@@ -30,11 +30,12 @@ function cleanPatchPath(pathValue: string): string {
 
 export function resolvePatchPath(pathValue: string, options: ApplyPatchOptions): string {
 	const cleaned = cleanPatchPath(pathValue);
-	const absolute = isAbsolute(cleaned) ? resolve(cleaned) : resolve(options.cwd, cleaned);
+	const inputIsAbsolute = isAbsolute(cleaned);
+	const absolute = inputIsAbsolute ? resolve(cleaned) : resolve(options.cwd, cleaned);
 	const cwd = resolve(options.cwd);
 	const rel = relative(cwd, absolute);
 	const insideCwd = rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-	if (!insideCwd && !options.allowAbsolutePaths) throw new Error(`Patch path escapes cwd: ${pathValue}`);
+	if (!insideCwd && !(options.allowAbsolutePaths && inputIsAbsolute)) throw new Error(`Patch path escapes cwd: ${pathValue}`);
 	return absolute;
 }
 
@@ -96,6 +97,15 @@ function replaceUnique(content: string, oldText: string, newText: string, path: 
 	return `${content.slice(0, first)}${newText}${content.slice(first + oldText.length)}`;
 }
 
+function oldTextCandidates(oldText: string): string[] {
+	const candidates = [oldText];
+	if (!oldText.endsWith("\n")) candidates.push(`${oldText}\n`);
+	const crlfOld = oldText.replace(/\n/g, "\r\n");
+	candidates.push(crlfOld);
+	if (!crlfOld.endsWith("\r\n")) candidates.push(`${crlfOld}\r\n`);
+	return [...new Set(candidates)];
+}
+
 function replaceOnce(content: string, oldText: string, newText: string, path: string): string {
 	if (oldText.length === 0) return `${content}${newText}`;
 	const candidates: Array<[string, string]> = [[oldText, newText]];
@@ -111,11 +121,16 @@ function replaceOnce(content: string, oldText: string, newText: string, path: st
 	throw new Error(`Patch context not found in ${path}`);
 }
 
+function matchesWholeContent(content: string, oldText: string): boolean {
+	return oldTextCandidates(oldText).includes(content);
+}
+
 async function applyAdd(action: PatchAction, options: ApplyPatchOptions): Promise<AppliedPatchFile> {
 	const absolutePath = resolvePatchPath(action.path, options);
+	if (existsSync(absolutePath)) throw new Error(`Add File target already exists: ${action.path}`);
 	const content = addText(action);
 	await mkdir(dirname(absolutePath), { recursive: true });
-	await writeFile(absolutePath, content, "utf8");
+	await writeFile(absolutePath, content, { encoding: "utf8", flag: "wx" });
 	return { absolutePath, kind: action.kind, path: action.path };
 }
 
@@ -127,6 +142,7 @@ async function applyUpdate(action: PatchAction, options: ApplyPatchOptions): Pro
 	let absoluteMoveTo: string | undefined;
 	if (action.moveTo) {
 		absoluteMoveTo = resolvePatchPath(action.moveTo, options);
+		if (absoluteMoveTo !== absolutePath && existsSync(absoluteMoveTo)) throw new Error(`Move target already exists: ${action.moveTo}`);
 		await mkdir(dirname(absoluteMoveTo), { recursive: true });
 		await rename(absolutePath, absoluteMoveTo);
 	}
@@ -135,6 +151,11 @@ async function applyUpdate(action: PatchAction, options: ApplyPatchOptions): Pro
 
 async function applyDelete(action: PatchAction, options: ApplyPatchOptions): Promise<AppliedPatchFile> {
 	const absolutePath = resolvePatchPath(action.path, options);
+	if (action.hunks.length > 0) {
+		const content = await readUtf8(absolutePath);
+		const expected = action.hunks.map(hunkOldText).join("\n");
+		if (!matchesWholeContent(content, expected)) throw new Error(`Delete File context does not match ${action.path}`);
+	}
 	await rm(absolutePath, { force: false });
 	return { absolutePath, kind: action.kind, path: action.path };
 }

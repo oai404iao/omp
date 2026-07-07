@@ -26,6 +26,17 @@ test("parseApplyPatch parses add/update/delete actions", () => {
 	assert.equal(parsed.actions[2]?.kind, "delete");
 });
 
+test("parseApplyPatch rejects content after end marker", () => {
+	assert.throws(
+		() => parseApplyPatch(`*** Begin Patch
+*** Add File: a.txt
++hello
+*** End Patch
+trailing`),
+		/Unexpected content after/,
+	);
+});
+
 test("applyPatch adds, updates, deletes, and moves files", async () => {
 	const cwd = tempDir();
 	writeFileSync(join(cwd, "update.txt"), "alpha\nold\nomega");
@@ -67,6 +78,23 @@ test("applyPatch rejects path traversal by default", async () => {
 	);
 });
 
+test("applyPatch allowAbsolutePaths only permits absolute escapes", async () => {
+	const cwd = tempDir();
+	await assert.rejects(
+		() => applyPatch(`*** Begin Patch
+*** Add File: ../escape.txt
++nope
+*** End Patch`, { cwd, allowAbsolutePaths: true }),
+		/escapes cwd/,
+	);
+	const absolutePath = join(tempDir(), "outside.txt");
+	await applyPatch(`*** Begin Patch
+*** Add File: ${absolutePath}
++ok
+*** End Patch`, { cwd, allowAbsolutePaths: true });
+	assert.equal(readFileSync(absolutePath, "utf8"), "ok");
+});
+
 test("applyPatch reports partial failure and rolls back touched files", async () => {
 	const cwd = tempDir();
 	await assert.rejects(
@@ -81,6 +109,55 @@ test("applyPatch reports partial failure and rolls back touched files", async ()
 		/Rolled back touched files/,
 	);
 	assert.equal(existsSync(join(cwd, "ok.txt")), false);
+});
+
+test("applyPatch refuses to overwrite existing files with Add File", async () => {
+	const cwd = tempDir();
+	writeFileSync(join(cwd, "existing.txt"), "keep");
+	await assert.rejects(
+		() => applyPatch(`*** Begin Patch
+*** Add File: existing.txt
++replace
+*** End Patch`, { cwd }),
+		/already exists/,
+	);
+	assert.equal(readFileSync(join(cwd, "existing.txt"), "utf8"), "keep");
+});
+
+test("applyPatch validates Delete File hunks when present", async () => {
+	const cwd = tempDir();
+	writeFileSync(join(cwd, "delete.txt"), "actual\n");
+	await assert.rejects(
+		() => applyPatch(`*** Begin Patch
+*** Delete File: delete.txt
+-expected
+*** End Patch`, { cwd }),
+		/context does not match/,
+	);
+	assert.equal(readFileSync(join(cwd, "delete.txt"), "utf8"), "actual\n");
+	await applyPatch(`*** Begin Patch
+*** Delete File: delete.txt
+-actual
+*** End Patch`, { cwd });
+	assert.equal(existsSync(join(cwd, "delete.txt")), false);
+});
+
+test("applyPatch refuses to overwrite existing files with Move to", async () => {
+	const cwd = tempDir();
+	writeFileSync(join(cwd, "source.txt"), "source");
+	writeFileSync(join(cwd, "target.txt"), "target");
+	await assert.rejects(
+		() => applyPatch(`*** Begin Patch
+*** Update File: source.txt
+*** Move to: target.txt
+@@
+-source
++updated
+*** End Patch`, { cwd }),
+		/Move target already exists/,
+	);
+	assert.equal(readFileSync(join(cwd, "source.txt"), "utf8"), "source");
+	assert.equal(readFileSync(join(cwd, "target.txt"), "utf8"), "target");
 });
 
 test("applyPatch rejects ambiguous update context", async () => {

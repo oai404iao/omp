@@ -89,6 +89,9 @@ export function parseApplyPatch(input: string): ParsedPatch {
 		actions.push(action);
 	}
 	if (!sawEnd) throw new Error("Patch must end with '*** End Patch'.");
+	for (let trailing = index + 1; trailing < lines.length; trailing++) {
+		if (lines[trailing]!.trim() !== "") throw new Error(`Unexpected content after '*** End Patch' at line ${trailing + 1}.`);
+	}
 	if (actions.length === 0) throw new Error("Patch contains no file actions.");
 	return { actions };
 }
