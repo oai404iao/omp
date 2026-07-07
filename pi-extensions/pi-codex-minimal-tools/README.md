@@ -1,0 +1,117 @@
+# pi-codex-minimal-tools
+
+Minimal Codex/OpenAI tools for Pi. Adds Codex-style tools without replacing Pi natives like `read`, `grep`, `find`, `ls`, `bash`, `edit`, or `write`.
+
+## Highlights
+
+- `image_generation` — Codex/OpenAI Responses image generation bridge, with saved local outputs.
+- `view_image` — return a local image as model image content (off by default).
+- `apply_patch` — local Codex-style patch application.
+- `/image-gen <prompt> [reference.png]` — background image generation/editing with a live status card.
+- Generated images are saved with timestamp filenames, `latest.<ext>` mirrors, metadata, and inline previews.
+- Tools only activate on OpenAI/Codex-like models; hidden on Anthropic/Claude-bridge sessions.
+- Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
+
+## Install
+
+Install as a local Pi package:
+
+```bash
+pi install /absolute/path/to/pi-codex-minimal-tools
+```
+
+Restart Pi or run `/reload` after installation.
+
+## Commands
+
+| Command | Action |
+| --- | --- |
+| `/codex-minimal-tools` | Show current status and config path. |
+| `/codex-minimal-tools:doctor` | Run self-checks. |
+| `/image-gen <prompt> [reference.png]` | Background image generation/editing. |
+
+`/image-gen` uses Codex/ChatGPT OAuth headers from Pi's model registry by default. With `apiKeyMode` enabled it uses plain `Authorization: Bearer <api key>` auth instead and skips ChatGPT account-id headers. It does **not** require `OPENAI_API_KEY` unless you enable the separate direct Images API fallback. Reference images may be `@reference.png` or bare local PNG/JPEG/WebP paths.
+
+## Configuration
+
+This package is configured by a standalone JSON file under Pi's agent directory:
+
+```text
+<PI_CODING_AGENT_DIR>/extensions/pi-codex-minimal-tools/config.json
+```
+
+If `PI_CODING_AGENT_DIR` is not set, the extension looks under the Pi user agent directory (normally `~/.config/pi/agent` or `~/.pi/agent`, depending on your Pi installation).
+
+The config shape is flat and all keys are optional:
+
+```json
+{
+  "enabled": true,
+  "glyphStyle": "unicode",
+  "autoEnable": true,
+  "nativeProviderTools": true,
+  "apiKeyMode": false,
+  "imageGeneration": true,
+  "imageOutputDir": ".pi/openai-codex-images",
+  "imageModel": "gpt-image-2",
+  "directImageApiFallback": false,
+  "viewImage": false,
+  "viewImageWorkspaceOnly": false,
+  "applyPatchEnabled": true,
+  "strictPatchMode": false,
+  "allowAbsolutePatchPaths": false,
+  "deferApplyPatchRendering": true
+}
+```
+
+### General
+
+| Setting | What it does |
+| --- | --- |
+| `enabled` | Register this package's tools and provider shim. |
+| `glyphStyle` | UI glyphs: `unicode` or `ascii`. |
+| `autoEnable` | Auto-add this package's enabled tools on supported models. |
+
+### Provider
+
+| Setting | What it does |
+| --- | --- |
+| `nativeProviderTools` | Rewrite this package's `image_generation` function into OpenAI's native Responses `image_generation` tool on `openai-codex`. |
+| `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. |
+
+### Images
+
+| Setting | What it does |
+| --- | --- |
+| `imageGeneration` | Expose `image_generation` on supported OpenAI Codex image-capable models. |
+| `imageOutputDir` | Where generated images are saved. Relative paths resolve against the workspace root. |
+| `imageModel` | Image model for native/fallback image generation. |
+| `directImageApiFallback` | Allow direct OpenAI Images API generation when native Codex generation is unavailable. |
+| `viewImage` | Expose `view_image` on image-capable models. |
+| `viewImageWorkspaceOnly` | Reject `view_image` paths outside the workspace. |
+
+### Patch
+
+| Setting | What it does |
+| --- | --- |
+| `applyPatchEnabled` | Expose `apply_patch`. |
+| `strictPatchMode` | Block `edit`/`write` so all edits go through `apply_patch`. |
+| `allowAbsolutePatchPaths` | Permit absolute paths in `apply_patch`. |
+| `deferApplyPatchRendering` | Let Pi's fallback renderer handle display instead of registering an in-package renderer. |
+
+## API key mode provider example
+
+When `apiKeyMode` is enabled, configure `openai-codex` in Pi's `models.json` like a Responses-compatible endpoint:
+
+```json
+{
+  "providers": {
+    "openai-codex": {
+      "baseUrl": "https://api.example.com/v1",
+      "apiKey": "$OPENAI_API_KEY"
+    }
+  }
+}
+```
+
+The extension will request `https://api.example.com/v1/responses`.

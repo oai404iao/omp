@@ -1,0 +1,65 @@
+{
+  "name": "pi-codex-minimal-tools",
+  "version": "1.2.4",
+  "description": "Minimal Codex/OpenAI native tools for Pi: Codex image_generation, view_image, apply_patch",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "codex",
+    "openai",
+    "image-generation",
+    "apply-patch"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "dependencies": {
+    "undici": "^7.25.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.75.0",
+    "@earendil-works/pi-coding-agent": "^0.75.0",
+    "@earendil-works/pi-tui": "^0.75.0",
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typebox": "^1.1.24",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "files": [
+    "src/",
+    "tests/",
+    "README.md",
+    "package.json",
+    "tsconfig.json"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
+  }
+}

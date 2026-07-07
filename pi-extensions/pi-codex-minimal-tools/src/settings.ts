@@ -1,0 +1,144 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+
+export const PACKAGE_NAME = "pi-codex-minimal-tools";
+export const CONFIG_FILE_NAME = "config.json";
+
+export interface CodexMinimalToolsSettings {
+	enabled: boolean;
+	glyphStyle: "unicode" | "ascii";
+	autoEnable: boolean;
+	nativeProviderTools: boolean;
+	apiKeyMode: boolean;
+	imageGeneration: boolean;
+	imageOutputDir: string;
+	imageModel: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1";
+	directImageApiFallback: boolean;
+	viewImage: boolean;
+	viewImageWorkspaceOnly: boolean;
+	applyPatchEnabled: boolean;
+	strictPatchMode: boolean;
+	allowAbsolutePatchPaths: boolean;
+	deferApplyPatchRendering: boolean;
+}
+
+export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
+	enabled: true,
+	glyphStyle: "unicode",
+	autoEnable: true,
+	nativeProviderTools: true,
+	apiKeyMode: false,
+	imageGeneration: true,
+	imageOutputDir: ".pi/openai-codex-images",
+	imageModel: "gpt-image-2",
+	directImageApiFallback: false,
+	viewImage: false,
+	viewImageWorkspaceOnly: false,
+	applyPatchEnabled: true,
+	strictPatchMode: false,
+	allowAbsolutePatchPaths: false,
+	deferApplyPatchRendering: true,
+};
+
+type SettingsRecord = Record<string, unknown>;
+const settingsParseWarnings = new Map<string, string>();
+
+function expandHome(input: string): string {
+	if (input === "~") return homedir();
+	if (input.startsWith("~/")) return join(homedir(), input.slice(2));
+	return input;
+}
+
+export function piUserDir(): string {
+	const envDir = process.env.PI_CODING_AGENT_DIR?.trim();
+	if (envDir) return resolve(expandHome(envDir));
+
+	const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
+	const xdgAgentDir = xdgConfigHome
+		? resolve(expandHome(xdgConfigHome), "pi", "agent")
+		: join(homedir(), ".config", "pi", "agent");
+	if (existsSync(xdgAgentDir)) return xdgAgentDir;
+
+	return resolve(expandHome("~/.pi/agent"));
+}
+
+export function configDir(agentDir = piUserDir()): string {
+	return join(agentDir, "extensions", PACKAGE_NAME);
+}
+
+export function configPath(agentDir = piUserDir()): string {
+	return join(configDir(agentDir), CONFIG_FILE_NAME);
+}
+
+function asRecord(value: unknown): SettingsRecord | undefined {
+	return value && typeof value === "object" && !Array.isArray(value) ? (value as SettingsRecord) : undefined;
+}
+
+export function readRawConfig(): SettingsRecord {
+	const path = configPath();
+	if (!existsSync(path)) return {};
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8"));
+		settingsParseWarnings.delete(path);
+		return asRecord(parsed) ?? {};
+	} catch (error) {
+		settingsParseWarnings.set(path, error instanceof Error ? error.message : String(error));
+		return {};
+	}
+}
+
+export function settingsDiagnostics(): string[] {
+	readRawConfig();
+	const path = configPath();
+	const warning = settingsParseWarnings.get(path);
+	return warning ? [`${path}: ${warning}`] : [];
+}
+
+function boolSetting(raw: SettingsRecord, key: keyof CodexMinimalToolsSettings): boolean {
+	const fallback = DEFAULT_SETTINGS[key];
+	const value = raw[key as string];
+	return typeof value === "boolean" ? value : Boolean(fallback);
+}
+
+function stringSetting(raw: SettingsRecord, key: keyof CodexMinimalToolsSettings): string {
+	const fallback = String(DEFAULT_SETTINGS[key]);
+	const value = raw[key as string];
+	return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function imageModelSetting(raw: SettingsRecord): CodexMinimalToolsSettings["imageModel"] {
+	const value = raw.imageModel;
+	return value === "gpt-image-2" || value === "gpt-image-1.5" || value === "gpt-image-1" ? value : DEFAULT_SETTINGS.imageModel;
+}
+
+function glyphStyleSetting(raw: SettingsRecord): CodexMinimalToolsSettings["glyphStyle"] {
+	const value = raw.glyphStyle;
+	return value === "ascii" || value === "unicode" ? value : DEFAULT_SETTINGS.glyphStyle;
+}
+
+export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
+	const raw = readRawConfig();
+	return {
+		enabled: boolSetting(raw, "enabled"),
+		glyphStyle: glyphStyleSetting(raw),
+		autoEnable: boolSetting(raw, "autoEnable"),
+		nativeProviderTools: boolSetting(raw, "nativeProviderTools"),
+		apiKeyMode: boolSetting(raw, "apiKeyMode"),
+		imageGeneration: boolSetting(raw, "imageGeneration"),
+		imageOutputDir: stringSetting(raw, "imageOutputDir"),
+		imageModel: imageModelSetting(raw),
+		directImageApiFallback: boolSetting(raw, "directImageApiFallback"),
+		viewImage: boolSetting(raw, "viewImage"),
+		viewImageWorkspaceOnly: boolSetting(raw, "viewImageWorkspaceOnly"),
+		applyPatchEnabled: boolSetting(raw, "applyPatchEnabled"),
+		strictPatchMode: boolSetting(raw, "strictPatchMode"),
+		allowAbsolutePatchPaths: boolSetting(raw, "allowAbsolutePatchPaths"),
+		deferApplyPatchRendering: boolSetting(raw, "deferApplyPatchRendering"),
+	};
+}
+
+export function resolveSettingsRelativePath(value: string, settingsPath = configPath()): string {
+	const expanded = expandHome(value.trim());
+	return isAbsolute(expanded) ? expanded : resolve(dirname(settingsPath), expanded);
+}
