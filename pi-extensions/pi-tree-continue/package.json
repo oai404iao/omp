@@ -1,0 +1,46 @@
+{
+  "name": "pi-tree-continue",
+  "version": "0.1.0",
+  "description": "Add /continue to resume Pi from the current session tree node without creating a user message.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "continue",
+    "tree"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.75.0",
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "npm run typecheck"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "package.json",
+    "tsconfig.json"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  }
+}
