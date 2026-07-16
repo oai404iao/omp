@@ -118,6 +118,45 @@ test("processResponsesStream preserves image_generation_call items from terminal
 	]);
 });
 
+test("processResponsesStream renders web citation annotations as clickable Markdown", async () => {
+	const output = createAssistantOutput();
+	const textEvents: any[] = [];
+	await processResponsesStream(
+		asAsyncIterable([
+			{ type: "response.created", response: { id: "resp_cite" } },
+			{ type: "response.output_item.added", output_index: 0, item: { type: "message", id: "msg_cite" } },
+			{ type: "response.content_part.added", output_index: 0, content_index: 0, part: { type: "output_text", text: "", annotations: [] } },
+			{ type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "Example source" },
+			{ type: "response.output_text.annotation.added", output_index: 0, content_index: 0, annotation_index: 0, annotation: { type: "url_citation", start_index: 0, end_index: 14, title: "Example", url: "https://example.com/source" } },
+			{ type: "response.output_item.done", output_index: 0, item: { type: "message", id: "msg_cite", content: [{ type: "output_text", text: "Example source", annotations: [{ type: "url_citation", start_index: 0, end_index: 14, title: "Example", url: "https://example.com/source" }] }] } },
+			{ type: "response.completed", response: { id: "resp_cite", status: "completed", usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } } } },
+		]),
+		output,
+		{ push(event: any) { if (event.type === "text_delta" || event.type === "text_end") textEvents.push(event); } } as any,
+		model,
+	);
+
+	assert.equal((output.content[0] as any).text, "[Example source](https://example.com/source)");
+	assert.equal(textEvents.find((event) => event.type === "text_delta")?.delta, "Example source");
+	assert.equal(textEvents.find((event) => event.type === "text_end")?.content, "[Example source](https://example.com/source)");
+});
+
+test("processResponsesStream appends source list for invalid citation spans", async () => {
+	const output = createAssistantOutput();
+	await processResponsesStream(
+		asAsyncIterable([
+			{ type: "response.created", response: { id: "resp_cite_invalid" } },
+			{ type: "response.output_item.done", output_index: 0, item: { type: "message", id: "msg_cite_invalid", content: [{ type: "output_text", text: "No span here", annotations: [{ type: "url_citation", start_index: 99, end_index: 120, title: "Invalid", url: "https://example.com/invalid" }] }] } },
+			{ type: "response.completed", response: { id: "resp_cite_invalid", status: "completed", usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } } } },
+		]),
+		output,
+		{ push() {} } as any,
+		model,
+	);
+
+	assert.equal((output.content[0] as any).text, "No span here\n\nSources: [Invalid](https://example.com/invalid)");
+});
+
 test("saveOpenAICodexGeneratedImage writes generated images under the configured default output dir", async () => {
 	const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "pi-codex-minimal-image-"));
 	const encoded = Buffer.from("png-bytes").toString("base64");

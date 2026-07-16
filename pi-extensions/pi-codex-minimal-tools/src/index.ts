@@ -8,6 +8,7 @@ import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 import { configPath, loadSettings, settingsDiagnostics } from "./settings.js";
 import { createApplyPatchToolDefinition } from "./tools/apply-patch.js";
 import { createImageGenerationToolDefinition } from "./tools/image-generation.js";
+import { createWebSearchToolDefinition } from "./tools/web-search.js";
 import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInput } from "./tools/view-image.js";
 import { glyphs } from "./glyphs.js";
 
@@ -100,6 +101,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`enabled: ${settings.enabled}`,
 		`autoEnable: ${settings.autoEnable}`,
 		`nativeProviderTools: ${settings.nativeProviderTools}`,
+		`webSearchEnabled: ${settings.webSearchEnabled}`,
 		`apiKeyMode: ${settings.apiKeyMode}`,
 		`native provider shim: ${settings.enabled && settings.nativeProviderTools ? "registered" : "disabled"}`,
 		"tools:",
@@ -140,6 +142,7 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 
 function registerTools(pi: ExtensionAPI): void {
 	pi.registerTool(createImageGenerationToolDefinition({ loadSettings }) as never);
+	pi.registerTool(createWebSearchToolDefinition() as never);
 	pi.registerTool({
 		renderShell: "self",
 		name: "view_image",
@@ -205,7 +208,8 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 		currentCwd = ctx.cwd;
 		const settings = loadSettings(ctx.cwd);
 		if (!settings.enabled || !settings.nativeProviderTools || !hasOpenAiModelsLoaded(ctx) || contextModel(ctx)?.provider !== "openai-codex") return undefined;
-		const result = rewriteNativeOpenAiTools(event.payload, { imageModel: settings.imageModel });
+		const capabilities = computeToolCapabilities(contextModel(ctx), settings);
+		const result = rewriteNativeOpenAiTools(event.payload, { imageModel: settings.imageModel, webSearch: capabilities.web_search.enabled });
 		return result.rewritten.length > 0 ? result.payload : undefined;
 	});
 }

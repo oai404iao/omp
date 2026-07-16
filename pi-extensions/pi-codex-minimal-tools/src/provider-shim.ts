@@ -36,6 +36,7 @@ const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]
 const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
 const CODEX_RESPONSE_STATUSES = new Set(["completed", "incomplete", "failed", "cancelled", "queued", "in_progress"]);
 const OPENAI_BETA_RESPONSES_WEBSOCKETS = "responses_websockets=2026-02-06";
+const WEB_SEARCH_SOURCES_INCLUDE = "web_search_call.action.sources";
 const SESSION_WEBSOCKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const dynamicImport = (specifier: string) => import(specifier);
 let _os: { platform(): string; release(): string; arch(): string } | null = null;
@@ -532,6 +533,17 @@ function resolveCodexServiceTier(responseServiceTier: ServiceTier, requestServic
 		return requestServiceTier;
 	}
 	return responseServiceTier ?? requestServiceTier;
+}
+
+function hasNativeWebSearchTool(body: ResponsesBody): boolean {
+	return Array.isArray(body.tools) && body.tools.some((tool) => Boolean(tool) && typeof tool === "object" && (tool as { type?: unknown }).type === "web_search");
+}
+
+function ensureWebSearchSourcesIncluded(body: ResponsesBody): void {
+	if (!hasNativeWebSearchTool(body)) return;
+	const include = Array.isArray(body.include) ? body.include : [];
+	if (include.includes(WEB_SEARCH_SOURCES_INCLUDE)) return;
+	body.include = [...include, WEB_SEARCH_SOURCES_INCLUDE];
 }
 
 function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, options?: SimpleStreamOptions): ResponsesBody {
@@ -1405,47 +1417,38 @@ async function processWebSocketStream<TApi extends Api>(
 	}
 }
 
-function extractWebSearch(item: StreamEventShape["item"]): SurfacedWebSearch | undefined {
+export function extractWebSearch(item: StreamEventShape["item"]): SurfacedWebSearch | undefined {
 	if (!item || item.type !== "web_search_call") return undefined;
-	const callId = typeof item.id === "string" ? item.id : undefined;
+	const callId = typeof item.id === "string" ? item.id : typeof item.call_id === "string" ? item.call_id : undefined;
 	if (!callId) return undefined;
 
 	const action = typeof item.action === "object" && item.action !== null ? (item.action as Record<string, unknown>) : undefined;
-	const query = typeof action?.query === "string" ? action.query : undefined;
-	const queries = Array.isArray(action?.queries) ? action.queries.filter((value): value is string => typeof value === "string") : [];
-	const sourceUrls = Array.isArray(action?.sources)
-		? action.sources
-				.map((source) => (typeof source === "object" && source !== null ? (source as Record<string, unknown>) : undefined))
-				.map((source) => (typeof source?.url === "string" ? source.url : undefined))
-				.filter((url): url is string => typeof url === "string")
-		: [];
+	const query = typeof action?.query === "string" ? action.query : typeof item.query === "string" ? item.query : undefined;
+	const queries = [
+		...(Array.isArray(action?.queries) ? action.queries : []),
+		...(Array.isArray(item.queries) ? item.queries : []),
+	].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
 
-	const results = Array.isArray(item.results)
-		? item.results
-				.map((result) => (typeof result === "object" && result !== null ? (result as Record<string, unknown>) : undefined))
-				.filter((result): result is Record<string, unknown> => !!result)
+	const asRecordArray = (value: unknown): Record<string, unknown>[] => Array.isArray(value)
+		? value
+				.map((entry) => typeof entry === "object" && entry !== null ? entry as Record<string, unknown> : undefined)
+				.filter((entry): entry is Record<string, unknown> => !!entry)
 		: [];
-
-	const titledSources: Array<{ title?: string; url: string }> = [];
-	for (const result of results) {
-		if (typeof result.url !== "string") continue;
-		titledSources.push({
-			title: typeof result.title === "string" ? result.title : undefined,
-			url: result.url,
-		});
-	}
+	const sourceCandidates = [
+		...asRecordArray(action?.sources),
+		...asRecordArray(action?.results),
+		...asRecordArray(item.results),
+	];
+	if (typeof item.url === "string") sourceCandidates.push(item as Record<string, unknown>);
 
 	const seenUrls = new Set<string>();
 	const sources: Array<{ title?: string; url: string }> = [];
-	for (const source of titledSources) {
-		if (seenUrls.has(source.url)) continue;
-		seenUrls.add(source.url);
-		sources.push(source);
-	}
-	for (const url of sourceUrls) {
-		if (seenUrls.has(url)) continue;
+	for (const source of sourceCandidates) {
+		const url = typeof source.url === "string" && source.url.trim() ? source.url.trim() : undefined;
+		if (!url || seenUrls.has(url)) continue;
 		seenUrls.add(url);
-		sources.push({ url });
+		const title = typeof source.title === "string" && source.title.trim() ? source.title.trim() : undefined;
+		sources.push({ ...(title ? { title } : {}), url });
 	}
 
 	return {
@@ -1459,19 +1462,16 @@ function extractWebSearch(item: StreamEventShape["item"]): SurfacedWebSearch | u
 
 export function buildWebSearchActivityMessage(searches: SurfacedWebSearch[]): string {
 	const sections = searches.map((search, index) => {
-		const heading = searches.length > 1 ? `Web search results ${index + 1}` : "Web search results";
-		const lines = [heading];
+		const heading = searches.length > 1 ? `Web search ${index + 1}` : "Web search";
+		const lines = [heading, `Call: ${search.callId}${search.status ? ` (${search.status})` : ""}`];
 		const queries = search.queries.length > 0 ? search.queries : search.query ? [search.query] : [];
 		if (queries.length > 0) {
-			lines.push("Queries:");
-			for (const query of queries) {
-				lines.push(`- ${query}`);
-			}
+			lines.push(`Query: ${queries.join(" | ")}`);
 		}
 		if (search.sources.length > 0) {
 			lines.push("Sources:");
-			for (const source of search.sources.slice(0, 5)) {
-				lines.push(`- ${source.title ? `${source.title} — ` : ""}${source.url}`);
+			for (const source of search.sources.slice(0, 8)) {
+				lines.push(`- ${source.title ? `${source.title}: ` : ""}${source.url}`);
 			}
 		}
 		return lines.join("\n");
@@ -1649,6 +1649,7 @@ function createCodexStream<TApi extends Api>(
 			if (nextBody !== undefined) {
 				body = nextBody as ResponsesBody;
 			}
+			ensureWebSearchSourcesIncluded(body);
 
 			const websocketRequestId = options?.sessionId || createCodexRequestId();
 			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId);
@@ -1859,8 +1860,9 @@ export function registerOpenAICodexCustomProvider(pi: ExtensionAPI, options: { g
 				onImageSaved: (savedImage, imageData) => {
 					pendingActivities.push({ kind: "image", savedImage, imageData });
 				},
-				// Web-search provider selection and native rewrite ownership stays in pi-web-tools.
-				// Keep this shim focused on capturing native image_generation_call results.
+				onWebSearchCaptured: (search) => {
+					pendingActivities.push({ kind: "web-search", search });
+				},
 			}),
 	});
 

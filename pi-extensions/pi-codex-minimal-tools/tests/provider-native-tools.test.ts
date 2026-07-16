@@ -16,3 +16,14 @@ test("rewriteNativeOpenAiTools rewrites image_generation function tools to nativ
 	assert.deepEqual(result.payload.tools[1], { type: "function", function: { name: "web_search", parameters: {} } });
 	assert.equal((result.payload.tools[2] as any).name, "read");
 });
+
+test("rewriteNativeOpenAiTools rewrites web_search only when enabled", () => {
+	const payload = { tools: [{ type: "function", name: "web_search", parameters: {} }] };
+	const disabled = rewriteNativeOpenAiTools(payload, { webSearch: false });
+	assert.deepEqual(disabled.rewritten, []);
+	assert.deepEqual(disabled.payload.tools[0], { type: "function", name: "web_search", parameters: {} });
+
+	const enabled = rewriteNativeOpenAiTools(payload, { webSearch: true });
+	assert.deepEqual(enabled.rewritten, ["web_search"]);
+	assert.deepEqual(enabled.payload.tools[0], { type: "web_search" });
+});

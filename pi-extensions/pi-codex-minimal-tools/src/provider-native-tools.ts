@@ -5,6 +5,7 @@ export interface NativeToolRewriteResult<T = unknown> {
 
 export interface NativeToolRewriteOptions {
 	imageModel?: string;
+	webSearch?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -39,6 +40,10 @@ export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewri
 		if (name === "image_generation") {
 			rewritten.push(name);
 			return imageToolConfig(candidate, options);
+		}
+		if (name === "web_search" && options.webSearch) {
+			rewritten.push(name);
+			return { type: "web_search" };
 		}
 		return candidate;
 	});

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
-import { registerOpenAICodexCustomProvider, withHttpStatusPrefix } from "../src/provider-shim.js";
+import { registerOpenAICodexCustomProvider, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE, withHttpStatusPrefix } from "../src/provider-shim.js";
 
 const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
@@ -37,19 +37,26 @@ function codexJwt(): string {
 	return `header.${payload}.signature`;
 }
 
-function createCodexProvider(): any {
+function createCodexProviderHarness(): { provider: any; handlers: Record<string, Function[]>; messages: any[] } {
 	let provider: any;
+	const handlers: Record<string, Function[]> = {};
+	const messages: any[] = [];
 	const pi = {
 		registerProvider(name: string, value: any) {
 			assert.equal(name, "openai-codex");
 			provider = value;
 		},
-		on() {},
+		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },
 		registerMessageRenderer() {},
+		sendMessage(message: any, options: any) { messages.push({ message, options }); },
 	};
 	registerOpenAICodexCustomProvider(pi as any, { getCurrentCwd: () => process.cwd() });
 	assert.ok(provider);
-	return provider;
+	return { provider, handlers, messages };
+}
+
+function createCodexProvider(): any {
+	return createCodexProviderHarness().provider;
 }
 
 function mockFetch(factories: FetchFactory[]): () => number {
@@ -90,12 +97,13 @@ function errorResponse(status: number, body: unknown, statusText = "Error"): Res
 	return new Response(typeof body === "string" ? body : JSON.stringify(body), { status, statusText });
 }
 
-function successSseResponse(): Response {
+function successSseResponse(output: unknown[] = []): Response {
 	const event = {
 		type: "response.completed",
 		response: {
 			id: "resp_ok",
 			status: "completed",
+			output,
 			usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } },
 		},
 	};
@@ -155,6 +163,60 @@ test("successful SSE retry hides intermediate HTTP failure", async () => {
 	assert.equal(fetchCalls(), 2);
 	assert.equal(result.stopReason, "stop");
 	assert.equal(result.errorMessage, undefined);
+});
+
+test("native web_search requests include source payloads without dropping reasoning include", async () => {
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	const result = await runCodexProvider({
+		onPayload: async (payload: any) => ({ ...payload, tools: [{ type: "web_search" }] }),
+	});
+
+	assert.equal(result.stopReason, "stop");
+	assert.deepEqual(requestBody.tools, [{ type: "web_search" }]);
+	assert.ok(requestBody.include.includes("reasoning.encrypted_content"));
+	assert.ok(requestBody.include.includes("web_search_call.action.sources"));
+});
+
+test("web_search_call activity is emitted through pending provider messages", async () => {
+	const harness = createCodexProviderHarness();
+	globalThis.fetch = (async () => successSseResponse([
+		{
+			type: "web_search_call",
+			id: "ws_123",
+			status: "completed",
+			action: { query: "latest docs", sources: [{ title: "Docs", url: "https://example.com/docs" }] },
+		},
+	])) as typeof fetch;
+
+	const stream = harness.provider.streamSimple(
+		{
+			provider: "openai-codex",
+			api: "openai-codex-responses",
+			id: "gpt-5.5",
+			baseUrl: "https://example.test/backend-api",
+			headers: {},
+			input: ["text"],
+			reasoning: false,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		},
+		{ systemPrompt: "", messages: [{ role: "user", content: "hello" }], tools: [] },
+		{ apiKey: codexJwt(), transport: "sse" },
+	);
+	const result = await stream.result();
+	for (const handler of harness.handlers.agent_end ?? []) await handler({});
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assert.equal(result.stopReason, "stop");
+	assert.equal(harness.messages.length, 1);
+	assert.equal(harness.messages[0].message.customType, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE);
+	assert.equal(harness.messages[0].options.triggerTurn, false);
+	assert.match(harness.messages[0].message.content, /Call: ws_123 \(completed\)/);
+	assert.match(harness.messages[0].message.content, /Docs: https:\/\/example\.com\/docs/);
 });
 
 test("apiKeyMode accepts plain API keys without account-id extraction", async () => {

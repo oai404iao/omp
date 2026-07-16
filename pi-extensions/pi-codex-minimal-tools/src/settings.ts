@@ -12,6 +12,7 @@ export interface CodexMinimalToolsSettings {
 	nativeProviderTools: boolean;
 	apiKeyMode: boolean;
 	imageGeneration: boolean;
+	webSearchEnabled: boolean;
 	imageOutputDir: string;
 	imageModel: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1";
 	directImageApiFallback: boolean;
@@ -30,6 +31,7 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	nativeProviderTools: true,
 	apiKeyMode: false,
 	imageGeneration: true,
+	webSearchEnabled: false,
 	imageOutputDir: ".pi/openai-codex-images",
 	imageModel: "gpt-image-2",
 	directImageApiFallback: false,
@@ -126,6 +128,7 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		nativeProviderTools: boolSetting(raw, "nativeProviderTools"),
 		apiKeyMode: boolSetting(raw, "apiKeyMode"),
 		imageGeneration: boolSetting(raw, "imageGeneration"),
+		webSearchEnabled: boolSetting(raw, "webSearchEnabled"),
 		imageOutputDir: stringSetting(raw, "imageOutputDir"),
 		imageModel: imageModelSetting(raw),
 		directImageApiFallback: boolSetting(raw, "directImageApiFallback"),

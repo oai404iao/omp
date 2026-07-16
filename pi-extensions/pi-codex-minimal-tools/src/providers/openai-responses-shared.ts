@@ -383,11 +383,12 @@ export async function processResponsesStream<TApi extends Api>(
 		block: ThinkingBlock;
 		summaryParts: Map<number, { text: string }>;
 	};
+	type MessagePartState = { type: "output_text" | "refusal"; text: string; annotations?: unknown[] };
 	type MessageState = {
 		kind: "message";
 		blockIndex: number;
 		block: TextBlock;
-		parts: Map<number, { type: "output_text" | "refusal"; text: string }>;
+		parts: Map<number, MessagePartState>;
 	};
 	type FunctionCallState = {
 		kind: "function_call";
@@ -416,10 +417,61 @@ export async function processResponsesStream<TApi extends Api>(
 			.map(([, part]) => part.text)
 			.join("\n\n");
 
-	const renderMessageText = (parts: Map<number, { type: "output_text" | "refusal"; text: string }>): string =>
+	const annotationUrl = (annotation: unknown): string | undefined => {
+		const candidate = annotation && typeof annotation === "object" ? annotation as Record<string, unknown> : undefined;
+		return candidate?.type === "url_citation" && typeof candidate.url === "string" && candidate.url.trim() ? candidate.url.trim() : undefined;
+	};
+	const annotationTitle = (annotation: unknown): string | undefined => {
+		const candidate = annotation && typeof annotation === "object" ? annotation as Record<string, unknown> : undefined;
+		return typeof candidate?.title === "string" && candidate.title.trim() ? candidate.title.trim() : undefined;
+	};
+	const markdownLinkText = (value: string): string => value.replace(/\\/g, "\\\\").replace(/]/g, "\\]").replace(/\n+/g, " ");
+	const markdownLinkUrl = (value: string): string => value.replace(/[)\s]/g, (char) => encodeURIComponent(char));
+	const sourceMarkdown = (annotations: unknown[], citedUrls: Set<string>): string => {
+		const seen = new Set<string>();
+		const links: string[] = [];
+		for (const annotation of annotations) {
+			const url = annotationUrl(annotation);
+			if (!url || citedUrls.has(url) || seen.has(url)) continue;
+			seen.add(url);
+			links.push(`[${markdownLinkText(annotationTitle(annotation) ?? url)}](${markdownLinkUrl(url)})`);
+		}
+		return links.length > 0 ? `\n\nSources: ${links.join(", ")}` : "";
+	};
+	const renderOutputTextPart = (part: MessagePartState): string => {
+		const annotations = part.annotations ?? [];
+		if (part.type !== "output_text" || annotations.length === 0) return part.text;
+		const spans = annotations
+			.map((annotation) => {
+				const candidate = annotation && typeof annotation === "object" ? annotation as Record<string, unknown> : undefined;
+				const url = annotationUrl(annotation);
+				const start = candidate?.start_index;
+				const end = candidate?.end_index;
+				return typeof start === "number" && typeof end === "number" && url && Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= part.text.length
+					? { start, end, url }
+					: undefined;
+			})
+			.filter((span): span is { start: number; end: number; url: string } => !!span)
+			.sort((a, b) => a.start - b.start || a.end - b.end);
+		const citedUrls = new Set<string>();
+		let cursor = 0;
+		let rendered = "";
+		for (const span of spans) {
+			if (span.start < cursor) continue;
+			rendered += part.text.slice(cursor, span.start);
+			const label = part.text.slice(span.start, span.end);
+			rendered += `[${markdownLinkText(label)}](${markdownLinkUrl(span.url)})`;
+			citedUrls.add(span.url);
+			cursor = span.end;
+		}
+		if (cursor === 0) return part.text + sourceMarkdown(annotations, citedUrls);
+		rendered += part.text.slice(cursor);
+		return rendered + sourceMarkdown(annotations, citedUrls);
+	};
+	const renderMessageText = (parts: Map<number, MessagePartState>, citations = false): string =>
 		Array.from(parts.entries())
 			.sort(([a], [b]) => a - b)
-			.map(([, part]) => part.text)
+			.map(([, part]) => citations ? renderOutputTextPart(part) : part.text)
 			.join("");
 
 	const emitAppendedDelta = (
@@ -508,10 +560,24 @@ export async function processResponsesStream<TApi extends Api>(
 		} else if (event.type === "response.content_part.added") {
 			const state = outputStates.get(event.output_index);
 			if (state?.kind === "message" && (event.part.type === "output_text" || event.part.type === "refusal")) {
+				const annotations = event.part.type === "output_text" && Array.isArray((event.part as { annotations?: unknown }).annotations)
+					? (event.part as { annotations: unknown[] }).annotations
+					: undefined;
 				state.parts.set(event.content_index, {
 					type: event.part.type,
 					text: event.part.type === "output_text" ? event.part.text : event.part.refusal,
+					...(annotations ? { annotations } : {}),
 				});
+			}
+		} else if ((event as { type?: string }).type === "response.output_text.annotation.added") {
+			const annotationEvent = event as unknown as { output_index: number; content_index: number; annotation?: unknown };
+			const state = outputStates.get(annotationEvent.output_index);
+			if (state?.kind === "message") {
+				const messagePart = state.parts.get(annotationEvent.content_index) ?? { type: "output_text" as const, text: "", annotations: [] };
+				if (messagePart.type === "output_text" && annotationEvent.annotation) {
+					messagePart.annotations = [...(messagePart.annotations ?? []), annotationEvent.annotation];
+					state.parts.set(annotationEvent.content_index, messagePart);
+				}
 			}
 		} else if (event.type === "response.output_text.delta") {
 			const state = outputStates.get(event.output_index);
@@ -587,7 +653,22 @@ export async function processResponsesStream<TApi extends Api>(
 				// (e.g. vLLM) can emit an empty message item with content: null before a
 				// function_call. Without the guard, item.content.map throws and the stream
 				// aborts, silently dropping the tool call (earendil-works/pi#5819).
-				state.block.text = (item.content ?? []).map((content) => (content.type === "output_text" ? content.text : content.refusal)).join("");
+				const finalContent = item.content ?? [];
+				if (finalContent.length > 0) {
+					state.parts.clear();
+					for (let contentIndex = 0; contentIndex < finalContent.length; contentIndex++) {
+						const content = finalContent[contentIndex]!;
+						const annotations = content.type === "output_text" && Array.isArray((content as { annotations?: unknown }).annotations)
+							? (content as { annotations: unknown[] }).annotations
+							: undefined;
+						state.parts.set(contentIndex, {
+							type: content.type === "output_text" ? "output_text" : "refusal",
+							text: content.type === "output_text" ? content.text : content.refusal,
+							...(annotations ? { annotations } : {}),
+						});
+					}
+				}
+				state.block.text = renderMessageText(state.parts, true);
 				state.block.textSignature = encodeTextSignatureV1(item.id, item.phase ?? undefined);
 				stream.push({ type: "text_end", contentIndex: state.blockIndex, content: state.block.text, partial: output });
 				outputStates.delete(event.output_index);

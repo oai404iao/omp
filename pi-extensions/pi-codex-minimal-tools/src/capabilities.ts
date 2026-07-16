@@ -1,6 +1,6 @@
 import type { CodexMinimalToolsSettings } from "./settings.js";
 
-export const PACKAGE_TOOL_NAMES = ["image_generation", "view_image", "apply_patch"] as const;
+export const PACKAGE_TOOL_NAMES = ["image_generation", "view_image", "apply_patch", "web_search"] as const;
 export type PackageToolName = (typeof PACKAGE_TOOL_NAMES)[number];
 
 export interface ModelLike {
@@ -37,6 +37,11 @@ export function isOpenAiLikeModel(model: ModelLike | undefined): boolean {
 	return openAiProvider || /^gpt[-_\d]/.test(id) || /^o\d/.test(id) || id.includes("codex");
 }
 
+export function isGpt5SeriesModel(model: ModelLike | undefined): boolean {
+	const id = (model?.id ?? model?.name ?? "").toLowerCase();
+	return /^gpt-5(?:$|[.-])/.test(id);
+}
+
 export function supportsImageInput(model: ModelLike | undefined): boolean {
 	const inputs = [
 		...(model?.input ?? []),
@@ -52,17 +57,20 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 			image_generation: { enabled: false, reason: "package disabled" },
 			view_image: { enabled: false, reason: "package disabled" },
 			apply_patch: { enabled: false, reason: "package disabled" },
+			web_search: { enabled: false, reason: "package disabled" },
 		};
 	}
 
 	const imageInput = supportsImageInput(model);
 	const openAiLike = isOpenAiLikeModel(model);
 	const codex = isOpenAiCodexModel(model);
+	const gpt5 = isGpt5SeriesModel(model);
 	if (!openAiLike) {
 		return {
 			image_generation: { enabled: false, reason: "model is not OpenAI/Codex-like" },
 			view_image: { enabled: false, reason: "model is not OpenAI/Codex-like" },
 			apply_patch: { enabled: false, reason: "model is not OpenAI/Codex-like" },
+			web_search: { enabled: false, reason: "model is not OpenAI/Codex-like" },
 		};
 	}
 
@@ -78,6 +86,9 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 		apply_patch: settings.applyPatchEnabled && openAiLike
 			? { enabled: true, reason: "OpenAI/Codex-like model" }
 			: { enabled: false, reason: !settings.applyPatchEnabled ? "apply_patch disabled by setting" : "model is not OpenAI/Codex-like" },
+		web_search: settings.webSearchEnabled && settings.nativeProviderTools && codex && gpt5
+			? { enabled: true, reason: "GPT-5-series openai-codex model with native web_search enabled" }
+			: { enabled: false, reason: !settings.webSearchEnabled ? "web_search disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !codex ? "requires openai-codex provider" : "requires a GPT-5-series model" },
 	};
 }
 

@@ -57,6 +57,7 @@ test("loadSettings reads flat package config", () => {
 			imageOutputDir: "custom-images",
 			imageModel: "gpt-image-1",
 			directImageApiFallback: true,
+			webSearchEnabled: true,
 		});
 		const settings = loadSettings();
 		assert.equal(settings.autoEnable, false);
@@ -64,6 +65,7 @@ test("loadSettings reads flat package config", () => {
 		assert.equal(settings.imageOutputDir, "custom-images");
 		assert.equal(settings.imageModel, "gpt-image-1");
 		assert.equal(settings.directImageApiFallback, true);
+		assert.equal(settings.webSearchEnabled, true);
 		assert.equal(settings.applyPatchEnabled, true);
 	});
 });
