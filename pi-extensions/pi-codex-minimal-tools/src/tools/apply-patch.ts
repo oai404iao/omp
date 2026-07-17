@@ -60,8 +60,8 @@ export function createApplyPatchToolDefinition(options: { cwd?: string; allowAbs
 		renderShell: "self",
 		name: "apply_patch",
 		label: "Apply Patch",
-		description: "Apply a Codex-style patch locally. Use the input argument with a patch beginning *** Begin Patch and ending *** End Patch. Pi native edit/write remain available unless strict patch mode is enabled.",
-		promptSnippet: "Apply Codex-style multi-file patches using the input argument.",
+		description: "Apply a Codex-style patch locally. Patch text begins with *** Begin Patch and ends with *** End Patch. Pi native edit/write remain available unless strict patch mode is enabled.",
+		promptSnippet: "Apply Codex-style multi-file patches.",
 		promptGuidelines: ["Use apply_patch for concise multi-file edits when a Codex-style patch is clearer than separate edit/write calls."],
 		parameters: applyPatchToolSchema,
 		async execute(_toolCallId: string, params: ApplyPatchInput, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {

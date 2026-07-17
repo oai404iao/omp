@@ -58,6 +58,12 @@ test("loadSettings reads flat package config", () => {
 			imageModel: "gpt-image-1",
 			directImageApiFallback: true,
 			webSearchEnabled: true,
+			requestProfile: {
+				responsesMode: "standard",
+				patchTransport: "function",
+				supportsHostedTools: false,
+				supportsParallelTools: false,
+			},
 		});
 		const settings = loadSettings();
 		assert.equal(settings.autoEnable, false);
@@ -66,15 +72,26 @@ test("loadSettings reads flat package config", () => {
 		assert.equal(settings.imageModel, "gpt-image-1");
 		assert.equal(settings.directImageApiFallback, true);
 		assert.equal(settings.webSearchEnabled, true);
+		assert.deepEqual(settings.requestProfile, {
+			responsesMode: "standard",
+			patchTransport: "function",
+			supportsHostedTools: false,
+			supportsParallelTools: false,
+		});
 		assert.equal(settings.applyPatchEnabled, true);
 	});
 });
 
 test("loadSettings falls back for invalid enum values", () => {
 	withAgentDir((agentDir) => {
-		writeConfig(agentDir, { imageModel: "bad-model", glyphStyle: "bad-style" });
+		writeConfig(agentDir, {
+			imageModel: "bad-model",
+			glyphStyle: "bad-style",
+			requestProfile: { responsesMode: "lite", patchTransport: "custom" },
+		});
 		const settings = loadSettings();
 		assert.equal(settings.imageModel, DEFAULT_SETTINGS.imageModel);
 		assert.equal(settings.glyphStyle, DEFAULT_SETTINGS.glyphStyle);
+		assert.deepEqual(settings.requestProfile, {});
 	});
 });

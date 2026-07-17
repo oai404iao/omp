@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { glyphs, treeGlyph } from "./glyphs.js";
 import { loadSettings } from "./settings.js";
+import { resolveCodexRequestProfile, type CodexRequestProfile } from "./codex-request-profile.js";
 import { saveBase64Image } from "./utils/images.js";
 import { Box, Container, getCapabilities, getImageDimensions, Image, Spacer, Text } from "@earendil-works/pi-tui";
 import {
@@ -546,7 +547,9 @@ function ensureWebSearchSourcesIncluded(body: ResponsesBody): void {
 	body.include = [...include, WEB_SEARCH_SOURCES_INCLUDE];
 }
 
-function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, options?: SimpleStreamOptions): ResponsesBody {
+function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, profile: CodexRequestProfile, options?: SimpleStreamOptions): ResponsesBody {
+	if (profile.responsesMode !== "standard") throw new Error(`Unsupported Responses mode: ${profile.responsesMode}`);
+	if (profile.patchTransport !== "function") throw new Error(`Unsupported apply_patch transport: ${profile.patchTransport}`);
 	const messages = convertResponsesMessages(model, context, CODEX_TOOL_CALL_PROVIDERS, {
 		includeSystemPrompt: false,
 	});
@@ -561,7 +564,7 @@ function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context
 		include: ["reasoning.encrypted_content"],
 		prompt_cache_key: options?.sessionId,
 		tool_choice: "auto",
-		parallel_tool_calls: true,
+		parallel_tool_calls: profile.supportsParallelTools,
 	};
 
 	// The Codex ChatGPT-backed endpoint rejects output-token cap fields with
@@ -1643,8 +1646,9 @@ function createCodexStream<TApi extends Api>(
 			}
 
 			const settings = loadSettings(requestCwd);
+			const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
 			const accountId = settings.apiKeyMode ? undefined : extractAccountId(apiKey);
-			let body = buildRequestBody(model, context, options);
+			let body = buildRequestBody(model, context, requestProfile, options);
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
 				body = nextBody as ResponsesBody;

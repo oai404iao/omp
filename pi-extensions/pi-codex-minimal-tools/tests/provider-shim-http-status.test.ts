@@ -69,7 +69,7 @@ function mockFetch(factories: FetchFactory[]): () => number {
 	return () => calls;
 }
 
-async function runCodexProvider(streamOptions: Record<string, unknown> = {}, modelOverrides: Record<string, unknown> = {}): Promise<any> {
+async function runCodexProvider(streamOptions: Record<string, unknown> = {}, modelOverrides: Record<string, unknown> = {}, tools: any[] = []): Promise<any> {
 	const provider = createCodexProvider();
 	const stream = provider.streamSimple(
 		{
@@ -86,11 +86,20 @@ async function runCodexProvider(streamOptions: Record<string, unknown> = {}, mod
 		{
 			systemPrompt: "",
 			messages: [{ role: "user", content: "hello" }],
-			tools: [],
+			tools,
 		},
 		{ apiKey: codexJwt(), transport: "sse", ...streamOptions },
 	);
 	return stream.result();
+}
+
+function writeSettings(value: Record<string, unknown>): void {
+	const root = mkdtempSync(join(tmpdir(), "pi-codex-settings-"));
+	const agentDir = join(root, "agent");
+	const configDir = join(agentDir, "extensions", "pi-codex-minimal-tools");
+	mkdirSync(configDir, { recursive: true });
+	writeFileSync(join(configDir, "config.json"), JSON.stringify(value));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
 }
 
 function errorResponse(status: number, body: unknown, statusText = "Error"): Response {
@@ -111,12 +120,7 @@ function successSseResponse(output: unknown[] = []): Response {
 }
 
 function enableApiKeyMode(): void {
-	const root = mkdtempSync(join(tmpdir(), "pi-codex-api-key-mode-"));
-	const agentDir = join(root, "agent");
-	const configDir = join(agentDir, "extensions", "pi-codex-minimal-tools");
-	mkdirSync(configDir, { recursive: true });
-	writeFileSync(join(configDir, "config.json"), JSON.stringify({ apiKeyMode: true }));
-	process.env.PI_CODING_AGENT_DIR = agentDir;
+	writeSettings({ apiKeyMode: true });
 }
 
 test("withHttpStatusPrefix adds status once", () => {
@@ -180,6 +184,31 @@ test("native web_search requests include source payloads without dropping reason
 	assert.deepEqual(requestBody.tools, [{ type: "web_search" }]);
 	assert.ok(requestBody.include.includes("reasoning.encrypted_content"));
 	assert.ok(requestBody.include.includes("web_search_call.action.sources"));
+});
+
+test("request profile disables parallel calls while apply_patch stays a function tool", async () => {
+	writeSettings({ requestProfile: { supportsParallelTools: false } });
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	const result = await runCodexProvider({}, {}, [{
+		name: "apply_patch",
+		description: "Apply a patch",
+		parameters: {
+			type: "object",
+			properties: { input: { type: "string" } },
+			required: ["input"],
+			additionalProperties: false,
+		},
+	}]);
+
+	assert.equal(result.stopReason, "stop");
+	assert.equal(requestBody.parallel_tool_calls, false);
+	assert.equal(requestBody.tools[0].type, "function");
+	assert.equal(requestBody.tools[0].name, "apply_patch");
 });
 
 test("web_search_call activity is emitted through pending provider messages", async () => {

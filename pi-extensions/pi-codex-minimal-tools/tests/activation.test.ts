@@ -117,3 +117,19 @@ test("before_provider_request rewrites web_search only for enabled GPT-5 Codex m
 	});
 	assert.equal(notGpt5, undefined);
 }));
+
+test("before_provider_request preserves function placeholders when hosted tools are disabled by profile", async () => withAgentDir(async (agentDir) => {
+	writeConfig(agentDir, { webSearchEnabled: true, requestProfile: { supportsHostedTools: false } });
+	const pi = fakePi();
+	codexMinimalTools(pi as any);
+	const handler = pi.handlers.before_provider_request?.[0];
+	assert.ok(handler);
+
+	const payload = { tools: [{ type: "function", name: "web_search", parameters: {} }] };
+	const rewritten = handler({ payload }, {
+		cwd: process.cwd(),
+		model: { provider: "openai-codex", id: "gpt-5.5", input: ["text"] },
+		modelRegistry: { getAll: () => [] },
+	});
+	assert.equal(rewritten, undefined);
+}));

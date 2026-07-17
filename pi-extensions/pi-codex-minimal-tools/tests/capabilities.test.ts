@@ -83,3 +83,14 @@ test("strict patch mode still removes native mutation tools", () => {
 	assert.deepEqual(next.activeTools, ["read", "apply_patch", "image_generation"]);
 	assert.deepEqual(next.removed.sort(), ["edit", "write"].sort());
 });
+
+test("request profile can disable hosted tools without disabling apply_patch", () => {
+	const capabilities = computeToolCapabilities(codex55, {
+		...DEFAULT_SETTINGS,
+		webSearchEnabled: true,
+		requestProfile: { supportsHostedTools: false },
+	});
+	assert.equal(capabilities.image_generation.enabled, false);
+	assert.equal(capabilities.web_search.enabled, false);
+	assert.equal(capabilities.apply_patch.enabled, true);
+});

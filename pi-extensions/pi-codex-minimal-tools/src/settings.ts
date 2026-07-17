@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import type { CodexRequestProfileOverride } from "./codex-request-profile.js";
 
 export const PACKAGE_NAME = "pi-codex-minimal-tools";
 export const CONFIG_FILE_NAME = "config.json";
@@ -10,6 +11,7 @@ export interface CodexMinimalToolsSettings {
 	glyphStyle: "unicode" | "ascii";
 	autoEnable: boolean;
 	nativeProviderTools: boolean;
+	requestProfile: CodexRequestProfileOverride;
 	apiKeyMode: boolean;
 	imageGeneration: boolean;
 	webSearchEnabled: boolean;
@@ -29,6 +31,7 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	glyphStyle: "unicode",
 	autoEnable: true,
 	nativeProviderTools: true,
+	requestProfile: {},
 	apiKeyMode: false,
 	imageGeneration: true,
 	webSearchEnabled: false,
@@ -119,6 +122,17 @@ function glyphStyleSetting(raw: SettingsRecord): CodexMinimalToolsSettings["glyp
 	return value === "ascii" || value === "unicode" ? value : DEFAULT_SETTINGS.glyphStyle;
 }
 
+function requestProfileSetting(raw: SettingsRecord): CodexRequestProfileOverride {
+	const value = asRecord(raw.requestProfile);
+	if (!value) return {};
+	const profile: CodexRequestProfileOverride = {};
+	if (value.responsesMode === "standard") profile.responsesMode = value.responsesMode;
+	if (value.patchTransport === "function") profile.patchTransport = value.patchTransport;
+	if (typeof value.supportsHostedTools === "boolean") profile.supportsHostedTools = value.supportsHostedTools;
+	if (typeof value.supportsParallelTools === "boolean") profile.supportsParallelTools = value.supportsParallelTools;
+	return profile;
+}
+
 export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 	const raw = readRawConfig();
 	return {
@@ -126,6 +140,7 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		glyphStyle: glyphStyleSetting(raw),
 		autoEnable: boolSetting(raw, "autoEnable"),
 		nativeProviderTools: boolSetting(raw, "nativeProviderTools"),
+		requestProfile: requestProfileSetting(raw),
 		apiKeyMode: boolSetting(raw, "apiKeyMode"),
 		imageGeneration: boolSetting(raw, "imageGeneration"),
 		webSearchEnabled: boolSetting(raw, "webSearchEnabled"),

@@ -45,6 +45,7 @@
   "files": [
     "src/",
     "tests/",
+    "reference/",
     "README.md",
     "package.json",
     "tsconfig.json"

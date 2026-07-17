@@ -1,4 +1,5 @@
 import type { CodexMinimalToolsSettings } from "./settings.js";
+import { resolveCodexRequestProfile } from "./codex-request-profile.js";
 
 export const PACKAGE_TOOL_NAMES = ["image_generation", "view_image", "apply_patch", "web_search"] as const;
 export type PackageToolName = (typeof PACKAGE_TOOL_NAMES)[number];
@@ -65,6 +66,7 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	const openAiLike = isOpenAiLikeModel(model);
 	const codex = isOpenAiCodexModel(model);
 	const gpt5 = isGpt5SeriesModel(model);
+	const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
 	if (!openAiLike) {
 		return {
 			image_generation: { enabled: false, reason: "model is not OpenAI/Codex-like" },
@@ -75,20 +77,20 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	}
 
 	return {
-		image_generation: settings.imageGeneration && settings.nativeProviderTools && codex && imageInput
+		image_generation: settings.imageGeneration && settings.nativeProviderTools && requestProfile.supportsHostedTools && codex && imageInput
 			? { enabled: true, reason: "OpenAI Codex image-capable model with native tools enabled" }
 			: settings.imageGeneration && settings.directImageApiFallback
 				? { enabled: true, reason: "direct Images API fallback enabled" }
-				: { enabled: false, reason: !settings.imageGeneration ? "image_generation disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !codex ? "requires openai-codex provider" : "model does not advertise image input" },
+				: { enabled: false, reason: !settings.imageGeneration ? "image_generation disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !requestProfile.supportsHostedTools ? "hosted tools disabled by request profile" : !codex ? "requires openai-codex provider" : "model does not advertise image input" },
 		view_image: settings.viewImage && imageInput
 			? { enabled: true, reason: "model accepts image input" }
 			: { enabled: false, reason: !settings.viewImage ? "view_image disabled by setting" : "model does not advertise image input" },
 		apply_patch: settings.applyPatchEnabled && openAiLike
 			? { enabled: true, reason: "OpenAI/Codex-like model" }
 			: { enabled: false, reason: !settings.applyPatchEnabled ? "apply_patch disabled by setting" : "model is not OpenAI/Codex-like" },
-		web_search: settings.webSearchEnabled && settings.nativeProviderTools && codex && gpt5
+		web_search: settings.webSearchEnabled && settings.nativeProviderTools && requestProfile.supportsHostedTools && codex && gpt5
 			? { enabled: true, reason: "GPT-5-series openai-codex model with native web_search enabled" }
-			: { enabled: false, reason: !settings.webSearchEnabled ? "web_search disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !codex ? "requires openai-codex provider" : "requires a GPT-5-series model" },
+			: { enabled: false, reason: !settings.webSearchEnabled ? "web_search disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !requestProfile.supportsHostedTools ? "hosted tools disabled by request profile" : !codex ? "requires openai-codex provider" : "requires a GPT-5-series model" },
 	};
 }
 

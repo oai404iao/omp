@@ -14,6 +14,13 @@ Minimal Codex/OpenAI tools for Pi. Adds Codex-style tools without replacing Pi n
 - Web search citations are preserved as clickable Markdown links when the provider returns citation annotations.
 - Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
 
+## Protocol reference
+
+The [`reference/`](reference/README.md) directory documents the OpenAI Codex
+Responses modes, `apply_patch` wire protocols, Responses Lite request shape,
+custom-tool streaming parser, history replay, and model tool-exposure modes
+used as the source material for this extension's provider work.
+
 ## Install
 
 Install as a local Pi package:
@@ -44,7 +51,7 @@ This package is configured by a standalone JSON file under Pi's agent directory:
 
 If `PI_CODING_AGENT_DIR` is not set, the extension looks under the Pi user agent directory (normally `~/.config/pi/agent` or `~/.pi/agent`, depending on your Pi installation).
 
-The config shape is flat and all keys are optional:
+All keys are optional. `requestProfile` is the only nested section:
 
 ```json
 {
@@ -52,6 +59,12 @@ The config shape is flat and all keys are optional:
   "glyphStyle": "unicode",
   "autoEnable": true,
   "nativeProviderTools": true,
+  "requestProfile": {
+    "responsesMode": "standard",
+    "patchTransport": "function",
+    "supportsHostedTools": true,
+    "supportsParallelTools": true
+  },
   "apiKeyMode": false,
   "imageGeneration": true,
   "webSearchEnabled": false,
@@ -80,6 +93,7 @@ The config shape is flat and all keys are optional:
 | Setting | What it does |
 | --- | --- |
 | `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai-codex` (`image_generation`, and `web_search` when enabled). |
+| `requestProfile` | Explicit Standard Responses capability overrides. This phase accepts `responsesMode: "standard"` and `patchTransport: "function"`; custom and Lite are not exposed until their complete wire implementations land. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. |
 | `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. |
 | `webSearchEnabled` | Expose hosted `web_search` on GPT-5-series `openai-codex` models. Disabled by default. |
 

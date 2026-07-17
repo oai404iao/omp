@@ -11,6 +11,7 @@ import { createImageGenerationToolDefinition } from "./tools/image-generation.js
 import { createWebSearchToolDefinition } from "./tools/web-search.js";
 import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInput } from "./tools/view-image.js";
 import { glyphs } from "./glyphs.js";
+import { resolveCodexRequestProfile } from "./codex-request-profile.js";
 
 const INSTALL_SYMBOL = Symbol.for("pi-codex-minimal-tools.installed");
 
@@ -92,6 +93,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 	const settings = loadSettings(ctx.cwd);
 	const model = contextModel(ctx);
 	const capabilities = computeToolCapabilities(model, settings);
+	const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
 	const active = new Set(pi.getActiveTools?.() ?? []);
 	return [
 		"Codex Minimal Tools",
@@ -101,6 +103,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`enabled: ${settings.enabled}`,
 		`autoEnable: ${settings.autoEnable}`,
 		`nativeProviderTools: ${settings.nativeProviderTools}`,
+		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
 		`webSearchEnabled: ${settings.webSearchEnabled}`,
 		`apiKeyMode: ${settings.apiKeyMode}`,
 		`native provider shim: ${settings.enabled && settings.nativeProviderTools ? "registered" : "disabled"}`,
@@ -208,6 +211,8 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 		currentCwd = ctx.cwd;
 		const settings = loadSettings(ctx.cwd);
 		if (!settings.enabled || !settings.nativeProviderTools || !hasOpenAiModelsLoaded(ctx) || contextModel(ctx)?.provider !== "openai-codex") return undefined;
+		const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
+		if (!requestProfile.supportsHostedTools) return undefined;
 		const capabilities = computeToolCapabilities(contextModel(ctx), settings);
 		const result = rewriteNativeOpenAiTools(event.payload, { imageModel: settings.imageModel, webSearch: capabilities.web_search.enabled });
 		return result.rewritten.length > 0 ? result.payload : undefined;
