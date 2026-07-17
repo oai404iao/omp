@@ -93,9 +93,14 @@ All keys are optional. `requestProfile` is the only nested section:
 | Setting | What it does |
 | --- | --- |
 | `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai-codex` (`image_generation`, and `web_search` when enabled). |
-| `requestProfile` | Explicit Standard Responses capability overrides. This phase accepts `responsesMode: "standard"` and `patchTransport: "function"`; custom and Lite are not exposed until their complete wire implementations land. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. |
+| `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `patchTransport` remains `function` until custom-tool parsing lands. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always forces hosted and parallel tools off. |
 | `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. |
 | `webSearchEnabled` | Expose hosted `web_search` on GPT-5-series `openai-codex` models. Disabled by default. |
+
+Responses Lite uses Codex-internal request fields and transport signals. Enable
+`requestProfile.responsesMode: "lite"` only for an endpoint known to implement
+that contract. This implementation keeps `apply_patch` as a function tool in
+Lite and does not implement Codex Code Mode.
 
 ### Images
 

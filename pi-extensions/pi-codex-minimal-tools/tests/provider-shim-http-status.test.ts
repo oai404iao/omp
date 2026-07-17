@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
-import { registerOpenAICodexCustomProvider, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE, withHttpStatusPrefix } from "../src/provider-shim.js";
+import { registerOpenAICodexCustomProvider, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE, withHttpStatusPrefix, withResponsesLiteWebSocketMetadata } from "../src/provider-shim.js";
 
 const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
@@ -69,7 +69,12 @@ function mockFetch(factories: FetchFactory[]): () => number {
 	return () => calls;
 }
 
-async function runCodexProvider(streamOptions: Record<string, unknown> = {}, modelOverrides: Record<string, unknown> = {}, tools: any[] = []): Promise<any> {
+async function runCodexProvider(
+	streamOptions: Record<string, unknown> = {},
+	modelOverrides: Record<string, unknown> = {},
+	tools: any[] = [],
+	contextOverrides: Record<string, unknown> = {},
+): Promise<any> {
 	const provider = createCodexProvider();
 	const stream = provider.streamSimple(
 		{
@@ -87,6 +92,7 @@ async function runCodexProvider(streamOptions: Record<string, unknown> = {}, mod
 			systemPrompt: "",
 			messages: [{ role: "user", content: "hello" }],
 			tools,
+			...contextOverrides,
 		},
 		{ apiKey: codexJwt(), transport: "sse", ...streamOptions },
 	);
@@ -209,6 +215,98 @@ test("request profile disables parallel calls while apply_patch stays a function
 	assert.equal(requestBody.parallel_tool_calls, false);
 	assert.equal(requestBody.tools[0].type, "function");
 	assert.equal(requestBody.tools[0].name, "apply_patch");
+});
+
+test("Responses Lite moves tools and instructions into input and sets transport metadata", async () => {
+	writeSettings({ requestProfile: { responsesMode: "lite" } });
+	let requestBody: any;
+	let requestHeaders: Headers | undefined;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		requestHeaders = new Headers(init?.headers as HeadersInit);
+		return successSseResponse();
+	}) as typeof fetch;
+
+	const result = await runCodexProvider(
+		{},
+		{ input: ["text", "image"] },
+		[{
+			name: "apply_patch",
+			description: "Apply a patch",
+			parameters: {
+				type: "object",
+				properties: { input: { type: "string" } },
+				required: ["input"],
+				additionalProperties: false,
+			},
+		}],
+		{
+			systemPrompt: "stable instructions",
+			messages: [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "inspect this" },
+						{ type: "image", data: "AA==", mimeType: "image/png" },
+					],
+					timestamp: 1,
+				},
+				{
+					role: "assistant",
+					api: "openai-codex-responses",
+					provider: "openai-codex",
+					model: "gpt-5.5",
+					content: [{ type: "toolCall", id: "call_patch|fc_patch", name: "apply_patch", arguments: { input: "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n" } }],
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "toolUse",
+					timestamp: 2,
+				},
+				{
+					role: "toolResult",
+					toolCallId: "call_patch|fc_patch",
+					toolName: "apply_patch",
+					content: [{ type: "text", text: "Applied patch" }],
+					isError: false,
+					timestamp: 3,
+				},
+			],
+		},
+	);
+
+	assert.equal(result.stopReason, "stop");
+	assert.equal("instructions" in requestBody, false);
+	assert.equal("tools" in requestBody, false);
+	assert.equal(requestBody.parallel_tool_calls, false);
+	assert.deepEqual(requestBody.reasoning, { context: "all_turns" });
+	assert.equal(requestBody.client_metadata?.ws_request_header_x_openai_internal_codex_responses_lite, undefined);
+	assert.equal(requestHeaders?.get("x-openai-internal-codex-responses-lite"), "true");
+	assert.equal(requestBody.input[0].type, "additional_tools");
+	assert.equal(requestBody.input[0].role, "developer");
+	assert.equal(requestBody.input[0].tools[0].type, "function");
+	assert.equal(requestBody.input[0].tools[0].name, "apply_patch");
+	assert.deepEqual(requestBody.input[1], {
+		type: "message",
+		role: "developer",
+		content: [{ type: "input_text", text: "stable instructions" }],
+	});
+	const image = requestBody.input[2].content.find((item: any) => item.type === "input_image");
+	assert.ok(image);
+	assert.equal("detail" in image, false);
+	assert.equal(requestBody.input[3].type, "function_call");
+	assert.equal(requestBody.input[3].name, "apply_patch");
+	assert.equal(requestBody.input[4].type, "function_call_output");
+	assert.equal(requestBody.input[4].call_id, "call_patch");
+});
+
+test("Responses Lite adds its WebSocket signal only to WebSocket client metadata", () => {
+	const body = { client_metadata: { existing: "value" } };
+	assert.equal(withResponsesLiteWebSocketMetadata(body, "standard"), body);
+	assert.deepEqual(withResponsesLiteWebSocketMetadata(body, "lite"), {
+		client_metadata: {
+			existing: "value",
+			ws_request_header_x_openai_internal_codex_responses_lite: "true",
+		},
+	});
 });
 
 test("web_search_call activity is emitted through pending provider messages", async () => {

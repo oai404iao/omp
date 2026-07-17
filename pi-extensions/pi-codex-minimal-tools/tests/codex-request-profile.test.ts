@@ -25,6 +25,19 @@ test("Codex request profile applies supported explicit overrides", () => {
 	});
 });
 
+test("Responses Lite forces hosted and parallel tools off", () => {
+	assert.deepEqual(resolveCodexRequestProfile({
+		responsesMode: "lite",
+		supportsHostedTools: true,
+		supportsParallelTools: true,
+	}), {
+		responsesMode: "lite",
+		patchTransport: "function",
+		supportsHostedTools: false,
+		supportsParallelTools: false,
+	});
+});
+
 test("packaged apply_patch grammar matches the analyzed Codex grammar", () => {
 	const grammar = readFileSync(new URL("../src/providers/codex-apply-patch.lark", import.meta.url), "utf8");
 	assert.equal(grammar, `start: begin_patch hunk+ end_patch

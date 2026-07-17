@@ -37,6 +37,8 @@ const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]
 const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
 const CODEX_RESPONSE_STATUSES = new Set(["completed", "incomplete", "failed", "cancelled", "queued", "in_progress"]);
 const OPENAI_BETA_RESPONSES_WEBSOCKETS = "responses_websockets=2026-02-06";
+const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE = "x-openai-internal-codex-responses-lite";
+const WS_RESPONSES_LITE_CLIENT_METADATA_KEY = "ws_request_header_x_openai_internal_codex_responses_lite";
 const WEB_SEARCH_SOURCES_INCLUDE = "web_search_call.action.sources";
 const SESSION_WEBSOCKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const dynamicImport = (specifier: string) => import(specifier);
@@ -153,9 +155,11 @@ interface ResponsesBody {
 	service_tier?: string;
 	tools?: unknown[];
 	reasoning?: {
-		effort: string;
-		summary: string;
+		effort?: string;
+		summary?: string;
+		context?: "all_turns";
 	};
+	client_metadata?: Record<string, string>;
 	[key: string]: unknown;
 }
 
@@ -466,11 +470,13 @@ function buildSSEHeaders(
 	accountId: string | undefined,
 	token: string,
 	sessionId: string | undefined,
+	profile: CodexRequestProfile,
 ): Headers {
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token);
 	headers.set("OpenAI-Beta", "responses=experimental");
 	headers.set("accept", "text/event-stream");
 	headers.set("content-type", "application/json");
+	if (profile.responsesMode === "lite") headers.set(X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
 
 	if (sessionId) {
 		headers.set("session_id", sessionId);
@@ -547,25 +553,62 @@ function ensureWebSearchSourcesIncluded(body: ResponsesBody): void {
 	body.include = [...include, WEB_SEARCH_SOURCES_INCLUDE];
 }
 
+function stripResponsesLiteImageDetails(value: unknown): void {
+	if (Array.isArray(value)) {
+		for (const item of value) stripResponsesLiteImageDetails(item);
+		return;
+	}
+	if (!value || typeof value !== "object") return;
+	const record = value as Record<string, unknown>;
+	if (record.type === "input_image") delete record.detail;
+	for (const entry of Object.values(record)) stripResponsesLiteImageDetails(entry);
+}
+
+export function withResponsesLiteWebSocketMetadata<T extends { client_metadata?: Record<string, string> }>(body: T, responsesMode: CodexRequestProfile["responsesMode"]): T {
+	if (responsesMode !== "lite") return body;
+	return {
+		...body,
+		client_metadata: {
+			...body.client_metadata,
+			[WS_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
+		},
+	};
+}
+
 function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, profile: CodexRequestProfile, options?: SimpleStreamOptions): ResponsesBody {
-	if (profile.responsesMode !== "standard") throw new Error(`Unsupported Responses mode: ${profile.responsesMode}`);
 	if (profile.patchTransport !== "function") throw new Error(`Unsupported apply_patch transport: ${profile.patchTransport}`);
 	const messages = convertResponsesMessages(model, context, CODEX_TOOL_CALL_PROVIDERS, {
 		includeSystemPrompt: false,
 	});
+	const tools = context.tools && context.tools.length > 0 ? convertResponsesTools(context.tools, { strict: null }) : [];
+	const lite = profile.responsesMode === "lite";
 
 	const body: ResponsesBody = {
 		model: model.id,
 		store: false,
 		stream: true,
-		instructions: context.systemPrompt,
-		input: messages,
+		input: [],
 		text: { verbosity: ((options as { textVerbosity?: string } | undefined)?.textVerbosity ?? "low") as string },
 		include: ["reasoning.encrypted_content"],
 		prompt_cache_key: options?.sessionId,
 		tool_choice: "auto",
 		parallel_tool_calls: profile.supportsParallelTools,
 	};
+	if (lite) {
+		stripResponsesLiteImageDetails(messages);
+		body.input = [
+			{ type: "additional_tools", role: "developer", tools },
+			...(context.systemPrompt
+				? [{ type: "message", role: "developer", content: [{ type: "input_text", text: context.systemPrompt }] }]
+				: []),
+			...messages,
+		];
+		body.reasoning = { context: "all_turns" };
+	} else {
+		body.instructions = context.systemPrompt;
+		body.input = messages;
+		if (tools.length > 0) body.tools = tools;
+	}
 
 	// The Codex ChatGPT-backed endpoint rejects output-token cap fields with
 	// `Unsupported parameter: max_output_tokens`. Pi's branch summarizer passes
@@ -581,19 +624,16 @@ function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context
 		body.service_tier = serviceTier;
 	}
 
-	if (context.tools && context.tools.length > 0) {
-		body.tools = convertResponsesTools(context.tools, { strict: null });
-	}
-
 	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
 	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
 	if (reasoningEffort !== undefined) {
 		const effort = model.thinkingLevelMap?.[reasoningEffort] ?? reasoningEffort;
 		if (effort === null) return body;
-		body.reasoning = {
-			effort: clampReasoningEffort(model.id, effort),
-			summary: ((options as { reasoningSummary?: string } | undefined)?.reasoningSummary ?? "auto") as string,
-		};
+		const reasoning = body.reasoning ?? {};
+		reasoning.effort = clampReasoningEffort(model.id, effort);
+		const summary = (options as { reasoningSummary?: string } | undefined)?.reasoningSummary ?? (lite ? undefined : "auto");
+		if (summary && summary !== "none") reasoning.summary = summary;
+		body.reasoning = reasoning;
 	}
 
 	return body;
@@ -1656,13 +1696,14 @@ function createCodexStream<TApi extends Api>(
 			ensureWebSearchSourcesIncluded(body);
 
 			const websocketRequestId = options?.sessionId || createCodexRequestId();
-			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId);
+			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId, requestProfile);
 			const websocketHeaders = buildWebSocketHeaders(model.headers, options?.headers, accountId, apiKey, websocketRequestId);
 			const bodyJson = JSON.stringify(body);
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
 			const transport = settings.apiKeyMode ? "sse" : options?.transport || "auto";
 
 			if (transport !== "sse") {
+				const websocketBody = withResponsesLiteWebSocketMetadata(body, requestProfile.responsesMode);
 				let websocketStarted = false;
 				let retriedWebSocketConnectionLimit = false;
 				while (true) {
@@ -1670,7 +1711,7 @@ function createCodexStream<TApi extends Api>(
 					try {
 						await processWebSocketStream(
 							resolveCodexWebSocketUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode }),
-							body,
+							websocketBody,
 							websocketHeaders,
 							output,
 							stream,

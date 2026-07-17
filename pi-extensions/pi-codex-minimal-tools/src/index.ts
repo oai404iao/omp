@@ -106,7 +106,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
 		`webSearchEnabled: ${settings.webSearchEnabled}`,
 		`apiKeyMode: ${settings.apiKeyMode}`,
-		`native provider shim: ${settings.enabled && settings.nativeProviderTools ? "registered" : "disabled"}`,
+		`native provider shim: ${settings.enabled ? "registered" : "disabled"}`,
 		"tools:",
 		...Object.entries(capabilities).map(([name, capability]) => `- ${name}: ${capability.enabled ? "supported" : "disabled"}${active.has(name) ? ", active" : ""} — ${capability.reason}`),
 	];
@@ -190,7 +190,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 	};
 
 	const initialSettings = loadSettings(currentCwd);
-	if (initialSettings.enabled && initialSettings.nativeProviderTools) {
+	if (initialSettings.enabled) {
 		registerOpenAICodexCustomProvider(pi, { getCurrentCwd: () => currentCwd });
 		registerBackgroundImageGenerationCommand(pi);
 	}

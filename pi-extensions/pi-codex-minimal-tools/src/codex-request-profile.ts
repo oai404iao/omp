@@ -7,10 +7,10 @@ export interface CodexRequestProfile {
 
 /**
  * Only modes implemented by the current provider shim are configurable.
- * Lite and custom transport will be added with their complete wire parsers.
+ * Custom transport remains unavailable until its complete wire parser lands.
  */
 export interface CodexRequestProfileOverride {
-	responsesMode?: "standard";
+	responsesMode?: "standard" | "lite";
 	patchTransport?: "function";
 	supportsHostedTools?: boolean;
 	supportsParallelTools?: boolean;
@@ -24,10 +24,11 @@ export const DEFAULT_CODEX_REQUEST_PROFILE: CodexRequestProfile = {
 };
 
 export function resolveCodexRequestProfile(override: CodexRequestProfileOverride = {}): CodexRequestProfile {
+	const responsesMode = override.responsesMode ?? DEFAULT_CODEX_REQUEST_PROFILE.responsesMode;
 	return {
-		responsesMode: override.responsesMode ?? DEFAULT_CODEX_REQUEST_PROFILE.responsesMode,
+		responsesMode,
 		patchTransport: override.patchTransport ?? DEFAULT_CODEX_REQUEST_PROFILE.patchTransport,
-		supportsHostedTools: override.supportsHostedTools ?? DEFAULT_CODEX_REQUEST_PROFILE.supportsHostedTools,
-		supportsParallelTools: override.supportsParallelTools ?? DEFAULT_CODEX_REQUEST_PROFILE.supportsParallelTools,
+		supportsHostedTools: responsesMode === "lite" ? false : override.supportsHostedTools ?? DEFAULT_CODEX_REQUEST_PROFILE.supportsHostedTools,
+		supportsParallelTools: responsesMode === "lite" ? false : override.supportsParallelTools ?? DEFAULT_CODEX_REQUEST_PROFILE.supportsParallelTools,
 	};
 }

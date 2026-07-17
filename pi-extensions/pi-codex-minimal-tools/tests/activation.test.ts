@@ -9,13 +9,15 @@ import { hasOpenAiModelsLoaded } from "../src/activation.js";
 function fakePi() {
 	const handlers: Record<string, Function[]> = {};
 	const tools: any[] = [];
+	const providers: Array<{ name: string; value: any }> = [];
 	let activeTools = ["read", "bash"];
 	return {
 		activeTools,
 		handlers,
+		providers,
 		tools,
 		registerCommand() {},
-		registerProvider() {},
+		registerProvider(name: string, value: any) { providers.push({ name, value }); },
 		registerMessageRenderer() {},
 		registerTool(tool: any) { tools.push(tool); },
 		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },
@@ -79,6 +81,14 @@ test("extension does not register tools until OpenAI models are loaded", async (
 	assert.ok(pi.activeTools.includes("bash"));
 	assert.ok(pi.activeTools.includes("apply_patch"));
 	assert.equal(pi.activeTools.includes("web_search"), false);
+}));
+
+test("provider shim remains registered when native hosted tools are disabled", async () => withAgentDir(async (agentDir) => {
+	writeConfig(agentDir, { nativeProviderTools: false, requestProfile: { responsesMode: "lite" } });
+	const pi = fakePi();
+	codexMinimalTools(pi as any);
+	assert.equal(pi.providers.length, 1);
+	assert.equal(pi.providers[0]?.name, "openai-codex");
 }));
 
 test("active non-OpenAI models remove package tools even when OpenAI models exist in registry", async () => withAgentDir(async () => {

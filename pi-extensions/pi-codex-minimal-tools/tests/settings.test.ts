@@ -49,7 +49,7 @@ test("settingsDiagnostics reports malformed config.json", () => {
 	});
 });
 
-test("loadSettings reads flat package config", () => {
+test("loadSettings reads package config and nested request profile", () => {
 	withAgentDir((agentDir) => {
 		writeConfig(agentDir, {
 			autoEnable: false,
@@ -82,7 +82,7 @@ test("loadSettings reads flat package config", () => {
 	});
 });
 
-test("loadSettings falls back for invalid enum values", () => {
+test("loadSettings accepts Lite but falls back for unsupported custom transport", () => {
 	withAgentDir((agentDir) => {
 		writeConfig(agentDir, {
 			imageModel: "bad-model",
@@ -92,6 +92,6 @@ test("loadSettings falls back for invalid enum values", () => {
 		const settings = loadSettings();
 		assert.equal(settings.imageModel, DEFAULT_SETTINGS.imageModel);
 		assert.equal(settings.glyphStyle, DEFAULT_SETTINGS.glyphStyle);
-		assert.deepEqual(settings.requestProfile, {});
+		assert.deepEqual(settings.requestProfile, { responsesMode: "lite" });
 	});
 });
