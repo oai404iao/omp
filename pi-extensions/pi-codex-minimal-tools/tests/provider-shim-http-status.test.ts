@@ -125,6 +125,19 @@ function successSseResponse(output: unknown[] = []): Response {
 	return new Response(`data: ${JSON.stringify(event)}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
+function customApplyPatchSseResponse(): Response {
+	const patch = "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n";
+	const events = [
+		{ type: "response.created", response: { id: "resp_custom" } },
+		{ type: "response.output_item.added", output_index: 0, item: { type: "custom_tool_call", id: "ctc_1", call_id: "call_1", name: "apply_patch", input: "" } },
+		{ type: "response.custom_tool_call_input.delta", item_id: "ctc_1", call_id: "call_1", delta: "*** Begin Patch\n" },
+		{ type: "response.custom_tool_call_input.delta", item_id: "ctc_1", call_id: "call_1", delta: "*** Add File: a.txt\n+x\n*** End Patch\n" },
+		{ type: "response.output_item.done", output_index: 0, item: { type: "custom_tool_call", id: "ctc_1", call_id: "call_1", name: "apply_patch", input: patch } },
+		{ type: "response.completed", response: { id: "resp_custom", status: "completed", output: [], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } } } },
+	];
+	return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
 function enableApiKeyMode(): void {
 	writeSettings({ apiKeyMode: true });
 }
@@ -217,8 +230,44 @@ test("request profile disables parallel calls while apply_patch stays a function
 	assert.equal(requestBody.tools[0].name, "apply_patch");
 });
 
-test("Responses Lite moves tools and instructions into input and sets transport metadata", async () => {
-	writeSettings({ requestProfile: { responsesMode: "lite" } });
+test("custom patch transport replaces only apply_patch with the canonical freeform tool", async () => {
+	writeSettings({ requestProfile: { patchTransport: "custom" } });
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return customApplyPatchSseResponse();
+	}) as typeof fetch;
+
+	const result = await runCodexProvider({}, {}, [
+		{
+			name: "apply_patch",
+			description: "Apply a patch",
+			parameters: { type: "object", properties: { input: { type: "string" } }, required: ["input"], additionalProperties: false },
+		},
+		{
+			name: "read",
+			description: "Read a file",
+			parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false },
+		},
+	]);
+
+	assert.equal(result.stopReason, "toolUse");
+	assert.equal(requestBody.tools[0].type, "custom");
+	assert.equal(requestBody.tools[0].name, "apply_patch");
+	assert.match(requestBody.tools[0].description, /FREEFORM/);
+	assert.equal(requestBody.tools[0].format.type, "grammar");
+	assert.equal(requestBody.tools[0].format.syntax, "lark");
+	assert.match(requestBody.tools[0].format.definition, /^start: begin_patch hunk\+ end_patch/);
+	assert.equal("parameters" in requestBody.tools[0], false);
+	assert.equal(requestBody.tools[1].type, "function");
+	assert.equal(requestBody.tools[1].name, "read");
+	const toolCall = result.content.find((block: any) => block.type === "toolCall");
+	assert.equal(toolCall.id, "call_1|ctc_1");
+	assert.deepEqual(toolCall.arguments, { input: "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n" });
+});
+
+test("Responses Lite carries custom apply_patch and replays custom history in input", async () => {
+	writeSettings({ requestProfile: { responsesMode: "lite", patchTransport: "custom" } });
 	let requestBody: any;
 	let requestHeaders: Headers | undefined;
 	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -256,14 +305,14 @@ test("Responses Lite moves tools and instructions into input and sets transport 
 					api: "openai-codex-responses",
 					provider: "openai-codex",
 					model: "gpt-5.5",
-					content: [{ type: "toolCall", id: "call_patch|fc_patch", name: "apply_patch", arguments: { input: "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n" } }],
+					content: [{ type: "toolCall", id: "call_patch|ctc_patch", name: "apply_patch", arguments: { input: "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n" } }],
 					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
 					stopReason: "toolUse",
 					timestamp: 2,
 				},
 				{
 					role: "toolResult",
-					toolCallId: "call_patch|fc_patch",
+					toolCallId: "call_patch|ctc_patch",
 					toolName: "apply_patch",
 					content: [{ type: "text", text: "Applied patch" }],
 					isError: false,
@@ -282,8 +331,9 @@ test("Responses Lite moves tools and instructions into input and sets transport 
 	assert.equal(requestHeaders?.get("x-openai-internal-codex-responses-lite"), "true");
 	assert.equal(requestBody.input[0].type, "additional_tools");
 	assert.equal(requestBody.input[0].role, "developer");
-	assert.equal(requestBody.input[0].tools[0].type, "function");
+	assert.equal(requestBody.input[0].tools[0].type, "custom");
 	assert.equal(requestBody.input[0].tools[0].name, "apply_patch");
+	assert.equal(requestBody.input[0].tools[0].format.syntax, "lark");
 	assert.deepEqual(requestBody.input[1], {
 		type: "message",
 		role: "developer",
@@ -292,10 +342,12 @@ test("Responses Lite moves tools and instructions into input and sets transport 
 	const image = requestBody.input[2].content.find((item: any) => item.type === "input_image");
 	assert.ok(image);
 	assert.equal("detail" in image, false);
-	assert.equal(requestBody.input[3].type, "function_call");
+	assert.equal(requestBody.input[3].type, "custom_tool_call");
 	assert.equal(requestBody.input[3].name, "apply_patch");
-	assert.equal(requestBody.input[4].type, "function_call_output");
+	assert.match(requestBody.input[3].input, /^\*\*\* Begin Patch/);
+	assert.equal(requestBody.input[4].type, "custom_tool_call_output");
 	assert.equal(requestBody.input[4].call_id, "call_patch");
+	assert.equal(requestBody.input[4].output, "Applied patch");
 });
 
 test("Responses Lite adds its WebSocket signal only to WebSocket client metadata", () => {

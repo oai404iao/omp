@@ -23,6 +23,7 @@ import {
 	convertResponsesTools,
 	processResponsesStream,
 } from "./providers/openai-responses-shared.js";
+import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
@@ -576,11 +577,13 @@ export function withResponsesLiteWebSocketMetadata<T extends { client_metadata?:
 }
 
 function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, profile: CodexRequestProfile, options?: SimpleStreamOptions): ResponsesBody {
-	if (profile.patchTransport !== "function") throw new Error(`Unsupported apply_patch transport: ${profile.patchTransport}`);
 	const messages = convertResponsesMessages(model, context, CODEX_TOOL_CALL_PROVIDERS, {
 		includeSystemPrompt: false,
 	});
-	const tools = context.tools && context.tools.length > 0 ? convertResponsesTools(context.tools, { strict: null }) : [];
+	const tools = context.tools && context.tools.length > 0
+		? convertResponsesTools(context.tools, { strict: null }).map((tool) =>
+			profile.patchTransport === "custom" && tool.type === "function" && tool.name === "apply_patch" ? createCodexApplyPatchCustomTool() : tool)
+		: [];
 	const lite = profile.responsesMode === "lite";
 
 	const body: ResponsesBody = {

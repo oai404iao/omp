@@ -82,7 +82,7 @@ test("loadSettings reads package config and nested request profile", () => {
 	});
 });
 
-test("loadSettings accepts Lite but falls back for unsupported custom transport", () => {
+test("loadSettings accepts Lite with custom patch transport", () => {
 	withAgentDir((agentDir) => {
 		writeConfig(agentDir, {
 			imageModel: "bad-model",
@@ -92,6 +92,6 @@ test("loadSettings accepts Lite but falls back for unsupported custom transport"
 		const settings = loadSettings();
 		assert.equal(settings.imageModel, DEFAULT_SETTINGS.imageModel);
 		assert.equal(settings.glyphStyle, DEFAULT_SETTINGS.glyphStyle);
-		assert.deepEqual(settings.requestProfile, { responsesMode: "lite" });
+		assert.deepEqual(settings.requestProfile, { responsesMode: "lite", patchTransport: "custom" });
 	});
 });

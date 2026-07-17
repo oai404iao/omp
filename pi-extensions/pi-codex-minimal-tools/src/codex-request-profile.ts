@@ -11,7 +11,7 @@ export interface CodexRequestProfile {
  */
 export interface CodexRequestProfileOverride {
 	responsesMode?: "standard" | "lite";
-	patchTransport?: "function";
+	patchTransport?: "function" | "custom";
 	supportsHostedTools?: boolean;
 	supportsParallelTools?: boolean;
 }

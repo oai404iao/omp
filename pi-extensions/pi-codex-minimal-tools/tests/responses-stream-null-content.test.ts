@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { processResponsesStream } from "../src/providers/openai-responses-shared.js";
+import { convertResponsesMessages, processResponsesStream } from "../src/providers/openai-responses-shared.js";
 
 async function* asAsyncIterable(events: any[]) {
 	for (const event of events) yield event;
@@ -59,6 +59,93 @@ test("processResponsesStream tolerates a null-content message item before a func
 
 	const textBlocks = output.content.filter((block: any) => block.type === "text");
 	assert.equal(textBlocks[0]?.text, "", "null message content collapses to empty text");
+});
+
+test("processResponsesStream maps custom raw deltas to apply_patch input", async () => {
+	const output = createAssistantOutput();
+	const streamEvents: Array<{ type: string; delta?: string }> = [];
+	const patch = "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n";
+
+	await processResponsesStream(
+		asAsyncIterable([
+			{ type: "response.created", response: { id: "resp_custom" } },
+			{ type: "response.output_item.added", output_index: 0, item: { type: "custom_tool_call", id: "ctc_1", call_id: "call_1", name: "apply_patch", input: "" } },
+			{ type: "response.custom_tool_call_input.delta", item_id: "ctc_1", call_id: "call_1", delta: "*** Begin Patch\n" },
+			{ type: "response.custom_tool_call_input.delta", item_id: "ctc_1", call_id: "call_1", delta: "*** Add File: a.txt\n+x\n*** End Patch\n" },
+			{ type: "response.output_item.done", output_index: 0, item: { type: "custom_tool_call", id: "ctc_1", call_id: "call_1", name: "apply_patch", input: patch } },
+			{ type: "response.completed", response: { id: "resp_custom", status: "completed", usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } } } },
+		]),
+		output,
+		{ push(event: any) { streamEvents.push({ type: event.type, ...(typeof event.delta === "string" ? { delta: event.delta } : {}) }); } } as any,
+		model,
+	);
+
+	const toolCall = output.content.find((block: any) => block.type === "toolCall") as any;
+	assert.equal(toolCall.id, "call_1|ctc_1");
+	assert.equal(toolCall.name, "apply_patch");
+	assert.deepEqual(toolCall.arguments, { input: patch });
+	assert.equal("partialInput" in toolCall, false);
+	assert.deepEqual(streamEvents.map((event) => event.type), ["toolcall_start", "toolcall_delta", "toolcall_delta", "toolcall_end"]);
+	assert.equal(streamEvents.filter((event) => event.type === "toolcall_delta").map((event) => event.delta).join(""), patch);
+	assert.equal(output.stopReason, "toolUse");
+});
+
+test("processResponsesStream routes interleaved custom deltas by item id", async () => {
+	const output = createAssistantOutput();
+	await processResponsesStream(
+		asAsyncIterable([
+			{ type: "response.created", response: { id: "resp_parallel" } },
+			{ type: "response.output_item.added", output_index: 0, item: { type: "custom_tool_call", id: "ctc_a", call_id: "call_a", name: "apply_patch", input: "" } },
+			{ type: "response.output_item.added", output_index: 1, item: { type: "custom_tool_call", id: "ctc_b", call_id: "call_b", name: "apply_patch", input: "" } },
+			{ type: "response.custom_tool_call_input.delta", item_id: "ctc_b", delta: "patch-b" },
+			{ type: "response.custom_tool_call_input.delta", item_id: "ctc_a", delta: "patch-a" },
+			{ type: "response.output_item.done", output_index: 0, item: { type: "custom_tool_call", id: "ctc_a", call_id: "call_a", name: "apply_patch", input: "patch-a" } },
+			{ type: "response.output_item.done", output_index: 1, item: { type: "custom_tool_call", id: "ctc_b", call_id: "call_b", name: "apply_patch", input: "patch-b" } },
+			{ type: "response.completed", response: { id: "resp_parallel", status: "completed", usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } } } },
+		]),
+		output,
+		{ push() {} } as any,
+		model,
+	);
+
+	const toolCalls = output.content.filter((block: any) => block.type === "toolCall") as any[];
+	assert.deepEqual(toolCalls.map((call) => call.arguments.input), ["patch-a", "patch-b"]);
+});
+
+test("convertResponsesMessages replays custom calls and outputs by ctc item id", () => {
+	const patch = "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n";
+	const messages = convertResponsesMessages(model, {
+		systemPrompt: "",
+		tools: [],
+		messages: [
+			{
+				...createAssistantOutput(),
+				content: [{ type: "toolCall", id: "call_1|ctc_1", name: "apply_patch", arguments: { input: patch } }],
+				stopReason: "toolUse",
+			},
+			{
+				role: "toolResult",
+				toolCallId: "call_1|ctc_1",
+				toolName: "apply_patch",
+				content: [{ type: "text", text: "Applied patch" }],
+				isError: false,
+				timestamp: Date.now(),
+			},
+		],
+	} as any, new Set(["openai-codex"]), { includeSystemPrompt: false }) as any[];
+
+	assert.deepEqual(messages[0], {
+		type: "custom_tool_call",
+		id: "ctc_1",
+		call_id: "call_1",
+		name: "apply_patch",
+		input: patch,
+	});
+	assert.deepEqual(messages[1], {
+		type: "custom_tool_call_output",
+		call_id: "call_1",
+		output: "Applied patch",
+	});
 });
 
 test("processResponsesStream records reasoning token usage and incomplete stop reason", async () => {

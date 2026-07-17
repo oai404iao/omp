@@ -257,8 +257,8 @@ export function convertResponsesMessages<TApi extends Api>(
 		const normalized = sanitized.length > 64 ? sanitized.slice(0, 64) : sanitized;
 		return normalized.replace(/_+$/, "");
 	};
-	const buildForeignResponsesItemId = (itemId: string) => {
-		const normalized = `fc_${shortHash(itemId)}`;
+	const buildForeignResponsesItemId = (itemId: string, prefix: "fc_" | "ctc_") => {
+		const normalized = `${prefix}${shortHash(itemId)}`;
 		return normalized.length > 64 ? normalized.slice(0, 64) : normalized;
 	};
 	const normalizeToolCallId = (id: string, _targetModel: Model<TApi>, source: Extract<Message, { role: "assistant" }>) => {
@@ -267,8 +267,9 @@ export function convertResponsesMessages<TApi extends Api>(
 		const [callId, itemId] = id.split("|");
 		const normalizedCallId = normalizeIdPart(callId);
 		const isForeignToolCall = source.provider !== model.provider || source.api !== model.api;
-		let normalizedItemId = isForeignToolCall ? buildForeignResponsesItemId(itemId ?? "") : normalizeIdPart(itemId ?? "");
-		if (!normalizedItemId.startsWith("fc_")) normalizedItemId = normalizeIdPart(`fc_${normalizedItemId}`);
+		const itemPrefix = itemId?.startsWith("ctc_") ? "ctc_" : "fc_";
+		let normalizedItemId = isForeignToolCall ? buildForeignResponsesItemId(itemId ?? "", itemPrefix) : normalizeIdPart(itemId ?? "");
+		if (!normalizedItemId.startsWith(itemPrefix)) normalizedItemId = normalizeIdPart(`${itemPrefix}${normalizedItemId}`);
 		return `${normalizedCallId}|${normalizedItemId}`;
 	};
 
@@ -316,15 +317,26 @@ export function convertResponsesMessages<TApi extends Api>(
 					assistantBlockIndex++;
 				} else if (block.type === "toolCall") {
 					const [callId, itemIdRaw] = block.id.split("|");
+					const custom = itemIdRaw?.startsWith("ctc_") === true;
 					let itemId: string | undefined = itemIdRaw;
-					if (isDifferentModel && itemId?.startsWith("fc_")) itemId = undefined;
-					output.push({
-						type: "function_call",
-						...(itemId ? { id: itemId } : {}),
-						call_id: callId,
-						name: block.name,
-						arguments: JSON.stringify(block.arguments),
-					} as ResponseInput[number]);
+					if (isDifferentModel && (itemId?.startsWith("fc_") || itemId?.startsWith("ctc_"))) itemId = undefined;
+					if (custom) {
+						output.push({
+							type: "custom_tool_call",
+							...(itemId ? { id: itemId } : {}),
+							call_id: callId,
+							name: block.name,
+							input: typeof block.arguments.input === "string" ? block.arguments.input : "",
+						} as ResponseInput[number]);
+					} else {
+						output.push({
+							type: "function_call",
+							...(itemId ? { id: itemId } : {}),
+							call_id: callId,
+							name: block.name,
+							arguments: JSON.stringify(block.arguments),
+						} as ResponseInput[number]);
+					}
 				}
 			}
 			if (output.length > 0) messages.push(...output);
@@ -332,7 +344,7 @@ export function convertResponsesMessages<TApi extends Api>(
 			const textResult = msg.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
 			const hasImages = msg.content.some((c) => c.type === "image");
 			const hasText = textResult.length > 0;
-			const [callId] = msg.toolCallId.split("|");
+			const [callId, itemId] = msg.toolCallId.split("|");
 			const output = hasImages && model.input.includes("image")
 				? [
 						...(hasText ? [{ type: "input_text" as const, text: sanitizeSurrogates(textResult) }] : []),
@@ -345,7 +357,11 @@ export function convertResponsesMessages<TApi extends Api>(
 							})),
 					]
 				: sanitizeSurrogates(hasText ? textResult : "(see attached image)");
-			messages.push({ type: "function_call_output", call_id: callId, output });
+			messages.push({
+				type: itemId?.startsWith("ctc_") ? "custom_tool_call_output" : "function_call_output",
+				call_id: callId,
+				output,
+			} as ResponseInput[number]);
 		}
 		msgIndex++;
 	}
@@ -375,7 +391,7 @@ export async function processResponsesStream<TApi extends Api>(
 	const blockIndex = () => blocks.length - 1;
 	type ThinkingBlock = Extract<AssistantMessage["content"][number], { type: "thinking" }>;
 	type TextBlock = Extract<AssistantMessage["content"][number], { type: "text" }>;
-	type ToolCallBlock = Extract<AssistantMessage["content"][number], { type: "toolCall" }> & { partialJson?: string };
+	type ToolCallBlock = Extract<AssistantMessage["content"][number], { type: "toolCall" }> & { partialJson?: string; partialInput?: string };
 
 	type ReasoningState = {
 		kind: "reasoning";
@@ -395,11 +411,32 @@ export async function processResponsesStream<TApi extends Api>(
 		blockIndex: number;
 		block: ToolCallBlock;
 	};
-	type OutputState = ReasoningState | MessageState | FunctionCallState;
+	type CustomToolCallState = {
+		kind: "custom_tool_call";
+		blockIndex: number;
+		block: ToolCallBlock;
+		itemId: string;
+		sourceItemId?: string;
+		callId: string;
+		input: string;
+	};
+	type OutputState = ReasoningState | MessageState | FunctionCallState | CustomToolCallState;
 
 	let sawTerminalResponseEvent = false;
 	const outputStates = new Map<number, OutputState>();
 	const imageGenerationCallIds = new Set<string>();
+	const customItemId = (itemId: string | undefined, callId: string): string =>
+		itemId?.startsWith("ctc_") ? itemId : `ctc_${shortHash(itemId || callId)}`;
+	const findCustomToolCallState = (event: { output_index?: number; item_id?: string; call_id?: string }): CustomToolCallState | undefined => {
+		const indexed = typeof event.output_index === "number" ? outputStates.get(event.output_index) : undefined;
+		if (indexed?.kind === "custom_tool_call") return indexed;
+		for (const state of outputStates.values()) {
+			if (state.kind !== "custom_tool_call") continue;
+			if (event.item_id && (event.item_id === state.itemId || event.item_id === state.sourceItemId)) return state;
+			if (event.call_id && event.call_id === state.callId) return state;
+		}
+		return undefined;
+	};
 
 	const appendImageGenerationCall = (item: unknown): void => {
 		const imageGenerationCall = sanitizeImageGenerationCallItem(item);
@@ -493,6 +530,7 @@ export async function processResponsesStream<TApi extends Api>(
 			output.responseId = event.response.id;
 		} else if (event.type === "response.output_item.added") {
 			const item = event.item;
+			const customItem = item as unknown as { type?: string; id?: string; call_id?: string; name?: string; input?: string };
 			if (item.type === "reasoning") {
 				const currentBlock: ThinkingBlock = { type: "thinking", thinking: "" };
 				output.content.push(currentBlock);
@@ -526,6 +564,27 @@ export async function processResponsesStream<TApi extends Api>(
 					kind: "function_call",
 					blockIndex: blockIndex(),
 					block: currentBlock,
+				});
+				stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
+			} else if (customItem.type === "custom_tool_call" && customItem.call_id && customItem.name) {
+				const itemId = customItemId(customItem.id, customItem.call_id);
+				const input = customItem.input ?? "";
+				const currentBlock: ToolCallBlock = {
+					type: "toolCall",
+					id: `${customItem.call_id}|${itemId}`,
+					name: customItem.name,
+					arguments: { input },
+					partialInput: input,
+				};
+				output.content.push(currentBlock);
+				outputStates.set(event.output_index, {
+					kind: "custom_tool_call",
+					blockIndex: blockIndex(),
+					block: currentBlock,
+					itemId,
+					sourceItemId: customItem.id,
+					callId: customItem.call_id,
+					input,
 				});
 				stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
 			}
@@ -605,6 +664,15 @@ export async function processResponsesStream<TApi extends Api>(
 					emitAppendedDelta("text_delta", state.blockIndex, previousText, nextText);
 				}
 			}
+		} else if ((event as { type?: string }).type === "response.custom_tool_call_input.delta") {
+			const customEvent = event as unknown as { output_index?: number; item_id?: string; call_id?: string; delta?: string };
+			const state = findCustomToolCallState(customEvent);
+			if (state && typeof customEvent.delta === "string") {
+				state.input += customEvent.delta;
+				state.block.partialInput = state.input;
+				state.block.arguments = { input: state.input };
+				stream.push({ type: "toolcall_delta", contentIndex: state.blockIndex, delta: customEvent.delta, partial: output });
+			}
 		} else if (event.type === "response.function_call_arguments.delta") {
 			const state = outputStates.get(event.output_index);
 			if (state?.kind === "function_call") {
@@ -627,6 +695,7 @@ export async function processResponsesStream<TApi extends Api>(
 			}
 		} else if (event.type === "response.output_item.done") {
 			const item = event.item;
+			const customItem = item as unknown as { type?: string; id?: string; call_id?: string; name?: string; input?: string };
 			if (item.type === "reasoning") {
 				let state = outputStates.get(event.output_index);
 				if (!state || state.kind !== "reasoning") {
@@ -694,6 +763,33 @@ export async function processResponsesStream<TApi extends Api>(
 						return fallbackToolCall;
 					})();
 				const toolCallIndex = state?.kind === "function_call" ? state.blockIndex : blockIndex();
+				stream.push({ type: "toolcall_end", contentIndex: toolCallIndex, toolCall, partial: output });
+				outputStates.delete(event.output_index);
+			} else if (customItem.type === "custom_tool_call" && customItem.call_id && customItem.name) {
+				const state = findCustomToolCallState({
+					output_index: event.output_index,
+					item_id: customItem.id,
+					call_id: customItem.call_id,
+				});
+				const input = typeof customItem.input === "string" ? customItem.input : state?.input ?? "";
+				const toolCall = state
+					? (() => {
+						state.input = input;
+						state.block.arguments = { input };
+						delete state.block.partialInput;
+						return state.block;
+					})()
+					: (() => {
+						const fallbackToolCall: ToolCallBlock = {
+							type: "toolCall",
+							id: `${customItem.call_id}|${customItemId(customItem.id, customItem.call_id)}`,
+							name: customItem.name,
+							arguments: { input },
+						};
+						output.content.push(fallbackToolCall);
+						return fallbackToolCall;
+					})();
+				const toolCallIndex = state?.blockIndex ?? blockIndex();
 				stream.push({ type: "toolcall_end", contentIndex: toolCallIndex, toolCall, partial: output });
 				outputStates.delete(event.output_index);
 			} else if (item.type === "image_generation_call") {
