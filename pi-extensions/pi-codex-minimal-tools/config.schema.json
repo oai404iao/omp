@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unpkg.com/pi-codex-minimal-tools@1/config.schema.json",
+  "title": "pi-codex-minimal-tools configuration",
+  "description": "Configuration for the pi-codex-minimal-tools Pi extension.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL used by editors for validation and completion.",
+      "default": "https://unpkg.com/pi-codex-minimal-tools@1/config.schema.json"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Register this package's tools and provider shim.",
+      "default": true
+    },
+    "glyphStyle": {
+      "type": "string",
+      "description": "Glyph style used by the extension UI.",
+      "enum": ["unicode", "ascii"],
+      "default": "unicode"
+    },
+    "autoEnable": {
+      "type": "boolean",
+      "description": "Automatically activate enabled package tools on supported models.",
+      "default": true
+    },
+    "nativeProviderTools": {
+      "type": "boolean",
+      "description": "Rewrite hosted-tool placeholders into native OpenAI Responses tools on openai-codex.",
+      "default": true
+    },
+    "requestProfile": {
+      "type": "object",
+      "description": "Explicit overrides for the OpenAI Responses request profile.",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "responsesMode": {
+          "type": "string",
+          "description": "Responses protocol mode. Lite requires an endpoint that implements the Codex Responses Lite contract.",
+          "enum": ["standard", "lite"],
+          "default": "standard"
+        },
+        "patchTransport": {
+          "type": "string",
+          "description": "Transport for apply_patch: a JSON function tool or the Codex freeform custom tool.",
+          "enum": ["function", "custom"],
+          "default": "function"
+        },
+        "supportsHostedTools": {
+          "type": "boolean",
+          "description": "Enable hosted-tool activation and request rewriting. Responses Lite always disables hosted tools.",
+          "default": true
+        },
+        "supportsParallelTools": {
+          "type": "boolean",
+          "description": "Enable parallel tool calls in provider requests. Responses Lite always disables parallel tools.",
+          "default": true
+        }
+      }
+    },
+    "apiKeyMode": {
+      "type": "boolean",
+      "description": "Use plain Bearer API-key authentication for openai-codex instead of ChatGPT account headers.",
+      "default": false
+    },
+    "imageGeneration": {
+      "type": "boolean",
+      "description": "Expose image_generation on supported OpenAI Codex models.",
+      "default": true
+    },
+    "webSearchEnabled": {
+      "type": "boolean",
+      "description": "Expose hosted web_search on GPT-5-series openai-codex models.",
+      "default": false
+    },
+    "imageOutputDir": {
+      "type": "string",
+      "description": "Directory for generated images. Relative paths resolve against the workspace root.",
+      "minLength": 1,
+      "pattern": "\\S",
+      "default": ".pi/openai-codex-images"
+    },
+    "imageModel": {
+      "type": "string",
+      "description": "Image model used for native or fallback image generation.",
+      "enum": ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"],
+      "default": "gpt-image-2"
+    },
+    "directImageApiFallback": {
+      "type": "boolean",
+      "description": "Allow direct OpenAI Images API generation when native Codex generation is unavailable.",
+      "default": false
+    },
+    "viewImage": {
+      "type": "boolean",
+      "description": "Expose the view_image tool on image-capable models.",
+      "default": false
+    },
+    "viewImageWorkspaceOnly": {
+      "type": "boolean",
+      "description": "Reject view_image paths outside the active workspace.",
+      "default": false
+    },
+    "applyPatchEnabled": {
+      "type": "boolean",
+      "description": "Expose the apply_patch tool.",
+      "default": true
+    },
+    "strictPatchMode": {
+      "type": "boolean",
+      "description": "Disable Pi's edit and write tools so mutations go through apply_patch.",
+      "default": false
+    },
+    "allowAbsolutePatchPaths": {
+      "type": "boolean",
+      "description": "Allow absolute paths in apply_patch. Relative path escapes remain blocked.",
+      "default": false
+    },
+    "deferApplyPatchRendering": {
+      "type": "boolean",
+      "description": "Use Pi's fallback tool renderer instead of the built-in streaming filesystem preview.",
+      "default": false
+    }
+  }
+}

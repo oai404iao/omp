@@ -51,10 +51,12 @@ This package is configured by a standalone JSON file under Pi's agent directory:
 
 If `PI_CODING_AGENT_DIR` is not set, the extension looks under the Pi user agent directory (normally `~/.config/pi/agent` or `~/.pi/agent`, depending on your Pi installation).
 
-All keys are optional. `requestProfile` is the only nested section:
+All keys are optional. Add `$schema` to enable validation and completion in
+JSON Schema-aware editors. `requestProfile` is the only nested section:
 
 ```json
 {
+  "$schema": "https://unpkg.com/pi-codex-minimal-tools@1/config.schema.json",
   "enabled": true,
   "glyphStyle": "unicode",
   "autoEnable": true,
@@ -79,6 +81,9 @@ All keys are optional. `requestProfile` is the only nested section:
   "deferApplyPatchRendering": false
 }
 ```
+
+The schema is shipped with the package as [`config.schema.json`](config.schema.json).
+For offline completion, replace the URL with a local path your editor can resolve.
 
 ### General
 

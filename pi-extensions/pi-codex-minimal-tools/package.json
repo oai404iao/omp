@@ -47,6 +47,7 @@
     "tests/",
     "reference/",
     "README.md",
+    "config.schema.json",
     "package.json",
     "tsconfig.json"
   ],
