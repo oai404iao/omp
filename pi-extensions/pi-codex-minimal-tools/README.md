@@ -7,10 +7,10 @@ Minimal Codex/OpenAI tools for Pi. Adds Codex-style tools without replacing Pi n
 - `image_generation` — Codex/OpenAI Responses image generation bridge, with saved local outputs.
 - `view_image` — return a local image as model image content (off by default).
 - `apply_patch` — local Codex-style patch application, with function transport by default and opt-in Codex freeform custom transport.
-- `web_search` — hosted OpenAI Responses web search for GPT-5-series `openai-codex` models (off by default).
+- `web_search` — hosted OpenAI Responses web search for GPT-5-series `openai` and `openai-codex` models (off by default).
 - `/image-gen <prompt> [reference.png]` — background image generation/editing with a live status card.
 - Generated images are saved with timestamp filenames, `latest.<ext>` mirrors, metadata, and inline previews.
-- Tools only activate on supported OpenAI/Codex-like models; native hosted tools are rewritten only on `openai-codex`.
+- Tools only activate on supported OpenAI/Codex-like models; native hosted tools and request profiles are supported on `openai` and `openai-codex`.
 - Web search citations are preserved as clickable Markdown links when the provider returns citation annotations.
 - Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
 
@@ -63,6 +63,7 @@ JSON Schema-aware editors. `requestProfile` is the only nested section:
   "nativeProviderTools": true,
   "requestProfile": {
     "responsesMode": "standard",
+    "systemPromptPlacement": "instructions",
     "patchTransport": "function",
     "supportsHostedTools": true,
     "supportsParallelTools": true
@@ -97,10 +98,10 @@ For offline completion, replace the URL with a local path your editor can resolv
 
 | Setting | What it does |
 | --- | --- |
-| `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai-codex` (`image_generation`, and `web_search` when enabled). |
-| `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always forces hosted and parallel tools off. |
-| `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. |
-| `webSearchEnabled` | Expose hosted `web_search` on GPT-5-series `openai-codex` models. Disabled by default. |
+| `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai` and `openai-codex` (`image_generation`, and `web_search` when enabled). |
+| `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `systemPromptPlacement` chooses top-level `instructions` or an input `developer` message in Standard mode; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always uses a developer message and forces hosted and parallel tools off. |
+| `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. The `openai` provider always uses this API-key transport. |
+| `webSearchEnabled` | Expose hosted `web_search` on GPT-5-series `openai` and `openai-codex` models. Disabled by default. |
 
 Responses Lite uses Codex-internal request fields and transport signals. Enable
 `requestProfile.responsesMode: "lite"` only for an endpoint known to implement
@@ -110,6 +111,10 @@ implement Codex Code Mode.
 Set `requestProfile.patchTransport: "custom"` to send `apply_patch` as the
 Codex freeform custom tool with the packaged Lark grammar. Other tools remain
 normal function tools.
+
+Set `requestProfile.systemPromptPlacement: "developer"` to place Pi's system
+prompt at the start of Standard Responses `input`. The default `"instructions"`
+keeps it in the top-level `instructions` field.
 
 ### Images
 

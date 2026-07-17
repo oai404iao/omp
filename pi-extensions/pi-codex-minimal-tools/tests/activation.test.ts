@@ -87,8 +87,7 @@ test("provider shim remains registered when native hosted tools are disabled", a
 	writeConfig(agentDir, { nativeProviderTools: false, requestProfile: { responsesMode: "lite" } });
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
-	assert.equal(pi.providers.length, 1);
-	assert.equal(pi.providers[0]?.name, "openai-codex");
+	assert.deepEqual(pi.providers.map((provider) => provider.name), ["openai-codex", "openai"]);
 }));
 
 test("active non-OpenAI models remove package tools even when OpenAI models exist in registry", async () => withAgentDir(async () => {
@@ -105,7 +104,7 @@ test("active non-OpenAI models remove package tools even when OpenAI models exis
 	assert.deepEqual(pi.activeTools, ["read"]);
 }));
 
-test("before_provider_request rewrites web_search only for enabled GPT-5 Codex models", async () => withAgentDir(async (agentDir) => {
+test("before_provider_request rewrites web_search only for enabled GPT-5 OpenAI models", async () => withAgentDir(async (agentDir) => {
 	writeConfig(agentDir, { webSearchEnabled: true });
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
@@ -119,6 +118,13 @@ test("before_provider_request rewrites web_search only for enabled GPT-5 Codex m
 		modelRegistry: { getAll: () => [] },
 	});
 	assert.deepEqual(rewritten.tools, [{ type: "web_search" }]);
+
+	const rewrittenOpenAi = handler({ payload }, {
+		cwd: process.cwd(),
+		model: { provider: "openai", id: "gpt-5.5", input: ["text"] },
+		modelRegistry: { getAll: () => [] },
+	});
+	assert.deepEqual(rewrittenOpenAi.tools, [{ type: "web_search" }]);
 
 	const notGpt5 = handler({ payload }, {
 		cwd: process.cwd(),

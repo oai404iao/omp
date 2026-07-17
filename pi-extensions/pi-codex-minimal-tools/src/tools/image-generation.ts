@@ -29,7 +29,7 @@ async function urlToBase64(url: string, signal?: AbortSignal): Promise<string> {
 }
 
 export async function directImageGeneration(input: ImageGenerationInput, cwd: string, settings: CodexMinimalToolsSettings, signal?: AbortSignal) {
-	if (!settings.directImageApiFallback) throw new Error("Direct Images API fallback is disabled. Use native openai-codex handling or enable directImageApiFallback.");
+	if (!settings.directImageApiFallback) throw new Error("Direct Images API fallback is disabled. Use native openai or openai-codex handling, or enable directImageApiFallback.");
 	const apiKey = process.env.OPENAI_API_KEY;
 	if (!apiKey) throw new Error("OPENAI_API_KEY is required for direct image_generation fallback.");
 	if (!input.prompt?.trim()) throw new Error("A prompt is required for direct image_generation fallback.");
@@ -63,7 +63,7 @@ export function createImageGenerationToolDefinition(options: { loadSettings?: (c
 	return {
 		name: "image_generation",
 		label: "Image Generation",
-		description: "Generate images with OpenAI native image_generation on supported openai-codex models. Native results are saved under the configured imageOutputDir and mirrored to latest.<ext>. If native handling is unavailable, direct fallback can be enabled with directImageApiFallback and OPENAI_API_KEY.",
+		description: "Generate images with OpenAI native image_generation on supported openai or openai-codex models. Native results are saved under the configured imageOutputDir and mirrored to latest.<ext>. If native handling is unavailable, direct fallback can be enabled with directImageApiFallback and OPENAI_API_KEY.",
 		promptSnippet: "Generate images with OpenAI native image_generation when available; native results are saved under imageOutputDir and mirrored as latest.<ext>.",
 		parameters: imageGenerationToolSchema,
 		async execute(_toolCallId: string, params: ImageGenerationInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
@@ -71,7 +71,7 @@ export function createImageGenerationToolDefinition(options: { loadSettings?: (c
 			const settings = options.loadSettings?.(cwd);
 			if (settings?.directImageApiFallback) return directImageGeneration(params, cwd, settings, signal);
 			return {
-				content: [{ type: "text", text: "image_generation is native-provider-first. If this function tool executes directly, enable directImageApiFallback with OPENAI_API_KEY or use an openai-codex model with native provider handling." }],
+				content: [{ type: "text", text: "image_generation is native-provider-first. If this function tool executes directly, enable directImageApiFallback with OPENAI_API_KEY or use an openai or openai-codex model with native provider handling." }],
 				details: { phase: "native-provider", nativeTool: "image_generation" },
 			};
 		},

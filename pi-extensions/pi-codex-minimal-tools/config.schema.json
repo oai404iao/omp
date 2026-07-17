@@ -29,7 +29,7 @@
     },
     "nativeProviderTools": {
       "type": "boolean",
-      "description": "Rewrite hosted-tool placeholders into native OpenAI Responses tools on openai-codex.",
+      "description": "Rewrite hosted-tool placeholders into native OpenAI Responses tools on openai and openai-codex.",
       "default": true
     },
     "requestProfile": {
@@ -43,6 +43,12 @@
           "description": "Responses protocol mode. Lite requires an endpoint that implements the Codex Responses Lite contract.",
           "enum": ["standard", "lite"],
           "default": "standard"
+        },
+        "systemPromptPlacement": {
+          "type": "string",
+          "description": "Where Standard Responses places Pi's system prompt. Responses Lite always uses a developer message.",
+          "enum": ["instructions", "developer"],
+          "default": "instructions"
         },
         "patchTransport": {
           "type": "string",
@@ -64,7 +70,7 @@
     },
     "apiKeyMode": {
       "type": "boolean",
-      "description": "Use plain Bearer API-key authentication for openai-codex instead of ChatGPT account headers.",
+      "description": "Use plain Bearer API-key authentication for openai-codex instead of ChatGPT account headers. The openai provider always uses API-key transport.",
       "default": false
     },
     "imageGeneration": {
@@ -74,7 +80,7 @@
     },
     "webSearchEnabled": {
       "type": "boolean",
-      "description": "Expose hosted web_search on GPT-5-series openai-codex models.",
+      "description": "Expose hosted web_search on GPT-5-series openai and openai-codex models.",
       "default": false
     },
     "imageOutputDir": {

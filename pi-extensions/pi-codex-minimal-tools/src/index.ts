@@ -2,8 +2,8 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { getCapabilities, Image, Text, type Component } from "@earendil-works/pi-tui";
 import { hasOpenAiModelsLoaded } from "./activation.js";
 import { registerBackgroundImageGenerationCommand } from "./background-image-generation.js";
-import { computeNextActiveTools, computeToolCapabilities, modelKey, PACKAGE_TOOL_NAMES, type ModelLike } from "./capabilities.js";
-import { registerOpenAICodexCustomProvider } from "./provider-shim.js";
+import { computeNextActiveTools, computeToolCapabilities, isNativeOpenAiProviderModel, modelKey, PACKAGE_TOOL_NAMES, type ModelLike } from "./capabilities.js";
+import { registerOpenAIResponsesProviders } from "./provider-shim.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 import { configPath, loadSettings, settingsDiagnostics } from "./settings.js";
 import { createApplyPatchToolDefinition } from "./tools/apply-patch.js";
@@ -103,7 +103,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`enabled: ${settings.enabled}`,
 		`autoEnable: ${settings.autoEnable}`,
 		`nativeProviderTools: ${settings.nativeProviderTools}`,
-		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
+		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, system=${requestProfile.systemPromptPlacement}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
 		`webSearchEnabled: ${settings.webSearchEnabled}`,
 		`apiKeyMode: ${settings.apiKeyMode}`,
 		`native provider shim: ${settings.enabled ? "registered" : "disabled"}`,
@@ -191,7 +191,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 
 	const initialSettings = loadSettings(currentCwd);
 	if (initialSettings.enabled) {
-		registerOpenAICodexCustomProvider(pi, { getCurrentCwd: () => currentCwd });
+		registerOpenAIResponsesProviders(pi, { getCurrentCwd: () => currentCwd });
 		registerBackgroundImageGenerationCommand(pi);
 	}
 
@@ -210,7 +210,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 	pi.on("before_provider_request", (event, ctx) => {
 		currentCwd = ctx.cwd;
 		const settings = loadSettings(ctx.cwd);
-		if (!settings.enabled || !settings.nativeProviderTools || !hasOpenAiModelsLoaded(ctx) || contextModel(ctx)?.provider !== "openai-codex") return undefined;
+		if (!settings.enabled || !settings.nativeProviderTools || !hasOpenAiModelsLoaded(ctx) || !isNativeOpenAiProviderModel(contextModel(ctx))) return undefined;
 		const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
 		if (!requestProfile.supportsHostedTools) return undefined;
 		const capabilities = computeToolCapabilities(contextModel(ctx), settings);

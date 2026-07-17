@@ -81,6 +81,7 @@ test("loadSettings reads package config and nested request profile", () => {
 			webSearchEnabled: true,
 			requestProfile: {
 				responsesMode: "standard",
+				systemPromptPlacement: "developer",
 				patchTransport: "function",
 				supportsHostedTools: false,
 				supportsParallelTools: false,
@@ -95,6 +96,7 @@ test("loadSettings reads package config and nested request profile", () => {
 		assert.equal(settings.webSearchEnabled, true);
 		assert.deepEqual(settings.requestProfile, {
 			responsesMode: "standard",
+			systemPromptPlacement: "developer",
 			patchTransport: "function",
 			supportsHostedTools: false,
 			supportsParallelTools: false,

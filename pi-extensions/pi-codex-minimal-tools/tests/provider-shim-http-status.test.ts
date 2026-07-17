@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
-import { registerOpenAICodexCustomProvider, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE, withHttpStatusPrefix, withResponsesLiteWebSocketMetadata } from "../src/provider-shim.js";
+import { registerOpenAIResponsesProviders, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE, withHttpStatusPrefix, withResponsesLiteWebSocketMetadata } from "../src/provider-shim.js";
 
 const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
@@ -37,26 +37,26 @@ function codexJwt(): string {
 	return `header.${payload}.signature`;
 }
 
-function createCodexProviderHarness(): { provider: any; handlers: Record<string, Function[]>; messages: any[] } {
-	let provider: any;
+function createProviderHarness(): { providers: Record<string, any>; handlers: Record<string, Function[]>; messages: any[] } {
+	const providers: Record<string, any> = {};
 	const handlers: Record<string, Function[]> = {};
 	const messages: any[] = [];
 	const pi = {
 		registerProvider(name: string, value: any) {
-			assert.equal(name, "openai-codex");
-			provider = value;
+			providers[name] = value;
 		},
 		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },
 		registerMessageRenderer() {},
 		sendMessage(message: any, options: any) { messages.push({ message, options }); },
 	};
-	registerOpenAICodexCustomProvider(pi as any, { getCurrentCwd: () => process.cwd() });
-	assert.ok(provider);
-	return { provider, handlers, messages };
+	registerOpenAIResponsesProviders(pi as any, { getCurrentCwd: () => process.cwd() });
+	assert.ok(providers["openai-codex"]);
+	assert.ok(providers.openai);
+	return { providers, handlers, messages };
 }
 
 function createCodexProvider(): any {
-	return createCodexProviderHarness().provider;
+	return createProviderHarness().providers["openai-codex"];
 }
 
 function mockFetch(factories: FetchFactory[]): () => number {
@@ -230,6 +230,26 @@ test("request profile disables parallel calls while apply_patch stays a function
 	assert.equal(requestBody.tools[0].name, "apply_patch");
 });
 
+test("Standard Responses can place the system prompt in a developer message", async () => {
+	writeSettings({ requestProfile: { responsesMode: "standard", systemPromptPlacement: "developer" } });
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	const result = await runCodexProvider({}, {}, [], { systemPrompt: "Pi system prompt" });
+
+	assert.equal(result.stopReason, "stop");
+	assert.equal("instructions" in requestBody, false);
+	assert.deepEqual(requestBody.input[0], {
+		type: "message",
+		role: "developer",
+		content: [{ type: "input_text", text: "Pi system prompt" }],
+	});
+	assert.equal(requestBody.input[1].role, "user");
+});
+
 test("custom patch transport replaces only apply_patch with the canonical freeform tool", async () => {
 	writeSettings({ requestProfile: { patchTransport: "custom" } });
 	let requestBody: any;
@@ -362,7 +382,7 @@ test("Responses Lite adds its WebSocket signal only to WebSocket client metadata
 });
 
 test("web_search_call activity is emitted through pending provider messages", async () => {
-	const harness = createCodexProviderHarness();
+	const harness = createProviderHarness();
 	globalThis.fetch = (async () => successSseResponse([
 		{
 			type: "web_search_call",
@@ -372,7 +392,7 @@ test("web_search_call activity is emitted through pending provider messages", as
 		},
 	])) as typeof fetch;
 
-	const stream = harness.provider.streamSimple(
+	const stream = harness.providers["openai-codex"].streamSimple(
 		{
 			provider: "openai-codex",
 			api: "openai-codex-responses",
@@ -396,6 +416,52 @@ test("web_search_call activity is emitted through pending provider messages", as
 	assert.equal(harness.messages[0].options.triggerTurn, false);
 	assert.match(harness.messages[0].message.content, /Call: ws_123 \(completed\)/);
 	assert.match(harness.messages[0].message.content, /Docs: https:\/\/example\.com\/docs/);
+});
+
+test("openai provider applies request profiles with API-key Responses transport", async () => {
+	writeSettings({ requestProfile: { patchTransport: "custom", supportsParallelTools: false } });
+	const provider = createProviderHarness().providers.openai;
+	let requestUrl = "";
+	let requestBody: any;
+	let accountHeader: string | null = null;
+	globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+		requestUrl = String(url);
+		requestBody = JSON.parse(String(init?.body));
+		accountHeader = new Headers(init?.headers as HeadersInit).get("chatgpt-account-id");
+		return successSseResponse();
+	}) as typeof fetch;
+
+	const stream = provider.streamSimple(
+		{
+			provider: "openai",
+			api: "openai-responses",
+			id: "gpt-5.5",
+			baseUrl: "https://example.test/v1",
+			headers: {},
+			input: ["text"],
+			reasoning: false,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		},
+		{
+			systemPrompt: "",
+			messages: [{ role: "user", content: "hello" }],
+			tools: [{
+				name: "apply_patch",
+				description: "Apply a patch",
+				parameters: { type: "object", properties: { input: { type: "string" } }, required: ["input"], additionalProperties: false },
+			}],
+		},
+		{ apiKey: "plain-api-key" },
+	);
+	const result = await stream.result();
+
+	assert.equal(result.stopReason, "stop");
+	assert.equal(result.api, "openai-responses");
+	assert.equal(requestUrl, "https://example.test/v1/responses");
+	assert.equal(accountHeader, null);
+	assert.equal(requestBody.parallel_tool_calls, false);
+	assert.equal(requestBody.tools[0].type, "custom");
+	assert.equal(requestBody.tools[0].name, "apply_patch");
 });
 
 test("apiKeyMode accepts plain API keys without account-id extraction", async () => {

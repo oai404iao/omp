@@ -14,11 +14,13 @@ test("Codex request profile defaults to Standard Responses function tools", () =
 test("Codex request profile applies supported explicit overrides", () => {
 	assert.deepEqual(resolveCodexRequestProfile({
 		responsesMode: "standard",
+		systemPromptPlacement: "developer",
 		patchTransport: "function",
 		supportsHostedTools: false,
 		supportsParallelTools: false,
 	}), {
 		responsesMode: "standard",
+		systemPromptPlacement: "developer",
 		patchTransport: "function",
 		supportsHostedTools: false,
 		supportsParallelTools: false,
@@ -32,6 +34,7 @@ test("Responses Lite forces hosted and parallel tools off", () => {
 		supportsParallelTools: true,
 	}), {
 		responsesMode: "lite",
+		systemPromptPlacement: "developer",
 		patchTransport: "function",
 		supportsHostedTools: false,
 		supportsParallelTools: false,
@@ -41,6 +44,12 @@ test("Responses Lite forces hosted and parallel tools off", () => {
 test("custom patch transport is opt-in while function remains the default", () => {
 	assert.equal(resolveCodexRequestProfile().patchTransport, "function");
 	assert.equal(resolveCodexRequestProfile({ patchTransport: "custom" }).patchTransport, "custom");
+});
+
+test("system prompt placement defaults to instructions and accepts developer", () => {
+	assert.equal(resolveCodexRequestProfile().systemPromptPlacement, "instructions");
+	assert.equal(resolveCodexRequestProfile({ systemPromptPlacement: "developer" }).systemPromptPlacement, "developer");
+	assert.equal(resolveCodexRequestProfile({ responsesMode: "lite", systemPromptPlacement: "instructions" }).systemPromptPlacement, "developer");
 });
 
 test("packaged apply_patch grammar matches the analyzed Codex grammar", () => {

@@ -22,7 +22,7 @@ test("capability gating follows provider and image support", () => {
 	assert.equal(textOnlyCodexCaps.apply_patch.enabled, true);
 
 	const openaiCaps = computeToolCapabilities(openai, withViewImage);
-	assert.equal(openaiCaps.image_generation.enabled, false);
+	assert.equal(openaiCaps.image_generation.enabled, true);
 	assert.equal(openaiCaps.view_image.enabled, true);
 	assert.equal(openaiCaps.apply_patch.enabled, true);
 	assert.equal(openaiCaps.web_search.enabled, false);
@@ -37,12 +37,12 @@ test("capability gating follows provider and image support", () => {
 	assert.equal(defaults.web_search.enabled, false, "web_search is gated off by default");
 });
 
-test("web_search is GPT-5 openai-codex only and off by default", () => {
+test("web_search is GPT-5 openai/openai-codex only and off by default", () => {
 	const enabledSettings = { ...DEFAULT_SETTINGS, webSearchEnabled: true };
 	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-5", input: ["text"] }, enabledSettings).web_search.enabled, true);
 	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-5.5", input: ["text"] }, enabledSettings).web_search.enabled, true);
 	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-5-mini", input: ["text"] }, enabledSettings).web_search.enabled, true);
-	assert.equal(computeToolCapabilities({ provider: "openai", id: "gpt-5", input: ["text"] }, enabledSettings).web_search.enabled, false);
+	assert.equal(computeToolCapabilities({ provider: "openai", id: "gpt-5", input: ["text"] }, enabledSettings).web_search.enabled, true);
 	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-4.1", input: ["text"] }, enabledSettings).web_search.enabled, false);
 	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "o4-mini", input: ["text"] }, enabledSettings).web_search.enabled, false);
 	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-50", input: ["text"] }, enabledSettings).web_search.enabled, false);
@@ -72,6 +72,8 @@ test("active tool sync auto-adds web_search only when desired", () => {
 	const next = computeNextActiveTools(["read"], { provider: "openai-codex", id: "gpt-5", input: ["text"] }, { ...DEFAULT_SETTINGS, webSearchEnabled: true });
 	assert.ok(next.activeTools.includes("web_search"));
 	assert.ok(next.added.includes("web_search"));
+	const openaiNext = computeNextActiveTools(["read"], { provider: "openai", id: "gpt-5", input: ["text"] }, { ...DEFAULT_SETTINGS, webSearchEnabled: true });
+	assert.ok(openaiNext.activeTools.includes("web_search"));
 
 	const defaultSettings = computeNextActiveTools(["read"], { provider: "openai-codex", id: "gpt-5", input: ["text"] }, DEFAULT_SETTINGS);
 	assert.equal(defaultSettings.activeTools.includes("web_search"), false);

@@ -608,8 +608,17 @@ function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context
 		];
 		body.reasoning = { context: "all_turns" };
 	} else {
-		body.instructions = context.systemPrompt;
-		body.input = messages;
+		if (profile.systemPromptPlacement === "instructions") {
+			body.instructions = context.systemPrompt;
+			body.input = messages;
+		} else {
+			body.input = [
+				...(context.systemPrompt
+					? [{ type: "message", role: "developer", content: [{ type: "input_text", text: context.systemPrompt }] }]
+					: []),
+				...messages,
+			];
+		}
 		if (tools.length > 0) body.tools = tools;
 	}
 
@@ -1601,7 +1610,7 @@ function createInitialAssistantMessage<TApi extends Api>(model: Model<TApi>): As
 	return {
 		role: "assistant",
 		content: [],
-		api: "openai-codex-responses",
+		api: model.api,
 		provider: model.provider,
 		model: model.id,
 		usage: {
@@ -1690,7 +1699,8 @@ function createCodexStream<TApi extends Api>(
 
 			const settings = loadSettings(requestCwd);
 			const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
-			const accountId = settings.apiKeyMode ? undefined : extractAccountId(apiKey);
+			const apiKeyTransport = settings.apiKeyMode || model.provider === "openai";
+			const accountId = apiKeyTransport ? undefined : extractAccountId(apiKey);
 			let body = buildRequestBody(model, context, requestProfile, options);
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
@@ -1703,7 +1713,7 @@ function createCodexStream<TApi extends Api>(
 			const websocketHeaders = buildWebSocketHeaders(model.headers, options?.headers, accountId, apiKey, websocketRequestId);
 			const bodyJson = JSON.stringify(body);
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
-			const transport = settings.apiKeyMode ? "sse" : options?.transport || "auto";
+			const transport = apiKeyTransport ? "sse" : options?.transport || "auto";
 
 			if (transport !== "sse") {
 				const websocketBody = withResponsesLiteWebSocketMetadata(body, requestProfile.responsesMode);
@@ -1713,7 +1723,7 @@ function createCodexStream<TApi extends Api>(
 					websocketStarted = false;
 					try {
 						await processWebSocketStream(
-							resolveCodexWebSocketUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode }),
+							resolveCodexWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport }),
 							websocketBody,
 							websocketHeaders,
 							output,
@@ -1761,7 +1771,7 @@ function createCodexStream<TApi extends Api>(
 
 			let response: Response | undefined;
 			let lastError: Error | undefined;
-			const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode });
+			const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: apiKeyTransport });
 			const sseDispatcher = await proxyDispatcherForUrl(sseUrl);
 
 			for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -1843,7 +1853,7 @@ function createCodexStream<TApi extends Api>(
 	return stream;
 }
 
-export function registerOpenAICodexCustomProvider(pi: ExtensionAPI, options: { getCurrentCwd: () => string }): void {
+export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { getCurrentCwd: () => string }): void {
 	const pendingActivities: PendingActivity[] = [];
 	const imagePreviewCache = new Map<string, CachedImagePreview>();
 	let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1900,18 +1910,24 @@ export function registerOpenAICodexCustomProvider(pi: ExtensionAPI, options: { g
 		imagePreviewCache.clear();
 	};
 
+	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: Context, streamOptions?: SimpleStreamOptions) =>
+		createCodexStream(model, context, streamOptions, {
+			getCurrentCwd: options.getCurrentCwd,
+			onImageSaved: (savedImage, imageData) => {
+				pendingActivities.push({ kind: "image", savedImage, imageData });
+			},
+			onWebSearchCaptured: (search) => {
+				pendingActivities.push({ kind: "web-search", search });
+			},
+		});
+
 	pi.registerProvider("openai-codex", {
 		api: "openai-codex-responses",
-		streamSimple: (model, context, streamOptions) =>
-			createCodexStream(model, context, streamOptions, {
-				getCurrentCwd: options.getCurrentCwd,
-				onImageSaved: (savedImage, imageData) => {
-					pendingActivities.push({ kind: "image", savedImage, imageData });
-				},
-				onWebSearchCaptured: (search) => {
-					pendingActivities.push({ kind: "web-search", search });
-				},
-			}),
+		streamSimple,
+	});
+	pi.registerProvider("openai", {
+		api: "openai-responses",
+		streamSimple,
 	});
 
 	pi.on("session_start", async () => {
