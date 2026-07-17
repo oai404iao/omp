@@ -9,7 +9,7 @@ export const applyPatchToolSchema = {
 	type: "object",
 	additionalProperties: false,
 	properties: {
-		input: { type: "string", description: "Codex apply_patch text beginning with *** Begin Patch and ending with *** End Patch." },
+		input: { type: "string", description: "Raw Codex patch text. Use relative file paths. Add File content lines start with +; Update File chunks use context, +, and - lines." },
 	},
 	required: ["input"],
 };
@@ -19,7 +19,7 @@ export function applyPatchTargetPaths(input: string, cwd: string, allowAbsoluteP
 	const paths = new Set<string>();
 	for (const action of parsed.actions) {
 		paths.add(resolvePatchPath(action.path, { allowAbsolutePaths, cwd }));
-		if (action.moveTo) paths.add(resolvePatchPath(action.moveTo, { allowAbsolutePaths, cwd }));
+		if (action.kind === "update" && action.moveTo) paths.add(resolvePatchPath(action.moveTo, { allowAbsolutePaths, cwd }));
 	}
 	return [...paths].sort();
 }
@@ -37,7 +37,13 @@ async function withMutationQueue(path: string, fn: () => Promise<void>): Promise
 
 export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string, allowAbsolutePaths: boolean): Promise<{ content: Array<{ type: "text"; text: string }>; details: ApplyPatchResult }> {
 	if (!params || typeof params.input !== "string") throw new Error("apply_patch requires an input string.");
-	const targets = applyPatchTargetPaths(params.input, cwd, allowAbsolutePaths);
+	let targets: string[];
+	try {
+		targets = applyPatchTargetPaths(params.input, cwd, allowAbsolutePaths);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(`apply_patch verification failed: ${message}`);
+	}
 	let result: ApplyPatchResult | undefined;
 	const runAt = async (index: number): Promise<void> => {
 		if (index >= targets.length) {
@@ -48,9 +54,8 @@ export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string
 	};
 	await runAt(0);
 	if (!result) throw new Error("apply_patch did not produce a result.");
-	const fileCount = result.files.length;
 	return {
-		content: [{ type: "text", text: `${result.summary}\nFiles changed: ${fileCount}` }],
+		content: [{ type: "text", text: result.summary }],
 		details: result,
 	};
 }
@@ -60,9 +65,13 @@ export function createApplyPatchToolDefinition(options: { cwd?: string; allowAbs
 		renderShell: "self",
 		name: "apply_patch",
 		label: "Apply Patch",
-		description: "Apply a Codex-style patch locally. Patch text begins with *** Begin Patch and ends with *** End Patch. Pi native edit/write remain available unless strict patch mode is enabled.",
-		promptSnippet: "Apply Codex-style multi-file patches.",
-		promptGuidelines: ["Use apply_patch for concise multi-file edits when a Codex-style patch is clearer than separate edit/write calls."],
+		description: "Use apply_patch to edit files with the Codex patch format. A patch starts with *** Begin Patch, contains one or more Add, Update, or Delete file sections, and ends with *** End Patch.",
+		promptSnippet: "Apply Codex-style multi-file patches with relative paths, contextual update hunks, and explicit Add, Update, or Delete headers.",
+		promptGuidelines: [
+			"Use apply_patch for concise multi-file edits when a Codex-style patch is clearer than separate edit/write calls.",
+			"In apply_patch, use relative paths; prefix every Add File content line with +; and use @@ class/function context plus surrounding lines when repeated code needs disambiguation.",
+			"Use *** End of File in apply_patch when a hunk must match the end of a file.",
+		],
 		parameters: applyPatchToolSchema,
 		async execute(_toolCallId: string, params: ApplyPatchInput, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
 			const cwd = ctx?.cwd ?? options.cwd ?? process.cwd();

@@ -20,16 +20,18 @@ can change after the analyzed commit.
 
 1. [Apply-patch wire protocols](apply-patch-protocols.md) separates the public
    built-in tool, Codex freeform custom tool, and JSON function fallbacks.
-2. [Standard Responses mode](responses-standard.md) records the normal Codex
+2. [Apply-patch behavior](apply-patch-behavior.md) records the local parser,
+   matching algorithm, result format, and intentional Pi safety differences.
+3. [Standard Responses mode](responses-standard.md) records the normal Codex
    request envelope and prompt/tool placement.
-3. [Responses Lite mode](responses-lite.md) records the internal Lite request
+4. [Responses Lite mode](responses-lite.md) records the internal Lite request
    transformation, headers, and restrictions.
-4. [Streaming, parsing, and replay](streaming-parsing-and-replay.md) follows a
+5. [Streaming, parsing, and replay](streaming-parsing-and-replay.md) follows a
    custom tool call from SSE/WebSocket deltas through execution and the next
    request.
-5. [Model modes and Code Mode](model-modes-and-code-mode.md) separates model
+6. [Model modes and Code Mode](model-modes-and-code-mode.md) separates model
    capability, Responses transport mode, and model-visible tool exposure.
-6. [Source map](source-map.md) maps each conclusion to Codex source and tests.
+7. [Source map](source-map.md) maps each conclusion to Codex source and tests.
 
 The exact freeform patch grammar from the analyzed commit is also preserved as
 the packaged provider resource

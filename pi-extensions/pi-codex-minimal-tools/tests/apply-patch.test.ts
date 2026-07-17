@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { applyPatch } from "../src/patch/apply.js";
 import { parseApplyPatch } from "../src/patch/parser.js";
+import { executeApplyPatchTool } from "../src/tools/apply-patch.js";
 
 function tempDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-apply-patch-"));
@@ -24,6 +25,13 @@ test("parseApplyPatch parses add/update/delete actions", () => {
 	assert.equal(parsed.actions[0]?.kind, "add");
 	assert.equal(parsed.actions[1]?.kind, "update");
 	assert.equal(parsed.actions[2]?.kind, "delete");
+	assert.equal(parsed.actions[0]?.kind === "add" ? parsed.actions[0].content : undefined, "hello\n");
+	assert.deepEqual(parsed.actions[1]?.kind === "update" ? parsed.actions[1].chunks : undefined, [{
+		changeContext: undefined,
+		oldLines: ["old"],
+		newLines: ["new"],
+		isEndOfFile: false,
+	}]);
 });
 
 test("parseApplyPatch rejects content after end marker", () => {
@@ -33,8 +41,62 @@ test("parseApplyPatch rejects content after end marker", () => {
 +hello
 *** End Patch
 trailing`),
-		/Unexpected content after/,
+		/The last line of the patch/,
 	);
+});
+
+test("parseApplyPatch preserves Codex update contexts and end-of-file markers", () => {
+	const parsed = parseApplyPatch(`*** Begin Patch
+*** Update File: src/app.ts
+@@ class App
+ old
+-before
++after
+@@ render()
++tail
+*** End of File
+*** End Patch`);
+	assert.deepEqual(parsed.actions[0]?.kind === "update" ? parsed.actions[0].chunks : undefined, [
+		{ changeContext: "class App", oldLines: ["old", "before"], newLines: ["old", "after"], isEndOfFile: false },
+		{ changeContext: "render()", oldLines: [], newLines: ["tail"], isEndOfFile: true },
+	]);
+});
+
+test("parseApplyPatch accepts an initial chunk without @@ and preserves bare empty context lines", () => {
+	const parsed = parseApplyPatch(`*** Begin Patch
+*** Update File: a.txt
+ before
+
+ after
+*** End Patch`);
+	assert.deepEqual(parsed.actions[0]?.kind === "update" ? parsed.actions[0].chunks : undefined, [{
+		changeContext: undefined,
+		oldLines: ["before", "", "after"],
+		newLines: ["before", "", "after"],
+		isEndOfFile: false,
+	}]);
+});
+
+test("parseApplyPatch enforces canonical Add, Delete, Move, and Update bodies", () => {
+	assert.throws(() => parseApplyPatch(`*** Begin Patch
+*** Add File: a.txt
+plain
+*** End Patch`), /Add File lines must start/);
+	assert.throws(() => parseApplyPatch(`*** Begin Patch
+*** Delete File: a.txt
+-old
+*** End Patch`), /not a valid file header/);
+	assert.throws(() => parseApplyPatch(`*** Begin Patch
+*** Update File: a.txt
+*** Move to: b.txt
+*** End Patch`), /Update file hunk.*empty/);
+	assert.throws(() => parseApplyPatch(`*** Begin Patch
+*** Update File: a.txt
+@@
+-old
++new
+*** Move to: b.txt
+*** End Patch`), /Expected update hunk/);
 });
 
 test("applyPatch adds, updates, deletes, and moves files", async () => {
@@ -60,11 +122,12 @@ test("applyPatch adds, updates, deletes, and moves files", async () => {
 +newer
  omega
 *** End Patch`, { cwd });
-	assert.equal(readFileSync(join(cwd, "added.txt"), "utf8"), "hello\nworld");
-	assert.equal(readFileSync(join(cwd, "moved.txt"), "utf8"), "alpha\nnewer\nomega");
+	assert.equal(readFileSync(join(cwd, "added.txt"), "utf8"), "hello\nworld\n");
+	assert.equal(readFileSync(join(cwd, "moved.txt"), "utf8"), "alpha\nnewer\nomega\n");
 	assert.equal(existsSync(join(cwd, "update.txt")), false);
 	assert.equal(existsSync(join(cwd, "delete.txt")), false);
 	assert.equal(result.files.length, 4);
+	assert.equal(result.summary, "Success. Updated the following files:\nA added.txt\nM update.txt\nD delete.txt\nM moved.txt");
 });
 
 test("applyPatch rejects path traversal by default", async () => {
@@ -92,10 +155,10 @@ test("applyPatch allowAbsolutePaths only permits absolute escapes", async () => 
 *** Add File: ${absolutePath}
 +ok
 *** End Patch`, { cwd, allowAbsolutePaths: true });
-	assert.equal(readFileSync(absolutePath, "utf8"), "ok");
+	assert.equal(readFileSync(absolutePath, "utf8"), "ok\n");
 });
 
-test("applyPatch reports partial failure and rolls back touched files", async () => {
+test("applyPatch validates all actions before changing files", async () => {
 	const cwd = tempDir();
 	await assert.rejects(
 		() => applyPatch(`*** Begin Patch
@@ -106,9 +169,35 @@ test("applyPatch reports partial failure and rolls back touched files", async ()
 -old
 +new
 *** End Patch`, { cwd }),
-		/Rolled back touched files/,
+		/Failed to read missing.txt/,
 	);
 	assert.equal(existsSync(join(cwd, "ok.txt")), false);
+});
+
+test("applyPatch rolls back committed files and mode bits after an I/O failure", {
+	skip: process.platform === "win32" || process.getuid?.() === 0,
+}, async () => {
+	const cwd = tempDir();
+	const executable = join(cwd, "script.sh");
+	const locked = join(cwd, "locked");
+	writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+	mkdirSync(locked);
+	chmodSync(locked, 0o555);
+	try {
+		await assert.rejects(
+			() => applyPatch(`*** Begin Patch
+*** Delete File: script.sh
+*** Add File: locked/fail.txt
++cannot write
+*** End Patch`, { cwd }),
+			/Rolled back touched files/,
+		);
+	} finally {
+		chmodSync(locked, 0o755);
+	}
+	assert.equal(readFileSync(executable, "utf8"), "#!/bin/sh\nexit 0\n");
+	assert.equal(statSync(executable).mode & 0o777, 0o755);
+	assert.equal(existsSync(join(locked, "fail.txt")), false);
 });
 
 test("applyPatch refuses to overwrite existing files with Add File", async () => {
@@ -124,20 +213,11 @@ test("applyPatch refuses to overwrite existing files with Add File", async () =>
 	assert.equal(readFileSync(join(cwd, "existing.txt"), "utf8"), "keep");
 });
 
-test("applyPatch validates Delete File hunks when present", async () => {
+test("applyPatch deletes files without a non-canonical Delete body", async () => {
 	const cwd = tempDir();
 	writeFileSync(join(cwd, "delete.txt"), "actual\n");
-	await assert.rejects(
-		() => applyPatch(`*** Begin Patch
-*** Delete File: delete.txt
--expected
-*** End Patch`, { cwd }),
-		/context does not match/,
-	);
-	assert.equal(readFileSync(join(cwd, "delete.txt"), "utf8"), "actual\n");
 	await applyPatch(`*** Begin Patch
 *** Delete File: delete.txt
--actual
 *** End Patch`, { cwd });
 	assert.equal(existsSync(join(cwd, "delete.txt")), false);
 });
@@ -160,19 +240,71 @@ test("applyPatch refuses to overwrite existing files with Move to", async () => 
 	assert.equal(readFileSync(join(cwd, "target.txt"), "utf8"), "target");
 });
 
-test("applyPatch rejects ambiguous update context", async () => {
+test("applyPatch follows Codex cursor semantics for repeated update context", async () => {
 	const cwd = tempDir();
 	writeFileSync(join(cwd, "ambiguous.txt"), "same\nsame\n");
-	await assert.rejects(
-		() => applyPatch(`*** Begin Patch
+	await applyPatch(`*** Begin Patch
 *** Update File: ambiguous.txt
 @@
 -same
 +different
-*** End Patch`, { cwd }),
-		/ambiguous/,
-	);
-	assert.equal(readFileSync(join(cwd, "ambiguous.txt"), "utf8"), "same\nsame\n");
+*** End Patch`, { cwd });
+	assert.equal(readFileSync(join(cwd, "ambiguous.txt"), "utf8"), "different\nsame\n");
+});
+
+test("applyPatch uses @@ context and ordered chunks to disambiguate repeated lines", async () => {
+	const cwd = tempDir();
+	writeFileSync(join(cwd, "ordered.txt"), "class First\nsame\nclass Second\nsame\nlast\n");
+	await applyPatch(`*** Begin Patch
+*** Update File: ordered.txt
+@@ class First
+-same
++first
+@@ class Second
+-same
++second
+*** End Patch`, { cwd });
+	assert.equal(readFileSync(join(cwd, "ordered.txt"), "utf8"), "class First\nfirst\nclass Second\nsecond\nlast\n");
+});
+
+test("applyPatch preflights consecutive Add, Update, Move, and Update actions on virtual state", async () => {
+	const cwd = tempDir();
+	const result = await applyPatch(`*** Begin Patch
+*** Add File: chain.txt
++one
+*** Update File: chain.txt
+@@
+-one
++two
+*** Update File: chain.txt
+*** Move to: moved.txt
+@@
+-two
++three
+*** Update File: moved.txt
+@@
+-three
++four
+*** End Patch`, { cwd });
+	assert.equal(existsSync(join(cwd, "chain.txt")), false);
+	assert.equal(readFileSync(join(cwd, "moved.txt"), "utf8"), "four\n");
+	assert.equal(result.summary, "Success. Updated the following files:\nA chain.txt\nM chain.txt\nM moved.txt\nM moved.txt");
+});
+
+test("applyPatch supports End of File and fuzzy whitespace and punctuation matching", async () => {
+	const cwd = tempDir();
+	writeFileSync(join(cwd, "fuzzy.txt"), "title\n  value – ‘quoted’   \nlast\n");
+	await applyPatch(`*** Begin Patch
+*** Update File: fuzzy.txt
+@@
+-value - 'quoted'
++updated
+@@
+ last
++tail
+*** End of File
+*** End Patch`, { cwd });
+	assert.equal(readFileSync(join(cwd, "fuzzy.txt"), "utf8"), "title\nupdated\nlast\ntail\n");
 });
 
 test("applyPatch preserves CRLF files when patch context uses LF", async () => {
@@ -187,4 +319,48 @@ test("applyPatch preserves CRLF files when patch context uses LF", async () => {
  omega
 *** End Patch`, { cwd });
 	assert.equal(readFileSync(join(cwd, "crlf.txt"), "utf8"), "alpha\r\nnew\r\nomega\r\n");
+});
+
+test("applyPatch rejects paths that escape cwd through a symbolic link", async () => {
+	const cwd = tempDir();
+	const outside = tempDir();
+	symlinkSync(outside, join(cwd, "link"), "dir");
+	await assert.rejects(
+		() => applyPatch(`*** Begin Patch
+*** Add File: link/escape.txt
++nope
+*** End Patch`, { cwd }),
+		/escapes cwd through a symbolic link/,
+	);
+	assert.equal(existsSync(join(outside, "escape.txt")), false);
+});
+
+test("applyPatch refuses to mutate a final symbolic-link target", async () => {
+	const cwd = tempDir();
+	const outside = join(tempDir(), "outside.txt");
+	writeFileSync(outside, "outside\n");
+	symlinkSync(outside, join(cwd, "linked.txt"), "file");
+	await assert.rejects(
+		() => applyPatch(`*** Begin Patch
+*** Update File: linked.txt
+@@
+-outside
++changed
+*** End Patch`, { cwd }),
+		/apply_patch verification failed: Patch target may not be a symbolic link/,
+	);
+	assert.equal(readFileSync(outside, "utf8"), "outside\n");
+});
+
+test("executeApplyPatchTool returns Codex summary text and verification errors", async () => {
+	const cwd = tempDir();
+	const result = await executeApplyPatchTool({ input: `*** Begin Patch
+*** Add File: added.txt
++hello
+*** End Patch` }, cwd, false);
+	assert.equal(result.content[0]?.text, "Success. Updated the following files:\nA added.txt");
+	await assert.rejects(
+		() => executeApplyPatchTool({ input: "not a patch" }, cwd, false),
+		/apply_patch verification failed: The first line of the patch/,
+	);
 });

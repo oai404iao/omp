@@ -126,6 +126,13 @@ normal function tools.
 | `allowAbsolutePatchPaths` | Permit absolute paths in `apply_patch`. |
 | `deferApplyPatchRendering` | Let Pi's fallback renderer handle display instead of registering an in-package renderer. |
 
+The executor supports Codex `@@ class/function` contexts, ordered update
+chunks, `*** End of File`, and Codex-style fuzzy line matching. It verifies all
+actions before writing, preserves CRLF files, refuses Add/Move overwrites, and
+rejects cwd escapes including symbolic-link escapes. See
+[`reference/apply-patch-behavior.md`](reference/apply-patch-behavior.md) for the
+exact behavior and intentional safety differences from Codex.
+
 ## API key mode provider example
 
 When `apiKeyMode` is enabled, configure `openai-codex` in Pi's `models.json` like a Responses-compatible endpoint:

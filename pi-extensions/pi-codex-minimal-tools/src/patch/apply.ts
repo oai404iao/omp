@@ -1,7 +1,6 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { chmod, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { actionSummary, parseApplyPatch, type ParsedPatch, type PatchAction, type PatchHunk } from "./parser.js";
+import { actionSummary, parseApplyPatch, type ParsedPatch, type PatchAction, type PatchUpdateChunk } from "./parser.js";
 
 export interface ApplyPatchOptions {
 	cwd: string;
@@ -21,15 +20,8 @@ export interface ApplyPatchResult {
 	summary: string;
 }
 
-function cleanPatchPath(pathValue: string): string {
-	let cleaned = pathValue.trim();
-	if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) cleaned = cleaned.slice(1, -1);
-	if (cleaned.startsWith("@")) cleaned = cleaned.slice(1);
-	return cleaned;
-}
-
 export function resolvePatchPath(pathValue: string, options: ApplyPatchOptions): string {
-	const cleaned = cleanPatchPath(pathValue);
+	const cleaned = pathValue.trim();
 	const inputIsAbsolute = isAbsolute(cleaned);
 	const absolute = inputIsAbsolute ? resolve(cleaned) : resolve(options.cwd, cleaned);
 	const cwd = resolve(options.cwd);
@@ -39,35 +31,208 @@ export function resolvePatchPath(pathValue: string, options: ApplyPatchOptions):
 	return absolute;
 }
 
-function stripMarker(line: string): string {
-	if (line === "\\ No newline at end of file") return "";
-	const marker = line[0];
-	return marker === "+" || marker === "-" || marker === " " ? line.slice(1) : line;
+function isWithin(parent: string, candidate: string): boolean {
+	const rel = relative(parent, candidate);
+	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-function hunkOldText(hunk: PatchHunk): string {
-	return hunk.lines.filter((line) => line.startsWith("-") || line.startsWith(" ")).map(stripMarker).join("\n");
+function errorCode(error: unknown): string | undefined {
+	return (error as NodeJS.ErrnoException | undefined)?.code;
 }
 
-function hunkNewText(hunk: PatchHunk): string {
-	return hunk.lines.filter((line) => line.startsWith("+") || line.startsWith(" ")).map(stripMarker).join("\n");
+function verificationError(error: unknown): Error {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.startsWith("apply_patch verification failed:") ? new Error(message) : new Error(`apply_patch verification failed: ${message}`);
 }
 
-function addText(action: PatchAction): string {
-	return action.hunks.flatMap((hunk) => hunk.lines.filter((line) => line.startsWith("+")).map(stripMarker)).join("\n");
+async function validateResolvedPath(absolutePath: string, originalPath: string, options: ApplyPatchOptions, realCwd: string): Promise<void> {
+	const lexicalCwd = resolve(options.cwd);
+	if (!isWithin(lexicalCwd, absolutePath)) return;
+
+	let candidate = absolutePath;
+	while (true) {
+		try {
+			const info = await lstat(candidate);
+			if (candidate === absolutePath && info.isSymbolicLink()) throw new Error(`Patch target may not be a symbolic link: ${originalPath}`);
+			const canonical = await realpath(candidate);
+			if (!isWithin(realCwd, canonical)) throw new Error(`Patch path escapes cwd through a symbolic link: ${originalPath}`);
+			return;
+		} catch (error) {
+			if (error instanceof Error && error.message.startsWith("Patch ")) throw error;
+			if (errorCode(error) !== "ENOENT") throw error;
+			const parent = dirname(candidate);
+			if (parent === candidate) throw new Error(`Unable to resolve patch path: ${originalPath}`);
+			candidate = parent;
+		}
+	}
+}
+
+function normalizeForMatch(value: string): string {
+	return value.trim().replace(/[‐‑‒–—―−]/gu, "-")
+		.replace(/[‘’‚‛]/gu, "'")
+		.replace(/[“”„‟]/gu, "\"")
+		.replace(/[            　]/gu, " ");
+}
+
+function sequenceMatches(lines: string[], pattern: string[], index: number, normalize: (value: string) => string): boolean {
+	for (let offset = 0; offset < pattern.length; offset++) {
+		if (normalize(lines[index + offset]!) !== normalize(pattern[offset]!)) return false;
+	}
+	return true;
+}
+
+export function seekSequence(lines: string[], pattern: string[], start: number, eof: boolean): number | undefined {
+	if (pattern.length === 0) return start;
+	if (pattern.length > lines.length) return undefined;
+	const lastStart = lines.length - pattern.length;
+	const searchStart = eof ? lastStart : start;
+	if (searchStart > lastStart) return undefined;
+	for (const normalize of [(value: string) => value, (value: string) => value.trimEnd(), (value: string) => value.trim(), normalizeForMatch]) {
+		for (let index = searchStart; index <= lastStart; index++) {
+			if (sequenceMatches(lines, pattern, index, normalize)) return index;
+		}
+	}
+	return undefined;
+}
+
+interface Replacement {
+	start: number;
+	oldLength: number;
+	newLines: string[];
+}
+
+function computeReplacements(originalLines: string[], path: string, chunks: PatchUpdateChunk[]): Replacement[] {
+	const replacements: Replacement[] = [];
+	let lineIndex = 0;
+	for (const chunk of chunks) {
+		if (chunk.changeContext !== undefined) {
+			const contextIndex = seekSequence(originalLines, [chunk.changeContext], lineIndex, false);
+			if (contextIndex === undefined) throw new Error(`Failed to find context '${chunk.changeContext}' in ${path}`);
+			lineIndex = contextIndex + 1;
+		}
+
+		if (chunk.oldLines.length === 0) {
+			replacements.push({ start: originalLines.length, oldLength: 0, newLines: chunk.newLines });
+			continue;
+		}
+
+		let pattern = chunk.oldLines;
+		let newLines = chunk.newLines;
+		let found = seekSequence(originalLines, pattern, lineIndex, chunk.isEndOfFile);
+		if (found === undefined && pattern[pattern.length - 1] === "") {
+			pattern = pattern.slice(0, -1);
+			if (newLines[newLines.length - 1] === "") newLines = newLines.slice(0, -1);
+			found = seekSequence(originalLines, pattern, lineIndex, chunk.isEndOfFile);
+		}
+		if (found === undefined) throw new Error(`Failed to find expected lines in ${path}:\n${chunk.oldLines.join("\n")}`);
+		replacements.push({ start: found, oldLength: pattern.length, newLines });
+		lineIndex = found + pattern.length;
+	}
+	return replacements.sort((a, b) => a.start - b.start);
+}
+
+function dominantLineEnding(content: string): "\n" | "\r\n" {
+	const crlfCount = content.match(/\r\n/g)?.length ?? 0;
+	const lfCount = content.match(/\n/g)?.length ?? 0;
+	return crlfCount > lfCount / 2 ? "\r\n" : "\n";
+}
+
+export function deriveUpdatedContent(content: string, path: string, chunks: PatchUpdateChunk[]): string {
+	const lineEnding = dominantLineEnding(content);
+	const originalLines = content.replace(/\r\n/g, "\n").split("\n");
+	if (originalLines[originalLines.length - 1] === "") originalLines.pop();
+	const replacements = computeReplacements(originalLines, path, chunks);
+	const updated = [...originalLines];
+	for (const replacement of [...replacements].reverse()) {
+		updated.splice(replacement.start, replacement.oldLength, ...replacement.newLines);
+	}
+	if (updated[updated.length - 1] !== "") updated.push("");
+	return updated.join(lineEnding);
+}
+
+interface VirtualFile {
+	exists: boolean;
+	content?: string;
+}
+
+interface PlannedAction {
+	action: PatchAction;
+	absolutePath: string;
+	absoluteMoveTo?: string;
+	content?: string;
+}
+
+async function loadVirtualFile(path: string, files: Map<string, VirtualFile>): Promise<VirtualFile> {
+	const cached = files.get(path);
+	if (cached) return cached;
+	try {
+		const info = await lstat(path);
+		const file = info.isDirectory() ? { exists: true } : { exists: true, content: await readFile(path, "utf8") };
+		files.set(path, file);
+		return file;
+	} catch (error) {
+		if (errorCode(error) !== "ENOENT") throw error;
+		const file = { exists: false };
+		files.set(path, file);
+		return file;
+	}
+}
+
+async function planPatch(parsed: ParsedPatch, options: ApplyPatchOptions): Promise<PlannedAction[]> {
+	const realCwd = await realpath(options.cwd);
+	const virtualFiles = new Map<string, VirtualFile>();
+	const plans: PlannedAction[] = [];
+	for (const action of parsed.actions) {
+		const absolutePath = resolvePatchPath(action.path, options);
+		await validateResolvedPath(absolutePath, action.path, options, realCwd);
+		const source = await loadVirtualFile(absolutePath, virtualFiles);
+
+		if (action.kind === "add") {
+			if (source.exists) throw new Error(`Add File target already exists: ${action.path}`);
+			virtualFiles.set(absolutePath, { exists: true, content: action.content });
+			plans.push({ action, absolutePath, content: action.content });
+			continue;
+		}
+
+		if (!source.exists) throw new Error(`Failed to read ${action.path}: file does not exist`);
+		if (source.content === undefined) throw new Error(`Patch target is not a file: ${action.path}`);
+		if (action.kind === "delete") {
+			virtualFiles.set(absolutePath, { exists: false });
+			plans.push({ action, absolutePath });
+			continue;
+		}
+
+		const content = deriveUpdatedContent(source.content, action.path, action.chunks);
+		let absoluteMoveTo: string | undefined;
+		if (action.moveTo) {
+			absoluteMoveTo = resolvePatchPath(action.moveTo, options);
+			await validateResolvedPath(absoluteMoveTo, action.moveTo, options, realCwd);
+			if (absoluteMoveTo !== absolutePath) {
+				const destination = await loadVirtualFile(absoluteMoveTo, virtualFiles);
+				if (destination.exists) throw new Error(`Move target already exists: ${action.moveTo}`);
+				virtualFiles.set(absolutePath, { exists: false });
+			}
+		}
+		virtualFiles.set(absoluteMoveTo ?? absolutePath, { exists: true, content });
+		plans.push({ action, absolutePath, ...(absoluteMoveTo ? { absoluteMoveTo } : {}), content });
+	}
+	return plans;
 }
 
 interface FileSnapshot {
 	absolutePath: string;
 	existed: boolean;
 	data?: Buffer;
+	mode?: number;
 }
 
 async function snapshotPath(absolutePath: string): Promise<FileSnapshot> {
 	try {
-		return { absolutePath, existed: true, data: await readFile(absolutePath) };
-	} catch {
-		return { absolutePath, existed: false };
+		const [data, metadata] = await Promise.all([readFile(absolutePath), stat(absolutePath)]);
+		return { absolutePath, existed: true, data, mode: metadata.mode };
+	} catch (error) {
+		if (errorCode(error) === "ENOENT") return { absolutePath, existed: false };
+		throw error;
 	}
 }
 
@@ -76,105 +241,57 @@ async function restoreSnapshots(snapshots: FileSnapshot[]): Promise<void> {
 		if (snapshot.existed) {
 			await mkdir(dirname(snapshot.absolutePath), { recursive: true });
 			await writeFile(snapshot.absolutePath, snapshot.data ?? Buffer.alloc(0));
-		} else if (existsSync(snapshot.absolutePath)) {
-			await rm(snapshot.absolutePath, { force: true, recursive: true });
+			if (snapshot.mode !== undefined) await chmod(snapshot.absolutePath, snapshot.mode);
+		} else {
+			await rm(snapshot.absolutePath, { force: true });
 		}
 	}
 }
 
-async function readUtf8(path: string): Promise<string> {
-	try {
-		return await readFile(path, "utf8");
-	} catch (error) {
-		throw new Error(`Failed to read ${path}: ${error instanceof Error ? error.message : String(error)}`);
+async function commitPlan(plan: PlannedAction): Promise<void> {
+	if (plan.action.kind === "add") {
+		await mkdir(dirname(plan.absolutePath), { recursive: true });
+		await writeFile(plan.absolutePath, plan.content ?? "", { encoding: "utf8", flag: "wx" });
+	} else if (plan.action.kind === "delete") {
+		await rm(plan.absolutePath, { force: false });
+	} else if (plan.absoluteMoveTo && plan.absoluteMoveTo !== plan.absolutePath) {
+		await writeFile(plan.absolutePath, plan.content ?? "", "utf8");
+		await mkdir(dirname(plan.absoluteMoveTo), { recursive: true });
+		await rename(plan.absolutePath, plan.absoluteMoveTo);
+	} else {
+		await writeFile(plan.absolutePath, plan.content ?? "", "utf8");
 	}
 }
 
-function replaceUnique(content: string, oldText: string, newText: string, path: string): string | undefined {
-	const first = content.indexOf(oldText);
-	if (first < 0) return undefined;
-	if (content.indexOf(oldText, first + oldText.length) >= 0) throw new Error(`Patch context is ambiguous in ${path}`);
-	return `${content.slice(0, first)}${newText}${content.slice(first + oldText.length)}`;
-}
-
-function oldTextCandidates(oldText: string): string[] {
-	const candidates = [oldText];
-	if (!oldText.endsWith("\n")) candidates.push(`${oldText}\n`);
-	const crlfOld = oldText.replace(/\n/g, "\r\n");
-	candidates.push(crlfOld);
-	if (!crlfOld.endsWith("\r\n")) candidates.push(`${crlfOld}\r\n`);
-	return [...new Set(candidates)];
-}
-
-function replaceOnce(content: string, oldText: string, newText: string, path: string): string {
-	if (oldText.length === 0) return `${content}${newText}`;
-	const candidates: Array<[string, string]> = [[oldText, newText]];
-	if (!oldText.endsWith("\n")) candidates.push([`${oldText}\n`, newText]);
-	const crlfOld = oldText.replace(/\n/g, "\r\n");
-	const crlfNew = newText.replace(/\n/g, "\r\n");
-	candidates.push([crlfOld, crlfNew]);
-	if (!crlfOld.endsWith("\r\n")) candidates.push([`${crlfOld}\r\n`, crlfNew]);
-	for (const [candidateOld, candidateNew] of candidates) {
-		const next = replaceUnique(content, candidateOld, candidateNew, path);
-		if (next !== undefined) return next;
-	}
-	throw new Error(`Patch context not found in ${path}`);
-}
-
-function matchesWholeContent(content: string, oldText: string): boolean {
-	return oldTextCandidates(oldText).includes(content);
-}
-
-async function applyAdd(action: PatchAction, options: ApplyPatchOptions): Promise<AppliedPatchFile> {
-	const absolutePath = resolvePatchPath(action.path, options);
-	if (existsSync(absolutePath)) throw new Error(`Add File target already exists: ${action.path}`);
-	const content = addText(action);
-	await mkdir(dirname(absolutePath), { recursive: true });
-	await writeFile(absolutePath, content, { encoding: "utf8", flag: "wx" });
-	return { absolutePath, kind: action.kind, path: action.path };
-}
-
-async function applyUpdate(action: PatchAction, options: ApplyPatchOptions): Promise<AppliedPatchFile> {
-	const absolutePath = resolvePatchPath(action.path, options);
-	let content = await readUtf8(absolutePath);
-	for (const hunk of action.hunks) content = replaceOnce(content, hunkOldText(hunk), hunkNewText(hunk), action.path);
-	await writeFile(absolutePath, content, "utf8");
-	let absoluteMoveTo: string | undefined;
-	if (action.moveTo) {
-		absoluteMoveTo = resolvePatchPath(action.moveTo, options);
-		if (absoluteMoveTo !== absolutePath && existsSync(absoluteMoveTo)) throw new Error(`Move target already exists: ${action.moveTo}`);
-		await mkdir(dirname(absoluteMoveTo), { recursive: true });
-		await rename(absolutePath, absoluteMoveTo);
-	}
-	return { absoluteMoveTo, absolutePath, kind: action.kind, moveTo: action.moveTo, path: action.path };
-}
-
-async function applyDelete(action: PatchAction, options: ApplyPatchOptions): Promise<AppliedPatchFile> {
-	const absolutePath = resolvePatchPath(action.path, options);
-	if (action.hunks.length > 0) {
-		const content = await readUtf8(absolutePath);
-		const expected = action.hunks.map(hunkOldText).join("\n");
-		if (!matchesWholeContent(content, expected)) throw new Error(`Delete File context does not match ${action.path}`);
-	}
-	await rm(absolutePath, { force: false });
-	return { absolutePath, kind: action.kind, path: action.path };
+function appliedFile(plan: PlannedAction): AppliedPatchFile {
+	const { action } = plan;
+	return {
+		kind: action.kind,
+		path: action.path,
+		absolutePath: plan.absolutePath,
+		...(action.kind === "update" && action.moveTo ? { moveTo: action.moveTo, absoluteMoveTo: plan.absoluteMoveTo } : {}),
+	};
 }
 
 export async function applyParsedPatch(parsed: ParsedPatch, options: ApplyPatchOptions): Promise<ApplyPatchResult> {
-	const files: AppliedPatchFile[] = [];
-	const snapshots = new Map<string, FileSnapshot>();
-	const snapshotAction = async (action: PatchAction) => {
-		for (const pathValue of [action.path, action.moveTo].filter((value): value is string => Boolean(value))) {
-			const absolutePath = resolvePatchPath(pathValue, options);
-			if (!snapshots.has(absolutePath)) snapshots.set(absolutePath, await snapshotPath(absolutePath));
-		}
-	};
+	let plans: PlannedAction[];
 	try {
-		for (const action of parsed.actions) {
-			await snapshotAction(action);
-			if (action.kind === "add") files.push(await applyAdd(action, options));
-			else if (action.kind === "update") files.push(await applyUpdate(action, options));
-			else files.push(await applyDelete(action, options));
+		plans = await planPatch(parsed, options);
+	} catch (error) {
+		throw verificationError(error);
+	}
+	const snapshots = new Map<string, FileSnapshot>();
+	for (const plan of plans) {
+		for (const path of [plan.absolutePath, plan.absoluteMoveTo].filter((value): value is string => Boolean(value))) {
+			if (!snapshots.has(path)) snapshots.set(path, await snapshotPath(path));
+		}
+	}
+
+	const files: AppliedPatchFile[] = [];
+	try {
+		for (const plan of plans) {
+			await commitPlan(plan);
+			files.push(appliedFile(plan));
 		}
 	} catch (error) {
 		const applied = files.map((file) => `${file.kind} ${file.path}`).join(", ") || "none";
@@ -182,12 +299,19 @@ export async function applyParsedPatch(parsed: ParsedPatch, options: ApplyPatchO
 		await restoreSnapshots([...snapshots.values()]);
 		throw new Error(`${message}\nPartial apply status: completed actions before failure: ${applied}. Rolled back touched files; review the working tree before retrying.`);
 	}
+
 	return {
 		files,
-		summary: `Applied patch: ${parsed.actions.map(actionSummary).join(", ")}`,
+		summary: `Success. Updated the following files:\n${parsed.actions.map(actionSummary).join("\n")}`,
 	};
 }
 
 export async function applyPatch(input: string, options: ApplyPatchOptions): Promise<ApplyPatchResult> {
-	return applyParsedPatch(parseApplyPatch(input), options);
+	let parsed: ParsedPatch;
+	try {
+		parsed = parseApplyPatch(input);
+	} catch (error) {
+		throw verificationError(error);
+	}
+	return applyParsedPatch(parsed, options);
 }
