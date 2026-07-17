@@ -31,6 +31,7 @@ function writeConfig(agentDir: string, value: unknown): void {
 test("loadSettings returns defaults when config.json is absent", () => {
 	withAgentDir(() => {
 		assert.deepEqual(loadSettings(), DEFAULT_SETTINGS);
+		assert.equal(loadSettings().deferApplyPatchRendering, false);
 	});
 });
 

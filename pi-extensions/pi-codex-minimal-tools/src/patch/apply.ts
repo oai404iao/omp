@@ -1,6 +1,6 @@
 import { chmod, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { actionSummary, parseApplyPatch, type ParsedPatch, type PatchAction, type PatchUpdateChunk } from "./parser.js";
+import { actionSummary, parseApplyPatch, parseApplyPatchProgress, type ParsedPatch, type PatchAction, type PatchUpdateChunk } from "./parser.js";
 
 export interface ApplyPatchOptions {
 	cwd: string;
@@ -159,7 +159,21 @@ interface PlannedAction {
 	action: PatchAction;
 	absolutePath: string;
 	absoluteMoveTo?: string;
+	previousContent: string;
 	content?: string;
+}
+
+export interface ApplyPatchPreviewFile {
+	kind: PatchAction["kind"];
+	path: string;
+	moveTo?: string;
+	previousContent: string;
+	content: string;
+}
+
+export interface ApplyPatchPreview {
+	complete: boolean;
+	files: ApplyPatchPreviewFile[];
 }
 
 async function loadVirtualFile(path: string, files: Map<string, VirtualFile>): Promise<VirtualFile> {
@@ -190,7 +204,7 @@ async function planPatch(parsed: ParsedPatch, options: ApplyPatchOptions): Promi
 		if (action.kind === "add") {
 			if (source.exists) throw new Error(`Add File target already exists: ${action.path}`);
 			virtualFiles.set(absolutePath, { exists: true, content: action.content });
-			plans.push({ action, absolutePath, content: action.content });
+			plans.push({ action, absolutePath, previousContent: "", content: action.content });
 			continue;
 		}
 
@@ -198,7 +212,7 @@ async function planPatch(parsed: ParsedPatch, options: ApplyPatchOptions): Promi
 		if (source.content === undefined) throw new Error(`Patch target is not a file: ${action.path}`);
 		if (action.kind === "delete") {
 			virtualFiles.set(absolutePath, { exists: false });
-			plans.push({ action, absolutePath });
+			plans.push({ action, absolutePath, previousContent: source.content });
 			continue;
 		}
 
@@ -214,9 +228,35 @@ async function planPatch(parsed: ParsedPatch, options: ApplyPatchOptions): Promi
 			}
 		}
 		virtualFiles.set(absoluteMoveTo ?? absolutePath, { exists: true, content });
-		plans.push({ action, absolutePath, ...(absoluteMoveTo ? { absoluteMoveTo } : {}), content });
+		plans.push({ action, absolutePath, ...(absoluteMoveTo ? { absoluteMoveTo } : {}), previousContent: source.content, content });
 	}
 	return plans;
+}
+
+export async function previewApplyPatch(input: string, options: ApplyPatchOptions, complete = false): Promise<ApplyPatchPreview> {
+	let parsed: ParsedPatch;
+	try {
+		parsed = complete ? parseApplyPatch(input) : parseApplyPatchProgress(input);
+	} catch (error) {
+		throw verificationError(error);
+	}
+	if (parsed.actions.length === 0) return { complete, files: [] };
+	let plans: PlannedAction[];
+	try {
+		plans = await planPatch(parsed, options);
+	} catch (error) {
+		throw verificationError(error);
+	}
+	return {
+		complete,
+		files: plans.map((plan) => ({
+			kind: plan.action.kind,
+			path: plan.action.path,
+			...(plan.action.kind === "update" && plan.action.moveTo ? { moveTo: plan.action.moveTo } : {}),
+			previousContent: plan.previousContent,
+			content: plan.content ?? "",
+		})),
+	};
 }
 
 interface FileSnapshot {

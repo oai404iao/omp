@@ -76,7 +76,7 @@ All keys are optional. `requestProfile` is the only nested section:
   "applyPatchEnabled": true,
   "strictPatchMode": false,
   "allowAbsolutePatchPaths": false,
-  "deferApplyPatchRendering": true
+  "deferApplyPatchRendering": false
 }
 ```
 
@@ -124,7 +124,7 @@ normal function tools.
 | `applyPatchEnabled` | Expose `apply_patch`. |
 | `strictPatchMode` | Block `edit`/`write` so all edits go through `apply_patch`. |
 | `allowAbsolutePatchPaths` | Permit absolute paths in `apply_patch`. |
-| `deferApplyPatchRendering` | Let Pi's fallback renderer handle display instead of registering an in-package renderer. |
+| `deferApplyPatchRendering` | Let Pi's fallback renderer handle display instead of the built-in streaming filesystem preview. Defaults to `false`. |
 
 The executor supports Codex `@@ class/function` contexts, ordered update
 chunks, `*** End of File`, and Codex-style fuzzy line matching. It verifies all
@@ -132,6 +132,12 @@ actions before writing, preserves CRLF files, refuses Add/Move overwrites, and
 rejects cwd escapes including symbolic-link escapes. See
 [`reference/apply-patch-behavior.md`](reference/apply-patch-behavior.md) for the
 exact behavior and intentional safety differences from Codex.
+
+While patch arguments stream, the built-in renderer consumes completed lines
+and previews the currently valid A/M/D actions against files under the active
+cwd. Preview reads are throttled to at most once every 500 ms, never mutate the
+filesystem, and stop before tool execution begins. Set
+`deferApplyPatchRendering: true` to use Pi's fallback tool renderer instead.
 
 ## API key mode provider example
 

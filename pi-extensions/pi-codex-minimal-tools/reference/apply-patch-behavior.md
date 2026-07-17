@@ -86,6 +86,26 @@ D src/old.ts
 For Move, the `M` line displays the destination path. Structured result details
 continue to include source and destination paths for renderers and callers.
 
+## Streaming filesystem preview
+
+The built-in renderer parses newline-terminated patch input while either the
+custom/freeform or JSON function call is still streaming. It evaluates the
+currently valid action prefix against the active cwd using the same virtual
+filesystem planning logic as final execution, then displays A/M/D paths, Move
+destinations, and old/new line counts.
+
+Preview work is read-only and throttled to at most once every 500 ms. A newer
+delta supersedes an older pending preview. Once Pi reports that tool execution
+has started, delayed preview work is cancelled and in-flight results are
+ignored so they cannot race with mutations. The completed tool call is always
+reparsed by `parseApplyPatch()` and remains authoritative.
+
+Pi does not expose Codex's sandbox and permission runtime. Preview and final
+verification therefore use the local filesystem plus this extension's cwd,
+realpath, symlink, overwrite, mutation-queue, snapshot, and rollback checks.
+Set `deferApplyPatchRendering: true` to disable the built-in preview and use
+Pi's fallback renderer.
+
 ## Primary Codex sources
 
 - `codex-rs/apply-patch/src/parser.rs`

@@ -185,6 +185,32 @@ export function parseApplyPatch(input: string): ParsedPatch {
 	return { actions };
 }
 
+/**
+ * Best-effort parser for model arguments that are still streaming. Only
+ * newline-terminated input is considered, and incomplete trailing actions are
+ * removed until the remaining prefix forms a valid patch. Final execution
+ * always uses parseApplyPatch() instead.
+ */
+export function parseApplyPatchProgress(input: string): ParsedPatch {
+	if (typeof input !== "string" || !input.includes("\n")) return { actions: [] };
+	const normalized = input.replace(/\r\n/g, "\n");
+	const completePrefix = normalized.slice(0, normalized.lastIndexOf("\n") + 1);
+	const lines = completePrefix.split("\n");
+	while (lines[lines.length - 1] === "") lines.pop();
+	if (lines[0]?.trim() !== BEGIN_PATCH) return { actions: [] };
+
+	const minimum = Math.max(1, lines.length - 64);
+	for (let end = lines.length; end >= minimum; end--) {
+		const candidate = `${lines.slice(0, end).join("\n")}\n${END_PATCH}`;
+		try {
+			return parseApplyPatch(candidate);
+		} catch {
+			// The current line/action may be incomplete; try the previous line.
+		}
+	}
+	return { actions: [] };
+}
+
 export function actionSummary(action: PatchAction): string {
 	const path = action.kind === "update" && action.moveTo ? action.moveTo : action.path;
 	const marker = action.kind === "add" ? "A" : action.kind === "delete" ? "D" : "M";

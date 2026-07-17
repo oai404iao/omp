@@ -90,6 +90,20 @@ Failed to find expected lines in ...
 Failed to find context ...
 ```
 
+### Pi filesystem preview
+
+This extension maps the same lifecycle onto Pi's tool-call renderer. Partial
+function or custom arguments are accumulated as `{input}`; the renderer parses
+only newline-terminated input and evaluates the valid prefix against the local
+cwd. It emits no synthetic tool execution and performs no writes. Reads are
+throttled to at most once every 500 ms, and pending/in-flight preview results
+are discarded once actual execution starts.
+
+There is no Codex sandbox object in Pi. The preview uses the local filesystem
+and the executor's path, realpath, symlink, overwrite, virtual-state, queue,
+snapshot, and rollback rules. Final execution still reparses the complete
+patch and is authoritative.
+
 ## Router representation
 
 Codex preserves the distinction between function and custom tools in its

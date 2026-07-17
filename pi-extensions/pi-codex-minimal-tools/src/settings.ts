@@ -43,7 +43,7 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	applyPatchEnabled: true,
 	strictPatchMode: false,
 	allowAbsolutePatchPaths: false,
-	deferApplyPatchRendering: true,
+	deferApplyPatchRendering: false,
 };
 
 type SettingsRecord = Record<string, unknown>;

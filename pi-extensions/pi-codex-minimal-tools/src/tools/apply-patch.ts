@@ -1,5 +1,6 @@
 import { applyPatch, resolvePatchPath, type ApplyPatchResult } from "../patch/apply.js";
 import { parseApplyPatch } from "../patch/parser.js";
+import { createApplyPatchRenderers } from "../patch/render.js";
 
 export interface ApplyPatchInput {
 	input: string;
@@ -61,6 +62,8 @@ export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string
 }
 
 export function createApplyPatchToolDefinition(options: { cwd?: string; allowAbsolutePaths?: boolean | ((cwd: string) => boolean); deferRendering?: boolean } = {}) {
+	const allowAbsolutePathsForCwd = (cwd: string): boolean =>
+		typeof options.allowAbsolutePaths === "function" ? options.allowAbsolutePaths(cwd) : Boolean(options.allowAbsolutePaths);
 	const definition: Record<string, unknown> = {
 		renderShell: "self",
 		name: "apply_patch",
@@ -75,9 +78,9 @@ export function createApplyPatchToolDefinition(options: { cwd?: string; allowAbs
 		parameters: applyPatchToolSchema,
 		async execute(_toolCallId: string, params: ApplyPatchInput, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
 			const cwd = ctx?.cwd ?? options.cwd ?? process.cwd();
-			const allowAbsolutePaths = typeof options.allowAbsolutePaths === "function" ? options.allowAbsolutePaths(cwd) : Boolean(options.allowAbsolutePaths);
-			return executeApplyPatchTool(params, cwd, allowAbsolutePaths);
+			return executeApplyPatchTool(params, cwd, allowAbsolutePathsForCwd(cwd));
 		},
 	};
+	if (!options.deferRendering) Object.assign(definition, createApplyPatchRenderers(allowAbsolutePathsForCwd));
 	return definition;
 }

@@ -3,8 +3,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { applyPatch } from "../src/patch/apply.js";
-import { parseApplyPatch } from "../src/patch/parser.js";
+import { applyPatch, previewApplyPatch } from "../src/patch/apply.js";
+import { parseApplyPatch, parseApplyPatchProgress } from "../src/patch/parser.js";
 import { executeApplyPatchTool } from "../src/tools/apply-patch.js";
 
 function tempDir(): string {
@@ -75,6 +75,14 @@ test("parseApplyPatch accepts an initial chunk without @@ and preserves bare emp
 		newLines: ["before", "", "after"],
 		isEndOfFile: false,
 	}]);
+});
+
+test("parseApplyPatchProgress keeps completed lines and drops an incomplete trailing action", () => {
+	const parsed = parseApplyPatchProgress(`*** Begin Patch
+*** Add File: added.txt
++hello
+*** Upd`);
+	assert.deepEqual(parsed.actions, [{ kind: "add", path: "added.txt", content: "hello\n" }]);
 });
 
 test("parseApplyPatch enforces canonical Add, Delete, Move, and Update bodies", () => {
@@ -289,6 +297,25 @@ test("applyPatch preflights consecutive Add, Update, Move, and Update actions on
 	assert.equal(existsSync(join(cwd, "chain.txt")), false);
 	assert.equal(readFileSync(join(cwd, "moved.txt"), "utf8"), "four\n");
 	assert.equal(result.summary, "Success. Updated the following files:\nA chain.txt\nM chain.txt\nM moved.txt\nM moved.txt");
+});
+
+test("previewApplyPatch derives partial changes from the current filesystem without writing", async () => {
+	const cwd = tempDir();
+	writeFileSync(join(cwd, "existing.txt"), "before\n");
+	const preview = await previewApplyPatch(`*** Begin Patch
+*** Update File: existing.txt
+@@
+-before
++after
+`, { cwd });
+	assert.equal(preview.complete, false);
+	assert.deepEqual(preview.files, [{
+		kind: "update",
+		path: "existing.txt",
+		previousContent: "before\n",
+		content: "after\n",
+	}]);
+	assert.equal(readFileSync(join(cwd, "existing.txt"), "utf8"), "before\n");
 });
 
 test("applyPatch supports End of File and fuzzy whitespace and punctuation matching", async () => {
