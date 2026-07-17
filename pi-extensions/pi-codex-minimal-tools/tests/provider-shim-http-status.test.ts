@@ -3,7 +3,15 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
-import { registerOpenAIResponsesProviders, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE, withHttpStatusPrefix, withResponsesLiteWebSocketMetadata } from "../src/provider-shim.js";
+import {
+	buildWebSearchStatusText,
+	extractWebSearchProgress,
+	mergeWebSearchActivity,
+	registerOpenAIResponsesProviders,
+	WEB_SEARCH_ACTIVITY_MESSAGE_TYPE,
+	withHttpStatusPrefix,
+	withResponsesLiteWebSocketMetadata,
+} from "../src/provider-shim.js";
 
 const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
@@ -37,22 +45,28 @@ function codexJwt(): string {
 	return `header.${payload}.signature`;
 }
 
-function createProviderHarness(): { providers: Record<string, any>; handlers: Record<string, Function[]>; messages: any[] } {
+function createProviderHarness(): {
+	providers: Record<string, any>;
+	handlers: Record<string, Function[]>;
+	messages: any[];
+	renderers: Record<string, Function>;
+} {
 	const providers: Record<string, any> = {};
 	const handlers: Record<string, Function[]> = {};
 	const messages: any[] = [];
+	const renderers: Record<string, Function> = {};
 	const pi = {
 		registerProvider(name: string, value: any) {
 			providers[name] = value;
 		},
 		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },
-		registerMessageRenderer() {},
+		registerMessageRenderer(type: string, renderer: Function) { renderers[type] = renderer; },
 		sendMessage(message: any, options: any) { messages.push({ message, options }); },
 	};
 	registerOpenAIResponsesProviders(pi as any, { getCurrentCwd: () => process.cwd() });
 	assert.ok(providers["openai-codex"]);
 	assert.ok(providers.openai);
-	return { providers, handlers, messages };
+	return { providers, handlers, messages, renderers };
 }
 
 function createCodexProvider(): any {
@@ -136,6 +150,48 @@ function customApplyPatchSseResponse(): Response {
 		{ type: "response.completed", response: { id: "resp_custom", status: "completed", output: [], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } } } },
 	];
 	return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+function webSearchLifecycleSseResponse(options?: { includeDoneItem?: boolean }): Response {
+	const includeDoneItem = options?.includeDoneItem ?? true;
+	const completedItem = {
+		type: "web_search_call",
+		id: "ws_123",
+		status: "completed",
+		action: {
+			type: "search",
+			query: "latest docs",
+			sources: [{ title: "Docs", url: "https://example.com/docs" }],
+		},
+	};
+	const events = [
+		{ type: "response.created", response: { id: "resp_web" } },
+		{ type: "response.output_item.added", output_index: 0, item: { type: "reasoning", id: "rs_123", summary: [] } },
+		{ type: "response.reasoning_summary_part.added", output_index: 0, summary_index: 0, part: { type: "summary_text", text: "" } },
+		{ type: "response.reasoning_summary_text.delta", output_index: 0, summary_index: 0, delta: "Need current information" },
+		{ type: "response.output_item.done", output_index: 0, item: { type: "reasoning", id: "rs_123", summary: [{ type: "summary_text", text: "Need current information" }] } },
+		{ type: "response.output_item.added", output_index: 1, item: { type: "web_search_call", id: "ws_123", status: "in_progress" } },
+		{ type: "response.web_search_call.in_progress", item_id: "ws_123", output_index: 1, sequence_number: 5 },
+		{ type: "response.web_search_call.searching", item_id: "ws_123", output_index: 1, sequence_number: 6 },
+		{ type: "response.web_search_call.completed", item_id: "ws_123", output_index: 1, sequence_number: 7 },
+		...(includeDoneItem ? [{ type: "response.output_item.done", output_index: 1, item: completedItem }] : []),
+		{ type: "response.output_item.added", output_index: 2, item: { type: "message", id: "msg_123", role: "assistant", status: "in_progress", content: [] } },
+		{ type: "response.output_text.delta", output_index: 2, content_index: 0, delta: "Final answer" },
+		{ type: "response.output_item.done", output_index: 2, item: { type: "message", id: "msg_123", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Final answer", annotations: [] }] } },
+		{
+			type: "response.completed",
+			response: {
+				id: "resp_web",
+				status: "completed",
+				output: includeDoneItem ? [completedItem] : [],
+				usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } },
+			},
+		},
+	];
+	return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+		status: 200,
+		headers: { "content-type": "text/event-stream" },
+	});
 }
 
 function enableApiKeyMode(): void {
@@ -381,16 +437,9 @@ test("Responses Lite adds its WebSocket signal only to WebSocket client metadata
 	});
 });
 
-test("web_search_call activity is emitted through pending provider messages", async () => {
+test("web search special events merge with output items into one rendered activity", async () => {
 	const harness = createProviderHarness();
-	globalThis.fetch = (async () => successSseResponse([
-		{
-			type: "web_search_call",
-			id: "ws_123",
-			status: "completed",
-			action: { query: "latest docs", sources: [{ title: "Docs", url: "https://example.com/docs" }] },
-		},
-	])) as typeof fetch;
+	globalThis.fetch = (async () => webSearchLifecycleSseResponse()) as typeof fetch;
 
 	const stream = harness.providers["openai-codex"].streamSimple(
 		{
@@ -406,16 +455,108 @@ test("web_search_call activity is emitted through pending provider messages", as
 		{ systemPrompt: "", messages: [{ role: "user", content: "hello" }], tools: [] },
 		{ apiKey: codexJwt(), transport: "sse" },
 	);
+	const updates: Array<{ type: string; content: any[] }> = [];
+	for await (const event of stream) {
+		if ("partial" in event) {
+			updates.push({
+				type: event.type,
+				content: event.partial.content.map((block: any) => ({ ...block })),
+			});
+		}
+	}
 	const result = await stream.result();
 	for (const handler of harness.handlers.agent_end ?? []) await handler({});
 	await new Promise((resolve) => setTimeout(resolve, 0));
 
 	assert.equal(result.stopReason, "stop");
-	assert.equal(harness.messages.length, 1);
-	assert.equal(harness.messages[0].message.customType, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE);
-	assert.equal(harness.messages[0].options.triggerTurn, false);
-	assert.match(harness.messages[0].message.content, /Call: ws_123 \(completed\)/);
-	assert.match(harness.messages[0].message.content, /Docs: https:\/\/example\.com\/docs/);
+	assert.equal(harness.messages.length, 0, "web search activity must not wait in pi.sendMessage's steer queue");
+	assert.deepEqual(result.content.map((block: any) => block.type), ["thinking", "text", "text"]);
+	assert.match((result.content[1] as any).text, /Searched the web.*latest docs/);
+	assert.match((result.content[1] as any).textSignature, /^pi:web-search-activity:ws_123/);
+	assert.equal((result.content[2] as any).text, "Final answer");
+	const searchUpdateIndex = updates.findIndex((update) =>
+		update.content.some((block) => block.type === "text" && /Searching the web|Searched the web/.test(block.text)));
+	const finalAnswerUpdateIndex = updates.findIndex((update) =>
+		update.content.some((block) => block.type === "text" && block.text === "Final answer"));
+	assert.ok(searchUpdateIndex >= 0);
+	assert.ok(finalAnswerUpdateIndex > searchUpdateIndex, "web search activity should render before the final reply");
+
+	const theme = {
+		bg(_color: string, text: string) { return text; },
+		fg(_color: string, text: string) { return text; },
+		bold(text: string) { return text; },
+	};
+	const component = harness.renderers[WEB_SEARCH_ACTIVITY_MESSAGE_TYPE]({
+		content: "legacy activity",
+		details: {
+			searches: [{
+				callId: "ws_123",
+				status: "completed",
+				completed: true,
+				query: "latest docs",
+				queries: [],
+				sources: [],
+			}],
+		},
+	}, { expanded: false }, theme);
+	assert.match(component.render(120).join("\n"), /Searched the web for latest docs/);
+});
+
+test("web search special events render even when no output item is returned", async () => {
+	const harness = createProviderHarness();
+	globalThis.fetch = (async () => webSearchLifecycleSseResponse({ includeDoneItem: false })) as typeof fetch;
+
+	const stream = harness.providers.openai.streamSimple(
+		{
+			provider: "openai",
+			api: "openai-responses",
+			id: "gpt-5.5",
+			baseUrl: "https://example.test/v1",
+			headers: {},
+			input: ["text"],
+			reasoning: false,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		},
+		{ systemPrompt: "", messages: [{ role: "user", content: "hello" }], tools: [] },
+		{ apiKey: "plain-api-key", transport: "sse" },
+	);
+	const result = await stream.result();
+	for (const handler of harness.handlers.agent_end ?? []) await handler({});
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assert.equal(result.stopReason, "stop");
+	assert.equal(harness.messages.length, 0);
+	const activity = result.content.find((block: any) => block.type === "text" && block.textSignature?.startsWith("pi:web-search-activity:"));
+	assert.ok(activity);
+	assert.match(activity.text, /Searched the web/);
+});
+
+test("web search progress parsing and action merging preserve authoritative detail", () => {
+	const progress = extractWebSearchProgress({
+		type: "response.web_search_call.searching",
+		item_id: "ws_1",
+		output_index: 2,
+	});
+	assert.deepEqual(progress, {
+		callId: "ws_1",
+		status: "searching",
+		completed: false,
+		queries: [],
+		sources: [],
+	});
+
+	const merged = mergeWebSearchActivity(progress, {
+		callId: "ws_1",
+		status: "completed",
+		completed: true,
+		actionType: "find_in_page",
+		queries: [],
+		url: "https://example.com/docs",
+		pattern: "streaming",
+		sources: [{ title: "Docs", url: "https://example.com/docs" }],
+	});
+	assert.equal(buildWebSearchStatusText(merged), "Searched the web for 'streaming' in https://example.com/docs");
+	assert.equal(merged.sources.length, 1);
 });
 
 test("openai provider applies request profiles with API-key Responses transport", async () => {

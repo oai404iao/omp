@@ -3,7 +3,7 @@ import { glyphs, treeGlyph } from "./glyphs.js";
 import { loadSettings } from "./settings.js";
 import { resolveCodexRequestProfile, type CodexRequestProfile } from "./codex-request-profile.js";
 import { saveBase64Image } from "./utils/images.js";
-import { Box, Container, getCapabilities, getImageDimensions, Image, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, getCapabilities, getImageDimensions, Image, Spacer, Text } from "@earendil-works/pi-tui";
 import {
 	createAssistantMessageEventStream,
 	appendAssistantMessageDiagnostic,
@@ -22,6 +22,7 @@ import {
 	convertResponsesMessages,
 	convertResponsesTools,
 	processResponsesStream,
+	WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX,
 } from "./providers/openai-responses-shared.js";
 import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
 
@@ -80,20 +81,19 @@ interface QueuedImageActivity extends PendingImageDisplay {
 	kind: "image";
 }
 
-interface SurfacedWebSearch {
+export interface SurfacedWebSearch {
 	callId: string;
 	status?: string;
+	completed?: boolean;
+	actionType?: string;
 	query?: string;
 	queries: string[];
+	url?: string;
+	pattern?: string;
 	sources: Array<{ title?: string; url: string }>;
 }
 
-interface QueuedWebSearchActivity {
-	kind: "web-search";
-	search: SurfacedWebSearch;
-}
-
-type PendingActivity = QueuedImageActivity | QueuedWebSearchActivity;
+type PendingActivity = QueuedImageActivity;
 
 interface CachedImagePreview {
 	data: string;
@@ -189,6 +189,8 @@ const HTTP_STATUS_MESSAGE_PREFIX = /^HTTP\s+\d{3}(?::|\b)/i;
 interface StreamEventShape {
 	type?: string;
 	response?: ResponseEnvelope;
+	item_id?: string;
+	output_index?: number;
 	item?: {
 		id?: string;
 		type?: string;
@@ -1345,11 +1347,19 @@ async function* captureGeneratedImages(
 			}
 		}
 
-		if (event.type === "response.output_item.done" && event.item?.type === "web_search_call") {
-			const search = extractWebSearch(event.item);
+		if (
+			(event.type === "response.output_item.added" || event.type === "response.output_item.done")
+			&& event.item?.type === "web_search_call"
+		) {
+			const search = extractWebSearch(event.item, { completed: event.type === "response.output_item.done" });
 			if (search) {
 				options.onWebSearchCaptured?.(search);
 			}
+		}
+
+		const webSearchProgress = extractWebSearchProgress(event);
+		if (webSearchProgress) {
+			options.onWebSearchCaptured?.(webSearchProgress);
 		}
 
 		yield event;
@@ -1364,16 +1374,40 @@ async function processCapturedResponsesStream<TApi extends Api>(
 	options: SimpleStreamOptions | undefined,
 	deps: {
 		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
-		onWebSearchCaptured?: (search: SurfacedWebSearch) => void;
 	},
 	cwd: string,
 	requestPrompt: string | undefined,
 ): Promise<void> {
+	type TextBlock = Extract<AssistantMessage["content"][number], { type: "text" }>;
+	const webSearchStates = new Map<string, { search: SurfacedWebSearch; block: TextBlock; contentIndex: number }>();
+	const updateWebSearchActivity = (search: SurfacedWebSearch) => {
+		const existing = webSearchStates.get(search.callId);
+		const merged = mergeWebSearchActivity(existing?.search, search);
+		const text = buildWebSearchInlineText(merged, cwd);
+		if (existing) {
+			existing.search = merged;
+			existing.block.text = text;
+			stream.push({ type: "text_delta", contentIndex: existing.contentIndex, delta: "", partial: output });
+			return;
+		}
+
+		const block: TextBlock = {
+			type: "text",
+			text: "",
+			textSignature: `${WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX}${search.callId}`,
+		};
+		output.content.push(block);
+		const contentIndex = output.content.length - 1;
+		webSearchStates.set(search.callId, { search: merged, block, contentIndex });
+		stream.push({ type: "text_start", contentIndex, partial: output });
+		block.text = text;
+		stream.push({ type: "text_delta", contentIndex, delta: text, partial: output });
+	};
 	const tappedEvents = captureGeneratedImages(mapCodexEvents(events), {
 		cwd,
 		requestPrompt,
 		onImageSaved: (image, imageData) => deps.onImageSaved?.(image, imageData),
-		onWebSearchCaptured: (search) => deps.onWebSearchCaptured?.(search),
+		onWebSearchCaptured: updateWebSearchActivity,
 	});
 
 	await processResponsesStream(tappedEvents as AsyncIterable<never>, output, stream, model, {
@@ -1394,7 +1428,6 @@ async function processWebSocketStream<TApi extends Api>(
 	options: SimpleStreamOptions | undefined,
 	deps: {
 		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
-		onWebSearchCaptured?: (search: SurfacedWebSearch) => void;
 	},
 	cwd: string,
 	requestPrompt: string | undefined,
@@ -1472,17 +1505,27 @@ async function processWebSocketStream<TApi extends Api>(
 	}
 }
 
-export function extractWebSearch(item: StreamEventShape["item"]): SurfacedWebSearch | undefined {
+export function extractWebSearch(
+	item: StreamEventShape["item"],
+	options?: { completed?: boolean },
+): SurfacedWebSearch | undefined {
 	if (!item || item.type !== "web_search_call") return undefined;
 	const callId = typeof item.id === "string" ? item.id : typeof item.call_id === "string" ? item.call_id : undefined;
 	if (!callId) return undefined;
 
 	const action = typeof item.action === "object" && item.action !== null ? (item.action as Record<string, unknown>) : undefined;
+	const actionType = typeof action?.type === "string" ? action.type : undefined;
 	const query = typeof action?.query === "string" ? action.query : typeof item.query === "string" ? item.query : undefined;
 	const queries = [
 		...(Array.isArray(action?.queries) ? action.queries : []),
 		...(Array.isArray(item.queries) ? item.queries : []),
 	].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+	const url = typeof action?.url === "string" && action.url.trim()
+		? action.url.trim()
+		: typeof item.url === "string" && item.url.trim()
+			? item.url.trim()
+			: undefined;
+	const pattern = typeof action?.pattern === "string" && action.pattern.trim() ? action.pattern.trim() : undefined;
 
 	const asRecordArray = (value: unknown): Record<string, unknown>[] => Array.isArray(value)
 		? value
@@ -1508,16 +1551,93 @@ export function extractWebSearch(item: StreamEventShape["item"]): SurfacedWebSea
 
 	return {
 		callId,
-		status: typeof item.status === "string" ? item.status : undefined,
-		query,
+		...(typeof item.status === "string" ? { status: item.status } : {}),
+		...(options?.completed !== undefined ? { completed: options.completed } : {}),
+		...(actionType ? { actionType } : {}),
+		...(query ? { query } : {}),
 		queries,
+		...(url ? { url } : {}),
+		...(pattern ? { pattern } : {}),
 		sources,
 	};
 }
 
+export function extractWebSearchProgress(event: StreamEventShape): SurfacedWebSearch | undefined {
+	const status = event.type === "response.web_search_call.in_progress"
+		? "in_progress"
+		: event.type === "response.web_search_call.searching"
+			? "searching"
+			: event.type === "response.web_search_call.completed"
+				? "completed"
+				: undefined;
+	if (!status || typeof event.item_id !== "string" || !event.item_id) return undefined;
+	return {
+		callId: event.item_id,
+		status,
+		completed: status === "completed",
+		queries: [],
+		sources: [],
+	};
+}
+
+export function mergeWebSearchActivity(
+	previous: SurfacedWebSearch | undefined,
+	next: SurfacedWebSearch,
+): SurfacedWebSearch {
+	if (!previous) return next;
+	const seenUrls = new Set<string>();
+	const sources = [...next.sources, ...previous.sources].filter((source) => {
+		if (seenUrls.has(source.url)) return false;
+		seenUrls.add(source.url);
+		return true;
+	});
+	const completed = Boolean(previous.completed || next.completed);
+	return {
+		callId: next.callId,
+		status: previous.completed && !next.completed ? previous.status : (next.status ?? previous.status),
+		completed,
+		actionType: next.actionType ?? previous.actionType,
+		query: next.query ?? previous.query,
+		queries: next.queries.length > 0 ? next.queries : previous.queries,
+		url: next.url ?? previous.url,
+		pattern: next.pattern ?? previous.pattern,
+		sources,
+	};
+}
+
+export function webSearchActivityDetail(search: SurfacedWebSearch): string {
+	if (search.actionType === "open_page") return search.url ?? "";
+	if (search.actionType === "find_in_page") {
+		if (search.pattern && search.url) return `'${search.pattern}' in ${search.url}`;
+		if (search.pattern) return `'${search.pattern}'`;
+		return search.url ?? "";
+	}
+	const query = search.query?.trim();
+	if (query) return query;
+	const first = search.queries[0]?.trim() ?? "";
+	return search.queries.length > 1 && first ? `${first} ...` : first;
+}
+
+export function buildWebSearchStatusText(search: SurfacedWebSearch): string {
+	const completed = search.completed ?? search.status === "completed";
+	const detail = webSearchActivityDetail(search);
+	if (completed) return `Searched the web${detail ? ` for ${detail}` : ""}`;
+	return `Searching the web${detail ? ` ${detail}` : ""}`;
+}
+
+export function buildWebSearchInlineText(search: SurfacedWebSearch, cwd?: string): string {
+	const completed = search.completed ?? search.status === "completed";
+	const header = completed ? "Searched the web" : "Searching the web";
+	const detail = webSearchActivityDetail(search);
+	const separator = detail ? (completed ? " for " : " ") : "";
+	return `${glyphs(cwd).bullet}**${header}**${separator}${detail}`;
+}
+
 export function buildWebSearchActivityMessage(searches: SurfacedWebSearch[]): string {
 	const sections = searches.map((search, index) => {
-		const heading = searches.length > 1 ? `Web search ${index + 1}` : "Web search";
+		const heading = searches.length > 1
+			? `${index + 1}. ${buildWebSearchStatusText(search)}`
+			: buildWebSearchStatusText(search);
 		const lines = [heading, `Call: ${search.callId}${search.status ? ` (${search.status})` : ""}`];
 		const queries = search.queries.length > 0 ? search.queries : search.query ? [search.query] : [];
 		if (queries.length > 0) {
@@ -1536,7 +1656,12 @@ export function buildWebSearchActivityMessage(searches: SurfacedWebSearch[]): st
 }
 
 export function buildWebSearchSummaryText(searches: SurfacedWebSearch[]): string {
-	return searches.length === 1 ? "Searched the web once" : `Searched the web ${searches.length} times`;
+	if (searches.length === 0) return "Web search";
+	if (searches.length === 1) return buildWebSearchStatusText(searches[0]!);
+	const completed = searches.filter((search) => search.completed ?? search.status === "completed").length;
+	if (completed === searches.length) return `Searched the web ${searches.length} times`;
+	if (completed === 0) return `Searching the web (${searches.length} calls)`;
+	return `Web search activity (${completed}/${searches.length} completed)`;
 }
 
 function makeCachedImagePreview(data: string, mimeType: string, bytes?: number): CachedImagePreview {
@@ -1681,7 +1806,6 @@ function createCodexStream<TApi extends Api>(
 	deps: {
 		getCurrentCwd: () => string;
 		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
-		onWebSearchCaptured?: (search: SurfacedWebSearch) => void;
 	},
 ): AssistantMessageEventStream {
 	const stream = createAssistantMessageEventStream();
@@ -1862,32 +1986,14 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 		pendingFlushTimer = undefined;
 		const activities = pendingActivities.splice(0, pendingActivities.length);
 
-		for (let index = 0; index < activities.length; index++) {
-			const activity = activities[index];
-			if (activity.kind === "image") {
-				imagePreviewCache.set(activity.savedImage.absolutePath, makeCachedImagePreview(activity.imageData.data, activity.imageData.mimeType));
-				pi.sendMessage(
-					{
-						customType: IMAGE_SAVE_DISPLAY_MESSAGE_TYPE,
-						content: [{ type: "text", text: buildGeneratedImageDisplayText(activity.savedImage, { expanded: false }) }],
-						display: true,
-						details: { savedImages: [activity.savedImage] } satisfies ImageDisplayMessageDetails,
-					},
-					{ triggerTurn: false },
-				);
-				continue;
-			}
-
-			const searches = [activity.search];
-			while (index + 1 < activities.length && activities[index + 1]?.kind === "web-search") {
-				searches.push((activities[++index] as QueuedWebSearchActivity).search);
-			}
+		for (const activity of activities) {
+			imagePreviewCache.set(activity.savedImage.absolutePath, makeCachedImagePreview(activity.imageData.data, activity.imageData.mimeType));
 			pi.sendMessage(
 				{
-					customType: WEB_SEARCH_ACTIVITY_MESSAGE_TYPE,
-					content: buildWebSearchActivityMessage(searches),
+					customType: IMAGE_SAVE_DISPLAY_MESSAGE_TYPE,
+					content: [{ type: "text", text: buildGeneratedImageDisplayText(activity.savedImage, { expanded: false }) }],
 					display: true,
-					details: { searches },
+					details: { savedImages: [activity.savedImage] } satisfies ImageDisplayMessageDetails,
 				},
 				{ triggerTurn: false },
 			);
@@ -1915,9 +2021,6 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 			getCurrentCwd: options.getCurrentCwd,
 			onImageSaved: (savedImage, imageData) => {
 				pendingActivities.push({ kind: "image", savedImage, imageData });
-			},
-			onWebSearchCaptured: (search) => {
-				pendingActivities.push({ kind: "web-search", search });
 			},
 		});
 
@@ -1957,9 +2060,19 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 	});
 
 	pi.registerMessageRenderer<{ searches?: SurfacedWebSearch[] }>(WEB_SEARCH_ACTIVITY_MESSAGE_TYPE, (message, options, theme) => {
-		const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
 		const searches = message.details?.searches ?? [];
-		box.addChild(new Text(theme.fg("customMessageLabel", theme.bold(buildWebSearchSummaryText(searches))), 0, 0));
+		const container = new Container();
+		const summaryLines = searches.length > 0
+			? searches.map((search) => {
+					const completed = search.completed ?? search.status === "completed";
+					const header = completed ? "Searched the web" : "Searching the web";
+					const detail = webSearchActivityDetail(search);
+					const separator = detail ? (completed ? " for " : " ") : "";
+					const bullet = themeFg(theme, completed ? "muted" : "accent", glyphs().bullet);
+					return `${bullet}${themeFg(theme, "text", themeBold(theme, header))}${themeFg(theme, "dim", `${separator}${detail}`)}`;
+				})
+			: [themeFg(theme, "text", themeBold(theme, buildWebSearchSummaryText(searches)))];
+		container.addChild(new Text(summaryLines.join("\n"), 0, 0));
 		if (options.expanded) {
 			const content = typeof message.content === "string"
 				? message.content
@@ -1967,8 +2080,8 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 						.filter((item) => item.type === "text")
 						.map((item) => item.text)
 						.join("\n");
-			box.addChild(new Text(`\n${theme.fg("customMessageText", content)}`, 0, 0));
+			container.addChild(new Text(`\n${themeFg(theme, "dim", content)}`, 0, 0));
 		}
-		return box;
+		return container;
 	});
 }

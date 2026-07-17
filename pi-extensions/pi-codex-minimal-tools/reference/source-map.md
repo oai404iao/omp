@@ -35,6 +35,21 @@ them. Paths are relative to the analyzed `openai/codex` checkout at commit
 | `codex-rs/apply-patch/src/streaming_parser.rs` | Incrementally parses raw patch lines and hunks. |
 | `codex-rs/core/src/tools/handlers/apply_patch.rs` | Converts streamed hunks into throttled patch update events. |
 
+## Hosted web-search lifecycle
+
+| Source | Evidence |
+| --- | --- |
+| `codex-rs/codex-api/src/sse/responses.rs` | Maps `response.output_item.added` and `.done` into normalized response-item events. |
+| `codex-rs/protocol/src/models.rs` | Defines `web_search_call` and the search/open-page/find-in-page action union. |
+| `codex-rs/core/src/event_mapping.rs` | Converts partial and completed response items into `WebSearchItem` values. |
+| `codex-rs/core/src/web_search.rs` | Defines action-detail formatting and query precedence. |
+| `codex-rs/core/src/session/turn.rs` | Emits item-started/item-completed lifecycle events from the normalized stream. |
+| `codex-rs/core/tests/common/responses.rs` | Provides canonical partial-added and completed web-search SSE fixtures. |
+| `codex-rs/core/tests/suite/items.rs` | Verifies matching started/completed web-search items and IDs. |
+| `codex-rs/tui/src/chatwidget/tool_lifecycle.rs` | Reconciles the active search cell by call ID and falls back when no start cell exists. |
+| `codex-rs/tui/src/history_cell/search.rs` | Renders `Searching the web` and `Searched the web for ...`. |
+| `openai/resources/responses/responses.d.ts` | Defines `response.web_search_call.in_progress`, `.searching`, and `.completed`, each keyed by `item_id` and `output_index`. |
+
 ## Request construction
 
 | Source | Evidence |

@@ -30,6 +30,7 @@ export interface OpenAIResponsesStreamOptions {
 }
 
 type TextSignaturePhase = "commentary" | "final_answer";
+export const WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX = "pi:web-search-activity:";
 
 interface ConvertResponsesMessagesOptions {
 	includeSystemPrompt?: boolean;
@@ -147,7 +148,10 @@ function transformMessages(
 					if (!block.thinking || block.thinking.trim() === "") return [];
 					return isSameModel ? block : { type: "text" as const, text: block.thinking };
 				}
-				if (block.type === "text") return isSameModel ? block : { type: "text" as const, text: block.text };
+				if (block.type === "text") {
+					if (isWebSearchActivityTextSignature(block.textSignature)) return block;
+					return isSameModel ? block : { type: "text" as const, text: block.text };
+				}
 				if (block.type === "toolCall") {
 					let normalizedToolCall = block;
 					if (!isSameModel && block.thoughtSignature) {
@@ -245,6 +249,10 @@ function parseTextSignature(signature: string | undefined): { id: string; phase?
 	return { id: signature };
 }
 
+export function isWebSearchActivityTextSignature(signature: string | undefined): boolean {
+	return signature?.startsWith(WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX) === true;
+}
+
 export function convertResponsesMessages<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
@@ -303,6 +311,7 @@ export function convertResponsesMessages<TApi extends Api>(
 				} else if (block.type === "thinking") {
 					if (block.thinkingSignature) output.push(JSON.parse(block.thinkingSignature));
 				} else if (block.type === "text") {
+					if (isWebSearchActivityTextSignature(block.textSignature)) continue;
 					const parsedSignature = parseTextSignature(block.textSignature);
 					let msgId = parsedSignature?.id ?? `msg_${msgIndex}_${assistantBlockIndex}`;
 					if (msgId.length > 64) msgId = `msg_${shortHash(msgId)}`;

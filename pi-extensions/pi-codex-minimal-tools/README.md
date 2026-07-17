@@ -11,6 +11,7 @@ Minimal Codex/OpenAI tools for Pi. Adds Codex-style tools without replacing Pi n
 - `/image-gen <prompt> [reference.png]` — background image generation/editing with a live status card.
 - Generated images are saved with timestamp filenames, `latest.<ext>` mirrors, metadata, and inline previews.
 - Tools only activate on supported OpenAI/Codex-like models; native hosted tools and request profiles are supported on `openai` and `openai-codex`.
+- Responses web-search progress events render as compact `Searching the web` / `Searched the web` activity rows.
 - Web search citations are preserved as clickable Markdown links when the provider returns citation annotations.
 - Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
 

@@ -148,6 +148,32 @@ test("convertResponsesMessages replays custom calls and outputs by ctc item id",
 	});
 });
 
+test("convertResponsesMessages omits rendered web search activity from model history", () => {
+	const messages = convertResponsesMessages(model, {
+		systemPrompt: "",
+		tools: [],
+		messages: [{
+			...createAssistantOutput(),
+			content: [
+				{
+					type: "text",
+					text: "● **Searched the web** for latest docs",
+					textSignature: "pi:web-search-activity:ws_123",
+				},
+				{
+					type: "text",
+					text: "Final answer",
+					textSignature: JSON.stringify({ v: 1, id: "msg_123" }),
+				},
+			],
+		}],
+	} as any, new Set(["openai-codex"]), { includeSystemPrompt: false }) as any[];
+
+	assert.equal(messages.length, 1);
+	assert.equal(messages[0].type, "message");
+	assert.equal(messages[0].content[0].text, "Final answer");
+});
+
 test("processResponsesStream records reasoning token usage and incomplete stop reason", async () => {
 	const output = createAssistantOutput();
 

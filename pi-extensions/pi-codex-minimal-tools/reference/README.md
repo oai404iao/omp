@@ -31,7 +31,9 @@ can change after the analyzed commit.
    request.
 6. [Model modes and Code Mode](model-modes-and-code-mode.md) separates model
    capability, Responses transport mode, and model-visible tool exposure.
-7. [Source map](source-map.md) maps each conclusion to Codex source and tests.
+7. [Hosted web-search streaming and rendering](web-search-streaming-rendering.md)
+   records the Responses item lifecycle and Codex begin/end TUI behavior.
+8. [Source map](source-map.md) maps each conclusion to Codex source and tests.
 
 The exact freeform patch grammar from the analyzed commit is also preserved as
 the packaged provider resource
