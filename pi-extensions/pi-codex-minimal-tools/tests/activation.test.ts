@@ -79,7 +79,7 @@ test("extension does not register tools until OpenAI models are loaded", async (
 	assert.deepEqual(pi.tools.map((tool) => tool.name).sort(), ["apply_patch", "image_generation", "view_image", "web_search"].sort());
 	assert.ok(pi.activeTools.includes("read"));
 	assert.ok(pi.activeTools.includes("bash"));
-	assert.ok(pi.activeTools.includes("apply_patch"));
+	assert.equal(pi.activeTools.includes("apply_patch"), false);
 	assert.equal(pi.activeTools.includes("web_search"), false);
 }));
 
@@ -102,6 +102,33 @@ test("active non-OpenAI models remove package tools even when OpenAI models exis
 	});
 
 	assert.deepEqual(pi.activeTools, ["read"]);
+}));
+
+test("apply_patch hides edit/write only for GPT-5 models on the openai provider and restores them after switching away", async () => withAgentDir(async () => {
+	const pi = fakePi();
+	pi.setActiveTools(["read", "edit", "write"]);
+	codexMinimalTools(pi as any);
+
+	await emit(pi, "model_select", {
+		cwd: process.cwd(),
+		model: { provider: "openai", id: "gpt-5.5", input: ["text"] },
+		modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-5.5", input: ["text"] }] },
+	});
+	assert.deepEqual(pi.activeTools, ["read", "apply_patch"]);
+
+	await emit(pi, "model_select", {
+		cwd: process.cwd(),
+		model: { provider: "openai-codex", id: "gpt-5.5", input: ["text"] },
+		modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-5.5", input: ["text"] }] },
+	});
+	assert.deepEqual(pi.activeTools, ["read", "edit", "write"]);
+
+	await emit(pi, "model_select", {
+		cwd: process.cwd(),
+		model: { provider: "anthropic", id: "claude", input: ["text"] },
+		modelRegistry: { getAll: () => [{ provider: "anthropic", id: "claude", input: ["text"] }] },
+	});
+	assert.deepEqual(pi.activeTools, ["read", "edit", "write"]);
 }));
 
 test("before_provider_request rewrites web_search only for enabled GPT-5 OpenAI models", async () => withAgentDir(async (agentDir) => {

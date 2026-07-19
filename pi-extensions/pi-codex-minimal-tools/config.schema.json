@@ -113,13 +113,8 @@
     },
     "applyPatchEnabled": {
       "type": "boolean",
-      "description": "Expose the apply_patch tool.",
+      "description": "Expose apply_patch only on GPT-5-series models from the openai provider.",
       "default": true
-    },
-    "strictPatchMode": {
-      "type": "boolean",
-      "description": "Disable Pi's edit and write tools so mutations go through apply_patch.",
-      "default": false
     },
     "allowAbsolutePatchPaths": {
       "type": "boolean",

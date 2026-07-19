@@ -1,6 +1,8 @@
 # pi-codex-minimal-tools
 
-Minimal Codex/OpenAI tools for Pi. Adds Codex-style tools without replacing Pi natives like `read`, `grep`, `find`, `ls`, `bash`, `edit`, or `write`.
+Minimal Codex/OpenAI tools for Pi. It preserves Pi's native tools except that
+GPT-5-series models on the `openai` provider use `apply_patch` instead of
+`edit` and `write`.
 
 ## Highlights
 
@@ -78,7 +80,6 @@ JSON Schema-aware editors. `requestProfile` is the only nested section:
   "viewImage": false,
   "viewImageWorkspaceOnly": false,
   "applyPatchEnabled": true,
-  "strictPatchMode": false,
   "allowAbsolutePatchPaths": false,
   "deferApplyPatchRendering": false
 }
@@ -132,8 +133,7 @@ keeps it in the top-level `instructions` field.
 
 | Setting | What it does |
 | --- | --- |
-| `applyPatchEnabled` | Expose `apply_patch`. |
-| `strictPatchMode` | Block `edit`/`write` so all edits go through `apply_patch`. |
+| `applyPatchEnabled` | Expose `apply_patch` only on GPT-5-series models from the `openai` provider. When active, Pi's `edit` and `write` tools are hidden; their previous activation is restored after switching away. |
 | `allowAbsolutePatchPaths` | Permit absolute paths in `apply_patch`. |
 | `deferApplyPatchRendering` | Let Pi's fallback renderer handle display instead of the built-in streaming filesystem preview. Defaults to `false`. |
 

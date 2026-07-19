@@ -21,7 +21,6 @@ export interface CodexMinimalToolsSettings {
 	viewImage: boolean;
 	viewImageWorkspaceOnly: boolean;
 	applyPatchEnabled: boolean;
-	strictPatchMode: boolean;
 	allowAbsolutePatchPaths: boolean;
 	deferApplyPatchRendering: boolean;
 }
@@ -41,7 +40,6 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	viewImage: false,
 	viewImageWorkspaceOnly: false,
 	applyPatchEnabled: true,
-	strictPatchMode: false,
 	allowAbsolutePatchPaths: false,
 	deferApplyPatchRendering: false,
 };
@@ -151,7 +149,6 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		viewImage: boolSetting(raw, "viewImage"),
 		viewImageWorkspaceOnly: boolSetting(raw, "viewImageWorkspaceOnly"),
 		applyPatchEnabled: boolSetting(raw, "applyPatchEnabled"),
-		strictPatchMode: boolSetting(raw, "strictPatchMode"),
 		allowAbsolutePatchPaths: boolSetting(raw, "allowAbsolutePatchPaths"),
 		deferApplyPatchRendering: boolSetting(raw, "deferApplyPatchRendering"),
 	};

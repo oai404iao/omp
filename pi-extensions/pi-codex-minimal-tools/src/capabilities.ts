@@ -3,6 +3,8 @@ import { resolveCodexRequestProfile } from "./codex-request-profile.js";
 
 export const PACKAGE_TOOL_NAMES = ["image_generation", "view_image", "apply_patch", "web_search"] as const;
 export type PackageToolName = (typeof PACKAGE_TOOL_NAMES)[number];
+export const NATIVE_MUTATION_TOOL_NAMES = ["edit", "write"] as const;
+export type NativeMutationToolName = (typeof NATIVE_MUTATION_TOOL_NAMES)[number];
 
 export interface ModelLike {
 	provider?: string;
@@ -43,6 +45,10 @@ export function isGpt5SeriesModel(model: ModelLike | undefined): boolean {
 	return /^gpt-5(?:$|[.-])/.test(id);
 }
 
+export function isOpenAiGpt5Model(model: ModelLike | undefined): boolean {
+	return model?.provider?.toLowerCase() === "openai" && isGpt5SeriesModel(model);
+}
+
 export function supportsImageInput(model: ModelLike | undefined): boolean {
 	const inputs = [
 		...(model?.input ?? []),
@@ -66,6 +72,7 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	const openAiLike = isOpenAiLikeModel(model);
 	const nativeOpenAi = isNativeOpenAiProviderModel(model);
 	const gpt5 = isGpt5SeriesModel(model);
+	const openAiGpt5 = isOpenAiGpt5Model(model);
 	const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
 	if (!openAiLike) {
 		return {
@@ -85,9 +92,16 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 		view_image: settings.viewImage && imageInput
 			? { enabled: true, reason: "model accepts image input" }
 			: { enabled: false, reason: !settings.viewImage ? "view_image disabled by setting" : "model does not advertise image input" },
-		apply_patch: settings.applyPatchEnabled && openAiLike
-			? { enabled: true, reason: "OpenAI/Codex-like model" }
-			: { enabled: false, reason: !settings.applyPatchEnabled ? "apply_patch disabled by setting" : "model is not OpenAI/Codex-like" },
+		apply_patch: settings.applyPatchEnabled && openAiGpt5
+			? { enabled: true, reason: "GPT-5-series model on the openai provider" }
+			: {
+				enabled: false,
+				reason: !settings.applyPatchEnabled
+					? "apply_patch disabled by setting"
+					: model?.provider?.toLowerCase() !== "openai"
+						? "requires the openai provider"
+						: "requires a GPT-5-series model",
+			},
 		web_search: settings.webSearchEnabled && settings.nativeProviderTools && requestProfile.supportsHostedTools && nativeOpenAi && gpt5
 			? { enabled: true, reason: "GPT-5-series OpenAI model with native web_search enabled" }
 			: { enabled: false, reason: !settings.webSearchEnabled ? "web_search disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !requestProfile.supportsHostedTools ? "hosted tools disabled by request profile" : !nativeOpenAi ? "requires openai or openai-codex provider" : "requires a GPT-5-series model" },
@@ -125,8 +139,8 @@ export function computeNextActiveTools(currentActive: readonly string[], model: 
 		}
 	}
 
-	if (settings.strictPatchMode && desired.has("apply_patch")) {
-		for (const nativeMutationTool of ["edit", "write"]) {
+	if (current.has("apply_patch")) {
+		for (const nativeMutationTool of NATIVE_MUTATION_TOOL_NAMES) {
 			if (current.delete(nativeMutationTool)) removed.push(nativeMutationTool);
 		}
 	}

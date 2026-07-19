@@ -2,7 +2,16 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { getCapabilities, Image, Text, type Component } from "@earendil-works/pi-tui";
 import { hasOpenAiModelsLoaded } from "./activation.js";
 import { registerBackgroundImageGenerationCommand } from "./background-image-generation.js";
-import { computeNextActiveTools, computeToolCapabilities, isNativeOpenAiProviderModel, modelKey, PACKAGE_TOOL_NAMES, type ModelLike } from "./capabilities.js";
+import {
+	computeNextActiveTools,
+	computeToolCapabilities,
+	isNativeOpenAiProviderModel,
+	modelKey,
+	NATIVE_MUTATION_TOOL_NAMES,
+	PACKAGE_TOOL_NAMES,
+	type ModelLike,
+	type NativeMutationToolName,
+} from "./capabilities.js";
 import { registerOpenAIResponsesProviders } from "./provider-shim.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 import { configPath, loadSettings, settingsDiagnostics } from "./settings.js";
@@ -72,21 +81,53 @@ function contextModel(ctx: ExtensionContext): ModelLike | undefined {
 	return ctx.model as ModelLike | undefined;
 }
 
-function removePackageToolsIfPresent(pi: ExtensionAPI): void {
-	const active = pi.getActiveTools?.() ?? [];
-	const next = active.filter((name) => !PACKAGE_TOOL_NAMES.includes(name as never));
-	if (next.length !== active.length) pi.setActiveTools(next);
+type SuppressedMutationTools = Map<NativeMutationToolName, number>;
+
+function captureSuppressedMutationTools(
+	activeTools: readonly string[],
+	removedTools: readonly string[],
+	suppressed: SuppressedMutationTools,
+): void {
+	for (const name of NATIVE_MUTATION_TOOL_NAMES) {
+		if (!removedTools.includes(name) || suppressed.has(name)) continue;
+		const index = activeTools.indexOf(name);
+		if (index >= 0) suppressed.set(name, index);
+	}
 }
 
-function syncActiveTools(pi: ExtensionAPI, ctx: ExtensionContext, toolsRegistered: boolean): void {
+function restoreSuppressedMutationTools(activeTools: readonly string[], suppressed: SuppressedMutationTools): string[] {
+	if (suppressed.size === 0) return [...activeTools];
+
+	const restored = [...activeTools];
+	for (const [name, index] of [...suppressed.entries()].sort(([, left], [, right]) => left - right)) {
+		if (!restored.includes(name)) restored.splice(Math.min(index, restored.length), 0, name);
+	}
+	suppressed.clear();
+	return restored;
+}
+
+function syncActiveTools(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	toolsRegistered: boolean,
+	suppressedMutationTools: SuppressedMutationTools,
+): void {
+	const active = pi.getActiveTools?.() ?? [];
 	if (!toolsRegistered || !hasOpenAiModelsLoaded(ctx)) {
-		removePackageToolsIfPresent(pi);
+		const next = restoreSuppressedMutationTools(
+			active.filter((name) => !PACKAGE_TOOL_NAMES.includes(name as never)),
+			suppressedMutationTools,
+		);
+		if (next.join("\0") !== active.join("\0")) pi.setActiveTools(next);
 		return;
 	}
 	const settings = loadSettings(ctx.cwd);
-	const active = pi.getActiveTools?.() ?? [];
 	const next = computeNextActiveTools(active, contextModel(ctx), settings);
-	if (next.activeTools.join("\0") !== active.join("\0")) pi.setActiveTools(next.activeTools);
+	captureSuppressedMutationTools(active, next.removed, suppressedMutationTools);
+	const activeTools = next.activeTools.includes("apply_patch")
+		? next.activeTools
+		: restoreSuppressedMutationTools(next.activeTools, suppressedMutationTools);
+	if (activeTools.join("\0") !== active.join("\0")) pi.setActiveTools(activeTools);
 }
 
 function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
@@ -179,6 +220,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 
 	let currentCwd = process.cwd();
 	let toolsRegistered = false;
+	const suppressedMutationTools: SuppressedMutationTools = new Map();
 	const ensureToolsRegistered = (ctx: ExtensionContext): boolean => {
 		currentCwd = ctx.cwd;
 		if (toolsRegistered) return true;
@@ -198,13 +240,18 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 	registerDiagnosticCommand(pi);
 
 	pi.on("session_start", async (_event, ctx) => {
-		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx));
+		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx), suppressedMutationTools);
 	});
 	pi.on("model_select", async (_event, ctx) => {
-		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx));
+		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx), suppressedMutationTools);
 	});
 	pi.on("thinking_level_select", async (_event, ctx) => {
-		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx));
+		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx), suppressedMutationTools);
+	});
+	pi.on("session_shutdown", async () => {
+		const active = pi.getActiveTools?.() ?? [];
+		const restored = restoreSuppressedMutationTools(active, suppressedMutationTools);
+		if (restored.join("\0") !== active.join("\0")) pi.setActiveTools(restored);
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {
