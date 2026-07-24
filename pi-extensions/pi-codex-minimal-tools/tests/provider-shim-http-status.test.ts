@@ -140,6 +140,19 @@ function successSseResponse(output: unknown[] = []): Response {
 	return new Response(`data: ${JSON.stringify(event)}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
+function streamReadErrorSseResponse(sequenceNumber = 0): Response {
+	const event = {
+		type: "error",
+		sequence_number: sequenceNumber,
+		error: {
+			type: "upstream_error",
+			message: "stream_read_error",
+			code: "stream_read_error",
+		},
+	};
+	return new Response(`data: ${JSON.stringify(event)}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
 function customApplyPatchSseResponse(): Response {
 	const patch = "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n";
 	const events = [
@@ -243,6 +256,18 @@ test("successful SSE retry hides intermediate HTTP failure", async () => {
 	assert.equal(fetchCalls(), 2);
 	assert.equal(result.stopReason, "stop");
 	assert.equal(result.errorMessage, undefined);
+});
+
+test("upstream stream_read_error is surfaced for Pi's agent-level auto-retry regardless of sequence number", async () => {
+	const fetchCalls = mockFetch([
+		() => streamReadErrorSseResponse(37),
+	]);
+
+	const result = await runCodexProvider();
+
+	assert.equal(fetchCalls(), 1);
+	assert.equal(result.stopReason, "error");
+	assert.equal(result.errorMessage, "Connection error: Codex error: stream_read_error");
 });
 
 test("native web_search requests include source payloads without dropping reasoning include", async () => {

@@ -193,6 +193,13 @@ const HTTP_STATUS_MESSAGE_PREFIX = /^HTTP\s+\d{3}(?::|\b)/i;
 
 interface StreamEventShape {
 	type?: string;
+	sequence_number?: number;
+	error?: {
+		type?: string;
+		message?: string;
+		code?: string;
+		[key: string]: unknown;
+	};
 	response?: ResponseEnvelope;
 	item_id?: string;
 	output_index?: number;
@@ -1253,8 +1260,25 @@ async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIt
 		if (!type) continue;
 
 		if (type === "error") {
-			const error = new Error(`Codex error: ${event.message || event.code || JSON.stringify(event)}`) as Error & { code?: string };
-			if (typeof event.code === "string") error.code = event.code;
+			const nestedError = event.error;
+			const code = typeof nestedError?.code === "string"
+				? nestedError.code
+				: typeof event.code === "string"
+					? event.code
+					: undefined;
+			const message = typeof nestedError?.message === "string"
+				? nestedError.message
+				: typeof event.message === "string"
+					? event.message
+					: undefined;
+			const error = new Error(`Codex error: ${message || code || JSON.stringify(event)}`) as Error & {
+				code?: string;
+				errorType?: string;
+				sequenceNumber?: number;
+			};
+			if (code) error.code = code;
+			if (typeof nestedError?.type === "string") error.errorType = nestedError.type;
+			if (typeof event.sequence_number === "number") error.sequenceNumber = event.sequence_number;
 			throw error;
 		}
 
@@ -1924,6 +1948,17 @@ function createErrorMessage(message: AssistantMessage, error: unknown, aborted: 
 
 export function buildProviderErrorMessage(error: unknown): string {
 	const message = error instanceof Error ? error.message : String(error);
+	const candidate = error as { code?: unknown; errorType?: unknown };
+	if (
+		candidate?.code === "stream_read_error"
+		&& candidate.errorType === "upstream_error"
+	) {
+		// Pi's agent-level retry classifier recognizes "connection error". Surface
+		// this upstream SSE read failure in that category instead of
+		// retrying inside the provider, so Pi's retry settings and UI remain the
+		// single source of truth.
+		return `Connection error: ${message}`;
+	}
 	if (/^(?:WebSocket (?:error|closed)|WebSocket stream closed before response\.completed|Stream closed before response\.completed)/.test(message)) {
 		return `Connection error: ${message}`;
 	}
