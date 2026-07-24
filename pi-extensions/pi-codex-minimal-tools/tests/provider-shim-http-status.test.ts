@@ -8,6 +8,7 @@ import {
 	extractWebSearchProgress,
 	mergeWebSearchActivity,
 	registerOpenAIResponsesProviders,
+	requestOpenAINativeCompaction,
 	WEB_SEARCH_ACTIVITY_MESSAGE_TYPE,
 	withHttpStatusPrefix,
 	withResponsesLiteWebSocketMetadata,
@@ -603,6 +604,123 @@ test("openai provider applies request profiles with API-key Responses transport"
 	assert.equal(requestBody.parallel_tool_calls, false);
 	assert.equal(requestBody.tools[0].type, "custom");
 	assert.equal(requestBody.tools[0].name, "apply_patch");
+});
+
+test("openai GPT-5 requests can opt into Responses context_management", async () => {
+	writeSettings({
+		compactionMode: "responses-context-management",
+		nativeCompactionThreshold: 123_456,
+	});
+	const provider = createProviderHarness().providers.openai;
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	const stream = provider.streamSimple(
+		{
+			provider: "openai",
+			api: "openai-responses",
+			id: "gpt-5.5",
+			baseUrl: "https://example.test/v1",
+			headers: {},
+			input: ["text"],
+			reasoning: false,
+			contextWindow: 400_000,
+			maxTokens: 16_384,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		},
+		{ systemPrompt: "", messages: [{ role: "user", content: "hello" }], tools: [] },
+		{ apiKey: "plain-api-key" },
+	);
+	const result = await stream.result();
+
+	assert.equal(result.stopReason, "stop");
+	assert.deepEqual(requestBody.context_management, [{
+		type: "compaction",
+		compact_threshold: 123_456,
+	}]);
+});
+
+test("native compaction supports /responses context_management and /responses/compact", async () => {
+	const model = {
+		provider: "openai",
+		api: "openai-responses",
+		id: "gpt-5.5",
+		baseUrl: "https://example.test/v1",
+		headers: {},
+		input: ["text"],
+		reasoning: false,
+		contextWindow: 400_000,
+		maxTokens: 16_384,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	} as any;
+	const context = {
+		systemPrompt: "system",
+		messages: [{ role: "user", content: "hello", timestamp: 1 }],
+		tools: [],
+	} as any;
+	const settings = {
+		enabled: true,
+		glyphStyle: "unicode",
+		autoEnable: true,
+		nativeProviderTools: true,
+		compactionMode: "responses-context-management",
+		nativeCompactionThreshold: 0,
+		requestProfile: {},
+		apiKeyMode: false,
+		imageGeneration: true,
+		webSearchEnabled: false,
+		imageOutputDir: ".pi/openai-codex-images",
+		imageModel: "gpt-image-2",
+		directImageApiFallback: false,
+		viewImage: false,
+		viewImageWorkspaceOnly: false,
+		applyPatchEnabled: true,
+		allowAbsolutePatchPaths: false,
+		deferApplyPatchRendering: false,
+	} as const;
+	const requests: Array<{ url: string; body: any }> = [];
+	globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+		const body = JSON.parse(String(init?.body));
+		requests.push({ url: String(url), body });
+		if (String(url).endsWith("/responses/compact")) {
+			return Response.json({
+				output: [
+					{ type: "message", role: "user", content: [{ type: "input_text", text: "retained" }] },
+					{ type: "compaction", encrypted_content: "legacy-encrypted" },
+				],
+			});
+		}
+		return Response.json({
+			output: [{ type: "compaction", encrypted_content: "managed-encrypted" }],
+		});
+	}) as typeof fetch;
+
+	const managed = await requestOpenAINativeCompaction(model, context, {
+		mode: "responses-context-management",
+		apiKey: "key",
+		settings: settings as any,
+	});
+	const legacy = await requestOpenAINativeCompaction(model, context, {
+		mode: "responses-compact",
+		apiKey: "key",
+		settings: { ...settings, compactionMode: "responses-compact" } as any,
+	});
+
+	assert.deepEqual(managed, [{ type: "compaction", encrypted_content: "managed-encrypted" }]);
+	assert.equal(requests[0]?.url, "https://example.test/v1/responses");
+	assert.equal(requests[0]?.body.stream, false);
+	assert.deepEqual(requests[0]?.body.context_management, [{ type: "compaction", compact_threshold: 1 }]);
+	assert.equal(requests[1]?.url, "https://example.test/v1/responses/compact");
+	assert.equal("stream" in requests[1]!.body, false);
+	assert.equal("store" in requests[1]!.body, false);
+	assert.equal("include" in requests[1]!.body, false);
+	assert.deepEqual(legacy, [
+		{ type: "message", role: "user", content: [{ type: "input_text", text: "retained" }] },
+		{ type: "compaction", encrypted_content: "legacy-encrypted" },
+	]);
 });
 
 test("apiKeyMode accepts plain API keys without account-id extraction", async () => {

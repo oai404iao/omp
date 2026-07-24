@@ -16,6 +16,8 @@ GPT-5-series models on the `openai` provider use `apply_patch` instead of
 - Responses web-search progress events render as compact `Searching the web` / `Searched the web` activity rows.
 - Web search citations are preserved as clickable Markdown links when the provider returns citation annotations.
 - Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
+- Optional GPT-5 native compaction using either Responses `context_management`
+  or the legacy `/responses/compact` endpoint.
 
 ## Protocol reference
 
@@ -64,6 +66,8 @@ JSON Schema-aware editors. `requestProfile` is the only nested section:
   "glyphStyle": "unicode",
   "autoEnable": true,
   "nativeProviderTools": true,
+  "compactionMode": "pi",
+  "nativeCompactionThreshold": 0,
   "requestProfile": {
     "responsesMode": "standard",
     "systemPromptPlacement": "instructions",
@@ -101,6 +105,8 @@ For offline completion, replace the URL with a local path your editor can resolv
 | Setting | What it does |
 | --- | --- |
 | `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai` and `openai-codex` (`image_generation`, and `web_search` when enabled). |
+| `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses-context-management` (new `/responses` `context_management` path), or `responses-compact` (legacy `/responses/compact`). |
+| `nativeCompactionThreshold` | Token threshold used by `responses-context-management`. `0` derives a threshold below Pi's default auto-compaction boundary. |
 | `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `systemPromptPlacement` chooses top-level `instructions` or an input `developer` message in Standard mode; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always uses a developer message and forces hosted and parallel tools off. |
 | `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. The `openai` provider always uses this API-key transport. |
 | `webSearchEnabled` | Expose hosted `web_search` on GPT-5-series `openai` and `openai-codex` models. Disabled by default. |
@@ -109,6 +115,19 @@ Responses Lite uses Codex-internal request fields and transport signals. Enable
 `requestProfile.responsesMode: "lite"` only for an endpoint known to implement
 that contract. Both patch transports work in Lite; this package does not
 implement Codex Code Mode.
+
+Native compaction is available only for GPT-5-series models on the `openai`
+provider and requires the Standard Responses profile. Native compaction output
+contains opaque encrypted state. This extension stores that state in the Pi
+session and replays it only to the exact originating provider, model, and API.
+The encrypted payload is not a readable summary, may be model-bound, and is
+sensitive session data. Switching model or provider after native compaction
+falls back to Pi's placeholder summary plus retained recent messages.
+If Pi requests compaction before `context_management` has emitted a compaction
+item (for example, an early manual `/compact`), the extension sends a forced
+non-streaming `/responses` request, keeps only its compaction item, and discards
+any ordinary assistant output from that request. Native modes ignore
+`/compact` custom summary instructions.
 
 Set `requestProfile.patchTransport: "custom"` to send `apply_patch` as the
 Codex freeform custom tool with the packaged Lark grammar. Other tools remain

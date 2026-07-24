@@ -434,6 +434,7 @@ export async function processResponsesStream<TApi extends Api>(
 	let sawTerminalResponseEvent = false;
 	const outputStates = new Map<number, OutputState>();
 	const imageGenerationCallIds = new Set<string>();
+	const nativeCompactionSignatures = new Set<string>();
 	const customItemId = (itemId: string | undefined, callId: string): string =>
 		itemId?.startsWith("ctc_") ? itemId : `ctc_${shortHash(itemId || callId)}`;
 	const findCustomToolCallState = (event: { output_index?: number; item_id?: string; call_id?: string }): CustomToolCallState | undefined => {
@@ -455,6 +456,20 @@ export async function processResponsesStream<TApi extends Api>(
 			type: "image_generation_call",
 			item: imageGenerationCall,
 		});
+	};
+	const appendNativeCompaction = (item: unknown): void => {
+		if (!item || typeof item !== "object") return;
+		const type = (item as { type?: unknown }).type;
+		if (type !== "compaction" && type !== "context_compaction") return;
+		const signature = JSON.stringify(item);
+		if (nativeCompactionSignatures.has(signature)) return;
+		nativeCompactionSignatures.add(signature);
+		output.content.push({
+			type: "thinking",
+			thinking: "",
+			thinkingSignature: signature,
+			redacted: true,
+		} as AssistantMessage["content"][number]);
 	};
 
 	const renderReasoningSummary = (summaryParts: Map<number, { text: string }>): string =>
@@ -804,6 +819,12 @@ export async function processResponsesStream<TApi extends Api>(
 			} else if (item.type === "image_generation_call") {
 				appendImageGenerationCall(item);
 				outputStates.delete(event.output_index);
+			} else if (
+				(item as { type?: unknown }).type === "compaction"
+				|| (item as { type?: unknown }).type === "context_compaction"
+			) {
+				appendNativeCompaction(item);
+				outputStates.delete(event.output_index);
 			}
 		} else if (event.type === "response.completed" || event.type === "response.incomplete") {
 			sawTerminalResponseEvent = true;
@@ -813,6 +834,7 @@ export async function processResponsesStream<TApi extends Api>(
 				: [];
 			for (const item of finalOutput) {
 				if ((item as { type?: unknown } | undefined)?.type === "image_generation_call") appendImageGenerationCall(item);
+				appendNativeCompaction(item);
 			}
 			if (response?.id) output.responseId = response.id;
 			if (response?.usage) {

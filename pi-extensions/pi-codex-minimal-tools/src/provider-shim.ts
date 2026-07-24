@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { glyphs, treeGlyph } from "./glyphs.js";
 import { loadSettings } from "./settings.js";
 import { resolveCodexRequestProfile, type CodexRequestProfile } from "./codex-request-profile.js";
+import { isOpenAiGpt5Model } from "./capabilities.js";
 import { saveBase64Image } from "./utils/images.js";
 import { Container, getCapabilities, getImageDimensions, Image, Spacer, Text } from "@earendil-works/pi-tui";
 import {
@@ -161,6 +162,10 @@ interface ResponsesBody {
 		context?: "all_turns";
 	};
 	client_metadata?: Record<string, string>;
+	context_management?: Array<{
+		type: "compaction";
+		compact_threshold: number;
+	}>;
 	[key: string]: unknown;
 }
 
@@ -419,7 +424,7 @@ function extractAccountId(token: string): string {
 	}
 }
 
-function resolveCodexUrl(baseUrl: string | undefined, options?: { apiKeyMode?: boolean }): string {
+export function resolveCodexUrl(baseUrl: string | undefined, options?: { apiKeyMode?: boolean }): string {
 	const raw = baseUrl && baseUrl.trim().length > 0 ? baseUrl : DEFAULT_CODEX_BASE_URL;
 	const normalized = raw.replace(/\/+$/, "");
 	if (options?.apiKeyMode) {
@@ -578,7 +583,13 @@ export function withResponsesLiteWebSocketMetadata<T extends { client_metadata?:
 	};
 }
 
-function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, profile: CodexRequestProfile, options?: SimpleStreamOptions): ResponsesBody {
+export function resolveNativeCompactionThreshold(model: Model<Api>, configuredThreshold: number): number {
+	if (configuredThreshold > 0) return configuredThreshold;
+	const contextWindow = Number.isFinite(model.contextWindow) ? model.contextWindow : 0;
+	return Math.max(1, contextWindow > 32_768 ? contextWindow - 32_768 : Math.floor(contextWindow * 0.8));
+}
+
+export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, profile: CodexRequestProfile, options?: SimpleStreamOptions): ResponsesBody {
 	const messages = convertResponsesMessages(model, context, CODEX_TOOL_CALL_PROVIDERS, {
 		includeSystemPrompt: false,
 	});
@@ -648,6 +659,18 @@ function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context
 		const summary = (options as { reasoningSummary?: string } | undefined)?.reasoningSummary ?? (lite ? undefined : "auto");
 		if (summary && summary !== "none") reasoning.summary = summary;
 		body.reasoning = reasoning;
+	}
+
+	const settings = loadSettings();
+	if (
+		settings.compactionMode === "responses-context-management"
+		&& profile.responsesMode === "standard"
+		&& isOpenAiGpt5Model(model)
+	) {
+		body.context_management = [{
+			type: "compaction",
+			compact_threshold: resolveNativeCompactionThreshold(model as Model<Api>, settings.nativeCompactionThreshold),
+		}];
 	}
 
 	return body;
@@ -1250,7 +1273,12 @@ async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIt
 				const item = output[outputIndex];
 				if (!item || typeof item !== "object") continue;
 				const itemType = (item as { type?: unknown }).type;
-				if (itemType !== "image_generation_call" && itemType !== "web_search_call") continue;
+				if (
+					itemType !== "image_generation_call"
+					&& itemType !== "web_search_call"
+					&& itemType !== "compaction"
+					&& itemType !== "context_compaction"
+				) continue;
 				const key = outputItemKey(item, outputIndex);
 				if (key && completedOutputItems.has(key)) continue;
 				if (key) completedOutputItems.add(key);
@@ -1415,6 +1443,138 @@ async function processCapturedResponsesStream<TApi extends Api>(
 		resolveServiceTier: resolveCodexServiceTier,
 		applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model as Model<Api>),
 	});
+}
+
+function compactUrl(baseUrl: string | undefined): string {
+	return `${resolveCodexUrl(baseUrl, { apiKeyMode: true }).replace(/\/+$/, "")}/compact`;
+}
+
+function buildJsonHeaders(
+	modelHeaders: Record<string, string> | undefined,
+	additionalHeaders: Record<string, string> | undefined,
+	apiKey: string,
+): Headers {
+	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, undefined, apiKey);
+	headers.set("accept", "application/json");
+	headers.set("content-type", "application/json");
+	return headers;
+}
+
+async function postJsonWithRetries(
+	url: string,
+	headers: Headers,
+	body: unknown,
+	signal: AbortSignal | undefined,
+	timeoutMs = SSE_RESPONSE_HEADER_TIMEOUT_MS,
+): Promise<Record<string, unknown>> {
+	const bodyJson = JSON.stringify(body);
+	const dispatcher = await proxyDispatcherForUrl(url);
+	let lastError: Error | undefined;
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		try {
+			const response = await fetchWithResponseHeaderTimeout(url, {
+				method: "POST",
+				headers,
+				body: bodyJson,
+				...(dispatcher ? { dispatcher } : {}),
+			} as RequestInit, signal, timeoutMs);
+			if (response.ok) {
+				const parsed = await response.json();
+				if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+					throw new NonRetryableProviderError("OpenAI native compaction returned a non-object response");
+				}
+				return parsed as Record<string, unknown>;
+			}
+			const errorText = await response.text();
+			if (attempt < MAX_RETRIES && isRetryableError(response.status, errorText)) {
+				await sleep(BASE_DELAY_MS * 2 ** attempt, signal);
+				continue;
+			}
+			const info = await parseErrorResponse(new Response(errorText, {
+				status: response.status,
+				statusText: response.statusText,
+			}));
+			throw new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message));
+		} catch (error) {
+			if (error instanceof NonRetryableProviderError) throw error;
+			if (signal?.aborted) throw new Error("Request was aborted");
+			lastError = error instanceof Error ? error : new Error(String(error));
+			if (attempt < MAX_RETRIES) {
+				await sleep(BASE_DELAY_MS * 2 ** attempt, signal);
+				continue;
+			}
+			throw lastError;
+		}
+	}
+	throw lastError ?? new Error("OpenAI native compaction failed");
+}
+
+function compactionItems(output: unknown): unknown[] {
+	if (!Array.isArray(output)) throw new Error("OpenAI native compaction response omitted output");
+	return output.filter((item) => {
+		const type = item && typeof item === "object" ? (item as { type?: unknown }).type : undefined;
+		return type === "compaction" || type === "context_compaction";
+	});
+}
+
+export async function requestOpenAINativeCompaction(
+	model: Model<Api>,
+	context: Context,
+	options: {
+		mode: "responses-context-management" | "responses-compact";
+		apiKey: string;
+		headers?: Record<string, string>;
+		signal?: AbortSignal;
+		reasoning?: SimpleStreamOptions["reasoning"];
+		settings: ReturnType<typeof loadSettings>;
+	},
+): Promise<unknown[]> {
+	if (!isOpenAiGpt5Model(model)) {
+		throw new Error("OpenAI native compaction is limited to openai/GPT-5-series models");
+	}
+	const profile = resolveCodexRequestProfile(options.settings.requestProfile);
+	if (profile.responsesMode !== "standard") {
+		throw new Error("OpenAI native compaction requires Standard Responses mode");
+	}
+	const body = buildRequestBody(model, context, profile, {
+		apiKey: options.apiKey,
+		headers: options.headers,
+		signal: options.signal,
+		reasoning: options.reasoning,
+	});
+	const headers = buildJsonHeaders(model.headers, options.headers, options.apiKey);
+
+	if (options.mode === "responses-context-management") {
+		body.stream = false;
+		body.context_management = [{
+			type: "compaction",
+			compact_threshold: 1,
+		}];
+		const response = await postJsonWithRetries(resolveCodexUrl(model.baseUrl, { apiKeyMode: true }), headers, body, options.signal);
+		const items = compactionItems(response.output);
+		if (items.length !== 1) {
+			throw new Error(`OpenAI context_management expected exactly one compaction item, received ${items.length}`);
+		}
+		return items;
+	}
+
+	const compactBody: Record<string, unknown> = {
+		model: body.model,
+		input: body.input,
+		parallel_tool_calls: body.parallel_tool_calls,
+	};
+	for (const key of ["instructions", "tools", "reasoning", "service_tier", "prompt_cache_key", "text"] as const) {
+		if (body[key] !== undefined) compactBody[key] = body[key];
+	}
+	const response = await postJsonWithRetries(compactUrl(model.baseUrl), headers, compactBody, options.signal);
+	const output = response.output;
+	if (!Array.isArray(output) || output.length === 0) {
+		throw new Error("OpenAI /responses/compact returned no replacement output");
+	}
+	if (compactionItems(output).length === 0) {
+		throw new Error("OpenAI /responses/compact output did not contain a compaction item");
+	}
+	return output;
 }
 
 async function processWebSocketStream<TApi extends Api>(

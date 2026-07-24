@@ -21,6 +21,7 @@ import { createWebSearchToolDefinition } from "./tools/web-search.js";
 import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInput } from "./tools/view-image.js";
 import { glyphs } from "./glyphs.js";
 import { resolveCodexRequestProfile } from "./codex-request-profile.js";
+import { registerNativeCompaction } from "./native-compaction.js";
 
 const INSTALL_SYMBOL = Symbol.for("pi-codex-minimal-tools.installed");
 
@@ -144,6 +145,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`enabled: ${settings.enabled}`,
 		`autoEnable: ${settings.autoEnable}`,
 		`nativeProviderTools: ${settings.nativeProviderTools}`,
+		`compaction: ${settings.compactionMode}${settings.compactionMode === "responses-context-management" ? ` (threshold=${settings.nativeCompactionThreshold || "auto"})` : ""}`,
 		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, system=${requestProfile.systemPromptPlacement}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
 		`webSearchEnabled: ${settings.webSearchEnabled}`,
 		`apiKeyMode: ${settings.apiKeyMode}`,
@@ -234,6 +236,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 	const initialSettings = loadSettings(currentCwd);
 	if (initialSettings.enabled) {
 		registerOpenAIResponsesProviders(pi, { getCurrentCwd: () => currentCwd });
+		registerNativeCompaction(pi);
 		registerBackgroundImageGenerationCommand(pi);
 	}
 

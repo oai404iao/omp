@@ -174,6 +174,46 @@ test("convertResponsesMessages omits rendered web search activity from model his
 	assert.equal(messages[0].content[0].text, "Final answer");
 });
 
+test("processResponsesStream preserves opaque compaction items for exact replay", async () => {
+	const output = createAssistantOutput();
+	const compaction = {
+		type: "compaction",
+		id: "cmp_1",
+		encrypted_content: "opaque-encrypted-state",
+	};
+
+	await processResponsesStream(
+		asAsyncIterable([
+			{ type: "response.created", response: { id: "resp_compact" } },
+			{ type: "response.output_item.done", output_index: 0, item: compaction },
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_compact",
+					status: "completed",
+					output: [compaction],
+					usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11, input_tokens_details: { cached_tokens: 0 } },
+				},
+			},
+		]),
+		output,
+		{ push() {} } as any,
+		model,
+	);
+
+	const hidden = output.content.find((block: any) =>
+		block.type === "thinking" && block.redacted && block.thinking === "") as any;
+	assert.ok(hidden);
+	assert.deepEqual(JSON.parse(hidden.thinkingSignature), compaction);
+
+	const replay = convertResponsesMessages(model, {
+		systemPrompt: "",
+		tools: [],
+		messages: [output],
+	} as any, new Set(["openai-codex"]), { includeSystemPrompt: false }) as any[];
+	assert.deepEqual(replay, [compaction]);
+});
+
 test("processResponsesStream records reasoning token usage and incomplete stop reason", async () => {
 	const output = createAssistantOutput();
 
