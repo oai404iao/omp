@@ -1,0 +1,51 @@
+{
+  "name": "pi-telegram-notify",
+  "version": "0.1.0",
+  "description": "Send Telegram notifications when Pi completes, stops on an error, or waits for ask_user_question input.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "telegram",
+    "notification"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.75.0",
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "files": [
+    "src/",
+    "tests/",
+    "README.md",
+    "config.example.json",
+    "config.schema.json",
+    "package.json",
+    "tsconfig.json"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  }
+}

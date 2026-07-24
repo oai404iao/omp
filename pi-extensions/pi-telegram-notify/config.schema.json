@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pi:pi-telegram-notify:config",
+  "title": "pi-telegram-notify configuration",
+  "description": "Configuration for the pi-telegram-notify Pi extension.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "botToken",
+    "chatId"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL to this JSON Schema, used by editors for validation and completion.",
+      "default": "./config.schema.json"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether Telegram notifications are sent.",
+      "default": true
+    },
+    "botToken": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "Telegram Bot API token. Keep this file private."
+    },
+    "chatId": {
+      "description": "Telegram recipient chat ID, group ID, or @channelusername. Use a string to avoid numeric precision loss.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "integer"
+        }
+      ]
+    },
+    "requestTimeoutMs": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 120000,
+      "description": "Maximum time to wait for the Telegram Bot API. Notification delivery never blocks Pi's agent loop.",
+      "default": 10000
+    }
+  }
+}

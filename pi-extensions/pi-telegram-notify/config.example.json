@@ -1,0 +1,7 @@
+{
+  "$schema": "./config.schema.json",
+  "enabled": true,
+  "botToken": "123456789:replace-with-your-bot-token",
+  "chatId": "123456789",
+  "requestTimeoutMs": 10000
+}
