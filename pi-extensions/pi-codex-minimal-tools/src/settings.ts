@@ -12,7 +12,6 @@ export interface CodexMinimalToolsSettings {
 	autoEnable: boolean;
 	nativeProviderTools: boolean;
 	compactionMode: "pi" | "responses-context-management" | "responses-compact";
-	nativeCompactionThreshold: number;
 	requestProfile: CodexRequestProfileOverride;
 	apiKeyMode: boolean;
 	imageGeneration: boolean;
@@ -33,7 +32,6 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	autoEnable: true,
 	nativeProviderTools: true,
 	compactionMode: "pi",
-	nativeCompactionThreshold: 0,
 	requestProfile: {},
 	apiKeyMode: false,
 	imageGeneration: true,
@@ -131,12 +129,6 @@ function compactionModeSetting(raw: SettingsRecord): CodexMinimalToolsSettings["
 		: DEFAULT_SETTINGS.compactionMode;
 }
 
-function nonNegativeIntegerSetting(raw: SettingsRecord, key: keyof CodexMinimalToolsSettings): number {
-	const fallback = Number(DEFAULT_SETTINGS[key]);
-	const value = raw[key as string];
-	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fallback;
-}
-
 function requestProfileSetting(raw: SettingsRecord): CodexRequestProfileOverride {
 	const value = asRecord(raw.requestProfile);
 	if (!value) return {};
@@ -157,7 +149,6 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		autoEnable: boolSetting(raw, "autoEnable"),
 		nativeProviderTools: boolSetting(raw, "nativeProviderTools"),
 		compactionMode: compactionModeSetting(raw),
-		nativeCompactionThreshold: nonNegativeIntegerSetting(raw, "nativeCompactionThreshold"),
 		requestProfile: requestProfileSetting(raw),
 		apiKeyMode: boolSetting(raw, "apiKeyMode"),
 		imageGeneration: boolSetting(raw, "imageGeneration"),

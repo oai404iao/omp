@@ -435,6 +435,28 @@ export async function processResponsesStream<TApi extends Api>(
 	const outputStates = new Map<number, OutputState>();
 	const imageGenerationCallIds = new Set<string>();
 	const nativeCompactionSignatures = new Set<string>();
+	const responseOutputIndexByBlock = new WeakMap<object, number>();
+	const pushResponseBlock = <T extends InternalAssistantContent>(block: T, outputIndex: number): T => {
+		(output.content as InternalAssistantContent[]).push(block);
+		responseOutputIndexByBlock.set(block as object, outputIndex);
+		return block;
+	};
+	const normalizeResponseBlockOrder = (): void => {
+		const content = output.content as InternalAssistantContent[];
+		const slots: number[] = [];
+		const indexedBlocks: Array<{ block: InternalAssistantContent; outputIndex: number; sequence: number }> = [];
+		for (let index = 0; index < content.length; index++) {
+			const block = content[index]!;
+			const outputIndex = responseOutputIndexByBlock.get(block as object);
+			if (outputIndex === undefined) continue;
+			slots.push(index);
+			indexedBlocks.push({ block, outputIndex, sequence: indexedBlocks.length });
+		}
+		indexedBlocks.sort((a, b) => a.outputIndex - b.outputIndex || a.sequence - b.sequence);
+		for (let index = 0; index < slots.length; index++) {
+			content[slots[index]!] = indexedBlocks[index]!.block;
+		}
+	};
 	const customItemId = (itemId: string | undefined, callId: string): string =>
 		itemId?.startsWith("ctc_") ? itemId : `ctc_${shortHash(itemId || callId)}`;
 	const findCustomToolCallState = (event: { output_index?: number; item_id?: string; call_id?: string }): CustomToolCallState | undefined => {
@@ -448,28 +470,28 @@ export async function processResponsesStream<TApi extends Api>(
 		return undefined;
 	};
 
-	const appendImageGenerationCall = (item: unknown): void => {
+	const appendImageGenerationCall = (item: unknown, outputIndex: number): void => {
 		const imageGenerationCall = sanitizeImageGenerationCallItem(item);
 		if (!imageGenerationCall || imageGenerationCallIds.has(imageGenerationCall.id)) return;
 		imageGenerationCallIds.add(imageGenerationCall.id);
-		(output.content as InternalAssistantContent[]).push({
+		pushResponseBlock({
 			type: "image_generation_call",
 			item: imageGenerationCall,
-		});
+		}, outputIndex);
 	};
-	const appendNativeCompaction = (item: unknown): void => {
+	const appendNativeCompaction = (item: unknown, outputIndex: number): void => {
 		if (!item || typeof item !== "object") return;
 		const type = (item as { type?: unknown }).type;
 		if (type !== "compaction" && type !== "context_compaction") return;
 		const signature = JSON.stringify(item);
 		if (nativeCompactionSignatures.has(signature)) return;
 		nativeCompactionSignatures.add(signature);
-		output.content.push({
+		pushResponseBlock({
 			type: "thinking",
 			thinking: "",
 			thinkingSignature: signature,
 			redacted: true,
-		} as AssistantMessage["content"][number]);
+		} as AssistantMessage["content"][number], outputIndex);
 	};
 
 	const renderReasoningSummary = (summaryParts: Map<number, { text: string }>): string =>
@@ -556,8 +578,10 @@ export async function processResponsesStream<TApi extends Api>(
 			const item = event.item;
 			const customItem = item as unknown as { type?: string; id?: string; call_id?: string; name?: string; input?: string };
 			if (item.type === "reasoning") {
-				const currentBlock: ThinkingBlock = { type: "thinking", thinking: "" };
-				output.content.push(currentBlock);
+				const currentBlock: ThinkingBlock = pushResponseBlock(
+					{ type: "thinking", thinking: "" },
+					event.output_index,
+				);
 				outputStates.set(event.output_index, {
 					kind: "reasoning",
 					blockIndex: blockIndex(),
@@ -566,8 +590,10 @@ export async function processResponsesStream<TApi extends Api>(
 				});
 				stream.push({ type: "thinking_start", contentIndex: blockIndex(), partial: output });
 			} else if (item.type === "message") {
-				const currentBlock: TextBlock = { type: "text", text: "" };
-				output.content.push(currentBlock);
+				const currentBlock: TextBlock = pushResponseBlock(
+					{ type: "text", text: "" },
+					event.output_index,
+				);
 				outputStates.set(event.output_index, {
 					kind: "message",
 					blockIndex: blockIndex(),
@@ -583,7 +609,7 @@ export async function processResponsesStream<TApi extends Api>(
 					arguments: {},
 					partialJson: item.arguments || "",
 				};
-				output.content.push(currentBlock);
+				pushResponseBlock(currentBlock, event.output_index);
 				outputStates.set(event.output_index, {
 					kind: "function_call",
 					blockIndex: blockIndex(),
@@ -600,7 +626,7 @@ export async function processResponsesStream<TApi extends Api>(
 					arguments: { input },
 					partialInput: input,
 				};
-				output.content.push(currentBlock);
+				pushResponseBlock(currentBlock, event.output_index);
 				outputStates.set(event.output_index, {
 					kind: "custom_tool_call",
 					blockIndex: blockIndex(),
@@ -723,8 +749,10 @@ export async function processResponsesStream<TApi extends Api>(
 			if (item.type === "reasoning") {
 				let state = outputStates.get(event.output_index);
 				if (!state || state.kind !== "reasoning") {
-					const currentBlock: ThinkingBlock = { type: "thinking", thinking: "" };
-					output.content.push(currentBlock);
+					const currentBlock: ThinkingBlock = pushResponseBlock(
+						{ type: "thinking", thinking: "" },
+						event.output_index,
+					);
 					state = { kind: "reasoning", blockIndex: blockIndex(), block: currentBlock, summaryParts: new Map() };
 					outputStates.set(event.output_index, state);
 				}
@@ -737,8 +765,10 @@ export async function processResponsesStream<TApi extends Api>(
 			} else if (item.type === "message") {
 				let state = outputStates.get(event.output_index);
 				if (!state || state.kind !== "message") {
-					const currentBlock: TextBlock = { type: "text", text: "" };
-					output.content.push(currentBlock);
+					const currentBlock: TextBlock = pushResponseBlock(
+						{ type: "text", text: "" },
+						event.output_index,
+					);
 					state = { kind: "message", blockIndex: blockIndex(), block: currentBlock, parts: new Map() };
 					outputStates.set(event.output_index, state);
 				}
@@ -783,7 +813,7 @@ export async function processResponsesStream<TApi extends Api>(
 							name: item.name,
 							arguments: args,
 						};
-						output.content.push(fallbackToolCall);
+						pushResponseBlock(fallbackToolCall, event.output_index);
 						return fallbackToolCall;
 					})();
 				const toolCallIndex = state?.kind === "function_call" ? state.blockIndex : blockIndex();
@@ -810,20 +840,20 @@ export async function processResponsesStream<TApi extends Api>(
 							name: customItem.name,
 							arguments: { input },
 						};
-						output.content.push(fallbackToolCall);
+						pushResponseBlock(fallbackToolCall, event.output_index);
 						return fallbackToolCall;
 					})();
 				const toolCallIndex = state?.blockIndex ?? blockIndex();
 				stream.push({ type: "toolcall_end", contentIndex: toolCallIndex, toolCall, partial: output });
 				outputStates.delete(event.output_index);
 			} else if (item.type === "image_generation_call") {
-				appendImageGenerationCall(item);
+				appendImageGenerationCall(item, event.output_index);
 				outputStates.delete(event.output_index);
 			} else if (
 				(item as { type?: unknown }).type === "compaction"
 				|| (item as { type?: unknown }).type === "context_compaction"
 			) {
-				appendNativeCompaction(item);
+				appendNativeCompaction(item, event.output_index);
 				outputStates.delete(event.output_index);
 			}
 		} else if (event.type === "response.completed" || event.type === "response.incomplete") {
@@ -832,10 +862,17 @@ export async function processResponsesStream<TApi extends Api>(
 			const finalOutput = Array.isArray((response as { output?: unknown } | undefined)?.output)
 				? ((response as unknown as { output: unknown[] }).output)
 				: [];
-			for (const item of finalOutput) {
-				if ((item as { type?: unknown } | undefined)?.type === "image_generation_call") appendImageGenerationCall(item);
-				appendNativeCompaction(item);
+			for (let outputIndex = 0; outputIndex < finalOutput.length; outputIndex++) {
+				const item = finalOutput[outputIndex];
+				if ((item as { type?: unknown } | undefined)?.type === "image_generation_call") {
+					appendImageGenerationCall(item, outputIndex);
+				}
+				appendNativeCompaction(item, outputIndex);
 			}
+			// Some Responses-compatible transports only include compaction in the
+			// terminal output array. Preserve its authoritative output_index instead
+			// of appending it after an already-streamed tool call.
+			normalizeResponseBlockOrder();
 			if (response?.id) output.responseId = response.id;
 			if (response?.usage) {
 				const cachedTokens = response.usage.input_tokens_details?.cached_tokens || 0;

@@ -9,7 +9,10 @@ import type {
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 import type { Api, AssistantMessage, Context, Model, ThinkingLevel, Tool } from "@earendil-works/pi-ai";
 import { isOpenAiGpt5Model, type ModelLike } from "./capabilities.js";
-import { requestOpenAINativeCompaction } from "./provider-shim.js";
+import {
+	requestOpenAINativeCompaction,
+	sanitizeNativeCompactionOutput,
+} from "./provider-shim.js";
 import {
 	loadSettings,
 	type CodexMinimalToolsSettings,
@@ -35,6 +38,11 @@ export interface NativeCompactionDetails {
 interface NativeCompactionMarker {
 	item: Record<string, unknown>;
 	blockIndex: number;
+}
+
+interface IndexedNativeCompactionEntry {
+	entry: CompactionEntry<NativeCompactionDetails>;
+	index: number;
 }
 
 type PiMessage = SessionContext["messages"][number];
@@ -78,14 +86,22 @@ function findMarker(message: unknown): NativeCompactionMarker | undefined {
 	return undefined;
 }
 
-function latestNativeCompactionEntry(entries: readonly SessionEntry[]): CompactionEntry<NativeCompactionDetails> | undefined {
+function latestCompactionIndex(entries: readonly SessionEntry[]): number {
 	for (let index = entries.length - 1; index >= 0; index--) {
-		const entry = entries[index];
-		if (entry?.type === "compaction" && isNativeCompactionDetails(entry.details)) {
-			return entry as CompactionEntry<NativeCompactionDetails>;
-		}
+		if (entries[index]?.type === "compaction") return index;
 	}
-	return undefined;
+	return -1;
+}
+
+function latestNativeCompactionEntry(entries: readonly SessionEntry[]): IndexedNativeCompactionEntry | undefined {
+	const index = latestCompactionIndex(entries);
+	if (index < 0) return undefined;
+	const entry = entries[index];
+	if (entry?.type !== "compaction" || !isNativeCompactionDetails(entry.details)) return undefined;
+	return {
+		entry: entry as CompactionEntry<NativeCompactionDetails>,
+		index,
+	};
 }
 
 function latestMarkerEntry(entries: readonly SessionEntry[]): {
@@ -95,7 +111,8 @@ function latestMarkerEntry(entries: readonly SessionEntry[]): {
 	model: string;
 	api: string;
 } | undefined {
-	for (let index = entries.length - 1; index >= 0; index--) {
+	const compactionIndex = latestCompactionIndex(entries);
+	for (let index = entries.length - 1; index > compactionIndex; index--) {
 		const entry = entries[index];
 		if (entry?.type !== "message") continue;
 		const marker = findMarker(entry.message);
@@ -116,6 +133,10 @@ function latestMarkerEntry(entries: readonly SessionEntry[]): {
 		}
 	}
 	return undefined;
+}
+
+export function hasPendingNativeCompactionMarker(entries: readonly SessionEntry[]): boolean {
+	return latestMarkerEntry(entries) !== undefined;
 }
 
 function matchesModelIdentity(
@@ -158,6 +179,10 @@ function withoutCompactionSummary(messages: PiMessages): PiMessages {
 	return messages.filter((message) => message.role !== "compactionSummary");
 }
 
+function nativeMarkerSignature(marker: NativeCompactionMarker): string {
+	return JSON.stringify(marker.item);
+}
+
 function trimSourceAssistant(
 	messages: PiMessages,
 	sourceBlockIndex: number | undefined,
@@ -169,6 +194,26 @@ function trimSourceAssistant(
 	const marker = findMarker(first);
 	const blockIndex = marker?.blockIndex ?? sourceBlockIndex;
 	if (blockIndex === undefined) return messages;
+	const prefix = first.content.slice(0, blockIndex);
+	const suffix = first.content.slice(blockIndex + 1);
+	const resultIds = new Set(
+		messages
+			.filter((message): message is Extract<PiMessage, { role: "toolResult" }> => message.role === "toolResult")
+			.map((message) => message.toolCallId),
+	);
+	const recoverTerminalMarker = suffix.length === 0 && prefix.some(
+		(block) => block.type === "toolCall" && resultIds.has(block.id),
+	);
+	if (recoverTerminalMarker) {
+		// Older versions appended a compaction discovered only in
+		// response.completed after already-streamed output, even when its
+		// authoritative output_index was first. Rotate that terminal marker back
+		// in front so the call arguments and matching results survive replay.
+		const content = includeMarker
+			? [first.content[blockIndex]!, ...prefix]
+			: prefix;
+		return content.length > 0 ? [{ ...first, content }, ...messages.slice(1)] : messages.slice(1);
+	}
 	const start = includeMarker ? blockIndex : blockIndex + 1;
 	const content = first.content.slice(start);
 	return content.length > 0 ? [{ ...first, content }, ...messages.slice(1)] : messages.slice(1);
@@ -176,6 +221,88 @@ function trimSourceAssistant(
 
 function messageTimestamp(message: PiMessage): number {
 	return typeof message.timestamp === "number" ? message.timestamp : 0;
+}
+
+function messagesAfterEntry(entries: readonly SessionEntry[], entryIndex: number): PiMessages {
+	const suffix = entries.slice(entryIndex + 1);
+	if (suffix.length === 0) return [];
+	return buildSessionContext(
+		suffix as SessionEntry[],
+		suffix[suffix.length - 1]?.id,
+	).messages;
+}
+
+/**
+ * Responses requires every function/custom-tool output to have a matching call.
+ * Compaction can expose malformed local history if a boundary lands inside a
+ * tool turn, so rebuild tool turns atomically: drop orphan/duplicate results and
+ * synthesize an aborted output for a surviving call with no result.
+ */
+export function normalizeNativeCompactionToolPairs(messages: PiMessages): PiMessages {
+	const resultByCallId = new Map<string, Extract<PiMessage, { role: "toolResult" }>>();
+	for (const message of messages) {
+		if (message.role === "toolResult" && !resultByCallId.has(message.toolCallId)) {
+			resultByCallId.set(message.toolCallId, message);
+		}
+	}
+
+	let changed = false;
+	const normalized: PiMessage[] = [];
+	const retainedResults = new Set<string>();
+	for (const message of messages) {
+		if (message.role === "toolResult") {
+			changed = true;
+			continue;
+		}
+		normalized.push(message);
+		if (message.role !== "assistant") continue;
+
+		for (const block of message.content) {
+			if (block.type !== "toolCall" || retainedResults.has(block.id)) continue;
+			retainedResults.add(block.id);
+			const existing = resultByCallId.get(block.id);
+			if (existing) {
+				normalized.push(existing);
+				continue;
+			}
+			changed = true;
+			normalized.push({
+				role: "toolResult",
+				toolCallId: block.id,
+				toolName: block.name,
+				content: [{ type: "text", text: "aborted" }],
+				isError: true,
+				timestamp: messageTimestamp(message),
+			} as PiMessage);
+		}
+	}
+
+	if (retainedResults.size !== resultByCallId.size) changed = true;
+	return changed ? normalized : messages;
+}
+
+function pendingMarkerInMessages(
+	messages: PiMessages,
+	entries: readonly SessionEntry[],
+	model: Model<Api>,
+): { messageIndex: number; marker: NativeCompactionMarker } | undefined {
+	const pending = latestMarkerEntry(entries);
+	if (!pending && entries.length > 0) return undefined;
+	const expectedSignature = pending ? nativeMarkerSignature(pending.marker) : undefined;
+
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const marker = findMarker(messages[index]);
+		if (!marker) continue;
+		if (expectedSignature && nativeMarkerSignature(marker) !== expectedSignature) continue;
+		const message = asRecord(messages[index]);
+		if (
+			message?.provider !== model.provider
+			|| message.model !== model.id
+			|| message.api !== model.api
+		) continue;
+		return { messageIndex: index, marker };
+	}
+	return undefined;
 }
 
 /**
@@ -193,36 +320,34 @@ export function applyNativeCompactionContext(
 
 	const installed = latestNativeCompactionEntry(branchEntries);
 	if (installed) {
-		const details = installed.details;
+		const details = installed.entry.details;
 		if (!isNativeCompactionDetails(details)) return messages;
 		if (!matchesModelIdentity(details, model)) return messages;
+		const output = details.mode === "responses-compact"
+			? sanitizeNativeCompactionOutput(details.output)
+			: details.output;
 		const withoutSummary = withoutCompactionSummary(messages);
 		let tail: PiMessages;
 		if (details.sourceEntryId) {
 			tail = trimSourceAssistant(withoutSummary, details.sourceBlockIndex, false);
 		} else {
-			const installedAt = new Date(installed.timestamp).getTime();
-			tail = withoutSummary.filter((message) => messageTimestamp(message) > installedAt);
+			// The compaction entry is the semantic history boundary. Timestamps are
+			// not safe here because messages queued while compaction is running can
+			// be appended after the entry with an earlier creation timestamp.
+			tail = messagesAfterEntry(branchEntries, installed.index);
 		}
-		return [
-			syntheticNativeAssistant(details.output, model, new Date(installed.timestamp).getTime()),
+		return normalizeNativeCompactionToolPairs([
+			syntheticNativeAssistant(output, model, new Date(installed.entry.timestamp).getTime()),
 			...tail,
-		];
+		]);
 	}
 
 	if (mode !== "responses-context-management") return messages;
-	for (let index = messages.length - 1; index >= 0; index--) {
-		const marker = findMarker(messages[index]);
-		if (!marker) continue;
-		const message = asRecord(messages[index]);
-		if (
-			message?.provider !== model.provider
-			|| message.model !== model.id
-			|| message.api !== model.api
-		) continue;
-		return trimSourceAssistant(messages.slice(index), marker.blockIndex, true);
-	}
-	return messages;
+	const pending = pendingMarkerInMessages(messages, branchEntries, model);
+	if (!pending) return messages;
+	return normalizeNativeCompactionToolPairs(
+		trimSourceAssistant(messages.slice(pending.messageIndex), pending.marker.blockIndex, true),
+	);
 }
 
 function activeTools(pi: ExtensionAPI): Tool[] {
@@ -238,7 +363,7 @@ function activeTools(pi: ExtensionAPI): Tool[] {
 
 function compactionSummary(mode: NativeCompactionMode): string {
 	return mode === "responses-context-management"
-		? "OpenAI Responses context management compacted the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools."
+		? "OpenAI Responses compaction trigger compacted the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools."
 		: "OpenAI Responses /responses/compact replaced the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools.";
 }
 
@@ -288,7 +413,7 @@ export function registerNativeCompaction(pi: ExtensionAPI): void {
 
 			if (mode === "responses-context-management") {
 				const captured = latestMarkerEntry(event.branchEntries);
-				if (captured) {
+				if (captured && matchesModelIdentity(captured, model)) {
 					return {
 						compaction: {
 							summary: compactionSummary(mode),

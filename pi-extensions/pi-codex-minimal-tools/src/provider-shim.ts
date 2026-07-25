@@ -44,6 +44,9 @@ const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE = "x-openai-internal-codex-response
 const WS_RESPONSES_LITE_CLIENT_METADATA_KEY = "ws_request_header_x_openai_internal_codex_responses_lite";
 const WEB_SEARCH_SOURCES_INCLUDE = "web_search_call.action.sources";
 const SESSION_WEBSOCKET_CACHE_TTL_MS = 5 * 60 * 1000;
+const CODEX_COMPACTION_TRIGGER_TYPE = "compaction_trigger";
+const CODEX_RETAINED_MESSAGE_TOKEN_BUDGET = 64_000;
+const APPROX_BYTES_PER_TOKEN = 4;
 const dynamicImport = (specifier: string) => import(specifier);
 let _os: { platform(): string; release(): string; arch(): string } | null = null;
 
@@ -162,10 +165,6 @@ interface ResponsesBody {
 		context?: "all_turns";
 	};
 	client_metadata?: Record<string, string>;
-	context_management?: Array<{
-		type: "compaction";
-		compact_threshold: number;
-	}>;
 	[key: string]: unknown;
 }
 
@@ -590,12 +589,6 @@ export function withResponsesLiteWebSocketMetadata<T extends { client_metadata?:
 	};
 }
 
-export function resolveNativeCompactionThreshold(model: Model<Api>, configuredThreshold: number): number {
-	if (configuredThreshold > 0) return configuredThreshold;
-	const contextWindow = Number.isFinite(model.contextWindow) ? model.contextWindow : 0;
-	return Math.max(1, contextWindow > 32_768 ? contextWindow - 32_768 : Math.floor(contextWindow * 0.8));
-}
-
 export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, profile: CodexRequestProfile, options?: SimpleStreamOptions): ResponsesBody {
 	const messages = convertResponsesMessages(model, context, CODEX_TOOL_CALL_PROVIDERS, {
 		includeSystemPrompt: false,
@@ -666,18 +659,6 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 		const summary = (options as { reasoningSummary?: string } | undefined)?.reasoningSummary ?? (lite ? undefined : "auto");
 		if (summary && summary !== "none") reasoning.summary = summary;
 		body.reasoning = reasoning;
-	}
-
-	const settings = loadSettings();
-	if (
-		settings.compactionMode === "responses-context-management"
-		&& profile.responsesMode === "standard"
-		&& isOpenAiGpt5Model(model)
-	) {
-		body.context_management = [{
-			type: "compaction",
-			compact_threshold: resolveNativeCompactionThreshold(model as Model<Api>, settings.nativeCompactionThreshold),
-		}];
 	}
 
 	return body;
@@ -1535,9 +1516,198 @@ async function postJsonWithRetries(
 
 function compactionItems(output: unknown): unknown[] {
 	if (!Array.isArray(output)) throw new Error("OpenAI native compaction response omitted output");
+	return output.filter(isNativeCompactionItem);
+}
+
+function isNativeCompactionItem(item: unknown): item is Record<string, unknown> {
+	const type = item && typeof item === "object" ? (item as { type?: unknown }).type : undefined;
+	return type === "compaction" || type === "context_compaction";
+}
+
+function approxTokenCount(text: string): number {
+	const bytes = new TextEncoder().encode(text).byteLength;
+	return Math.ceil(bytes / APPROX_BYTES_PER_TOKEN);
+}
+
+function responseMessageTokenCount(item: Record<string, unknown>): number {
+	if (!Array.isArray(item.content)) return 1;
+	const tokens = item.content.reduce((total, part) => {
+		if (!part || typeof part !== "object") return total;
+		const text = (part as { text?: unknown }).text;
+		return typeof text === "string" ? total + approxTokenCount(text) : total;
+	}, 0);
+	return Math.max(1, tokens);
+}
+
+function truncateUtf8Prefix(text: string, maxBytes: number): string {
+	if (maxBytes <= 0) return "";
+	const encoder = new TextEncoder();
+	if (encoder.encode(text).byteLength <= maxBytes) return text;
+	let result = "";
+	let bytes = 0;
+	for (const character of text) {
+		const characterBytes = encoder.encode(character).byteLength;
+		if (bytes + characterBytes > maxBytes) break;
+		result += character;
+		bytes += characterBytes;
+	}
+	return result;
+}
+
+function truncateResponseMessage(
+	item: Record<string, unknown>,
+	maxTokens: number,
+): Record<string, unknown> | undefined {
+	if (!Array.isArray(item.content) || maxTokens <= 0) return undefined;
+	let remaining = maxTokens;
+	const content: unknown[] = [];
+	for (const part of item.content) {
+		if (!part || typeof part !== "object" || Array.isArray(part)) continue;
+		const record = part as Record<string, unknown>;
+		if (typeof record.text !== "string") {
+			content.push(part);
+			continue;
+		}
+		if (remaining <= 0) continue;
+		const tokenCount = approxTokenCount(record.text);
+		if (tokenCount <= remaining) {
+			content.push(part);
+			remaining -= tokenCount;
+			continue;
+		}
+		const text = truncateUtf8Prefix(record.text, remaining * APPROX_BYTES_PER_TOKEN);
+		if (text) content.push({ ...record, text });
+		remaining = 0;
+	}
+	return content.length > 0 ? { ...item, content } : undefined;
+}
+
+/**
+ * Match Codex remote compaction v2's installed checkpoint shape: retain the
+ * newest real user messages within a bounded token budget, drop stale
+ * developer/system/assistant/tool state, then append the opaque compaction
+ * item returned by Responses.
+ */
+export function buildCodexCompactionCheckpoint(
+	input: unknown[],
+	compactionItem: unknown,
+): unknown[] {
+	const candidates = input.flatMap((item): Record<string, unknown>[] => {
+		if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+		const record = item as Record<string, unknown>;
+		if (
+			(record.type === undefined || record.type === "message")
+			&& record.role === "user"
+			&& Array.isArray(record.content)
+		) {
+			return [{ ...record, type: "message" }];
+		}
+		return [];
+	});
+	let remaining = CODEX_RETAINED_MESSAGE_TOKEN_BUDGET;
+	const retainedReversed: Record<string, unknown>[] = [];
+	for (let index = candidates.length - 1; index >= 0 && remaining > 0; index--) {
+		const item = candidates[index]!;
+		const tokenCount = responseMessageTokenCount(item);
+		if (tokenCount <= remaining) {
+			retainedReversed.push(item);
+			remaining -= tokenCount;
+			continue;
+		}
+		const truncated = truncateResponseMessage(item, remaining);
+		if (truncated) retainedReversed.push(truncated);
+		remaining = 0;
+	}
+	retainedReversed.reverse();
+	return [...retainedReversed, compactionItem];
+}
+
+async function collectCodexCompactionOutput(response: Response): Promise<unknown> {
+	let outputItemCount = 0;
+	const compacted: unknown[] = [];
+	for await (const event of mapCodexEvents(parseSSE(response))) {
+		if (event.type !== "response.output_item.done" || !event.item) continue;
+		outputItemCount++;
+		if (isNativeCompactionItem(event.item)) compacted.push(event.item);
+	}
+	if (compacted.length !== 1) {
+		throw new NonRetryableProviderError(
+			`OpenAI compaction trigger expected exactly one compaction item, received ${compacted.length} from ${outputItemCount} output items`,
+		);
+	}
+	return compacted[0];
+}
+
+async function requestCodexCompactionTrigger(
+	url: string,
+	headers: Headers,
+	body: ResponsesBody,
+	signal: AbortSignal | undefined,
+): Promise<unknown> {
+	const bodyJson = JSON.stringify(body);
+	const dispatcher = await proxyDispatcherForUrl(url);
+	let lastError: Error | undefined;
+	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+		try {
+			const response = await fetchWithResponseHeaderTimeout(url, {
+				method: "POST",
+				headers,
+				body: bodyJson,
+				...(dispatcher ? { dispatcher } : {}),
+			} as RequestInit, signal);
+			if (response.ok) return await collectCodexCompactionOutput(response);
+
+			const errorText = await response.text();
+			if (attempt < MAX_RETRIES && isRetryableError(response.status, errorText)) {
+				await sleep(BASE_DELAY_MS * 2 ** attempt, signal);
+				continue;
+			}
+			const info = await parseErrorResponse(new Response(errorText, {
+				status: response.status,
+				statusText: response.statusText,
+			}));
+			throw new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message));
+		} catch (error) {
+			if (error instanceof NonRetryableProviderError) throw error;
+			if (signal?.aborted) throw new Error("Request was aborted");
+			lastError = error instanceof Error ? error : new Error(String(error));
+			if (attempt < MAX_RETRIES) {
+				await sleep(BASE_DELAY_MS * 2 ** attempt, signal);
+				continue;
+			}
+			throw lastError;
+		}
+	}
+	throw lastError ?? new Error("OpenAI compaction trigger failed");
+}
+
+function hasNonEmptyResponseMessageContent(item: Record<string, unknown>): boolean {
+	if (item.type !== "message") return false;
+	if (item.role !== "user" && item.role !== "assistant") return false;
+	if (!Array.isArray(item.content)) return false;
+	return item.content.some((part) => {
+		if (!part || typeof part !== "object") return false;
+		const content = part as Record<string, unknown>;
+		return (
+			(typeof content.text === "string" && content.text.trim().length > 0)
+			|| (typeof content.refusal === "string" && content.refusal.trim().length > 0)
+			|| typeof content.image_url === "string"
+		);
+	});
+}
+
+/**
+ * Install remote compaction as a fresh history checkpoint, following Codex's
+ * compaction reducer: preserve only safe message/checkpoint items and discard
+ * reasoning, tool calls, and tool outputs. Replaying a partial call pair is
+ * invalid Responses input and can detach tool arguments from their result.
+ */
+export function sanitizeNativeCompactionOutput(output: unknown[]): unknown[] {
 	return output.filter((item) => {
-		const type = item && typeof item === "object" ? (item as { type?: unknown }).type : undefined;
-		return type === "compaction" || type === "context_compaction";
+		if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+		const record = item as Record<string, unknown>;
+		if (record.type === "compaction" || record.type === "context_compaction") return true;
+		return hasNonEmptyResponseMessageContent(record);
 	});
 }
 
@@ -1566,22 +1736,21 @@ export async function requestOpenAINativeCompaction(
 		signal: options.signal,
 		reasoning: options.reasoning,
 	});
-	const headers = buildJsonHeaders(model.headers, options.headers, options.apiKey);
 
 	if (options.mode === "responses-context-management") {
-		body.stream = false;
-		body.context_management = [{
-			type: "compaction",
-			compact_threshold: 1,
-		}];
-		const response = await postJsonWithRetries(resolveCodexUrl(model.baseUrl, { apiKeyMode: true }), headers, body, options.signal);
-		const items = compactionItems(response.output);
-		if (items.length !== 1) {
-			throw new Error(`OpenAI context_management expected exactly one compaction item, received ${items.length}`);
-		}
-		return items;
+		const retainedInput = [...body.input];
+		body.input = [...retainedInput, { type: CODEX_COMPACTION_TRIGGER_TYPE }];
+		const headers = buildSSEHeaders(model.headers, options.headers, undefined, options.apiKey, undefined, profile);
+		const item = await requestCodexCompactionTrigger(
+			resolveCodexUrl(model.baseUrl, { apiKeyMode: true }),
+			headers,
+			body,
+			options.signal,
+		);
+		return buildCodexCompactionCheckpoint(retainedInput, item);
 	}
 
+	const headers = buildJsonHeaders(model.headers, options.headers, options.apiKey);
 	const compactBody: Record<string, unknown> = {
 		model: body.model,
 		input: body.input,
@@ -1595,10 +1764,11 @@ export async function requestOpenAINativeCompaction(
 	if (!Array.isArray(output) || output.length === 0) {
 		throw new Error("OpenAI /responses/compact returned no replacement output");
 	}
-	if (compactionItems(output).length === 0) {
+	const sanitizedOutput = sanitizeNativeCompactionOutput(output);
+	if (compactionItems(sanitizedOutput).length === 0) {
 		throw new Error("OpenAI /responses/compact output did not contain a compaction item");
 	}
-	return output;
+	return sanitizedOutput;
 }
 
 async function processWebSocketStream<TApi extends Api>(

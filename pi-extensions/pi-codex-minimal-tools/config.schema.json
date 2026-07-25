@@ -34,15 +34,9 @@
     },
     "compactionMode": {
       "type": "string",
-      "description": "Compaction implementation for GPT-5-series models on the openai provider. pi uses Pi summaries; responses-context-management uses /responses context_management; responses-compact uses /responses/compact.",
+      "description": "Compaction implementation for GPT-5-series models on the openai provider. pi uses Pi summaries; responses-context-management is a compatibility name for Codex-style /responses compaction_trigger; responses-compact uses /responses/compact.",
       "enum": ["pi", "responses-context-management", "responses-compact"],
       "default": "pi"
-    },
-    "nativeCompactionThreshold": {
-      "type": "integer",
-      "description": "Token threshold for responses-context-management. Set to 0 to derive a threshold below Pi's default auto-compaction boundary.",
-      "minimum": 0,
-      "default": 0
     },
     "requestProfile": {
       "type": "object",

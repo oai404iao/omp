@@ -214,6 +214,67 @@ test("processResponsesStream preserves opaque compaction items for exact replay"
 	assert.deepEqual(replay, [compaction]);
 });
 
+test("terminal-only compaction is ordered before an already-streamed tool call", async () => {
+	const output = createAssistantOutput();
+	const compaction = {
+		type: "compaction",
+		id: "cmp_1",
+		encrypted_content: "opaque-encrypted-state",
+	};
+	const functionCall = {
+		type: "function_call",
+		id: "fc_1",
+		call_id: "call_1",
+		name: "read",
+		arguments: '{"path":"a.ts"}',
+	};
+
+	await processResponsesStream(
+		asAsyncIterable([
+			{ type: "response.created", response: { id: "resp_compact_call" } },
+			{ type: "response.output_item.added", output_index: 1, item: { ...functionCall, arguments: "" } },
+			{ type: "response.function_call_arguments.done", output_index: 1, arguments: functionCall.arguments },
+			{ type: "response.output_item.done", output_index: 1, item: functionCall },
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_compact_call",
+					status: "completed",
+					output: [compaction, functionCall],
+					usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11, input_tokens_details: { cached_tokens: 0 } },
+				},
+			},
+		]),
+		output,
+		{ push() {} } as any,
+		model,
+	);
+
+	assert.deepEqual(output.content.map((block: any) => block.type), ["thinking", "toolCall"]);
+	assert.deepEqual((output.content[1] as any).arguments, { path: "a.ts" });
+
+	const replay = convertResponsesMessages(model, {
+		systemPrompt: "",
+		tools: [],
+		messages: [
+			output,
+			{
+				role: "toolResult",
+				toolCallId: "call_1|fc_1",
+				toolName: "read",
+				content: [{ type: "text", text: "result" }],
+				isError: false,
+				timestamp: Date.now(),
+			},
+		],
+	} as any, new Set(["openai-codex"]), { includeSystemPrompt: false }) as any[];
+	assert.deepEqual(replay.map((item) => item.type), [
+		"compaction",
+		"function_call",
+		"function_call_output",
+	]);
+});
+
 test("processResponsesStream records reasoning token usage and incomplete stop reason", async () => {
 	const output = createAssistantOutput();
 

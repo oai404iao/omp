@@ -145,7 +145,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`enabled: ${settings.enabled}`,
 		`autoEnable: ${settings.autoEnable}`,
 		`nativeProviderTools: ${settings.nativeProviderTools}`,
-		`compaction: ${settings.compactionMode}${settings.compactionMode === "responses-context-management" ? ` (threshold=${settings.nativeCompactionThreshold || "auto"})` : ""}`,
+		`compaction: ${settings.compactionMode}`,
 		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, system=${requestProfile.systemPromptPlacement}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
 		`webSearchEnabled: ${settings.webSearchEnabled}`,
 		`apiKeyMode: ${settings.apiKeyMode}`,

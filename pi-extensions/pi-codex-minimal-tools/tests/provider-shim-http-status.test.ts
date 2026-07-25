@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
 import {
+	buildCodexCompactionCheckpoint,
 	buildWebSearchStatusText,
 	extractWebSearchProgress,
 	mergeWebSearchActivity,
@@ -631,10 +632,9 @@ test("openai provider applies request profiles with API-key Responses transport"
 	assert.equal(requestBody.tools[0].name, "apply_patch");
 });
 
-test("openai GPT-5 requests can opt into Responses context_management", async () => {
+test("normal OpenAI requests do not compact inline inside a tool turn", async () => {
 	writeSettings({
 		compactionMode: "responses-context-management",
-		nativeCompactionThreshold: 123_456,
 	});
 	const provider = createProviderHarness().providers.openai;
 	let requestBody: any;
@@ -662,13 +662,23 @@ test("openai GPT-5 requests can opt into Responses context_management", async ()
 	const result = await stream.result();
 
 	assert.equal(result.stopReason, "stop");
-	assert.deepEqual(requestBody.context_management, [{
-		type: "compaction",
-		compact_threshold: 123_456,
-	}]);
+	assert.equal("context_management" in requestBody, false);
 });
 
-test("native compaction supports /responses context_management and /responses/compact", async () => {
+test("Codex compaction checkpoints retain user messages and drop stale execution state", () => {
+	const compaction = { type: "compaction", encrypted_content: "managed-encrypted" };
+	const user = { type: "message", role: "user", content: [{ type: "input_text", text: "retained" }] };
+	const result = buildCodexCompactionCheckpoint([
+		{ type: "message", role: "developer", content: [{ type: "input_text", text: "stale instructions" }] },
+		user,
+		{ type: "message", role: "assistant", content: [{ type: "output_text", text: "stale reply" }] },
+		{ type: "function_call", id: "fc_old", call_id: "call_old", name: "read", arguments: "{}" },
+	], compaction);
+
+	assert.deepEqual(result, [user, compaction]);
+});
+
+test("native compaction supports Codex /responses compaction_trigger and /responses/compact", async () => {
 	const model = {
 		provider: "openai",
 		api: "openai-responses",
@@ -692,7 +702,6 @@ test("native compaction supports /responses context_management and /responses/co
 		autoEnable: true,
 		nativeProviderTools: true,
 		compactionMode: "responses-context-management",
-		nativeCompactionThreshold: 0,
 		requestProfile: {},
 		apiKeyMode: false,
 		imageGeneration: true,
@@ -706,21 +715,23 @@ test("native compaction supports /responses context_management and /responses/co
 		allowAbsolutePatchPaths: false,
 		deferApplyPatchRendering: false,
 	} as const;
-	const requests: Array<{ url: string; body: any }> = [];
+	const requests: Array<{ url: string; body: any; headers: Headers }> = [];
 	globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
 		const body = JSON.parse(String(init?.body));
-		requests.push({ url: String(url), body });
+		requests.push({ url: String(url), body, headers: new Headers(init?.headers as HeadersInit) });
 		if (String(url).endsWith("/responses/compact")) {
 			return Response.json({
 				output: [
+					{ type: "message", role: "developer", content: [{ type: "input_text", text: "stale instructions" }] },
 					{ type: "message", role: "user", content: [{ type: "input_text", text: "retained" }] },
+					{ type: "reasoning", id: "rs_old", encrypted_content: "stale-reasoning" },
+					{ type: "function_call", id: "fc_old", call_id: "call_old", name: "read", arguments: "{\"path\":\"old\"}" },
+					{ type: "function_call_output", call_id: "call_old", output: "old result" },
 					{ type: "compaction", encrypted_content: "legacy-encrypted" },
 				],
 			});
 		}
-		return Response.json({
-			output: [{ type: "compaction", encrypted_content: "managed-encrypted" }],
-		});
+		return successSseResponse([{ type: "compaction", encrypted_content: "managed-encrypted" }]);
 	}) as typeof fetch;
 
 	const managed = await requestOpenAINativeCompaction(model, context, {
@@ -734,10 +745,16 @@ test("native compaction supports /responses context_management and /responses/co
 		settings: { ...settings, compactionMode: "responses-compact" } as any,
 	});
 
-	assert.deepEqual(managed, [{ type: "compaction", encrypted_content: "managed-encrypted" }]);
+	assert.deepEqual(managed, [
+		{ type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] },
+		{ type: "compaction", encrypted_content: "managed-encrypted" },
+	]);
 	assert.equal(requests[0]?.url, "https://example.test/v1/responses");
-	assert.equal(requests[0]?.body.stream, false);
-	assert.deepEqual(requests[0]?.body.context_management, [{ type: "compaction", compact_threshold: 1 }]);
+	assert.equal(requests[0]?.body.stream, true);
+	assert.equal(requests[0]?.headers.get("accept"), "text/event-stream");
+	assert.equal("context_management" in requests[0]!.body, false);
+	assert.deepEqual(requests[0]?.body.input.at(-1), { type: "compaction_trigger" });
+	assert.equal(JSON.stringify(requests[0]?.body).includes("compact_threshold"), false);
 	assert.equal(requests[1]?.url, "https://example.test/v1/responses/compact");
 	assert.equal("stream" in requests[1]!.body, false);
 	assert.equal("store" in requests[1]!.body, false);
