@@ -20,10 +20,14 @@ import {
 } from "@earendil-works/pi-ai";
 import type { ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
 import {
+	collectHistoricalCitationSources,
+	collectWebSearchCitationSources,
 	convertResponsesMessages,
 	convertResponsesTools,
+	encodeWebSearchActivityTextSignature,
 	processResponsesStream,
-	WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX,
+	type CitationSource,
+	type WebSearchCitationSource,
 } from "./providers/openai-responses-shared.js";
 import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
 
@@ -43,6 +47,7 @@ const OPENAI_BETA_RESPONSES_WEBSOCKETS = "responses_websockets=2026-02-06";
 const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE = "x-openai-internal-codex-responses-lite";
 const WS_RESPONSES_LITE_CLIENT_METADATA_KEY = "ws_request_header_x_openai_internal_codex_responses_lite";
 const WEB_SEARCH_SOURCES_INCLUDE = "web_search_call.action.sources";
+const WEB_SEARCH_RESULTS_INCLUDE = "web_search_call.results";
 const SESSION_WEBSOCKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const CODEX_COMPACTION_TRIGGER_TYPE = "compaction_trigger";
 const CODEX_RETAINED_MESSAGE_TOKEN_BUDGET = 64_000;
@@ -95,6 +100,7 @@ export interface SurfacedWebSearch {
 	url?: string;
 	pattern?: string;
 	sources: Array<{ title?: string; url: string }>;
+	responseItem?: Record<string, unknown>;
 }
 
 type PendingActivity = QueuedImageActivity;
@@ -560,11 +566,11 @@ function hasNativeWebSearchTool(body: ResponsesBody): boolean {
 	return Array.isArray(body.tools) && body.tools.some((tool) => Boolean(tool) && typeof tool === "object" && (tool as { type?: unknown }).type === "web_search");
 }
 
-function ensureWebSearchSourcesIncluded(body: ResponsesBody): void {
+function ensureWebSearchDetailsIncluded(body: ResponsesBody): void {
 	if (!hasNativeWebSearchTool(body)) return;
 	const include = Array.isArray(body.include) ? body.include : [];
-	if (include.includes(WEB_SEARCH_SOURCES_INCLUDE)) return;
-	body.include = [...include, WEB_SEARCH_SOURCES_INCLUDE];
+	const missing = [WEB_SEARCH_SOURCES_INCLUDE, WEB_SEARCH_RESULTS_INCLUDE].filter((value) => !include.includes(value));
+	if (missing.length > 0) body.include = [...include, ...missing];
 }
 
 function stripResponsesLiteImageDetails(value: unknown): void {
@@ -1410,6 +1416,8 @@ async function processCapturedResponsesStream<TApi extends Api>(
 	},
 	cwd: string,
 	requestPrompt: string | undefined,
+	webSearchCitationSources: ReadonlyArray<WebSearchCitationSource>,
+	historicalCitationSources: ReadonlyArray<CitationSource>,
 ): Promise<void> {
 	type TextBlock = Extract<AssistantMessage["content"][number], { type: "text" }>;
 	const webSearchStates = new Map<string, { search: SurfacedWebSearch; block: TextBlock; contentIndex: number }>();
@@ -1417,9 +1425,11 @@ async function processCapturedResponsesStream<TApi extends Api>(
 		const existing = webSearchStates.get(search.callId);
 		const merged = mergeWebSearchActivity(existing?.search, search);
 		const text = buildWebSearchInlineText(merged, cwd);
+		const textSignature = encodeWebSearchActivityTextSignature(merged.callId, merged.responseItem);
 		if (existing) {
 			existing.search = merged;
 			existing.block.text = text;
+			existing.block.textSignature = textSignature;
 			stream.push({ type: "text_delta", contentIndex: existing.contentIndex, delta: "", partial: output });
 			return;
 		}
@@ -1427,7 +1437,7 @@ async function processCapturedResponsesStream<TApi extends Api>(
 		const block: TextBlock = {
 			type: "text",
 			text: "",
-			textSignature: `${WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX}${search.callId}`,
+			textSignature,
 		};
 		output.content.push(block);
 		const contentIndex = output.content.length - 1;
@@ -1447,6 +1457,8 @@ async function processCapturedResponsesStream<TApi extends Api>(
 		serviceTier: (options as { serviceTier?: ServiceTier } | undefined)?.serviceTier,
 		resolveServiceTier: resolveCodexServiceTier,
 		applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model as Model<Api>),
+		webSearchCitationSources,
+		historicalCitationSources,
 	});
 }
 
@@ -1785,6 +1797,8 @@ async function processWebSocketStream<TApi extends Api>(
 	},
 	cwd: string,
 	requestPrompt: string | undefined,
+	webSearchCitationSources: ReadonlyArray<WebSearchCitationSource>,
+	historicalCitationSources: ReadonlyArray<CitationSource>,
 ): Promise<void> {
 	let streamStarted = false;
 
@@ -1824,6 +1838,8 @@ async function processWebSocketStream<TApi extends Api>(
 				deps,
 				cwd,
 				requestPrompt,
+				webSearchCitationSources,
+				historicalCitationSources,
 			);
 			if (options?.signal?.aborted) {
 				keepConnection = false;
@@ -1913,6 +1929,7 @@ export function extractWebSearch(
 		...(url ? { url } : {}),
 		...(pattern ? { pattern } : {}),
 		sources,
+		...(options?.completed ? { responseItem: item as Record<string, unknown> } : {}),
 	};
 }
 
@@ -1956,6 +1973,7 @@ export function mergeWebSearchActivity(
 		url: next.url ?? previous.url,
 		pattern: next.pattern ?? previous.pattern,
 		sources,
+		responseItem: next.responseItem ?? previous.responseItem,
 	};
 }
 
@@ -2179,6 +2197,8 @@ function createCodexStream<TApi extends Api>(
 	(async () => {
 		const output = createInitialAssistantMessage(model);
 		const requestPrompt = getLatestUserText(context);
+		const webSearchCitationSources = collectWebSearchCitationSources(model, context);
+		const historicalCitationSources = collectHistoricalCitationSources(model, context);
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
@@ -2195,7 +2215,7 @@ function createCodexStream<TApi extends Api>(
 			if (nextBody !== undefined) {
 				body = nextBody as ResponsesBody;
 			}
-			ensureWebSearchSourcesIncluded(body);
+			ensureWebSearchDetailsIncluded(body);
 
 			const websocketRequestId = options?.sessionId || createCodexRequestId();
 			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId, requestProfile);
@@ -2225,6 +2245,8 @@ function createCodexStream<TApi extends Api>(
 							deps,
 							requestCwd,
 							requestPrompt,
+							webSearchCitationSources,
+							historicalCitationSources,
 						);
 						if (options?.signal?.aborted) {
 							throw new Error("Request was aborted");
@@ -2320,7 +2342,18 @@ function createCodexStream<TApi extends Api>(
 			}
 
 			stream.push({ type: "start", partial: output });
-			await processCapturedResponsesStream(parseSSE(response), output, stream, model, options, deps, requestCwd, requestPrompt);
+			await processCapturedResponsesStream(
+				parseSSE(response),
+				output,
+				stream,
+				model,
+				options,
+				deps,
+				requestCwd,
+				requestPrompt,
+				webSearchCitationSources,
+				historicalCitationSources,
+			);
 			finalizeUsage(model, output);
 
 			if (options?.signal?.aborted) {

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
+import { decodeWebSearchActivityTextSignature } from "../src/providers/openai-responses-shared.js";
 import {
 	buildCodexCompactionCheckpoint,
 	buildWebSearchStatusText,
@@ -178,6 +179,12 @@ function webSearchLifecycleSseResponse(options?: { includeDoneItem?: boolean }):
 			query: "latest docs",
 			sources: [{ title: "Docs", url: "https://example.com/docs" }],
 		},
+		results: [{
+			type: "text_result",
+			snippet: "citeturn0search0 Latest documentation",
+			title: "Docs",
+			url: "https://example.com/docs",
+		}],
 	};
 	const events = [
 		{ type: "response.created", response: { id: "resp_web" } },
@@ -271,7 +278,7 @@ test("upstream stream_read_error is surfaced for Pi's agent-level auto-retry reg
 	assert.equal(result.errorMessage, "Connection error: Codex error: stream_read_error");
 });
 
-test("native web_search requests include source payloads without dropping reasoning include", async () => {
+test("native web_search requests include source and result payloads without dropping reasoning include", async () => {
 	let requestBody: any;
 	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
 		requestBody = JSON.parse(String(init?.body));
@@ -286,6 +293,7 @@ test("native web_search requests include source payloads without dropping reason
 	assert.deepEqual(requestBody.tools, [{ type: "web_search" }]);
 	assert.ok(requestBody.include.includes("reasoning.encrypted_content"));
 	assert.ok(requestBody.include.includes("web_search_call.action.sources"));
+	assert.ok(requestBody.include.includes("web_search_call.results"));
 });
 
 test("request profile disables parallel calls while apply_patch stays a function tool", async () => {
@@ -500,6 +508,9 @@ test("web search special events merge with output items into one rendered activi
 	assert.deepEqual(result.content.map((block: any) => block.type), ["thinking", "text", "text"]);
 	assert.match((result.content[1] as any).text, /Searched the web.*latest docs/);
 	assert.match((result.content[1] as any).textSignature, /^pi:web-search-activity:ws_123/);
+	const replayItem = decodeWebSearchActivityTextSignature((result.content[1] as any).textSignature);
+	assert.equal(replayItem?.id, "ws_123");
+	assert.equal(replayItem?.results?.[0]?.snippet, "citeturn0search0 Latest documentation");
 	assert.equal((result.content[2] as any).text, "Final answer");
 	const searchUpdateIndex = updates.findIndex((update) =>
 		update.content.some((block) => block.type === "text" && /Searching the web|Searched the web/.test(block.text)));

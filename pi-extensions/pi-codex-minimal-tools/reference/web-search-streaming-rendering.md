@@ -138,14 +138,26 @@ When requested through:
 
 ```json
 {
-  "include": ["web_search_call.action.sources"]
+  "include": [
+    "web_search_call.action.sources",
+    "web_search_call.results"
+  ]
 }
 ```
 
-the completed action can contain source records. The extension preserves those
-records for expanded rendering. Assistant answer citations are a separate
-stream concern: `url_citation` annotations attached to output text are rendered
-as Markdown links by the Responses message parser.
+the completed action can contain source records, while `results` contains the
+search result snippets, titles, URLs, and internal reference markers such as
+`turn0search2`. The extension preserves the completed item for exact history
+replay and builds a reference-to-URL map from those result records. Assistant
+answer citations are a separate stream concern: `url_citation` annotations
+attached to output text are rendered as Markdown links by the Responses message
+parser and retained in the replayed message item.
+
+Some compatible endpoints return a prior-turn citation without annotations as
+an internal marker such as `cite...` or `【0†source】`. The parser resolves
+those markers from the preserved search results or the latest prior citation
+links. Unresolvable protocol markers are removed rather than exposed to the
+user; literal examples inside Markdown code remain unchanged.
 
 ## Extension behavior
 
@@ -165,9 +177,12 @@ final answer block or later tool call
 
 The activity block is updated in place as progress and authoritative output
 items arrive. Its `textSignature` uses a reserved
-`pi:web-search-activity:` prefix. The Responses history converter recognizes
-that prefix and omits the display-only block from subsequent model input, while
-the session transcript retains it for rendering and reload.
+`pi:web-search-activity:` prefix. A completed activity stores a sanitized
+`web_search_call` item, including `results`, in the signature. The Responses
+history converter recognizes that payload and replays the provider item in its
+original output position; legacy activity signatures remain display-only. The
+session transcript therefore retains both the compact UI row and the hidden
+metadata needed by later turns.
 
 The adapter uses this transport-neutral lifecycle:
 

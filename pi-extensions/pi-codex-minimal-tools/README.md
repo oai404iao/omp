@@ -14,7 +14,7 @@ GPT-5-series models on the `openai` provider use `apply_patch` instead of
 - Generated images are saved with timestamp filenames, `latest.<ext>` mirrors, metadata, and inline previews.
 - Tools only activate on supported OpenAI/Codex-like models; native hosted tools and request profiles are supported on `openai` and `openai-codex`.
 - Responses web-search progress events render as compact `Searching the web` / `Searched the web` activity rows.
-- Web search citations are preserved as clickable Markdown links when the provider returns citation annotations.
+- Web search citations remain clickable across turns by replaying hosted search results and citation annotations; leaked provider reference markers are resolved locally when possible.
 - Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
 - Optional GPT-5 native compaction using either Codex-style Responses
   `compaction_trigger` or the legacy `/responses/compact` endpoint.

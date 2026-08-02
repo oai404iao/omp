@@ -157,6 +157,23 @@ test("processResponsesStream appends source list for invalid citation spans", as
 	assert.equal((output.content[0] as any).text, "No span here\n\nSources: [Invalid](https://example.com/invalid)");
 });
 
+test("processResponsesStream does not wrap provider-rendered Markdown citations twice", async () => {
+	const output = createAssistantOutput();
+	const text = "Claim. ([example.com](https://example.com/source))";
+	const start = text.indexOf("(");
+	await processResponsesStream(
+		asAsyncIterable([
+			{ type: "response.output_item.done", output_index: 0, item: { type: "message", id: "msg_cite_markdown", content: [{ type: "output_text", text, annotations: [{ type: "url_citation", start_index: start, end_index: text.length, title: "Example", url: "https://example.com/source" }] }] } },
+			{ type: "response.completed", response: { id: "resp_cite_markdown", status: "completed", usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } } } },
+		]),
+		output,
+		{ push() {} } as any,
+		model,
+	);
+
+	assert.equal((output.content[0] as any).text, text);
+});
+
 test("saveOpenAICodexGeneratedImage writes generated images under the configured default output dir", async () => {
 	const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "pi-codex-minimal-image-"));
 	const encoded = Buffer.from("png-bytes").toString("base64");

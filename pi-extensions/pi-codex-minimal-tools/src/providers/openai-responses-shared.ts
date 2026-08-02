@@ -18,6 +18,36 @@ interface ImageGenerationCallBlock {
 	item: ImageGenerationCallItem;
 }
 
+export interface ReplayableWebSearchCallItem {
+	type: "web_search_call";
+	id: string;
+	status: "completed";
+	action: Record<string, unknown>;
+	results?: Array<Record<string, unknown>>;
+}
+
+export interface CitationSource {
+	url: string;
+	title?: string;
+}
+
+export interface WebSearchCitationSource extends CitationSource {
+	refId: string;
+}
+
+type ReplayableResponseMessageContent =
+	| { type: "output_text"; text: string; annotations: Array<Record<string, unknown>> }
+	| { type: "refusal"; refusal: string };
+
+interface ReplayableResponseMessageItem {
+	type: "message";
+	id: string;
+	role: "assistant";
+	status: "completed";
+	content: ReplayableResponseMessageContent[];
+	phase?: TextSignaturePhase;
+}
+
 type InternalAssistantContent = Extract<Message, { role: "assistant" }>["content"][number] | ImageGenerationCallBlock;
 
 export interface OpenAIResponsesStreamOptions {
@@ -27,10 +57,13 @@ export interface OpenAIResponsesStreamOptions {
 		requestServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
 	) => ResponseCreateParamsStreaming["service_tier"] | undefined;
 	applyServiceTierPricing?: (usage: Usage, serviceTier: ResponseCreateParamsStreaming["service_tier"] | undefined) => void;
+	webSearchCitationSources?: ReadonlyArray<WebSearchCitationSource>;
+	historicalCitationSources?: ReadonlyArray<CitationSource>;
 }
 
 type TextSignaturePhase = "commentary" | "final_answer";
 export const WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX = "pi:web-search-activity:";
+const LEAKED_CITATION_PROTOCOL = /cite[^]+|【\d+†source】/i;
 
 interface ConvertResponsesMessagesOptions {
 	includeSystemPrompt?: boolean;
@@ -64,6 +97,71 @@ function parseStreamingJson(partialJson: string): Record<string, unknown> {
 
 function sanitizeSurrogates(text: string): string {
 	return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+}
+
+function cloneJsonRecord(value: unknown): Record<string, unknown> | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	try {
+		const cloned = JSON.parse(JSON.stringify(value)) as unknown;
+		return cloned && typeof cloned === "object" && !Array.isArray(cloned)
+			? cloned as Record<string, unknown>
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function sanitizeWebSearchCallItem(item: unknown): ReplayableWebSearchCallItem | undefined {
+	if (!item || typeof item !== "object") return undefined;
+	const candidate = item as Record<string, unknown>;
+	if (candidate.type !== "web_search_call") return undefined;
+	if (typeof candidate.id !== "string" || candidate.id === "") return undefined;
+	if (candidate.status !== "completed") return undefined;
+	const action = cloneJsonRecord(candidate.action);
+	if (!action) return undefined;
+	const results = Array.isArray(candidate.results)
+		? candidate.results.map(cloneJsonRecord).filter((result): result is Record<string, unknown> => !!result)
+		: undefined;
+
+	return {
+		type: "web_search_call",
+		id: candidate.id,
+		status: "completed",
+		action,
+		...(results ? { results } : {}),
+	};
+}
+
+function sanitizeResponseMessageItem(item: unknown): ReplayableResponseMessageItem | undefined {
+	if (!item || typeof item !== "object") return undefined;
+	const candidate = item as Record<string, unknown>;
+	if (candidate.type !== "message") return undefined;
+	if (typeof candidate.id !== "string" || candidate.id === "") return undefined;
+	const rawContent = Array.isArray(candidate.content) ? candidate.content : [];
+	const content: ReplayableResponseMessageContent[] = [];
+	for (const rawPart of rawContent) {
+		if (!rawPart || typeof rawPart !== "object") continue;
+		const part = rawPart as Record<string, unknown>;
+		if (part.type === "output_text" && typeof part.text === "string") {
+			const annotations = Array.isArray(part.annotations)
+				? part.annotations.map(cloneJsonRecord).filter((annotation): annotation is Record<string, unknown> => !!annotation)
+				: [];
+			content.push({ type: "output_text", text: part.text, annotations });
+		} else if (part.type === "refusal" && typeof part.refusal === "string") {
+			content.push({ type: "refusal", refusal: part.refusal });
+		}
+	}
+	const phase = candidate.phase === "commentary" || candidate.phase === "final_answer"
+		? candidate.phase
+		: undefined;
+	return {
+		type: "message",
+		id: candidate.id,
+		role: "assistant",
+		status: "completed",
+		content,
+		...(phase ? { phase } : {}),
+	};
 }
 
 function isImageGenerationCallBlock(block: InternalAssistantContent): block is ImageGenerationCallBlock {
@@ -232,11 +330,56 @@ function encodeTextSignatureV1(id: string, phase?: string): string {
 	return JSON.stringify(payload);
 }
 
-function parseTextSignature(signature: string | undefined): { id: string; phase?: TextSignaturePhase } | undefined {
+function encodeTextSignature(item: unknown, renderedText?: string): string {
+	let replayItem = sanitizeResponseMessageItem(item);
+	if (!replayItem) {
+		const candidate = item && typeof item === "object" ? item as Record<string, unknown> : undefined;
+		return encodeTextSignatureV1(
+			typeof candidate?.id === "string" ? candidate.id : "msg_unknown",
+			typeof candidate?.phase === "string" ? candidate.phase : undefined,
+		);
+	}
+	const rawText = replayItem.content
+		.map((part) => part.type === "output_text" ? part.text : part.refusal)
+		.join("");
+	if (
+		renderedText !== undefined
+		&& renderedText !== rawText
+		&& replayItem.content.every((part) => part.type === "output_text")
+		&& LEAKED_CITATION_PROTOCOL.test(rawText)
+	) {
+		replayItem = {
+			...replayItem,
+			content: [{ type: "output_text", text: renderedText, annotations: [] }],
+		};
+	}
+	return JSON.stringify({ v: 2, item: replayItem });
+}
+
+function parseTextSignature(signature: string | undefined): {
+	id: string;
+	phase?: TextSignaturePhase;
+	item?: ReplayableResponseMessageItem;
+} | undefined {
 	if (!signature) return undefined;
 	if (signature.startsWith("{")) {
 		try {
-			const parsed = JSON.parse(signature) as { v?: number; id?: string; phase?: TextSignaturePhase | string };
+			const parsed = JSON.parse(signature) as {
+				v?: number;
+				id?: string;
+				phase?: TextSignaturePhase | string;
+				item?: unknown;
+			};
+			if (parsed.v === 2) {
+				const item = sanitizeResponseMessageItem(parsed.item);
+				if (item) {
+					return {
+						id: item.id,
+						...(item.phase ? { phase: item.phase } : {}),
+						item,
+					};
+				}
+			}
 			if (parsed.v === 1 && typeof parsed.id === "string") {
 				return parsed.phase === "commentary" || parsed.phase === "final_answer"
 					? { id: parsed.id, phase: parsed.phase }
@@ -251,6 +394,130 @@ function parseTextSignature(signature: string | undefined): { id: string; phase?
 
 export function isWebSearchActivityTextSignature(signature: string | undefined): boolean {
 	return signature?.startsWith(WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX) === true;
+}
+
+export function encodeWebSearchActivityTextSignature(callId: string, item?: unknown): string {
+	const replayItem = sanitizeWebSearchCallItem(item);
+	if (!replayItem || replayItem.id !== callId) {
+		return `${WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX}${callId}`;
+	}
+	return `${WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX}${callId}:${JSON.stringify({ v: 2, item: replayItem })}`;
+}
+
+export function decodeWebSearchActivityTextSignature(signature: string | undefined): ReplayableWebSearchCallItem | undefined {
+	if (!isWebSearchActivityTextSignature(signature)) return undefined;
+	const payload = signature!.slice(WEB_SEARCH_ACTIVITY_TEXT_SIGNATURE_PREFIX.length);
+	const separator = payload.indexOf(":");
+	if (separator < 1) return undefined;
+	const callId = payload.slice(0, separator);
+	try {
+		const parsed = JSON.parse(payload.slice(separator + 1)) as { v?: number; item?: unknown };
+		if (parsed.v !== 2) return undefined;
+		const item = sanitizeWebSearchCallItem(parsed.item);
+		return item?.id === callId ? item : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+const INTERNAL_CITATION_MARKER = /cite([^]+)/;
+const INTERNAL_CITATION_REF = /^turn\d+[a-z][a-z0-9_-]*\d+$/i;
+
+function citationRefsFromResult(result: Record<string, unknown>): string[] {
+	const refs = new Set<string>();
+	for (const key of ["ref_id", "reference_id", "id"]) {
+		const value = result[key];
+		if (typeof value === "string" && INTERNAL_CITATION_REF.test(value)) refs.add(value);
+	}
+	if (typeof result.snippet === "string") {
+		const marker = INTERNAL_CITATION_MARKER.exec(result.snippet.slice(0, 2048));
+		for (const ref of marker?.[1]?.split("") ?? []) {
+			const trimmed = ref.trim();
+			if (INTERNAL_CITATION_REF.test(trimmed)) refs.add(trimmed);
+		}
+	}
+	return [...refs];
+}
+
+export function extractWebSearchCitationSources(item: unknown): WebSearchCitationSource[] {
+	const replayItem = sanitizeWebSearchCallItem(item);
+	if (!replayItem) return [];
+	const actionResults = Array.isArray(replayItem.action.results)
+		? replayItem.action.results.map(cloneJsonRecord).filter((result): result is Record<string, unknown> => !!result)
+		: [];
+	const results = [...(replayItem.results ?? []), ...actionResults];
+	const sources: WebSearchCitationSource[] = [];
+	const seen = new Set<string>();
+	for (const result of results) {
+		const url = typeof result.url === "string" && result.url.trim() ? result.url.trim() : undefined;
+		if (!url) continue;
+		const title = typeof result.title === "string" && result.title.trim() ? result.title.trim() : undefined;
+		for (const refId of citationRefsFromResult(result)) {
+			const key = `${refId}\n${url}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			sources.push({ refId, url, ...(title ? { title } : {}) });
+		}
+	}
+	return sources;
+}
+
+export function collectWebSearchCitationSources<TApi extends Api>(
+	model: Model<TApi>,
+	context: Context,
+): WebSearchCitationSource[] {
+	const byRef = new Map<string, WebSearchCitationSource>();
+	for (const message of context.messages) {
+		if (message.role !== "assistant") continue;
+		if (message.provider !== model.provider || message.api !== model.api || message.model !== model.id) continue;
+		for (const block of message.content as InternalAssistantContent[]) {
+			if (block.type !== "text") continue;
+			const item = decodeWebSearchActivityTextSignature(block.textSignature);
+			if (!item) continue;
+			for (const source of extractWebSearchCitationSources(item)) byRef.set(source.refId, source);
+		}
+	}
+	return [...byRef.values()];
+}
+
+export function collectHistoricalCitationSources<TApi extends Api>(
+	model: Model<TApi>,
+	context: Context,
+): CitationSource[] {
+	let latestSources: CitationSource[] = [];
+	for (const message of context.messages) {
+		if (message.role !== "assistant") continue;
+		if (message.provider !== model.provider || message.api !== model.api || message.model !== model.id) continue;
+		const messageSources: CitationSource[] = [];
+		const seenUrls = new Set<string>();
+		const pushSource = (source: CitationSource): void => {
+			if (!source.url || seenUrls.has(source.url)) return;
+			seenUrls.add(source.url);
+			messageSources.push(source);
+		};
+		for (const block of message.content as InternalAssistantContent[]) {
+			if (block.type !== "text" || isWebSearchActivityTextSignature(block.textSignature)) continue;
+			const markdownLinkPattern = /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g;
+			for (const match of block.text.matchAll(markdownLinkPattern)) {
+				pushSource({ title: match[1], url: match[2] });
+			}
+			const replayItem = parseTextSignature(block.textSignature)?.item;
+			for (const part of replayItem?.content ?? []) {
+				if (part.type !== "output_text") continue;
+				for (const annotation of part.annotations) {
+					const url = annotation.type === "url_citation" && typeof annotation.url === "string"
+						? annotation.url.trim()
+						: "";
+					const title = typeof annotation.title === "string" && annotation.title.trim()
+						? annotation.title.trim()
+						: undefined;
+					if (url) pushSource({ url, ...(title ? { title } : {}) });
+				}
+			}
+		}
+		if (messageSources.length > 0) latestSources = messageSources;
+	}
+	return latestSources;
 }
 
 export function convertResponsesMessages<TApi extends Api>(
@@ -302,6 +569,7 @@ export function convertResponsesMessages<TApi extends Api>(
 			}
 		} else if (msg.role === "assistant") {
 			const output: ResponseInput = [];
+			const isSameModel = msg.model === model.id && msg.provider === model.provider && msg.api === model.api;
 			const isDifferentModel = msg.model !== model.id && msg.provider === model.provider && msg.api === model.api;
 			let assistantBlockIndex = 0;
 			for (const block of msg.content as InternalAssistantContent[]) {
@@ -311,8 +579,19 @@ export function convertResponsesMessages<TApi extends Api>(
 				} else if (block.type === "thinking") {
 					if (block.thinkingSignature) output.push(JSON.parse(block.thinkingSignature));
 				} else if (block.type === "text") {
-					if (isWebSearchActivityTextSignature(block.textSignature)) continue;
+					if (isWebSearchActivityTextSignature(block.textSignature)) {
+						const webSearchItem = isSameModel
+							? decodeWebSearchActivityTextSignature(block.textSignature)
+							: undefined;
+						if (webSearchItem) output.push(webSearchItem as unknown as ResponseInput[number]);
+						continue;
+					}
 					const parsedSignature = parseTextSignature(block.textSignature);
+					if (isSameModel && parsedSignature?.item) {
+						output.push(parsedSignature.item as ResponseInput[number]);
+						assistantBlockIndex++;
+						continue;
+					}
 					let msgId = parsedSignature?.id ?? `msg_${msgIndex}_${assistantBlockIndex}`;
 					if (msgId.length > 64) msgId = `msg_${shortHash(msgId)}`;
 					output.push({
@@ -389,6 +668,99 @@ export function convertResponsesTools(tools: Tool[], options?: ConvertResponsesT
 	}));
 }
 
+interface MarkdownCodeRange {
+	start: number;
+	end: number;
+}
+
+function characterRunLength(text: string, index: number, character: string): number {
+	let end = index;
+	while (end < text.length && text[end] === character) end++;
+	return end - index;
+}
+
+function isFencePosition(text: string, index: number): boolean {
+	const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+	return /^ {0,3}$/.test(text.slice(lineStart, index));
+}
+
+function markdownCodeRanges(text: string): MarkdownCodeRange[] {
+	const ranges: MarkdownCodeRange[] = [];
+	let fence: { character: "`" | "~"; length: number; start: number } | undefined;
+	let index = 0;
+	while (index < text.length) {
+		const character = text[index];
+		if (fence) {
+			if (character === fence.character && isFencePosition(text, index)) {
+				const runLength = characterRunLength(text, index, character);
+				if (runLength >= fence.length) {
+					ranges.push({ start: fence.start, end: index + runLength });
+					fence = undefined;
+					index += runLength;
+					continue;
+				}
+			}
+			index++;
+			continue;
+		}
+
+		if ((character === "`" || character === "~") && isFencePosition(text, index)) {
+			const runLength = characterRunLength(text, index, character);
+			if (runLength >= 3) {
+				fence = { character, length: runLength, start: index };
+				index += runLength;
+				continue;
+			}
+		}
+
+		if (character === "`") {
+			const runLength = characterRunLength(text, index, character);
+			const delimiter = character.repeat(runLength);
+			const close = text.indexOf(delimiter, index + runLength);
+			if (close < 0) {
+				ranges.push({ start: index, end: text.length });
+				break;
+			}
+			ranges.push({ start: index, end: close + runLength });
+			index = close + runLength;
+			continue;
+		}
+		index++;
+	}
+	if (fence) ranges.push({ start: fence.start, end: text.length });
+	return ranges;
+}
+
+function isInsideMarkdownCode(index: number, ranges: MarkdownCodeRange[]): boolean {
+	return ranges.some((range) => index >= range.start && index < range.end);
+}
+
+function trailingCitationFragmentStart(text: string, ranges: MarkdownCodeRange[]): number | undefined {
+	const opener = "cite";
+	const openIndex = text.lastIndexOf("cite");
+	if (openIndex >= 0 && text.indexOf("", openIndex) < 0 && !isInsideMarkdownCode(openIndex, ranges)) {
+		return openIndex;
+	}
+	for (let length = Math.min(opener.length - 1, text.length); length > 0; length--) {
+		if (!text.endsWith(opener.slice(0, length))) continue;
+		const start = text.length - length;
+		if (!isInsideMarkdownCode(start, ranges)) return start;
+	}
+	return undefined;
+}
+
+function trailingIndexedSourceFragmentStart(text: string, ranges: MarkdownCodeRange[]): number | undefined {
+	const openIndex = text.lastIndexOf("【");
+	if (openIndex < 0 || text.indexOf("】", openIndex) >= 0 || isInsideMarkdownCode(openIndex, ranges)) {
+		return undefined;
+	}
+	const fragment = text.slice(openIndex);
+	const match = /^【\d*(?:†([a-z]*))?$/i.exec(fragment);
+	if (!match) return undefined;
+	const sourceFragment = match[1]?.toLowerCase() ?? "";
+	return "source".startsWith(sourceFragment) ? openIndex : undefined;
+}
+
 export async function processResponsesStream<TApi extends Api>(
 	openaiStream: AsyncIterable<ResponseStreamEvent>,
 	output: AssistantMessage,
@@ -435,6 +807,16 @@ export async function processResponsesStream<TApi extends Api>(
 	const outputStates = new Map<number, OutputState>();
 	const imageGenerationCallIds = new Set<string>();
 	const nativeCompactionSignatures = new Set<string>();
+	const webSearchCitationSources = new Map<string, WebSearchCitationSource>();
+	for (const source of options?.webSearchCitationSources ?? []) {
+		if (source.refId && source.url) webSearchCitationSources.set(source.refId, source);
+	}
+	const registerWebSearchCitationSources = (item: unknown): void => {
+		for (const source of extractWebSearchCitationSources(item)) {
+			webSearchCitationSources.set(source.refId, source);
+		}
+	};
+	const historicalCitationSources = [...(options?.historicalCitationSources ?? [])];
 	const responseOutputIndexByBlock = new WeakMap<object, number>();
 	const pushResponseBlock = <T extends InternalAssistantContent>(block: T, outputIndex: number): T => {
 		(output.content as InternalAssistantContent[]).push(block);
@@ -510,6 +892,66 @@ export async function processResponsesStream<TApi extends Api>(
 	};
 	const markdownLinkText = (value: string): string => value.replace(/\\/g, "\\\\").replace(/]/g, "\\]").replace(/\n+/g, " ");
 	const markdownLinkUrl = (value: string): string => value.replace(/[)\s]/g, (char) => encodeURIComponent(char));
+	const containsMarkdownLink = (value: string): boolean => /\[[^\]\n]+\]\([^) \n]+\)/.test(value);
+	const citationSourceLabel = (source: CitationSource): string => {
+		try {
+			const hostname = new URL(source.url).hostname.replace(/^www\./, "");
+			if (hostname) return hostname;
+		} catch {
+			// Fall back to the result title or URL.
+		}
+		return source.title ?? source.url;
+	};
+	const citationSourceMarkdown = (source: CitationSource): string =>
+		`[${markdownLinkText(citationSourceLabel(source))}](${markdownLinkUrl(source.url)})`;
+	const renderInternalCitationMarkers = (text: string): string => {
+		const initialCodeRanges = markdownCodeRanges(text);
+		const fragmentStart = trailingCitationFragmentStart(text, initialCodeRanges);
+		const visibleText = fragmentStart === undefined ? text : text.slice(0, fragmentStart);
+		const codeRanges = fragmentStart === undefined ? initialCodeRanges : markdownCodeRanges(visibleText);
+		const markerPattern = new RegExp(INTERNAL_CITATION_MARKER.source, "g");
+		let cursor = 0;
+		let rendered = "";
+		for (const match of visibleText.matchAll(markerPattern)) {
+			const start = match.index ?? 0;
+			if (isInsideMarkdownCode(start, codeRanges)) continue;
+			rendered += visibleText.slice(cursor, start);
+			const seenUrls = new Set<string>();
+			const links: string[] = [];
+			for (const rawRef of match[1]?.split("") ?? []) {
+				const source = webSearchCitationSources.get(rawRef.trim());
+				if (!source || seenUrls.has(source.url)) continue;
+				seenUrls.add(source.url);
+				links.push(citationSourceMarkdown(source));
+			}
+			rendered += links.length > 0 ? `(${links.join(", ")})` : "";
+			cursor = start + match[0].length;
+		}
+		if (cursor === 0) return visibleText;
+		return rendered + visibleText.slice(cursor);
+	};
+	const renderIndexedSourceMarkers = (text: string): string => {
+		const initialCodeRanges = markdownCodeRanges(text);
+		const fragmentStart = trailingIndexedSourceFragmentStart(text, initialCodeRanges);
+		const visibleText = fragmentStart === undefined ? text : text.slice(0, fragmentStart);
+		const codeRanges = fragmentStart === undefined ? initialCodeRanges : markdownCodeRanges(visibleText);
+		const markerPattern = /【(\d+)†source】/gi;
+		let cursor = 0;
+		let rendered = "";
+		for (const match of visibleText.matchAll(markerPattern)) {
+			const start = match.index ?? 0;
+			if (isInsideMarkdownCode(start, codeRanges)) continue;
+			rendered += visibleText.slice(cursor, start);
+			const followingText = visibleText.slice(start + match[0].length);
+			const alreadyLinked = /^\s*(?:\(\s*)?\[[^\]\n]+\]\(https?:\/\/[^)\s]+\)/.test(followingText);
+			const sourceIndex = Number.parseInt(match[1] ?? "", 10);
+			const source = Number.isInteger(sourceIndex) ? historicalCitationSources[sourceIndex] : undefined;
+			rendered += alreadyLinked || !source ? "" : `(${citationSourceMarkdown(source)})`;
+			cursor = start + match[0].length;
+		}
+		if (cursor === 0) return visibleText;
+		return rendered + visibleText.slice(cursor);
+	};
 	const sourceMarkdown = (annotations: unknown[], citedUrls: Set<string>): string => {
 		const seen = new Set<string>();
 		const links: string[] = [];
@@ -543,7 +985,9 @@ export async function processResponsesStream<TApi extends Api>(
 			if (span.start < cursor) continue;
 			rendered += part.text.slice(cursor, span.start);
 			const label = part.text.slice(span.start, span.end);
-			rendered += `[${markdownLinkText(label)}](${markdownLinkUrl(span.url)})`;
+			rendered += containsMarkdownLink(label)
+				? label
+				: `[${markdownLinkText(label)}](${markdownLinkUrl(span.url)})`;
 			citedUrls.add(span.url);
 			cursor = span.end;
 		}
@@ -554,7 +998,12 @@ export async function processResponsesStream<TApi extends Api>(
 	const renderMessageText = (parts: Map<number, MessagePartState>, citations = false): string =>
 		Array.from(parts.entries())
 			.sort(([a], [b]) => a - b)
-			.map(([, part]) => citations ? renderOutputTextPart(part) : part.text)
+			.map(([, part]) => {
+				const text = citations ? renderOutputTextPart(part) : part.text;
+				return part.type === "output_text"
+					? renderIndexedSourceMarkers(renderInternalCitationMarkers(text))
+					: text;
+			})
 			.join("");
 
 	const emitAppendedDelta = (
@@ -792,7 +1241,7 @@ export async function processResponsesStream<TApi extends Api>(
 					}
 				}
 				state.block.text = renderMessageText(state.parts, true);
-				state.block.textSignature = encodeTextSignatureV1(item.id, item.phase ?? undefined);
+				state.block.textSignature = encodeTextSignature(item, state.block.text);
 				stream.push({ type: "text_end", contentIndex: state.blockIndex, content: state.block.text, partial: output });
 				outputStates.delete(event.output_index);
 			} else if (item.type === "function_call") {
@@ -846,6 +1295,9 @@ export async function processResponsesStream<TApi extends Api>(
 				const toolCallIndex = state?.blockIndex ?? blockIndex();
 				stream.push({ type: "toolcall_end", contentIndex: toolCallIndex, toolCall, partial: output });
 				outputStates.delete(event.output_index);
+			} else if (item.type === "web_search_call") {
+				registerWebSearchCitationSources(item);
+				outputStates.delete(event.output_index);
 			} else if (item.type === "image_generation_call") {
 				appendImageGenerationCall(item, event.output_index);
 				outputStates.delete(event.output_index);
@@ -864,6 +1316,9 @@ export async function processResponsesStream<TApi extends Api>(
 				: [];
 			for (let outputIndex = 0; outputIndex < finalOutput.length; outputIndex++) {
 				const item = finalOutput[outputIndex];
+				if ((item as { type?: unknown } | undefined)?.type === "web_search_call") {
+					registerWebSearchCitationSources(item);
+				}
 				if ((item as { type?: unknown } | undefined)?.type === "image_generation_call") {
 					appendImageGenerationCall(item, outputIndex);
 				}
