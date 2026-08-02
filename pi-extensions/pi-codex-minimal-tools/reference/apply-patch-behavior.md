@@ -55,20 +55,21 @@ on disk.
 The following are intentional Pi safety differences from the analyzed Codex
 runtime:
 
-- relative paths may not escape the current working directory;
-- a path may not escape through a symbolic-link ancestor, and a final symbolic
-  link is not mutated;
+- a final symbolic link is not mutated;
 - Add refuses to overwrite an existing target;
 - Move refuses to overwrite an existing destination;
-- an explicit absolute path outside the working directory requires
-  `allowAbsolutePatchPaths: true`;
 - touched paths are serialized through Pi's file-mutation queue;
 - an I/O failure during commit triggers best-effort rollback of every touched
   file, including restoration of file mode bits.
 
+Relative paths resolve against the active cwd, but `..` traversal, absolute
+paths, and paths through symbolic-link ancestors are accepted. This extension
+does not enforce a workspace boundary; users who need one should provide it
+through Pi permissions, sandboxing, or another extension.
+
 Codex relies on its sandbox, approval runtime, and committed-delta tracking for
-these concerns, so copying its overwrite and partial-commit behavior would not
-provide equivalent safety inside Pi.
+the remaining safety concerns, so copying its overwrite and partial-commit
+behavior would not provide equivalent safety inside Pi.
 
 ## Tool output
 
@@ -101,8 +102,8 @@ ignored so they cannot race with mutations. The completed tool call is always
 reparsed by `parseApplyPatch()` and remains authoritative.
 
 Pi does not expose Codex's sandbox and permission runtime. Preview and final
-verification therefore use the local filesystem plus this extension's cwd,
-realpath, symlink, overwrite, mutation-queue, snapshot, and rollback checks.
+verification therefore use the local filesystem plus this extension's
+final-target symlink, overwrite, mutation-queue, snapshot, and rollback checks.
 Set `deferApplyPatchRendering: true` to disable the built-in preview and use
 Pi's fallback renderer.
 

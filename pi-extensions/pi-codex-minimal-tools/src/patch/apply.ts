@@ -1,10 +1,9 @@
-import { chmod, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { actionSummary, parseApplyPatch, parseApplyPatchProgress, type ParsedPatch, type PatchAction, type PatchUpdateChunk } from "./parser.js";
 
 export interface ApplyPatchOptions {
 	cwd: string;
-	allowAbsolutePaths?: boolean;
 }
 
 export interface AppliedPatchFile {
@@ -22,18 +21,7 @@ export interface ApplyPatchResult {
 
 export function resolvePatchPath(pathValue: string, options: ApplyPatchOptions): string {
 	const cleaned = pathValue.trim();
-	const inputIsAbsolute = isAbsolute(cleaned);
-	const absolute = inputIsAbsolute ? resolve(cleaned) : resolve(options.cwd, cleaned);
-	const cwd = resolve(options.cwd);
-	const rel = relative(cwd, absolute);
-	const insideCwd = rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-	if (!insideCwd && !(options.allowAbsolutePaths && inputIsAbsolute)) throw new Error(`Patch path escapes cwd: ${pathValue}`);
-	return absolute;
-}
-
-function isWithin(parent: string, candidate: string): boolean {
-	const rel = relative(parent, candidate);
-	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+	return isAbsolute(cleaned) ? resolve(cleaned) : resolve(options.cwd, cleaned);
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -45,25 +33,13 @@ function verificationError(error: unknown): Error {
 	return message.startsWith("apply_patch verification failed:") ? new Error(message) : new Error(`apply_patch verification failed: ${message}`);
 }
 
-async function validateResolvedPath(absolutePath: string, originalPath: string, options: ApplyPatchOptions, realCwd: string): Promise<void> {
-	const lexicalCwd = resolve(options.cwd);
-	if (!isWithin(lexicalCwd, absolutePath)) return;
-
-	let candidate = absolutePath;
-	while (true) {
-		try {
-			const info = await lstat(candidate);
-			if (candidate === absolutePath && info.isSymbolicLink()) throw new Error(`Patch target may not be a symbolic link: ${originalPath}`);
-			const canonical = await realpath(candidate);
-			if (!isWithin(realCwd, canonical)) throw new Error(`Patch path escapes cwd through a symbolic link: ${originalPath}`);
-			return;
-		} catch (error) {
-			if (error instanceof Error && error.message.startsWith("Patch ")) throw error;
-			if (errorCode(error) !== "ENOENT") throw error;
-			const parent = dirname(candidate);
-			if (parent === candidate) throw new Error(`Unable to resolve patch path: ${originalPath}`);
-			candidate = parent;
-		}
+async function validatePatchTarget(absolutePath: string, originalPath: string): Promise<void> {
+	try {
+		const info = await lstat(absolutePath);
+		if (info.isSymbolicLink()) throw new Error(`Patch target may not be a symbolic link: ${originalPath}`);
+	} catch (error) {
+		if (error instanceof Error && error.message.startsWith("Patch ")) throw error;
+		if (errorCode(error) !== "ENOENT") throw error;
 	}
 }
 
@@ -193,12 +169,11 @@ async function loadVirtualFile(path: string, files: Map<string, VirtualFile>): P
 }
 
 async function planPatch(parsed: ParsedPatch, options: ApplyPatchOptions): Promise<PlannedAction[]> {
-	const realCwd = await realpath(options.cwd);
 	const virtualFiles = new Map<string, VirtualFile>();
 	const plans: PlannedAction[] = [];
 	for (const action of parsed.actions) {
 		const absolutePath = resolvePatchPath(action.path, options);
-		await validateResolvedPath(absolutePath, action.path, options, realCwd);
+		await validatePatchTarget(absolutePath, action.path);
 		const source = await loadVirtualFile(absolutePath, virtualFiles);
 
 		if (action.kind === "add") {
@@ -220,7 +195,7 @@ async function planPatch(parsed: ParsedPatch, options: ApplyPatchOptions): Promi
 		let absoluteMoveTo: string | undefined;
 		if (action.moveTo) {
 			absoluteMoveTo = resolvePatchPath(action.moveTo, options);
-			await validateResolvedPath(absoluteMoveTo, action.moveTo, options, realCwd);
+			await validatePatchTarget(absoluteMoveTo, action.moveTo);
 			if (absoluteMoveTo !== absolutePath) {
 				const destination = await loadVirtualFile(absoluteMoveTo, virtualFiles);
 				if (destination.exists) throw new Error(`Move target already exists: ${action.moveTo}`);

@@ -122,11 +122,6 @@
       "description": "Expose apply_patch only on GPT-5-series models from the openai provider.",
       "default": true
     },
-    "allowAbsolutePatchPaths": {
-      "type": "boolean",
-      "description": "Allow absolute paths in apply_patch. Relative path escapes remain blocked.",
-      "default": false
-    },
     "deferApplyPatchRendering": {
       "type": "boolean",
       "description": "Use Pi's fallback tool renderer instead of the built-in streaming filesystem preview.",

@@ -138,31 +138,20 @@ test("applyPatch adds, updates, deletes, and moves files", async () => {
 	assert.equal(result.summary, "Success. Updated the following files:\nA added.txt\nM update.txt\nD delete.txt\nM moved.txt");
 });
 
-test("applyPatch rejects path traversal by default", async () => {
-	const cwd = tempDir();
-	await assert.rejects(
-		() => applyPatch(`*** Begin Patch
-*** Add File: ../escape.txt
-+nope
-*** End Patch`, { cwd }),
-		/escapes cwd/,
-	);
-});
-
-test("applyPatch allowAbsolutePaths only permits absolute escapes", async () => {
-	const cwd = tempDir();
-	await assert.rejects(
-		() => applyPatch(`*** Begin Patch
-*** Add File: ../escape.txt
-+nope
-*** End Patch`, { cwd, allowAbsolutePaths: true }),
-		/escapes cwd/,
-	);
-	const absolutePath = join(tempDir(), "outside.txt");
+test("applyPatch accepts relative traversal and absolute paths outside cwd", async () => {
+	const root = tempDir();
+	const cwd = join(root, "workspace");
+	mkdirSync(cwd);
+	await applyPatch(`*** Begin Patch
+*** Add File: ../relative-outside.txt
++relative
+*** End Patch`, { cwd });
+	assert.equal(readFileSync(join(root, "relative-outside.txt"), "utf8"), "relative\n");
+	const absolutePath = join(root, "absolute-outside.txt");
 	await applyPatch(`*** Begin Patch
 *** Add File: ${absolutePath}
 +ok
-*** End Patch`, { cwd, allowAbsolutePaths: true });
+*** End Patch`, { cwd });
 	assert.equal(readFileSync(absolutePath, "utf8"), "ok\n");
 });
 
@@ -348,18 +337,15 @@ test("applyPatch preserves CRLF files when patch context uses LF", async () => {
 	assert.equal(readFileSync(join(cwd, "crlf.txt"), "utf8"), "alpha\r\nnew\r\nomega\r\n");
 });
 
-test("applyPatch rejects paths that escape cwd through a symbolic link", async () => {
+test("applyPatch accepts paths through a symbolic-link ancestor", async () => {
 	const cwd = tempDir();
 	const outside = tempDir();
 	symlinkSync(outside, join(cwd, "link"), "dir");
-	await assert.rejects(
-		() => applyPatch(`*** Begin Patch
+	await applyPatch(`*** Begin Patch
 *** Add File: link/escape.txt
-+nope
-*** End Patch`, { cwd }),
-		/escapes cwd through a symbolic link/,
-	);
-	assert.equal(existsSync(join(outside, "escape.txt")), false);
++allowed
+*** End Patch`, { cwd });
+	assert.equal(readFileSync(join(outside, "escape.txt"), "utf8"), "allowed\n");
 });
 
 test("applyPatch refuses to mutate a final symbolic-link target", async () => {
@@ -384,10 +370,10 @@ test("executeApplyPatchTool returns Codex summary text and verification errors",
 	const result = await executeApplyPatchTool({ input: `*** Begin Patch
 *** Add File: added.txt
 +hello
-*** End Patch` }, cwd, false);
+*** End Patch` }, cwd);
 	assert.equal(result.content[0]?.text, "Success. Updated the following files:\nA added.txt");
 	await assert.rejects(
-		() => executeApplyPatchTool({ input: "not a patch" }, cwd, false),
+		() => executeApplyPatchTool({ input: "not a patch" }, cwd),
 		/apply_patch verification failed: The first line of the patch/,
 	);
 });

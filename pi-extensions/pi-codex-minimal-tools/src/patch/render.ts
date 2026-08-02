@@ -8,7 +8,6 @@ type RenderPreview = { complete: boolean; files: ApplyPatchPreviewFile[] } | { e
 interface PreviewRequest {
 	input: string;
 	cwd: string;
-	allowAbsolutePaths: boolean;
 	complete: boolean;
 	invalidate: () => void;
 }
@@ -30,7 +29,6 @@ async function computePreview(request: PreviewRequest): Promise<RenderPreview> {
 	try {
 		const preview = await previewApplyPatch(request.input, {
 			cwd: request.cwd,
-			allowAbsolutePaths: request.allowAbsolutePaths,
 		}, request.complete);
 		return {
 			complete: preview.complete,
@@ -63,7 +61,7 @@ function getRenderBox(state: Record<string, unknown>, lastComponent: Component |
 }
 
 function requestKey(request: Omit<PreviewRequest, "invalidate">): string {
-	return `${request.complete ? "complete" : "partial"}\u0000${request.allowAbsolutePaths ? "absolute" : "workspace"}\u0000${request.cwd}\u0000${request.input}`;
+	return `${request.complete ? "complete" : "partial"}\u0000${request.cwd}\u0000${request.input}`;
 }
 
 function schedulePreview(component: ApplyPatchRenderBox, immediate = false): void {
@@ -158,7 +156,7 @@ function rebuildCall(component: ApplyPatchRenderBox, theme: any, expanded: boole
 	return component;
 }
 
-export function createApplyPatchRenderers(resolveAllowAbsolutePaths: (cwd: string) => boolean) {
+export function createApplyPatchRenderers() {
 	return {
 		renderCall(args: { input?: string } | undefined, theme: any, context: any) {
 			const component = getRenderBox(context.state, context.lastComponent);
@@ -174,7 +172,6 @@ export function createApplyPatchRenderers(resolveAllowAbsolutePaths: (cwd: strin
 				updatePreviewRequest(component, {
 					input,
 					cwd: context.cwd,
-					allowAbsolutePaths: resolveAllowAbsolutePaths(context.cwd),
 					complete: Boolean(context.argsComplete),
 					invalidate: context.invalidate,
 				});

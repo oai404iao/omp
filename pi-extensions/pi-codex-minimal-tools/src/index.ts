@@ -210,7 +210,6 @@ function registerTools(pi: ExtensionAPI): void {
 		},
 	} as never);
 	pi.registerTool(createApplyPatchToolDefinition({
-		allowAbsolutePaths: (cwd) => loadSettings(cwd).allowAbsolutePatchPaths,
 		deferRendering: loadSettings().deferApplyPatchRendering,
 	}) as never);
 }

@@ -34,6 +34,7 @@ test("loadSettings returns defaults when config.json is absent", () => {
 		assert.deepEqual(loadSettings(), DEFAULT_SETTINGS);
 		assert.equal(loadSettings().deferApplyPatchRendering, false);
 		assert.equal(Object.hasOwn(DEFAULT_SETTINGS, "strictPatchMode"), false);
+		assert.equal(Object.hasOwn(DEFAULT_SETTINGS, "allowAbsolutePatchPaths"), false);
 	});
 });
 

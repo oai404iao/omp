@@ -83,7 +83,6 @@ JSON Schema-aware editors. `requestProfile` is the only nested section:
   "viewImage": false,
   "viewImageWorkspaceOnly": false,
   "applyPatchEnabled": true,
-  "allowAbsolutePatchPaths": false,
   "deferApplyPatchRendering": false
 }
 ```
@@ -158,20 +157,21 @@ keeps it in the top-level `instructions` field.
 | Setting | What it does |
 | --- | --- |
 | `applyPatchEnabled` | Expose `apply_patch` only on GPT-5-series models from the `openai` provider. When active, Pi's `edit` and `write` tools are hidden; their previous activation is restored after switching away. |
-| `allowAbsolutePatchPaths` | Permit absolute paths in `apply_patch`. |
 | `deferApplyPatchRendering` | Let Pi's fallback renderer handle display instead of the built-in streaming filesystem preview. Defaults to `false`. |
 
 The executor supports Codex `@@ class/function` contexts, ordered update
 chunks, `*** End of File`, and Codex-style fuzzy line matching. It verifies all
 actions before writing, preserves CRLF files, refuses Add/Move overwrites, and
-rejects cwd escapes including symbolic-link escapes. See
+resolves relative paths against the active cwd while also accepting `..`
+traversal and absolute paths. Workspace permissions or sandboxing should be
+provided by the user's Pi setup rather than this extension. See
 [`reference/apply-patch-behavior.md`](reference/apply-patch-behavior.md) for the
 exact behavior and intentional safety differences from Codex.
 
 While patch arguments stream, the built-in renderer consumes completed lines
-and previews the currently valid A/M/D actions against files under the active
-cwd. Preview reads are throttled to at most once every 500 ms, never mutate the
-filesystem, and stop before tool execution begins. Set
+and previews the currently valid A/M/D actions against paths resolved from the
+active cwd. Preview reads are throttled to at most once every 500 ms, never
+mutate the filesystem, and stop before tool execution begins. Set
 `deferApplyPatchRendering: true` to use Pi's fallback tool renderer instead.
 
 ## API key mode provider example

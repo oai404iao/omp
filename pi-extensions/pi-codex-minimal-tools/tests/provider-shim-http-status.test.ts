@@ -712,7 +712,6 @@ test("native compaction supports Codex /responses compaction_trigger and /respon
 		viewImage: false,
 		viewImageWorkspaceOnly: false,
 		applyPatchEnabled: true,
-		allowAbsolutePatchPaths: false,
 		deferApplyPatchRendering: false,
 	} as const;
 	const requests: Array<{ url: string; body: any; headers: Headers }> = [];
