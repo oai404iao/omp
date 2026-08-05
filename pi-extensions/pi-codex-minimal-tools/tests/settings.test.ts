@@ -81,7 +81,7 @@ test("loadSettings reads package config and nested request profile", () => {
 			imageModel: "gpt-image-1",
 			directImageApiFallback: true,
 			webSearchEnabled: true,
-			compactionMode: "responses-context-management",
+			compactionMode: "responses",
 			requestProfile: {
 				responsesMode: "standard",
 				systemPromptPlacement: "developer",
@@ -97,7 +97,7 @@ test("loadSettings reads package config and nested request profile", () => {
 		assert.equal(settings.imageModel, "gpt-image-1");
 		assert.equal(settings.directImageApiFallback, true);
 		assert.equal(settings.webSearchEnabled, true);
-		assert.equal(settings.compactionMode, "responses-context-management");
+		assert.equal(settings.compactionMode, "responses");
 		assert.deepEqual(settings.requestProfile, {
 			responsesMode: "standard",
 			systemPromptPlacement: "developer",
@@ -106,6 +106,15 @@ test("loadSettings reads package config and nested request profile", () => {
 			supportsParallelTools: false,
 		});
 		assert.equal(settings.applyPatchEnabled, true);
+	});
+});
+
+test("loadSettings migrates the old context-management compaction name", () => {
+	withAgentDir((agentDir) => {
+		writeConfig(agentDir, {
+			compactionMode: "responses-context-management",
+		});
+		assert.equal(loadSettings().compactionMode, "responses");
 	});
 });
 

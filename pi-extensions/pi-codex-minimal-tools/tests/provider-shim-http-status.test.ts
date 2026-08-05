@@ -645,7 +645,7 @@ test("openai provider applies request profiles with API-key Responses transport"
 
 test("normal OpenAI requests do not compact inline inside a tool turn", async () => {
 	writeSettings({
-		compactionMode: "responses-context-management",
+		compactionMode: "responses",
 	});
 	const provider = createProviderHarness().providers.openai;
 	let requestBody: any;
@@ -676,20 +676,34 @@ test("normal OpenAI requests do not compact inline inside a tool turn", async ()
 	assert.equal("context_management" in requestBody, false);
 });
 
-test("Codex compaction checkpoints retain user messages and drop stale execution state", () => {
+test("Codex Responses compaction checkpoints retain user and delegated-task messages", () => {
 	const compaction = { type: "compaction", encrypted_content: "managed-encrypted" };
 	const user = { type: "message", role: "user", content: [{ type: "input_text", text: "retained" }] };
+	const delegatedTask = {
+		type: "agent_message",
+		author: "/root",
+		recipient: "/root/worker",
+		content: [
+			{ type: "input_text", text: "Message Type: TASK\nDelegate this work" },
+			{ type: "encrypted_content", encrypted_content: "delegated-task-state" },
+		],
+	};
 	const result = buildCodexCompactionCheckpoint([
 		{ type: "message", role: "developer", content: [{ type: "input_text", text: "stale instructions" }] },
 		user,
+		delegatedTask,
+		{
+			type: "agent_message",
+			content: [{ type: "input_text", text: "Message Type: FINAL_ANSWER\ncompleted child task" }],
+		},
 		{ type: "message", role: "assistant", content: [{ type: "output_text", text: "stale reply" }] },
 		{ type: "function_call", id: "fc_old", call_id: "call_old", name: "read", arguments: "{}" },
 	], compaction);
 
-	assert.deepEqual(result, [user, compaction]);
+	assert.deepEqual(result, [user, delegatedTask, compaction]);
 });
 
-test("native compaction supports Codex /responses compaction_trigger and /responses/compact", async () => {
+test("native compaction supports Codex Responses compaction and legacy /responses/compact", async () => {
 	const model = {
 		provider: "openai",
 		api: "openai-responses",
@@ -712,7 +726,7 @@ test("native compaction supports Codex /responses compaction_trigger and /respon
 		glyphStyle: "unicode",
 		autoEnable: true,
 		nativeProviderTools: true,
-		compactionMode: "responses-context-management",
+		compactionMode: "responses",
 		requestProfile: {},
 		apiKeyMode: false,
 		imageGeneration: true,
@@ -744,9 +758,10 @@ test("native compaction supports Codex /responses compaction_trigger and /respon
 		return successSseResponse([{ type: "compaction", encrypted_content: "managed-encrypted" }]);
 	}) as typeof fetch;
 
-	const managed = await requestOpenAINativeCompaction(model, context, {
-		mode: "responses-context-management",
+	const responses = await requestOpenAINativeCompaction(model, context, {
+		mode: "responses",
 		apiKey: "key",
+		sessionId: "session-1",
 		settings: settings as any,
 	});
 	const legacy = await requestOpenAINativeCompaction(model, context, {
@@ -755,15 +770,18 @@ test("native compaction supports Codex /responses compaction_trigger and /respon
 		settings: { ...settings, compactionMode: "responses-compact" } as any,
 	});
 
-	assert.deepEqual(managed, [
+	assert.deepEqual(responses, [
 		{ type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] },
 		{ type: "compaction", encrypted_content: "managed-encrypted" },
 	]);
 	assert.equal(requests[0]?.url, "https://example.test/v1/responses");
 	assert.equal(requests[0]?.body.stream, true);
 	assert.equal(requests[0]?.headers.get("accept"), "text/event-stream");
+	assert.equal(requests[0]?.headers.get("session_id"), "session-1");
+	assert.equal(requests[0]?.headers.get("x-codex-beta-features"), "remote_compaction_v2");
 	assert.equal("context_management" in requests[0]!.body, false);
 	assert.deepEqual(requests[0]?.body.input.at(-1), { type: "compaction_trigger" });
+	assert.equal(requests[0]?.body.prompt_cache_key, "session-1");
 	assert.equal(JSON.stringify(requests[0]?.body).includes("compact_threshold"), false);
 	assert.equal(requests[1]?.url, "https://example.test/v1/responses/compact");
 	assert.equal("stream" in requests[1]!.body, false);

@@ -34,8 +34,8 @@
     },
     "compactionMode": {
       "type": "string",
-      "description": "Compaction implementation for GPT-5-series models on the openai provider. pi uses Pi summaries; responses-context-management is a compatibility name for Codex-style /responses compaction_trigger; responses-compact uses /responses/compact.",
-      "enum": ["pi", "responses-context-management", "responses-compact"],
+      "description": "Compaction implementation for GPT-5-series models on the openai provider. pi uses Pi summaries; responses follows Codex remote compaction v2 through a streaming /responses compaction_trigger request; responses-compact uses the legacy /responses/compact endpoint.",
+      "enum": ["pi", "responses", "responses-compact"],
       "default": "pi"
     },
     "requestProfile": {

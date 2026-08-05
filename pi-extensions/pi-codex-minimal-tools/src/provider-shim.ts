@@ -51,6 +51,10 @@ const WEB_SEARCH_RESULTS_INCLUDE = "web_search_call.results";
 const SESSION_WEBSOCKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const CODEX_COMPACTION_TRIGGER_TYPE = "compaction_trigger";
 const CODEX_RETAINED_MESSAGE_TOKEN_BUDGET = 64_000;
+const CODEX_MAX_RETAINED_AGENT_MESSAGE_TOKENS = 10_000;
+const CODEX_REMOTE_COMPACTION_STREAM_RETRIES = 2;
+const X_CODEX_BETA_FEATURES = "x-codex-beta-features";
+const CODEX_REMOTE_COMPACTION_V2_FEATURE = "remote_compaction_v2";
 const APPROX_BYTES_PER_TOKEN = 4;
 const dynamicImport = (specifier: string) => import(specifier);
 let _os: { platform(): string; release(): string; arch(): string } | null = null;
@@ -504,6 +508,14 @@ function buildSSEHeaders(
 	}
 
 	return headers;
+}
+
+function appendCommaSeparatedHeader(headers: Headers, name: string, value: string): void {
+	const values = (headers.get(name) ?? "")
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter(Boolean);
+	if (!values.includes(value)) headers.set(name, [...values, value].join(","));
 }
 
 function buildWebSocketHeaders(
@@ -1470,10 +1482,15 @@ function buildJsonHeaders(
 	modelHeaders: Record<string, string> | undefined,
 	additionalHeaders: Record<string, string> | undefined,
 	apiKey: string,
+	sessionId?: string,
 ): Headers {
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, undefined, apiKey);
 	headers.set("accept", "application/json");
 	headers.set("content-type", "application/json");
+	if (sessionId) {
+		headers.set("session_id", sessionId);
+		headers.set("x-client-request-id", sessionId);
+	}
 	return headers;
 }
 
@@ -1541,14 +1558,20 @@ function approxTokenCount(text: string): number {
 	return Math.ceil(bytes / APPROX_BYTES_PER_TOKEN);
 }
 
-function responseMessageTokenCount(item: Record<string, unknown>): number {
-	if (!Array.isArray(item.content)) return 1;
-	const tokens = item.content.reduce((total, part) => {
-		if (!part || typeof part !== "object") return total;
-		const text = (part as { text?: unknown }).text;
-		return typeof text === "string" ? total + approxTokenCount(text) : total;
-	}, 0);
-	return Math.max(1, tokens);
+function responseItemTokenCount(item: Record<string, unknown>): number {
+	if (item.type === "message" && Array.isArray(item.content)) {
+		const tokens = item.content.reduce((total, part) => {
+			if (!part || typeof part !== "object") return total;
+			const text = (part as { text?: unknown }).text;
+			return typeof text === "string" ? total + approxTokenCount(text) : total;
+		}, 0);
+		return Math.max(1, tokens);
+	}
+	try {
+		return Math.max(1, approxTokenCount(JSON.stringify(item)));
+	} catch {
+		return Number.MAX_SAFE_INTEGER;
+	}
 }
 
 function truncateUtf8Prefix(text: string, maxBytes: number): string {
@@ -1570,7 +1593,7 @@ function truncateResponseMessage(
 	item: Record<string, unknown>,
 	maxTokens: number,
 ): Record<string, unknown> | undefined {
-	if (!Array.isArray(item.content) || maxTokens <= 0) return undefined;
+	if (item.type !== "message" || !Array.isArray(item.content) || maxTokens <= 0) return undefined;
 	let remaining = maxTokens;
 	const content: unknown[] = [];
 	for (const part of item.content) {
@@ -1594,9 +1617,30 @@ function truncateResponseMessage(
 	return content.length > 0 ? { ...item, content } : undefined;
 }
 
+function retainedResponsesCompactionItem(item: unknown): Record<string, unknown> | undefined {
+	if (!item || typeof item !== "object" || Array.isArray(item)) return undefined;
+	const record = item as Record<string, unknown>;
+	if (
+		(record.type === undefined || record.type === "message")
+		&& record.role === "user"
+		&& Array.isArray(record.content)
+	) {
+		return { ...record, type: "message" };
+	}
+	if (record.type !== "agent_message" || !Array.isArray(record.content)) return undefined;
+	const first = record.content[0];
+	const firstText = first && typeof first === "object" ? (first as { text?: unknown }).text : undefined;
+	if (typeof firstText === "string" && firstText.startsWith("Message Type: FINAL_ANSWER\n")) {
+		return undefined;
+	}
+	return responseItemTokenCount(record) <= CODEX_MAX_RETAINED_AGENT_MESSAGE_TOKENS
+		? record
+		: undefined;
+}
+
 /**
  * Match Codex remote compaction v2's installed checkpoint shape: retain the
- * newest real user messages within a bounded token budget, drop stale
+ * newest real user messages plus bounded delegated-agent state, drop stale
  * developer/system/assistant/tool state, then append the opaque compaction
  * item returned by Responses.
  */
@@ -1604,31 +1648,24 @@ export function buildCodexCompactionCheckpoint(
 	input: unknown[],
 	compactionItem: unknown,
 ): unknown[] {
-	const candidates = input.flatMap((item): Record<string, unknown>[] => {
-		if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-		const record = item as Record<string, unknown>;
-		if (
-			(record.type === undefined || record.type === "message")
-			&& record.role === "user"
-			&& Array.isArray(record.content)
-		) {
-			return [{ ...record, type: "message" }];
-		}
-		return [];
-	});
+	const candidates = input
+		.map(retainedResponsesCompactionItem)
+		.filter((item): item is Record<string, unknown> => !!item);
 	let remaining = CODEX_RETAINED_MESSAGE_TOKEN_BUDGET;
 	const retainedReversed: Record<string, unknown>[] = [];
 	for (let index = candidates.length - 1; index >= 0 && remaining > 0; index--) {
 		const item = candidates[index]!;
-		const tokenCount = responseMessageTokenCount(item);
+		const tokenCount = responseItemTokenCount(item);
 		if (tokenCount <= remaining) {
 			retainedReversed.push(item);
 			remaining -= tokenCount;
 			continue;
 		}
 		const truncated = truncateResponseMessage(item, remaining);
-		if (truncated) retainedReversed.push(truncated);
-		remaining = 0;
+		if (truncated) {
+			retainedReversed.push(truncated);
+			remaining = 0;
+		}
 	}
 	retainedReversed.reverse();
 	return [...retainedReversed, compactionItem];
@@ -1659,7 +1696,8 @@ async function requestCodexCompactionTrigger(
 	const bodyJson = JSON.stringify(body);
 	const dispatcher = await proxyDispatcherForUrl(url);
 	let lastError: Error | undefined;
-	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+	const maxRetries = Math.min(MAX_RETRIES, CODEX_REMOTE_COMPACTION_STREAM_RETRIES);
+	for (let attempt = 0; attempt <= maxRetries; attempt++) {
 		try {
 			const response = await fetchWithResponseHeaderTimeout(url, {
 				method: "POST",
@@ -1670,7 +1708,7 @@ async function requestCodexCompactionTrigger(
 			if (response.ok) return await collectCodexCompactionOutput(response);
 
 			const errorText = await response.text();
-			if (attempt < MAX_RETRIES && isRetryableError(response.status, errorText)) {
+			if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
 				await sleep(BASE_DELAY_MS * 2 ** attempt, signal);
 				continue;
 			}
@@ -1683,7 +1721,7 @@ async function requestCodexCompactionTrigger(
 			if (error instanceof NonRetryableProviderError) throw error;
 			if (signal?.aborted) throw new Error("Request was aborted");
 			lastError = error instanceof Error ? error : new Error(String(error));
-			if (attempt < MAX_RETRIES) {
+			if (attempt < maxRetries) {
 				await sleep(BASE_DELAY_MS * 2 ** attempt, signal);
 				continue;
 			}
@@ -1727,11 +1765,12 @@ export async function requestOpenAINativeCompaction(
 	model: Model<Api>,
 	context: Context,
 	options: {
-		mode: "responses-context-management" | "responses-compact";
+		mode: "responses" | "responses-compact";
 		apiKey: string;
 		headers?: Record<string, string>;
 		signal?: AbortSignal;
 		reasoning?: SimpleStreamOptions["reasoning"];
+		sessionId?: string;
 		settings: ReturnType<typeof loadSettings>;
 	},
 ): Promise<unknown[]> {
@@ -1747,12 +1786,25 @@ export async function requestOpenAINativeCompaction(
 		headers: options.headers,
 		signal: options.signal,
 		reasoning: options.reasoning,
+		sessionId: options.sessionId,
 	});
 
-	if (options.mode === "responses-context-management") {
+	if (options.mode === "responses") {
 		const retainedInput = [...body.input];
 		body.input = [...retainedInput, { type: CODEX_COMPACTION_TRIGGER_TYPE }];
-		const headers = buildSSEHeaders(model.headers, options.headers, undefined, options.apiKey, undefined, profile);
+		const headers = buildSSEHeaders(
+			model.headers,
+			options.headers,
+			undefined,
+			options.apiKey,
+			options.sessionId,
+			profile,
+		);
+		appendCommaSeparatedHeader(
+			headers,
+			X_CODEX_BETA_FEATURES,
+			CODEX_REMOTE_COMPACTION_V2_FEATURE,
+		);
 		const item = await requestCodexCompactionTrigger(
 			resolveCodexUrl(model.baseUrl, { apiKeyMode: true }),
 			headers,
@@ -1762,7 +1814,7 @@ export async function requestOpenAINativeCompaction(
 		return buildCodexCompactionCheckpoint(retainedInput, item);
 	}
 
-	const headers = buildJsonHeaders(model.headers, options.headers, options.apiKey);
+	const headers = buildJsonHeaders(model.headers, options.headers, options.apiKey, options.sessionId);
 	const compactBody: Record<string, unknown> = {
 		model: body.model,
 		input: body.input,

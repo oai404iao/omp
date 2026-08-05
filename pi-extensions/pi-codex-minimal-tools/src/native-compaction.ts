@@ -19,25 +19,23 @@ import {
 } from "./settings.js";
 
 export const NATIVE_COMPACTION_DETAILS_KIND = "openai-native-compaction";
-export const NATIVE_COMPACTION_DETAILS_VERSION = 1;
+export const NATIVE_COMPACTION_DETAILS_VERSION = 2;
 
-type NativeCompactionMode = Exclude<CodexMinimalToolsSettings["compactionMode"], "pi">;
+export type NativeCompactionMode = Exclude<CodexMinimalToolsSettings["compactionMode"], "pi">;
+type StoredNativeCompactionMode = NativeCompactionMode | "responses-context-management";
 
 export interface NativeCompactionDetails {
 	kind: typeof NATIVE_COMPACTION_DETAILS_KIND;
-	version: typeof NATIVE_COMPACTION_DETAILS_VERSION;
-	mode: NativeCompactionMode;
+	version: 1 | typeof NATIVE_COMPACTION_DETAILS_VERSION;
+	mode: StoredNativeCompactionMode;
 	provider: string;
 	model: string;
 	api: string;
 	output: unknown[];
+	/** Legacy context-management checkpoint source. New Responses compactions omit this. */
 	sourceEntryId?: string;
+	/** Legacy context-management checkpoint block. New Responses compactions omit this. */
 	sourceBlockIndex?: number;
-}
-
-interface NativeCompactionMarker {
-	item: Record<string, unknown>;
-	blockIndex: number;
 }
 
 interface IndexedNativeCompactionEntry {
@@ -57,31 +55,40 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 export function isNativeCompactionDetails(value: unknown): value is NativeCompactionDetails {
 	const details = asRecord(value);
 	return details?.kind === NATIVE_COMPACTION_DETAILS_KIND
-		&& details.version === NATIVE_COMPACTION_DETAILS_VERSION
-		&& (details.mode === "responses-context-management" || details.mode === "responses-compact")
+		&& (details.version === 1 || details.version === NATIVE_COMPACTION_DETAILS_VERSION)
+		&& (
+			details.mode === "responses"
+			|| details.mode === "responses-compact"
+			|| (details.version === 1 && details.mode === "responses-context-management")
+		)
 		&& typeof details.provider === "string"
 		&& typeof details.model === "string"
 		&& typeof details.api === "string"
 		&& Array.isArray(details.output);
 }
 
-function nativeItemFromSignature(signature: unknown): Record<string, unknown> | undefined {
-	if (typeof signature !== "string" || !signature.startsWith("{")) return undefined;
+function normalizedNativeCompactionMode(details: NativeCompactionDetails): NativeCompactionMode {
+	return details.mode === "responses-context-management" ? "responses" : details.mode;
+}
+
+function isNativeCompactionSignature(signature: unknown): boolean {
+	if (typeof signature !== "string" || !signature.startsWith("{")) return false;
 	try {
 		const item = asRecord(JSON.parse(signature));
-		return item?.type === "compaction" || item?.type === "context_compaction" ? item : undefined;
+		return item?.type === "compaction" || item?.type === "context_compaction";
 	} catch {
-		return undefined;
+		return false;
 	}
 }
 
-function findMarker(message: unknown): NativeCompactionMarker | undefined {
+function findLegacyMarkerBlockIndex(message: unknown): number | undefined {
 	const candidate = asRecord(message);
 	if (candidate?.role !== "assistant" || !Array.isArray(candidate.content)) return undefined;
 	for (let index = candidate.content.length - 1; index >= 0; index--) {
 		const block = asRecord(candidate.content[index]);
-		const item = block?.type === "thinking" ? nativeItemFromSignature(block.thinkingSignature) : undefined;
-		if (item) return { item, blockIndex: index };
+		if (block?.type === "thinking" && isNativeCompactionSignature(block.thinkingSignature)) {
+			return index;
+		}
 	}
 	return undefined;
 }
@@ -102,41 +109,6 @@ function latestNativeCompactionEntry(entries: readonly SessionEntry[]): IndexedN
 		entry: entry as CompactionEntry<NativeCompactionDetails>,
 		index,
 	};
-}
-
-function latestMarkerEntry(entries: readonly SessionEntry[]): {
-	entryId: string;
-	marker: NativeCompactionMarker;
-	provider: string;
-	model: string;
-	api: string;
-} | undefined {
-	const compactionIndex = latestCompactionIndex(entries);
-	for (let index = entries.length - 1; index > compactionIndex; index--) {
-		const entry = entries[index];
-		if (entry?.type !== "message") continue;
-		const marker = findMarker(entry.message);
-		const message = asRecord(entry.message);
-		if (
-			marker
-			&& typeof message?.provider === "string"
-			&& typeof message.model === "string"
-			&& typeof message.api === "string"
-		) {
-			return {
-				entryId: entry.id,
-				marker,
-				provider: message.provider,
-				model: message.model,
-				api: message.api,
-			};
-		}
-	}
-	return undefined;
-}
-
-export function hasPendingNativeCompactionMarker(entries: readonly SessionEntry[]): boolean {
-	return latestMarkerEntry(entries) !== undefined;
 }
 
 function matchesModelIdentity(
@@ -179,20 +151,14 @@ function withoutCompactionSummary(messages: PiMessages): PiMessages {
 	return messages.filter((message) => message.role !== "compactionSummary");
 }
 
-function nativeMarkerSignature(marker: NativeCompactionMarker): string {
-	return JSON.stringify(marker.item);
-}
-
-function trimSourceAssistant(
+function legacyTailAfterContextManagementMarker(
 	messages: PiMessages,
 	sourceBlockIndex: number | undefined,
-	includeMarker: boolean,
 ): PiMessages {
 	if (messages.length === 0) return messages;
 	const first = messages[0];
 	if (first?.role !== "assistant") return messages;
-	const marker = findMarker(first);
-	const blockIndex = marker?.blockIndex ?? sourceBlockIndex;
+	const blockIndex = findLegacyMarkerBlockIndex(first) ?? sourceBlockIndex;
 	if (blockIndex === undefined) return messages;
 	const prefix = first.content.slice(0, blockIndex);
 	const suffix = first.content.slice(blockIndex + 1);
@@ -209,14 +175,9 @@ function trimSourceAssistant(
 		// response.completed after already-streamed output, even when its
 		// authoritative output_index was first. Rotate that terminal marker back
 		// in front so the call arguments and matching results survive replay.
-		const content = includeMarker
-			? [first.content[blockIndex]!, ...prefix]
-			: prefix;
-		return content.length > 0 ? [{ ...first, content }, ...messages.slice(1)] : messages.slice(1);
+		return prefix.length > 0 ? [{ ...first, content: prefix }, ...messages.slice(1)] : messages.slice(1);
 	}
-	const start = includeMarker ? blockIndex : blockIndex + 1;
-	const content = first.content.slice(start);
-	return content.length > 0 ? [{ ...first, content }, ...messages.slice(1)] : messages.slice(1);
+	return suffix.length > 0 ? [{ ...first, content: suffix }, ...messages.slice(1)] : messages.slice(1);
 }
 
 function messageTimestamp(message: PiMessage): number {
@@ -281,30 +242,6 @@ export function normalizeNativeCompactionToolPairs(messages: PiMessages): PiMess
 	return changed ? normalized : messages;
 }
 
-function pendingMarkerInMessages(
-	messages: PiMessages,
-	entries: readonly SessionEntry[],
-	model: Model<Api>,
-): { messageIndex: number; marker: NativeCompactionMarker } | undefined {
-	const pending = latestMarkerEntry(entries);
-	if (!pending && entries.length > 0) return undefined;
-	const expectedSignature = pending ? nativeMarkerSignature(pending.marker) : undefined;
-
-	for (let index = messages.length - 1; index >= 0; index--) {
-		const marker = findMarker(messages[index]);
-		if (!marker) continue;
-		if (expectedSignature && nativeMarkerSignature(marker) !== expectedSignature) continue;
-		const message = asRecord(messages[index]);
-		if (
-			message?.provider !== model.provider
-			|| message.model !== model.id
-			|| message.api !== model.api
-		) continue;
-		return { messageIndex: index, marker };
-	}
-	return undefined;
-}
-
 /**
  * Replace Pi's textual compaction summary with the opaque native Responses
  * items saved in CompactionEntry.details. The opaque payload is replayed only
@@ -314,7 +251,6 @@ export function applyNativeCompactionContext(
 	messages: PiMessages,
 	branchEntries: readonly SessionEntry[],
 	model: Model<Api> | undefined,
-	mode: CodexMinimalToolsSettings["compactionMode"],
 ): PiMessages {
 	if (!model || !isOpenAiGpt5Model(model as ModelLike)) return messages;
 
@@ -323,13 +259,13 @@ export function applyNativeCompactionContext(
 		const details = installed.entry.details;
 		if (!isNativeCompactionDetails(details)) return messages;
 		if (!matchesModelIdentity(details, model)) return messages;
-		const output = details.mode === "responses-compact"
+		const output = normalizedNativeCompactionMode(details) === "responses-compact"
 			? sanitizeNativeCompactionOutput(details.output)
 			: details.output;
 		const withoutSummary = withoutCompactionSummary(messages);
 		let tail: PiMessages;
 		if (details.sourceEntryId) {
-			tail = trimSourceAssistant(withoutSummary, details.sourceBlockIndex, false);
+			tail = legacyTailAfterContextManagementMarker(withoutSummary, details.sourceBlockIndex);
 		} else {
 			// The compaction entry is the semantic history boundary. Timestamps are
 			// not safe here because messages queued while compaction is running can
@@ -341,13 +277,7 @@ export function applyNativeCompactionContext(
 			...tail,
 		]);
 	}
-
-	if (mode !== "responses-context-management") return messages;
-	const pending = pendingMarkerInMessages(messages, branchEntries, model);
-	if (!pending) return messages;
-	return normalizeNativeCompactionToolPairs(
-		trimSourceAssistant(messages.slice(pending.messageIndex), pending.marker.blockIndex, true),
-	);
+	return messages;
 }
 
 function activeTools(pi: ExtensionAPI): Tool[] {
@@ -362,8 +292,8 @@ function activeTools(pi: ExtensionAPI): Tool[] {
 }
 
 function compactionSummary(mode: NativeCompactionMode): string {
-	return mode === "responses-context-management"
-		? "OpenAI Responses compaction trigger compacted the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools."
+	return mode === "responses"
+		? "OpenAI Responses compaction replaced the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools."
 		: "OpenAI Responses /responses/compact replaced the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools.";
 }
 
@@ -372,7 +302,6 @@ async function buildNativeCompactionContext(
 	event: SessionBeforeCompactEvent,
 	ctx: ExtensionContext,
 	model: Model<Api>,
-	settings: CodexMinimalToolsSettings,
 ): Promise<Context> {
 	const session = buildSessionContext(event.branchEntries, ctx.sessionManager.getLeafId());
 	return {
@@ -381,7 +310,6 @@ async function buildNativeCompactionContext(
 			session.messages,
 			event.branchEntries,
 			model,
-			settings.compactionMode,
 		) as Context["messages"],
 		tools: activeTools(pi),
 	};
@@ -395,7 +323,6 @@ export function registerNativeCompaction(pi: ExtensionAPI): void {
 			event.messages as PiMessages,
 			ctx.sessionManager.getBranch(),
 			ctx.model as Model<Api> | undefined,
-			settings.compactionMode,
 		);
 		return messages === event.messages ? undefined : { messages: messages as typeof event.messages };
 	});
@@ -411,41 +338,18 @@ export function registerNativeCompaction(pi: ExtensionAPI): void {
 				throw new Error("native compaction requires the Standard Responses request profile");
 			}
 
-			if (mode === "responses-context-management") {
-				const captured = latestMarkerEntry(event.branchEntries);
-				if (captured && matchesModelIdentity(captured, model)) {
-					return {
-						compaction: {
-							summary: compactionSummary(mode),
-							firstKeptEntryId: captured.entryId,
-							tokensBefore: event.preparation.tokensBefore,
-							details: {
-								kind: NATIVE_COMPACTION_DETAILS_KIND,
-								version: NATIVE_COMPACTION_DETAILS_VERSION,
-								mode,
-								provider: captured.provider,
-								model: captured.model,
-								api: captured.api,
-								output: [captured.marker.item],
-								sourceEntryId: captured.entryId,
-								sourceBlockIndex: captured.marker.blockIndex,
-							} satisfies NativeCompactionDetails,
-						},
-					};
-				}
-			}
-
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 			if (!auth.ok || !auth.apiKey) {
 				throw new Error(auth.ok ? "OpenAI API key is unavailable" : auth.error);
 			}
-			const context = await buildNativeCompactionContext(pi, event, ctx, model, settings);
+			const context = await buildNativeCompactionContext(pi, event, ctx, model);
 			const output = await requestOpenAINativeCompaction(model, context, {
 				mode,
 				apiKey: auth.apiKey,
 				headers: auth.headers,
 				signal: event.signal,
 				reasoning: pi.getThinkingLevel() as ThinkingLevel,
+				sessionId: ctx.sessionManager.getSessionId(),
 				settings,
 			});
 			return {

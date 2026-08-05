@@ -16,8 +16,8 @@ GPT-5-series models on the `openai` provider use `apply_patch` instead of
 - Responses web-search progress events render as compact `Searching the web` / `Searched the web` activity rows.
 - Web search citations remain clickable across turns by replaying hosted search results and citation annotations; leaked provider reference markers are resolved locally when possible.
 - Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
-- Optional GPT-5 native compaction using either Codex-style Responses
-  `compaction_trigger` or the legacy `/responses/compact` endpoint.
+- Optional GPT-5 native compaction using Codex remote compaction v2 over
+  `/responses`, with the legacy `/responses/compact` endpoint still available.
 
 ## Protocol reference
 
@@ -103,7 +103,7 @@ For offline completion, replace the URL with a local path your editor can resolv
 | Setting | What it does |
 | --- | --- |
 | `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai` and `openai-codex` (`image_generation`, and `web_search` when enabled). |
-| `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses-context-management` (compatibility name for Codex-style `/responses` `compaction_trigger`), or `responses-compact` (legacy `/responses/compact`). |
+| `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses` (Codex remote compaction v2 through `/responses` + `compaction_trigger`), or `responses-compact` (legacy `/responses/compact`). The old `responses-context-management` config value is read as `responses` for migration only. |
 | `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `systemPromptPlacement` chooses top-level `instructions` or an input `developer` message in Standard mode; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always uses a developer message and forces hosted and parallel tools off. |
 | `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. The `openai` provider always uses this API-key transport. |
 | `webSearchEnabled` | Expose hosted `web_search` on GPT-5-series `openai` and `openai-codex` models. Disabled by default. |
@@ -124,14 +124,15 @@ falls back to Pi's placeholder summary plus retained recent messages.
 Native compaction runs through Pi's normal compaction lifecycle, so the
 `Compacting context...` status and `[compaction]` summary renderer remain
 visible. Pi's existing automatic threshold, overflow recovery, and `/compact`
-command decide when compaction runs. The `responses-context-management`
-compatibility mode follows current Codex remote compaction v2: it appends a
-`compaction_trigger` input item to a streaming `/responses` request, requires
-exactly one compaction output item, and installs retained user messages plus
-the opaque checkpoint. `responses-compact` uses `/responses/compact` and
-installs only safe retained messages plus the opaque compaction item; stale
-reasoning and tool call/output items are discarded. Native modes ignore
-`/compact` custom summary instructions.
+command decide when compaction runs. The `responses` mode follows current
+Codex remote compaction v2: it appends a `compaction_trigger` input item to a
+streaming `/responses` request, requires exactly one compaction output item,
+and installs bounded retained user/delegated-task messages plus the opaque
+checkpoint. It does not use the former Responses `context_management`
+request field or its inline marker lifecycle. `responses-compact` uses
+`/responses/compact` and installs only safe retained messages plus the opaque
+compaction item; stale reasoning and tool call/output items are discarded.
+Native modes ignore `/compact` custom summary instructions.
 
 Set `requestProfile.patchTransport: "custom"` to send `apply_patch` as the
 Codex freeform custom tool with the packaged Lark grammar. Other tools remain

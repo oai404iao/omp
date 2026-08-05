@@ -11,7 +11,7 @@ export interface CodexMinimalToolsSettings {
 	glyphStyle: "unicode" | "ascii";
 	autoEnable: boolean;
 	nativeProviderTools: boolean;
-	compactionMode: "pi" | "responses-context-management" | "responses-compact";
+	compactionMode: "pi" | "responses" | "responses-compact";
 	requestProfile: CodexRequestProfileOverride;
 	apiKeyMode: boolean;
 	imageGeneration: boolean;
@@ -122,7 +122,8 @@ function glyphStyleSetting(raw: SettingsRecord): CodexMinimalToolsSettings["glyp
 
 function compactionModeSetting(raw: SettingsRecord): CodexMinimalToolsSettings["compactionMode"] {
 	const value = raw.compactionMode;
-	return value === "pi" || value === "responses-context-management" || value === "responses-compact"
+	if (value === "responses-context-management") return "responses";
+	return value === "pi" || value === "responses" || value === "responses-compact"
 		? value
 		: DEFAULT_SETTINGS.compactionMode;
 }
