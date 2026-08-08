@@ -22,6 +22,7 @@ export interface CodexMinimalToolsSettings {
 	viewImage: boolean;
 	viewImageWorkspaceOnly: boolean;
 	applyPatchEnabled: boolean;
+	additionalModelIds: string[];
 	deferApplyPatchRendering: boolean;
 }
 
@@ -41,6 +42,7 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	viewImage: false,
 	viewImageWorkspaceOnly: false,
 	applyPatchEnabled: true,
+	additionalModelIds: [],
 	deferApplyPatchRendering: false,
 };
 
@@ -110,6 +112,24 @@ function stringSetting(raw: SettingsRecord, key: keyof CodexMinimalToolsSettings
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
+function modelIdListSetting(raw: SettingsRecord): string[] {
+	const value = raw.additionalModelIds;
+	if (!Array.isArray(value)) return [...DEFAULT_SETTINGS.additionalModelIds];
+
+	const seen = new Set<string>();
+	const modelIds: string[] = [];
+	for (const item of value) {
+		if (typeof item !== "string") continue;
+		const modelId = item.trim();
+		if (!modelId.includes("/")) continue;
+		const normalized = modelId.toLowerCase();
+		if (seen.has(normalized)) continue;
+		seen.add(normalized);
+		modelIds.push(modelId);
+	}
+	return modelIds;
+}
+
 function imageModelSetting(raw: SettingsRecord): CodexMinimalToolsSettings["imageModel"] {
 	const value = raw.imageModel;
 	return value === "gpt-image-2" || value === "gpt-image-1.5" || value === "gpt-image-1" ? value : DEFAULT_SETTINGS.imageModel;
@@ -158,6 +178,7 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		viewImage: boolSetting(raw, "viewImage"),
 		viewImageWorkspaceOnly: boolSetting(raw, "viewImageWorkspaceOnly"),
 		applyPatchEnabled: boolSetting(raw, "applyPatchEnabled"),
+		additionalModelIds: modelIdListSetting(raw),
 		deferApplyPatchRendering: boolSetting(raw, "deferApplyPatchRendering"),
 	};
 }

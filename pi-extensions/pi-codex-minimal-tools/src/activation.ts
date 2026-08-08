@@ -1,4 +1,4 @@
-import type { ModelLike } from "./capabilities.js";
+import { isAdditionalToolModel, type ModelLike } from "./capabilities.js";
 
 export interface ModelRegistryLike {
 	getAll?: () => unknown;
@@ -42,4 +42,10 @@ export function hasOpenAiModelsLoaded(ctx: ActivationContextLike): boolean {
 	} catch {
 		return false;
 	}
+}
+
+export function hasAdditionalToolModelsLoaded(ctx: ActivationContextLike, additionalModelIds: readonly string[]): boolean {
+	if (additionalModelIds.length === 0) return false;
+	if (isAdditionalToolModel(ctx.model, additionalModelIds)) return true;
+	return registryModels(ctx.modelRegistry).some((model) => isAdditionalToolModel(model, additionalModelIds));
 }

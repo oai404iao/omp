@@ -81,6 +81,11 @@ test("loadSettings reads package config and nested request profile", () => {
 			imageModel: "gpt-image-1",
 			directImageApiFallback: true,
 			webSearchEnabled: true,
+			additionalModelIds: [
+				" openai/deepseek-v4-flash ",
+				"OPENAI/deepseek-v4-flash",
+				"invalid",
+			],
 			compactionMode: "responses",
 			requestProfile: {
 				responsesMode: "standard",
@@ -97,6 +102,7 @@ test("loadSettings reads package config and nested request profile", () => {
 		assert.equal(settings.imageModel, "gpt-image-1");
 		assert.equal(settings.directImageApiFallback, true);
 		assert.equal(settings.webSearchEnabled, true);
+		assert.deepEqual(settings.additionalModelIds, ["openai/deepseek-v4-flash"]);
 		assert.equal(settings.compactionMode, "responses");
 		assert.deepEqual(settings.requestProfile, {
 			responsesMode: "standard",

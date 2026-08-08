@@ -29,6 +29,12 @@ export function modelKey(model: ModelLike | undefined): string {
 	return `${model.provider ?? "unknown"}/${model.id ?? model.name ?? "unknown"}`;
 }
 
+function modelIdKey(model: ModelLike | undefined): string | undefined {
+	const provider = model?.provider?.trim().toLowerCase();
+	const id = model?.id?.trim().toLowerCase();
+	return provider && id ? `${provider}/${id}` : undefined;
+}
+
 export function isNativeOpenAiProviderModel(model: ModelLike | undefined): boolean {
 	return model?.provider === "openai" || model?.provider === "openai-codex";
 }
@@ -47,6 +53,23 @@ export function isGpt5SeriesModel(model: ModelLike | undefined): boolean {
 
 export function isOpenAiGpt5Model(model: ModelLike | undefined): boolean {
 	return model?.provider?.toLowerCase() === "openai" && isGpt5SeriesModel(model);
+}
+
+export function isDefaultExtendedToolModel(model: ModelLike | undefined): boolean {
+	const key = modelIdKey(model);
+	return key !== undefined && /^openai\/gpt-5(?:$|[.-])/.test(key);
+}
+
+export function isAdditionalToolModel(model: ModelLike | undefined, additionalModelIds: readonly string[]): boolean {
+	const key = modelIdKey(model);
+	return Boolean(key) && additionalModelIds.some((candidate) => candidate.trim().toLowerCase() === key);
+}
+
+export function isExtendedToolModel(
+	model: ModelLike | undefined,
+	settings: Pick<CodexMinimalToolsSettings, "additionalModelIds">,
+): boolean {
+	return isDefaultExtendedToolModel(model) || isAdditionalToolModel(model, settings.additionalModelIds);
 }
 
 export function supportsImageInput(model: ModelLike | undefined): boolean {
@@ -71,40 +94,30 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	const imageInput = supportsImageInput(model);
 	const openAiLike = isOpenAiLikeModel(model);
 	const nativeOpenAi = isNativeOpenAiProviderModel(model);
-	const gpt5 = isGpt5SeriesModel(model);
-	const openAiGpt5 = isOpenAiGpt5Model(model);
+	const extendedToolModel = isExtendedToolModel(model, settings);
+	const configuredToolModel = isAdditionalToolModel(model, settings.additionalModelIds);
 	const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
-	if (!openAiLike) {
-		return {
-			image_generation: { enabled: false, reason: "model is not OpenAI/Codex-like" },
-			view_image: { enabled: false, reason: "model is not OpenAI/Codex-like" },
-			apply_patch: { enabled: false, reason: "model is not OpenAI/Codex-like" },
-			web_search: { enabled: false, reason: "model is not OpenAI/Codex-like" },
-		};
-	}
 
 	return {
-		image_generation: settings.imageGeneration && settings.nativeProviderTools && requestProfile.supportsHostedTools && nativeOpenAi && imageInput
+		image_generation: openAiLike && settings.imageGeneration && settings.nativeProviderTools && requestProfile.supportsHostedTools && nativeOpenAi && imageInput
 			? { enabled: true, reason: "OpenAI image-capable model with native tools enabled" }
-			: settings.imageGeneration && settings.directImageApiFallback
+			: openAiLike && settings.imageGeneration && settings.directImageApiFallback
 				? { enabled: true, reason: "direct Images API fallback enabled" }
-				: { enabled: false, reason: !settings.imageGeneration ? "image_generation disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !requestProfile.supportsHostedTools ? "hosted tools disabled by request profile" : !nativeOpenAi ? "requires openai or openai-codex provider" : "model does not advertise image input" },
-		view_image: settings.viewImage && imageInput
+				: { enabled: false, reason: !openAiLike ? "model is not OpenAI/Codex-like" : !settings.imageGeneration ? "image_generation disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !requestProfile.supportsHostedTools ? "hosted tools disabled by request profile" : !nativeOpenAi ? "requires openai or openai-codex provider" : "model does not advertise image input" },
+		view_image: openAiLike && settings.viewImage && imageInput
 			? { enabled: true, reason: "model accepts image input" }
-			: { enabled: false, reason: !settings.viewImage ? "view_image disabled by setting" : "model does not advertise image input" },
-		apply_patch: settings.applyPatchEnabled && openAiGpt5
-			? { enabled: true, reason: "GPT-5-series model on the openai provider" }
+			: { enabled: false, reason: !openAiLike ? "model is not OpenAI/Codex-like" : !settings.viewImage ? "view_image disabled by setting" : "model does not advertise image input" },
+		apply_patch: settings.applyPatchEnabled && extendedToolModel
+			? { enabled: true, reason: configuredToolModel ? "model enabled by additionalModelIds" : "model id starts with openai/gpt-5" }
 			: {
 				enabled: false,
 				reason: !settings.applyPatchEnabled
 					? "apply_patch disabled by setting"
-					: model?.provider?.toLowerCase() !== "openai"
-						? "requires the openai provider"
-						: "requires a GPT-5-series model",
+					: "requires an openai/gpt-5 model or an additionalModelIds entry",
 			},
-		web_search: settings.webSearchEnabled && settings.nativeProviderTools && requestProfile.supportsHostedTools && nativeOpenAi && gpt5
-			? { enabled: true, reason: "GPT-5-series OpenAI model with native web_search enabled" }
-			: { enabled: false, reason: !settings.webSearchEnabled ? "web_search disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !requestProfile.supportsHostedTools ? "hosted tools disabled by request profile" : !nativeOpenAi ? "requires openai or openai-codex provider" : "requires a GPT-5-series model" },
+		web_search: settings.webSearchEnabled && settings.nativeProviderTools && requestProfile.supportsHostedTools && nativeOpenAi && extendedToolModel
+			? { enabled: true, reason: configuredToolModel ? "model enabled by additionalModelIds with native web_search" : "openai/gpt-5 model with native web_search" }
+			: { enabled: false, reason: !settings.webSearchEnabled ? "web_search disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !requestProfile.supportsHostedTools ? "hosted tools disabled by request profile" : !nativeOpenAi ? "requires openai or openai-codex provider" : "requires an openai/gpt-5 model or an additionalModelIds entry" },
 	};
 }
 

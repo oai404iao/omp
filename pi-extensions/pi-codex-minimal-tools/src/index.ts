@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getCapabilities, Image, Text, type Component } from "@earendil-works/pi-tui";
-import { hasOpenAiModelsLoaded } from "./activation.js";
+import { hasAdditionalToolModelsLoaded, hasOpenAiModelsLoaded } from "./activation.js";
 import { registerBackgroundImageGenerationCommand } from "./background-image-generation.js";
 import {
 	computeNextActiveTools,
@@ -114,7 +114,10 @@ function syncActiveTools(
 	suppressedMutationTools: SuppressedMutationTools,
 ): void {
 	const active = pi.getActiveTools?.() ?? [];
-	if (!toolsRegistered || !hasOpenAiModelsLoaded(ctx)) {
+	const settings = loadSettings(ctx.cwd);
+	const supportedModelsLoaded = hasOpenAiModelsLoaded(ctx)
+		|| hasAdditionalToolModelsLoaded(ctx, settings.additionalModelIds);
+	if (!toolsRegistered || !supportedModelsLoaded) {
 		const next = restoreSuppressedMutationTools(
 			active.filter((name) => !PACKAGE_TOOL_NAMES.includes(name as never)),
 			suppressedMutationTools,
@@ -122,7 +125,6 @@ function syncActiveTools(
 		if (next.join("\0") !== active.join("\0")) pi.setActiveTools(next);
 		return;
 	}
-	const settings = loadSettings(ctx.cwd);
 	const next = computeNextActiveTools(active, contextModel(ctx), settings);
 	captureSuppressedMutationTools(active, next.removed, suppressedMutationTools);
 	const activeTools = next.activeTools.includes("apply_patch")
@@ -148,6 +150,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`compaction: ${settings.compactionMode}`,
 		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, system=${requestProfile.systemPromptPlacement}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
 		`webSearchEnabled: ${settings.webSearchEnabled}`,
+		`additionalModelIds: ${settings.additionalModelIds.length > 0 ? settings.additionalModelIds.join(", ") : "(none)"}`,
 		`apiKeyMode: ${settings.apiKeyMode}`,
 		`native provider shim: ${settings.enabled ? "registered" : "disabled"}`,
 		"tools:",
@@ -226,7 +229,9 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 		currentCwd = ctx.cwd;
 		if (toolsRegistered) return true;
 		const settings = loadSettings(ctx.cwd);
-		if (!settings.enabled || !hasOpenAiModelsLoaded(ctx)) return false;
+		const supportedModelsLoaded = hasOpenAiModelsLoaded(ctx)
+			|| hasAdditionalToolModelsLoaded(ctx, settings.additionalModelIds);
+		if (!settings.enabled || !supportedModelsLoaded) return false;
 		registerTools(pi);
 		toolsRegistered = true;
 		return true;

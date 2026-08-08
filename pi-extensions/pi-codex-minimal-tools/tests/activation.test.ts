@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import codexMinimalTools from "../src/index.js";
-import { hasOpenAiModelsLoaded } from "../src/activation.js";
+import { hasAdditionalToolModelsLoaded, hasOpenAiModelsLoaded } from "../src/activation.js";
 
 function fakePi() {
 	const handlers: Record<string, Function[]> = {};
@@ -55,6 +55,13 @@ test("hasOpenAiModelsLoaded detects active or registry OpenAI models", () => {
 	assert.equal(hasOpenAiModelsLoaded({ model: { provider: "openai-codex", id: "gpt-5.5" }, modelRegistry: { getAll: () => [] } }), true);
 	assert.equal(hasOpenAiModelsLoaded({ modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-5.5" }] } }), true);
 	assert.equal(hasOpenAiModelsLoaded({ modelRegistry: { find: (provider, id) => provider === "openai" && id === "gpt-5.2" ? { provider, id } : undefined } }), true);
+});
+
+test("hasAdditionalToolModelsLoaded matches configured provider/model ids", () => {
+	const ids = ["custom/deepseek-v4-flash"];
+	assert.equal(hasAdditionalToolModelsLoaded({ model: { provider: "custom", id: "deepseek-v4-flash" } }, ids), true);
+	assert.equal(hasAdditionalToolModelsLoaded({ modelRegistry: { getAll: () => [{ provider: "custom", id: "deepseek-v4-flash" }] } }, ids), true);
+	assert.equal(hasAdditionalToolModelsLoaded({ model: { provider: "custom", id: "deepseek-v4" } }, ids), false);
 });
 
 test("extension does not register tools until OpenAI models are loaded", async () => withAgentDir(async () => {
@@ -131,7 +138,7 @@ test("apply_patch hides edit/write only for GPT-5 models on the openai provider 
 	assert.deepEqual(pi.activeTools, ["read", "edit", "write"]);
 }));
 
-test("before_provider_request rewrites web_search only for enabled GPT-5 OpenAI models", async () => withAgentDir(async (agentDir) => {
+test("before_provider_request rewrites web_search only for enabled openai/gpt-5 models", async () => withAgentDir(async (agentDir) => {
 	writeConfig(agentDir, { webSearchEnabled: true });
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
@@ -144,7 +151,7 @@ test("before_provider_request rewrites web_search only for enabled GPT-5 OpenAI 
 		model: { provider: "openai-codex", id: "gpt-5.5", input: ["text"] },
 		modelRegistry: { getAll: () => [] },
 	});
-	assert.deepEqual(rewritten.tools, [{ type: "web_search" }]);
+	assert.equal(rewritten, undefined);
 
 	const rewrittenOpenAi = handler({ payload }, {
 		cwd: process.cwd(),
@@ -159,6 +166,47 @@ test("before_provider_request rewrites web_search only for enabled GPT-5 OpenAI 
 		modelRegistry: { getAll: () => [] },
 	});
 	assert.equal(notGpt5, undefined);
+}));
+
+test("additionalModelIds enables apply_patch and web_search for an exact custom model id", async () => withAgentDir(async (agentDir) => {
+	writeConfig(agentDir, {
+		webSearchEnabled: true,
+		additionalModelIds: ["openai/deepseek-v4-flash"],
+	});
+	const pi = fakePi();
+	pi.setActiveTools(["read", "edit", "write"]);
+	codexMinimalTools(pi as any);
+
+	const ctx = {
+		cwd: process.cwd(),
+		model: { provider: "openai", id: "deepseek-v4-flash", input: ["text"] },
+		modelRegistry: { getAll: () => [{ provider: "openai", id: "deepseek-v4-flash", input: ["text"] }] },
+	};
+	await emit(pi, "model_select", ctx);
+	assert.deepEqual(pi.activeTools, ["read", "apply_patch", "web_search"]);
+
+	const handler = pi.handlers.before_provider_request?.[0];
+	assert.ok(handler);
+	const rewritten = handler({
+		payload: { tools: [{ type: "function", name: "web_search", parameters: {} }] },
+	}, ctx);
+	assert.deepEqual(rewritten.tools, [{ type: "web_search" }]);
+}));
+
+test("additionalModelIds can activate apply_patch for a non-OpenAI custom provider", async () => withAgentDir(async (agentDir) => {
+	writeConfig(agentDir, {
+		additionalModelIds: ["custom/deepseek-v4-flash"],
+	});
+	const pi = fakePi();
+	pi.setActiveTools(["read", "edit", "write"]);
+	codexMinimalTools(pi as any);
+
+	await emit(pi, "model_select", {
+		cwd: process.cwd(),
+		model: { provider: "custom", id: "deepseek-v4-flash", input: ["text"] },
+		modelRegistry: { getAll: () => [{ provider: "custom", id: "deepseek-v4-flash", input: ["text"] }] },
+	});
+	assert.deepEqual(pi.activeTools, ["read", "apply_patch"]);
 }));
 
 test("before_provider_request preserves function placeholders when hosted tools are disabled by profile", async () => withAgentDir(async (agentDir) => {

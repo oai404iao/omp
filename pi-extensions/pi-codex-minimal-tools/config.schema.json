@@ -86,7 +86,7 @@
     },
     "webSearchEnabled": {
       "type": "boolean",
-      "description": "Expose hosted web_search on GPT-5-series openai and openai-codex models.",
+      "description": "Expose hosted web_search on openai/gpt-5 models and compatible native OpenAI models listed in additionalModelIds.",
       "default": false
     },
     "imageOutputDir": {
@@ -119,8 +119,18 @@
     },
     "applyPatchEnabled": {
       "type": "boolean",
-      "description": "Expose apply_patch only on GPT-5-series models from the openai provider.",
+      "description": "Expose apply_patch on openai/gpt-5 models and models listed in additionalModelIds.",
       "default": true
+    },
+    "additionalModelIds": {
+      "type": "array",
+      "description": "Additional exact provider/model ids in the shared web_search/apply_patch allowlist, for example openai/deepseek-v4-flash. web_search also requires the openai or openai-codex native Responses provider path.",
+      "items": {
+        "type": "string",
+        "pattern": "^[^\\s/]+/\\S+$"
+      },
+      "uniqueItems": true,
+      "default": []
     },
     "deferApplyPatchRendering": {
       "type": "boolean",

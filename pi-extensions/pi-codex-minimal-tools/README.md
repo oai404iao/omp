@@ -1,7 +1,7 @@
 # pi-codex-minimal-tools
 
 Minimal Codex/OpenAI tools for Pi. It preserves Pi's native tools except that
-GPT-5-series models on the `openai` provider use `apply_patch` instead of
+models whose full id starts with `openai/gpt-5` use `apply_patch` instead of
 `edit` and `write`.
 
 ## Highlights
@@ -9,10 +9,10 @@ GPT-5-series models on the `openai` provider use `apply_patch` instead of
 - `image_generation` — Codex/OpenAI Responses image generation bridge, with saved local outputs.
 - `view_image` — return a local image as model image content (off by default).
 - `apply_patch` — local Codex-style patch application, with function transport by default and opt-in Codex freeform custom transport.
-- `web_search` — hosted OpenAI Responses web search for GPT-5-series `openai` and `openai-codex` models (off by default).
+- `web_search` — hosted OpenAI Responses web search for `openai/gpt-5*` models and explicitly configured compatible model ids (off by default).
 - `/image-gen <prompt> [reference.png]` — background image generation/editing with a live status card.
 - Generated images are saved with timestamp filenames, `latest.<ext>` mirrors, metadata, and inline previews.
-- Tools only activate on supported OpenAI/Codex-like models; native hosted tools and request profiles are supported on `openai` and `openai-codex`.
+- Tools activate on built-in supported models or exact model ids added through configuration; native hosted tools and request profiles are supported on `openai` and `openai-codex`.
 - Responses web-search progress events render as compact `Searching the web` / `Searched the web` activity rows.
 - Web search citations remain clickable across turns by replaying hosted search results and citation annotations; leaked provider reference markers are resolved locally when possible.
 - Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
@@ -83,6 +83,9 @@ JSON Schema-aware editors. `requestProfile` is the only nested section:
   "viewImage": false,
   "viewImageWorkspaceOnly": false,
   "applyPatchEnabled": true,
+  "additionalModelIds": [
+    "openai/deepseek-v4-flash"
+  ],
   "deferApplyPatchRendering": false
 }
 ```
@@ -106,7 +109,8 @@ For offline completion, replace the URL with a local path your editor can resolv
 | `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses` (Codex remote compaction v2 through `/responses` + `compaction_trigger`), or `responses-compact` (legacy `/responses/compact`). The old `responses-context-management` config value is read as `responses` for migration only. |
 | `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `systemPromptPlacement` chooses top-level `instructions` or an input `developer` message in Standard mode; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always uses a developer message and forces hosted and parallel tools off. |
 | `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. The `openai` provider always uses this API-key transport. |
-| `webSearchEnabled` | Expose hosted `web_search` on GPT-5-series `openai` and `openai-codex` models. Disabled by default. |
+| `webSearchEnabled` | Expose hosted `web_search` on supported models. Disabled by default. |
+| `additionalModelIds` | Extend the shared `web_search`/`apply_patch` model allowlist with exact `provider/modelId` values, for example `openai/deepseek-v4-flash`. `web_search` additionally requires the `openai` or `openai-codex` native Responses provider path. |
 
 Responses Lite uses Codex-internal request fields and transport signals. Enable
 `requestProfile.responsesMode: "lite"` only for an endpoint known to implement
@@ -157,7 +161,7 @@ keeps it in the top-level `instructions` field.
 
 | Setting | What it does |
 | --- | --- |
-| `applyPatchEnabled` | Expose `apply_patch` only on GPT-5-series models from the `openai` provider. When active, Pi's `edit` and `write` tools are hidden; their previous activation is restored after switching away. |
+| `applyPatchEnabled` | Expose `apply_patch` on `openai/gpt-5*` models and models listed in `additionalModelIds`. When active, Pi's `edit` and `write` tools are hidden; their previous activation is restored after switching away. |
 | `deferApplyPatchRendering` | Let Pi's fallback renderer handle display instead of the built-in streaming filesystem preview. Defaults to `false`. |
 
 The executor supports Codex `@@ class/function` contexts, ordered update
