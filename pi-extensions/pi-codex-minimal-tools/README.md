@@ -18,6 +18,8 @@ models whose full id starts with `openai/gpt-5` use `apply_patch` instead of
 - Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
 - Optional GPT-5 native compaction using Codex remote compaction v2 over
   `/responses`, with the legacy `/responses/compact` endpoint still available.
+- Optional GPT-5 Fast processing with a persistent `/fast` toggle using
+  `service_tier: "priority"`.
 
 ## Protocol reference
 
@@ -42,6 +44,7 @@ Restart Pi or run `/reload` after installation.
 | --- | --- |
 | `/codex-minimal-tools` | Show current status and config path. |
 | `/codex-minimal-tools:doctor` | Run self-checks. |
+| `/fast [on\|off\|status]` | Toggle persistent GPT-5 Fast processing. |
 | `/image-gen <prompt> [reference.png]` | Background image generation/editing. |
 
 `/image-gen` uses Codex/ChatGPT OAuth headers from Pi's model registry by default. With `apiKeyMode` enabled it uses plain `Authorization: Bearer <api key>` auth instead and skips ChatGPT account-id headers. It does **not** require `OPENAI_API_KEY` unless you enable the separate direct Images API fallback. Reference images may be `@reference.png` or bare local PNG/JPEG/WebP paths.
@@ -66,6 +69,7 @@ JSON Schema-aware editors. `requestProfile` is the only nested section:
   "glyphStyle": "unicode",
   "autoEnable": true,
   "nativeProviderTools": true,
+  "fastMode": false,
   "compactionMode": "pi",
   "requestProfile": {
     "responsesMode": "standard",
@@ -106,6 +110,7 @@ For offline completion, replace the URL with a local path your editor can resolv
 | Setting | What it does |
 | --- | --- |
 | `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai` and `openai-codex` (`image_generation`, and `web_search` when enabled). |
+| `fastMode` | Add `service_tier: "priority"` to GPT-5-series requests on the native `openai` and `openai-codex` provider paths. The setting is off by default. An explicit `service_tier` supplied by another request hook takes precedence. |
 | `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses` (Codex remote compaction v2 through `/responses` + `compaction_trigger`), or `responses-compact` (legacy `/responses/compact`). The old `responses-context-management` config value is read as `responses` for migration only. |
 | `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `systemPromptPlacement` chooses top-level `instructions` or an input `developer` message in Standard mode; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always uses a developer message and forces hosted and parallel tools off. |
 | `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. The `openai` provider always uses this API-key transport. |
@@ -137,6 +142,11 @@ request field or its inline marker lifecycle. `responses-compact` uses
 `/responses/compact` and installs only safe retained messages plus the opaque
 compaction item; stale reasoning and tool call/output items are discarded.
 Native modes ignore `/compact` custom summary instructions.
+
+`/fast on` and `/fast off` update the package config file, so the selection
+survives Pi restarts. When enabled, the extension sends
+`service_tier: "priority"`. Fast mode applies only to GPT-5-series models on
+`openai` or `openai-codex`.
 
 Set `requestProfile.patchTransport: "custom"` to send `apply_patch` as the
 Codex freeform custom tool with the packaged Lark grammar. Other tools remain

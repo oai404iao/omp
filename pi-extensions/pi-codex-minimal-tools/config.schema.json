@@ -32,6 +32,11 @@
       "description": "Rewrite hosted-tool placeholders into native OpenAI Responses tools on openai and openai-codex.",
       "default": true
     },
+    "fastMode": {
+      "type": "boolean",
+      "description": "Request OpenAI GPT-5 Fast processing by adding service_tier: priority to native openai and openai-codex Responses requests.",
+      "default": false
+    },
     "compactionMode": {
       "type": "string",
       "description": "Compaction implementation for GPT-5-series models on the openai provider. pi uses Pi summaries; responses follows Codex remote compaction v2 through a streaming /responses compaction_trigger request; responses-compact uses the legacy /responses/compact endpoint.",

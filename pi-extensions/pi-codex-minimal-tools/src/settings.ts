@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { CodexRequestProfileOverride } from "./codex-request-profile.js";
@@ -11,6 +11,7 @@ export interface CodexMinimalToolsSettings {
 	glyphStyle: "unicode" | "ascii";
 	autoEnable: boolean;
 	nativeProviderTools: boolean;
+	fastMode: boolean;
 	compactionMode: "pi" | "responses" | "responses-compact";
 	requestProfile: CodexRequestProfileOverride;
 	apiKeyMode: boolean;
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	glyphStyle: "unicode",
 	autoEnable: true,
 	nativeProviderTools: true,
+	fastMode: false,
 	compactionMode: "pi",
 	requestProfile: {},
 	apiKeyMode: false,
@@ -167,6 +169,7 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		glyphStyle: glyphStyleSetting(raw),
 		autoEnable: boolSetting(raw, "autoEnable"),
 		nativeProviderTools: boolSetting(raw, "nativeProviderTools"),
+		fastMode: boolSetting(raw, "fastMode"),
 		compactionMode: compactionModeSetting(raw),
 		requestProfile: requestProfileSetting(raw),
 		apiKeyMode: boolSetting(raw, "apiKeyMode"),
@@ -181,6 +184,28 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		additionalModelIds: modelIdListSetting(raw),
 		deferApplyPatchRendering: boolSetting(raw, "deferApplyPatchRendering"),
 	};
+}
+
+export function updateConfig(patch: Partial<CodexMinimalToolsSettings>): string {
+	const path = configPath();
+	let raw: SettingsRecord = {};
+	if (existsSync(path)) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(readFileSync(path, "utf8"));
+		} catch (error) {
+			throw new Error(`Cannot update malformed config ${path}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		const record = asRecord(parsed);
+		if (!record) throw new Error(`Cannot update config ${path}: root value must be a JSON object`);
+		raw = record;
+	}
+
+	const next = { ...raw, ...patch };
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+	settingsParseWarnings.delete(path);
+	return path;
 }
 
 export function resolveSettingsRelativePath(value: string, settingsPath = configPath()): string {

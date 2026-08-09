@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { DEFAULT_CODEX_REQUEST_PROFILE } from "../src/codex-request-profile.js";
-import { DEFAULT_SETTINGS, configPath, loadSettings, settingsDiagnostics } from "../src/settings.js";
+import { DEFAULT_SETTINGS, configPath, loadSettings, settingsDiagnostics, updateConfig } from "../src/settings.js";
 
 function tempDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-codex-minimal-tools-"));
@@ -77,6 +77,7 @@ test("loadSettings reads package config and nested request profile", () => {
 		writeConfig(agentDir, {
 			autoEnable: false,
 			apiKeyMode: true,
+			fastMode: true,
 			imageOutputDir: "custom-images",
 			imageModel: "gpt-image-1",
 			directImageApiFallback: true,
@@ -98,6 +99,7 @@ test("loadSettings reads package config and nested request profile", () => {
 		const settings = loadSettings();
 		assert.equal(settings.autoEnable, false);
 		assert.equal(settings.apiKeyMode, true);
+		assert.equal(settings.fastMode, true);
 		assert.equal(settings.imageOutputDir, "custom-images");
 		assert.equal(settings.imageModel, "gpt-image-1");
 		assert.equal(settings.directImageApiFallback, true);
@@ -112,6 +114,31 @@ test("loadSettings reads package config and nested request profile", () => {
 			supportsParallelTools: false,
 		});
 		assert.equal(settings.applyPatchEnabled, true);
+	});
+});
+
+test("updateConfig preserves existing keys and writes persistent Fast mode settings", () => {
+	withAgentDir((agentDir) => {
+		writeConfig(agentDir, {
+			$schema: "/tmp/config.schema.json",
+			webSearchEnabled: true,
+		});
+		updateConfig({
+			fastMode: true,
+		});
+		const raw = JSON.parse(readFileSync(configPath(), "utf8"));
+		assert.equal(raw.$schema, "/tmp/config.schema.json");
+		assert.equal(raw.webSearchEnabled, true);
+		assert.equal(raw.fastMode, true);
+		assert.equal(loadSettings().fastMode, true);
+	});
+});
+
+test("updateConfig refuses to overwrite malformed config", () => {
+	withAgentDir((agentDir) => {
+		writeConfig(agentDir, "{");
+		assert.throws(() => updateConfig({ fastMode: true }), /Cannot update malformed config/);
+		assert.equal(readFileSync(configPath(), "utf8"), "{");
 	});
 });
 

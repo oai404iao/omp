@@ -296,6 +296,25 @@ test("native web_search requests include source and result payloads without drop
 	assert.ok(requestBody.include.includes("web_search_call.results"));
 });
 
+test("Fast mode adds service_tier while explicit request payload overrides remain authoritative", async () => {
+	writeSettings({ fastMode: true });
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	let result = await runCodexProvider();
+	assert.equal(result.stopReason, "stop");
+	assert.equal(requestBody.service_tier, "priority");
+
+	result = await runCodexProvider({
+		onPayload: async (payload: any) => ({ ...payload, service_tier: "flex" }),
+	});
+	assert.equal(result.stopReason, "stop");
+	assert.equal(requestBody.service_tier, "flex");
+});
+
 test("request profile disables parallel calls while apply_patch stays a function tool", async () => {
 	writeSettings({ requestProfile: { supportsParallelTools: false } });
 	let requestBody: any;
@@ -726,6 +745,7 @@ test("native compaction supports Codex Responses compaction and legacy /response
 		glyphStyle: "unicode",
 		autoEnable: true,
 		nativeProviderTools: true,
+		fastMode: true,
 		compactionMode: "responses",
 		requestProfile: {},
 		apiKeyMode: false,
@@ -782,8 +802,10 @@ test("native compaction supports Codex Responses compaction and legacy /response
 	assert.equal("context_management" in requests[0]!.body, false);
 	assert.deepEqual(requests[0]?.body.input.at(-1), { type: "compaction_trigger" });
 	assert.equal(requests[0]?.body.prompt_cache_key, "session-1");
+	assert.equal(requests[0]?.body.service_tier, "priority");
 	assert.equal(JSON.stringify(requests[0]?.body).includes("compact_threshold"), false);
 	assert.equal(requests[1]?.url, "https://example.test/v1/responses/compact");
+	assert.equal(requests[1]?.body.service_tier, "priority");
 	assert.equal("stream" in requests[1]!.body, false);
 	assert.equal("store" in requests[1]!.body, false);
 	assert.equal("include" in requests[1]!.body, false);

@@ -22,6 +22,7 @@ import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInpu
 import { glyphs } from "./glyphs.js";
 import { resolveCodexRequestProfile } from "./codex-request-profile.js";
 import { registerNativeCompaction } from "./native-compaction.js";
+import { registerFastMode, resolveFastModeServiceTier } from "./fast-mode.js";
 
 const INSTALL_SYMBOL = Symbol.for("pi-codex-minimal-tools.installed");
 
@@ -139,6 +140,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 	const capabilities = computeToolCapabilities(model, settings);
 	const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
 	const active = new Set(pi.getActiveTools?.() ?? []);
+	const fastModeTier = resolveFastModeServiceTier(settings, model);
 	return [
 		"Codex Minimal Tools",
 		`model: ${modelKey(model)}`,
@@ -147,6 +149,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`enabled: ${settings.enabled}`,
 		`autoEnable: ${settings.autoEnable}`,
 		`nativeProviderTools: ${settings.nativeProviderTools}`,
+		`fast mode: ${settings.fastMode ? "priority" : "off"}${fastModeTier ? ", active" : ""}`,
 		`compaction: ${settings.compactionMode}`,
 		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, system=${requestProfile.systemPromptPlacement}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
 		`webSearchEnabled: ${settings.webSearchEnabled}`,
@@ -245,6 +248,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 	}
 
 	registerDiagnosticCommand(pi);
+	registerFastMode(pi);
 
 	pi.on("session_start", async (_event, ctx) => {
 		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx), suppressedMutationTools);

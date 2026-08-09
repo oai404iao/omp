@@ -30,6 +30,7 @@ import {
 	type WebSearchCitationSource,
 } from "./providers/openai-responses-shared.js";
 import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
+import { applyFastModeServiceTier } from "./fast-mode.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
@@ -568,10 +569,29 @@ function applyServiceTierPricing(usage: AssistantMessage["usage"], serviceTier: 
 }
 
 function resolveCodexServiceTier(responseServiceTier: ServiceTier, requestServiceTier: ServiceTier): ServiceTier {
-	if (responseServiceTier === "default" && (requestServiceTier === "flex" || requestServiceTier === "priority")) {
+	if (
+		responseServiceTier === "default"
+		&& (requestServiceTier === "flex" || requestServiceTier === "priority")
+	) {
 		return requestServiceTier;
 	}
 	return responseServiceTier ?? requestServiceTier;
+}
+
+function withRequestServiceTier(
+	options: SimpleStreamOptions | undefined,
+	serviceTier: unknown,
+): SimpleStreamOptions | undefined {
+	if (
+		serviceTier !== "auto"
+		&& serviceTier !== "default"
+		&& serviceTier !== "flex"
+		&& serviceTier !== "scale"
+		&& serviceTier !== "priority"
+	) {
+		return options;
+	}
+	return { ...options, serviceTier } as SimpleStreamOptions;
 }
 
 function hasNativeWebSearchTool(body: ResponsesBody): boolean {
@@ -1781,13 +1801,13 @@ export async function requestOpenAINativeCompaction(
 	if (profile.responsesMode !== "standard") {
 		throw new Error("OpenAI native compaction requires Standard Responses mode");
 	}
-	const body = buildRequestBody(model, context, profile, {
+	const body = applyFastModeServiceTier(buildRequestBody(model, context, profile, {
 		apiKey: options.apiKey,
 		headers: options.headers,
 		signal: options.signal,
 		reasoning: options.reasoning,
 		sessionId: options.sessionId,
-	});
+	}), options.settings, model);
 
 	if (options.mode === "responses") {
 		const retainedInput = [...body.input];
@@ -2262,11 +2282,16 @@ function createCodexStream<TApi extends Api>(
 			const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
 			const apiKeyTransport = settings.apiKeyMode || model.provider === "openai";
 			const accountId = apiKeyTransport ? undefined : extractAccountId(apiKey);
-			let body = buildRequestBody(model, context, requestProfile, options);
+			let body = applyFastModeServiceTier(
+				buildRequestBody(model, context, requestProfile, options),
+				settings,
+				model,
+			);
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
 				body = nextBody as ResponsesBody;
 			}
+			options = withRequestServiceTier(options, body.service_tier);
 			ensureWebSearchDetailsIncluded(body);
 
 			const websocketRequestId = options?.sessionId || createCodexRequestId();
