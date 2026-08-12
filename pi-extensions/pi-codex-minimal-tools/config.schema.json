@@ -32,6 +32,17 @@
       "description": "Rewrite hosted-tool placeholders into native OpenAI Responses tools on openai and openai-codex.",
       "default": true
     },
+    "openaiTransport": {
+      "type": "string",
+      "description": "Transport for native openai provider Responses requests. sse always uses HTTP streaming; websocket uses a reusable WebSocket with full request context; websocket-cached also uses previous_response_id input deltas; auto retries WebSocket failures and permanently falls back to SSE for the Pi session after the retry budget is exhausted.",
+      "enum": ["sse", "websocket", "websocket-cached", "auto"],
+      "default": "sse"
+    },
+    "openaiWebSocketPrewarm": {
+      "type": "boolean",
+      "description": "When a WebSocket transport is enabled, preconnect and send a best-effort generate:false response.create before each new Pi agent turn so the first real request can reuse the warm response id.",
+      "default": true
+    },
     "fastMode": {
       "type": "boolean",
       "description": "Request OpenAI GPT-5 Fast processing by adding service_tier: priority to native openai and openai-codex Responses requests.",

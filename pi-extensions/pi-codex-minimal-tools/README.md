@@ -20,6 +20,8 @@ models whose full id starts with `openai/gpt-5` use `apply_patch` instead of
   `/responses`, with the legacy `/responses/compact` endpoint still available.
 - Optional GPT-5 Fast processing with a persistent `/fast` toggle using
   `service_tier: "priority"`.
+- Configurable `openai` Responses transport with SSE, WebSocket, cached
+  WebSocket continuation, Codex-style retry/session fallback, and prewarm.
 
 ## Protocol reference
 
@@ -69,6 +71,8 @@ JSON Schema-aware editors. `requestProfile` is the only nested section:
   "glyphStyle": "unicode",
   "autoEnable": true,
   "nativeProviderTools": true,
+  "openaiTransport": "sse",
+  "openaiWebSocketPrewarm": true,
   "fastMode": false,
   "compactionMode": "pi",
   "requestProfile": {
@@ -110,6 +114,8 @@ For offline completion, replace the URL with a local path your editor can resolv
 | Setting | What it does |
 | --- | --- |
 | `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai` and `openai-codex` (`image_generation`, and `web_search` when enabled). |
+| `openaiTransport` | Select the native `openai` Responses request path: `sse` (default), `websocket`, `websocket-cached`, or `auto`. WebSocket modes reuse one serialized Pi-session connection. Cached/auto modes send only the incremental input with `previous_response_id` when the request remains a strict extension of the preceding server output. `auto` retries retryable failures and permanently uses SSE for the rest of the Pi session after the retry budget is exhausted; HTTP 426 switches immediately. Explicit `websocket*` modes remain strict. |
+| `openaiWebSocketPrewarm` | With a WebSocket transport, preconnect and send a best-effort `response.create` with `generate: false` before each new agent turn. The first real request can then reuse the warm `previous_response_id` with an empty delta. Enabled by default. |
 | `fastMode` | Add `service_tier: "priority"` to GPT-5-series requests on the native `openai` and `openai-codex` provider paths. The setting is off by default. An explicit `service_tier` supplied by another request hook takes precedence. |
 | `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses` (Codex remote compaction v2 through `/responses` + `compaction_trigger`), or `responses-compact` (legacy `/responses/compact`). The old `responses-context-management` config value is read as `responses` for migration only. |
 | `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `systemPromptPlacement` chooses top-level `instructions` or an input `developer` message in Standard mode; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always uses a developer message and forces hosted and parallel tools off. |
@@ -147,6 +153,18 @@ Native modes ignore `/compact` custom summary instructions.
 survives Pi restarts. When enabled, the extension sends
 `service_tier: "priority"`. Fast mode applies only to GPT-5-series models on
 `openai` or `openai-codex`.
+
+`openaiTransport` overrides Pi's global transport preference only for this
+extension's `openai` provider shim. Authentication still comes from Pi's
+resolved provider credentials and headers. The WebSocket handshake targets
+the provider's normal `/responses` endpoint with `http(s)` rewritten to
+`ws(s)` and includes the Responses WebSocket beta header. Pi's session id is
+projected to the Codex-compatible `session-id`/`thread-id` handshake headers
+and `client_metadata.session_id`/`thread_id`; each agent run gets one stable
+`client_metadata.turn_id`, and each `response.create` gets a stream-start
+timestamp. The turn id remains stable across Pi's low-level automatic retry and
+compaction/retry lifecycle. WebSocket input items with legacy unprefixed ids are
+sent without those ids, while the in-memory Pi context is left unchanged.
 
 Set `requestProfile.patchTransport: "custom"` to send `apply_patch` as the
 Codex freeform custom tool with the packaged Lark grammar. Other tools remain

@@ -77,6 +77,8 @@ test("loadSettings reads package config and nested request profile", () => {
 		writeConfig(agentDir, {
 			autoEnable: false,
 			apiKeyMode: true,
+			openaiTransport: "websocket-cached",
+			openaiWebSocketPrewarm: false,
 			fastMode: true,
 			imageOutputDir: "custom-images",
 			imageModel: "gpt-image-1",
@@ -99,6 +101,8 @@ test("loadSettings reads package config and nested request profile", () => {
 		const settings = loadSettings();
 		assert.equal(settings.autoEnable, false);
 		assert.equal(settings.apiKeyMode, true);
+		assert.equal(settings.openaiTransport, "websocket-cached");
+		assert.equal(settings.openaiWebSocketPrewarm, false);
 		assert.equal(settings.fastMode, true);
 		assert.equal(settings.imageOutputDir, "custom-images");
 		assert.equal(settings.imageModel, "gpt-image-1");
@@ -156,11 +160,13 @@ test("loadSettings accepts Lite with custom patch transport", () => {
 		writeConfig(agentDir, {
 			imageModel: "bad-model",
 			glyphStyle: "bad-style",
+			openaiTransport: "bad-transport",
 			requestProfile: { responsesMode: "lite", patchTransport: "custom" },
 		});
 		const settings = loadSettings();
 		assert.equal(settings.imageModel, DEFAULT_SETTINGS.imageModel);
 		assert.equal(settings.glyphStyle, DEFAULT_SETTINGS.glyphStyle);
+		assert.equal(settings.openaiTransport, DEFAULT_SETTINGS.openaiTransport);
 		assert.deepEqual(settings.requestProfile, { responsesMode: "lite", patchTransport: "custom" });
 	});
 });
