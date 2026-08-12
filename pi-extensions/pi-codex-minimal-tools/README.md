@@ -156,7 +156,11 @@ survives Pi restarts. When enabled, the extension sends
 extension's `openai` provider shim. Authentication still comes from Pi's
 resolved provider credentials and headers. The WebSocket handshake targets
 the provider's normal `/responses` endpoint with `http(s)` rewritten to
-`ws(s)` and includes the Responses WebSocket beta header.
+`ws(s)` and includes the Responses WebSocket beta header. Pi's session id is
+projected to the Codex-compatible `session-id`/`thread-id` handshake headers
+and `client_metadata.session_id`/`thread_id`; each agent run gets one stable
+`client_metadata.turn_id`, and each `response.create` gets a stream-start
+timestamp.
 
 Set `requestProfile.patchTransport: "custom"` to send `apply_patch` as the
 Codex freeform custom tool with the packaged Lark grammar. Other tools remain

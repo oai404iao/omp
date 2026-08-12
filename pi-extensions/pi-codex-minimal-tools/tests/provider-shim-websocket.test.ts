@@ -44,6 +44,26 @@ function createProviderHarness(): Record<string, any> {
 	return providers;
 }
 
+function createProviderHarnessWithEvents(): {
+	providers: Record<string, any>;
+	handlers: Record<string, Array<(event: any, ctx: any) => Promise<void> | void>>;
+} {
+	const providers: Record<string, any> = {};
+	const handlers: Record<string, Array<(event: any, ctx: any) => Promise<void> | void>> = {};
+	const pi = {
+		registerProvider(name: string, value: any) {
+			providers[name] = value;
+		},
+		on(name: string, handler: (event: any, ctx: any) => Promise<void> | void) {
+			(handlers[name] ??= []).push(handler);
+		},
+		registerMessageRenderer() {},
+		sendMessage() {},
+	};
+	registerOpenAIResponsesProviders(pi as any, { getCurrentCwd: () => process.cwd() });
+	return { providers, handlers };
+}
+
 function successEvents(responseId: string, text?: string): unknown[] {
 	const output = text
 		? [{
@@ -264,6 +284,7 @@ test("OpenAI WebSocket URL and headers use the normal Responses endpoint and Pi 
 	assert.equal(headers.get("chatgpt-account-id"), null);
 	assert.equal(headers.get("openai-beta"), "responses_websockets=2026-02-06");
 	assert.equal(headers.get("session-id"), "pi-session");
+	assert.equal(headers.get("thread-id"), "pi-session");
 	assert.equal(headers.get("x-client-request-id"), "pi-session");
 });
 
@@ -284,10 +305,71 @@ test("openai websocket transport performs an authenticated response.create reque
 		assert.equal(server.requests.length, 1);
 		assert.equal(server.requests[0]?.type, "response.create");
 		assert.equal(server.requests[0]?.model, "gpt-5.5");
+		assert.equal(server.requests[0]?.client_metadata?.session_id, "pi-session");
+		assert.equal(server.requests[0]?.client_metadata?.thread_id, "pi-session");
+		assert.equal(typeof server.requests[0]?.client_metadata?.turn_id, "string");
+		assert.match(server.requests[0]?.client_metadata?.["x-codex-ws-stream-request-start-ms"], /^\d+$/);
 		assert.equal(server.handshakes[0]?.headers.authorization, "Bearer pi-resolved-api-key");
 		assert.equal(server.handshakes[0]?.headers["x-pi-auth"], "resolved");
 		assert.equal(server.handshakes[0]?.headers["openai-beta"], "responses_websockets=2026-02-06");
 		assert.equal(server.handshakes[0]?.headers["session-id"], "pi-session");
+		assert.equal(server.handshakes[0]?.headers["thread-id"], "pi-session");
+	} finally {
+		await server.close();
+	}
+});
+
+test("explicit Pi request metadata supplies the WebSocket turn identity", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => successEvents("resp_1", "ok"),
+	]);
+	try {
+		const provider = createProviderHarness().openai;
+		const result = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }], {
+			metadata: {
+				session_id: "pi-session-metadata",
+				thread_id: "pi-thread",
+				turn_id: "pi-turn",
+			},
+		});
+
+		assert.equal(result.stopReason, "stop");
+		assert.equal(server.handshakes[0]?.headers["session-id"], "pi-session-metadata");
+		assert.equal(server.handshakes[0]?.headers["thread-id"], "pi-thread");
+		assert.equal(server.handshakes[0]?.headers["x-client-request-id"], "pi-thread");
+		assert.equal(server.requests[0]?.client_metadata?.session_id, "pi-session-metadata");
+		assert.equal(server.requests[0]?.client_metadata?.thread_id, "pi-thread");
+		assert.equal(server.requests[0]?.client_metadata?.turn_id, "pi-turn");
+	} finally {
+		await server.close();
+	}
+});
+
+test("Pi agent lifecycle keeps one turn_id across tool-loop WebSocket requests", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => successEvents("resp_1", "first"),
+		() => successEvents("resp_2", "second"),
+	]);
+	try {
+		const harness = createProviderHarnessWithEvents();
+		const ctx = { sessionManager: { getSessionId: () => "pi-session" } };
+		for (const handler of harness.handlers.before_agent_start ?? []) {
+			await handler({ type: "before_agent_start", prompt: "hello" }, ctx);
+		}
+
+		await runOpenAIProvider(harness.providers.openai, server.url, [{ role: "user", content: "hello" }]);
+		await runOpenAIProvider(harness.providers.openai, server.url, [{ role: "user", content: "again" }]);
+
+		const firstTurnId = server.requests[0]?.client_metadata?.turn_id;
+		const secondTurnId = server.requests[1]?.client_metadata?.turn_id;
+		assert.equal(typeof firstTurnId, "string");
+		assert.equal(secondTurnId, firstTurnId);
+
+		for (const handler of harness.handlers.agent_end ?? []) {
+			await handler({ type: "agent_end", messages: [] }, ctx);
+		}
 	} finally {
 		await server.close();
 	}

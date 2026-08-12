@@ -52,6 +52,7 @@ const CODEX_RESPONSE_STATUSES = new Set(["completed", "incomplete", "failed", "c
 const OPENAI_BETA_RESPONSES_WEBSOCKETS = "responses_websockets=2026-02-06";
 const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE = "x-openai-internal-codex-responses-lite";
 const WS_RESPONSES_LITE_CLIENT_METADATA_KEY = "ws_request_header_x_openai_internal_codex_responses_lite";
+const WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY = "x-codex-ws-stream-request-start-ms";
 const WEB_SEARCH_SOURCES_INCLUDE = "web_search_call.action.sources";
 const WEB_SEARCH_RESULTS_INCLUDE = "web_search_call.results";
 const SESSION_WEBSOCKET_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -149,6 +150,12 @@ interface CachedWebSocketContinuationState {
 	lastRequestBody: ResponsesBody;
 	lastResponseId: string;
 	lastResponseItems: unknown[];
+}
+
+interface WebSocketRequestMetadata {
+	sessionId?: string;
+	threadId?: string;
+	turnId: string;
 }
 
 let fsPromisesPromise: Promise<typeof import("node:fs/promises")> | undefined;
@@ -483,6 +490,13 @@ function createCodexRequestId(): string {
 	return `codex_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function createPiTurnId(): string {
+	if (typeof globalThis.crypto?.randomUUID === "function") {
+		return globalThis.crypto.randomUUID();
+	}
+	return `turn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function buildBaseCodexHeaders(
 	modelHeaders: Record<string, string> | undefined,
 	additionalHeaders: Record<string, string> | undefined,
@@ -541,7 +555,8 @@ export function buildWebSocketHeaders(
 	additionalHeaders: Record<string, string> | undefined,
 	accountId: string | undefined,
 	token: string,
-	requestId: string,
+	sessionId: string,
+	threadId = sessionId,
 ): Headers {
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token);
 	headers.delete("accept");
@@ -549,8 +564,9 @@ export function buildWebSocketHeaders(
 	headers.delete("OpenAI-Beta");
 	headers.delete("openai-beta");
 	headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
-	headers.set("x-client-request-id", requestId);
-	headers.set("session-id", requestId);
+	headers.set("x-client-request-id", threadId);
+	headers.set("session-id", sessionId);
+	headers.set("thread-id", threadId);
 	return headers;
 }
 
@@ -640,6 +656,19 @@ export function withResponsesLiteWebSocketMetadata<T extends { client_metadata?:
 		client_metadata: {
 			...body.client_metadata,
 			[WS_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
+		},
+	};
+}
+
+function withWebSocketRequestMetadata(body: ResponsesBody, metadata: WebSocketRequestMetadata): ResponsesBody {
+	return {
+		...body,
+		client_metadata: {
+			...body.client_metadata,
+			...(metadata.sessionId ? { session_id: metadata.sessionId } : {}),
+			...(metadata.threadId ? { thread_id: metadata.threadId } : {}),
+			turn_id: metadata.turnId,
+			[WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY]: Date.now().toString(),
 		},
 	};
 }
@@ -1138,7 +1167,13 @@ async function decodeWebSocketData(data: unknown): Promise<string | null> {
 }
 
 function requestBodyWithoutInput(body: ResponsesBody): ResponsesBody {
-	const { input: _input, previous_response_id: _previousResponseId, ...rest } = body;
+	const {
+		input: _input,
+		previous_response_id: _previousResponseId,
+		client_metadata: _clientMetadata,
+		stream_options: _streamOptions,
+		...rest
+	} = body;
 	return rest as ResponsesBody;
 }
 
@@ -1985,6 +2020,7 @@ async function processWebSocketStream<TApi extends Api>(
 	requestPrompt: string | undefined,
 	webSearchCitationSources: ReadonlyArray<WebSearchCitationSource>,
 	historicalCitationSources: ReadonlyArray<CitationSource>,
+	requestMetadata: WebSocketRequestMetadata,
 ): Promise<void> {
 	let streamStarted = false;
 	let disableCachedContext = false;
@@ -2007,7 +2043,7 @@ async function processWebSocketStream<TApi extends Api>(
 		const useCachedContext = transport === "websocket-cached" || transport === "auto";
 		// ChatGPT Codex Responses rejects `store: true` ("Store must be set to false").
 		// WebSocket continuation still works via connection-scoped previous_response_id state.
-		const fullBody = body;
+		const fullBody = withWebSocketRequestMetadata(body, requestMetadata);
 		const requestBody = useCachedContext && !disableCachedContext && entry
 			? buildCachedWebSocketRequestBody(entry, fullBody)
 			: fullBody;
@@ -2403,6 +2439,7 @@ function createCodexStream<TApi extends Api>(
 	options: SimpleStreamOptions | undefined,
 	deps: {
 		getCurrentCwd: () => string;
+		getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
 		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
 	},
 ): AssistantMessageEventStream {
@@ -2440,9 +2477,31 @@ function createCodexStream<TApi extends Api>(
 			options = withRequestServiceTier(options, body.service_tier);
 			ensureWebSearchDetailsIncluded(body);
 
-			const websocketRequestId = options?.sessionId || createCodexRequestId();
+			const optionMetadata = options?.metadata;
+			const metadataString = (key: string): string | undefined => {
+				const value = optionMetadata?.[key];
+				return typeof value === "string" && value.trim() ? value.trim() : undefined;
+			};
+			const websocketSessionId = metadataString("session_id") ?? options?.sessionId;
+			const websocketThreadId = metadataString("thread_id") ?? options?.sessionId;
+			const websocketTurnId = metadataString("turn_id")
+				?? deps.getCurrentTurnId?.(options?.sessionId)
+				?? createPiTurnId();
+			const websocketRequestId = websocketThreadId || websocketSessionId || createCodexRequestId();
+			const websocketRequestMetadata: WebSocketRequestMetadata = {
+				...(websocketSessionId ? { sessionId: websocketSessionId } : {}),
+				...(websocketThreadId ? { threadId: websocketThreadId } : {}),
+				turnId: websocketTurnId,
+			};
 			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId, requestProfile);
-			const websocketHeaders = buildWebSocketHeaders(model.headers, options?.headers, accountId, apiKey, websocketRequestId);
+			const websocketHeaders = buildWebSocketHeaders(
+				model.headers,
+				options?.headers,
+				accountId,
+				apiKey,
+				websocketSessionId || websocketRequestId,
+				websocketThreadId || websocketRequestId,
+			);
 			const bodyJson = JSON.stringify(body);
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
 			const transport: ProviderTransport = model.provider === "openai"
@@ -2475,6 +2534,7 @@ function createCodexStream<TApi extends Api>(
 							requestPrompt,
 							webSearchCitationSources,
 							historicalCitationSources,
+							websocketRequestMetadata,
 						);
 						if (options?.signal?.aborted) {
 							throw new Error("Request was aborted");
@@ -2609,6 +2669,7 @@ function createCodexStream<TApi extends Api>(
 export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { getCurrentCwd: () => string }): void {
 	const pendingActivities: PendingActivity[] = [];
 	const imagePreviewCache = new Map<string, CachedImagePreview>();
+	const activeTurnIds = new Map<string, string>();
 	let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const flushPendingMessages = () => {
@@ -2648,6 +2709,7 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: Context, streamOptions?: SimpleStreamOptions) =>
 		createCodexStream(model, context, streamOptions, {
 			getCurrentCwd: options.getCurrentCwd,
+			getCurrentTurnId: (sessionId) => sessionId ? activeTurnIds.get(sessionId) : undefined,
 			onImageSaved: (savedImage, imageData) => {
 				pendingActivities.push({ kind: "image", savedImage, imageData });
 			},
@@ -2663,6 +2725,7 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 	});
 
 	pi.on("session_start", async () => {
+		activeTurnIds.clear();
 		clearPendingMessages();
 	});
 
@@ -2670,11 +2733,19 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 		if (pendingActivities.length > 0) {
 			flushPendingMessages();
 		}
+		activeTurnIds.clear();
 		closeProviderWebSocketSessions();
 		clearPendingMessages();
 	});
 
-	pi.on("agent_end", async () => {
+	pi.on("before_agent_start", async (_event, ctx) => {
+		const sessionId = ctx?.sessionManager?.getSessionId();
+		if (sessionId) activeTurnIds.set(sessionId, createPiTurnId());
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		const sessionId = ctx?.sessionManager?.getSessionId();
+		if (sessionId) activeTurnIds.delete(sessionId);
 		schedulePendingMessageFlush();
 	});
 
