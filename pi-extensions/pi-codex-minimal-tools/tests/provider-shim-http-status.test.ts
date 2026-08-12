@@ -788,7 +788,11 @@ test("native compaction supports Codex Responses compaction and legacy /response
 	const legacy = await requestOpenAINativeCompaction(model, context, {
 		mode: "responses-compact",
 		apiKey: "key",
-		settings: { ...settings, compactionMode: "responses-compact" } as any,
+		settings: {
+			...settings,
+			openaiTransport: "websocket",
+			compactionMode: "responses-compact",
+		} as any,
 	});
 
 	assert.deepEqual(responses, [

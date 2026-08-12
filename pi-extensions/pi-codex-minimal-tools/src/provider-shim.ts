@@ -189,6 +189,10 @@ interface WebSocketRequestMetadata {
 	turnId: string;
 }
 
+export interface OpenAIResponsesProviderController {
+	getCurrentTurnId(sessionId: string | undefined): string | undefined;
+}
+
 let fsPromisesPromise: Promise<typeof import("node:fs/promises")> | undefined;
 const workspaceRootCache = new Map<string, Promise<string>>();
 
@@ -608,6 +612,21 @@ function appendCommaSeparatedHeader(headers: Headers, name: string, value: strin
 		.map((entry) => entry.trim())
 		.filter(Boolean);
 	if (!values.includes(value)) headers.set(name, [...values, value].join(","));
+}
+
+function applyConfiguredResponsesFeatureHeaders(
+	headers: Headers,
+	settings: ReturnType<typeof loadSettings>,
+	model: Model<Api>,
+): Headers {
+	if (model.provider === "openai" && settings.compactionMode === "responses") {
+		appendCommaSeparatedHeader(
+			headers,
+			X_CODEX_BETA_FEATURES,
+			CODEX_REMOTE_COMPACTION_V2_FEATURE,
+		);
+	}
+	return headers;
 }
 
 export function buildWebSocketHeaders(
@@ -1788,16 +1807,36 @@ function isRetryableWebSocketError(error: unknown): boolean {
 	);
 }
 
+function explicitWebSocketRetryDelayMs(error: unknown): number | undefined {
+	return error instanceof WebSocketHandshakeError
+		? retryAfterMsFromHeaders(error.headers)
+		: error instanceof ProviderResponseError
+			? error.retryAfterMs
+			: undefined;
+}
+
+function boundedWebSocketRetryDelayMs(
+	delayMs: number,
+	options: SimpleStreamOptions | undefined,
+): number {
+	const configuredMax = options?.maxRetryDelayMs;
+	const maxDelay = typeof configuredMax === "number" && Number.isFinite(configuredMax) && configuredMax >= 0
+		? configuredMax
+		: WEBSOCKET_RETRY_MAX_DELAY_MS;
+	if (maxDelay > 0 && delayMs > maxDelay) {
+		throw new NonRetryableProviderError(
+			`WebSocket retry delay ${Math.round(delayMs)}ms exceeds maxRetryDelayMs ${Math.round(maxDelay)}ms`,
+		);
+	}
+	return delayMs;
+}
+
 function webSocketRetryDelayMs(
 	error: unknown,
 	retryCount: number,
 	options: SimpleStreamOptions | undefined,
 ): number {
-	const explicit = error instanceof WebSocketHandshakeError
-		? retryAfterMsFromHeaders(error.headers)
-		: error instanceof ProviderResponseError
-			? error.retryAfterMs
-			: undefined;
+	const explicit = explicitWebSocketRetryDelayMs(error);
 	const connectionFailure = !(
 		error instanceof WebSocketHandshakeError
 		|| error instanceof ProviderResponseError
@@ -1810,16 +1849,20 @@ function webSocketRetryDelayMs(
 	const jittered = explicit === undefined && !connectionFailure
 		? Math.round(base * (0.9 + Math.random() * 0.2))
 		: base;
-	const configuredMax = options?.maxRetryDelayMs;
-	const maxDelay = typeof configuredMax === "number" && Number.isFinite(configuredMax) && configuredMax >= 0
-		? configuredMax
-		: WEBSOCKET_RETRY_MAX_DELAY_MS;
-	if (maxDelay > 0 && jittered > maxDelay) {
-		throw new NonRetryableProviderError(
-			`WebSocket retry delay ${Math.round(jittered)}ms exceeds maxRetryDelayMs ${Math.round(maxDelay)}ms`,
-		);
-	}
-	return jittered;
+	return boundedWebSocketRetryDelayMs(jittered, options);
+}
+
+function webSocketCompactionRetryDelayMs(
+	error: unknown,
+	retryCount: number,
+	options: SimpleStreamOptions | undefined,
+): number {
+	const explicit = explicitWebSocketRetryDelayMs(error);
+	const base = explicit ?? WEBSOCKET_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, retryCount - 1);
+	const jittered = explicit === undefined
+		? Math.round(base * (0.9 + Math.random() * 0.2))
+		: base;
+	return boundedWebSocketRetryDelayMs(jittered, options);
 }
 
 function webSocketStreamMaxRetries(options: SimpleStreamOptions | undefined): number {
@@ -2430,20 +2473,50 @@ export function buildCodexCompactionCheckpoint(
 	return [...retainedReversed, compactionItem];
 }
 
-async function collectCodexCompactionOutput(response: Response): Promise<unknown> {
+interface CodexCompactionStreamResult {
+	item: unknown;
+	responseId?: string;
+	responseItems: unknown[];
+}
+
+async function collectCodexCompactionStream(
+	events: AsyncIterable<StreamEventShape>,
+): Promise<CodexCompactionStreamResult> {
 	let outputItemCount = 0;
 	const compacted: unknown[] = [];
-	for await (const event of mapCodexEvents(parseSSE(response))) {
-		if (event.type !== "response.output_item.done" || !event.item) continue;
-		outputItemCount++;
-		if (isNativeCompactionItem(event.item)) compacted.push(event.item);
+	const responseItems: unknown[] = [];
+	let responseId: string | undefined;
+	for await (const event of events) {
+		if (event.type === "response.created" && event.response?.id) {
+			responseId = event.response.id;
+		}
+		if (event.type === "response.output_item.done" && event.item) {
+			outputItemCount++;
+			responseItems.push(event.item);
+			if (isNativeCompactionItem(event.item)) compacted.push(event.item);
+		}
+		if (
+			(event.type === "response.completed" || event.type === "response.incomplete")
+			&& event.response?.id
+		) {
+			responseId = event.response.id;
+		}
 	}
 	if (compacted.length !== 1) {
 		throw new NonRetryableProviderError(
 			`OpenAI compaction trigger expected exactly one compaction item, received ${compacted.length} from ${outputItemCount} output items`,
 		);
 	}
-	return compacted[0];
+	return {
+		item: compacted[0],
+		...(responseId ? { responseId } : {}),
+		responseItems,
+	};
+}
+
+async function collectCodexCompactionOutput(response: Response): Promise<unknown> {
+	const result = await collectCodexCompactionStream(mapCodexEvents(parseSSE(response)));
+	return result.item;
 }
 
 async function requestCodexCompactionTrigger(
@@ -2490,6 +2563,183 @@ async function requestCodexCompactionTrigger(
 	throw lastError ?? new Error("OpenAI compaction trigger failed");
 }
 
+async function requestCodexCompactionTriggerWebSocket(
+	url: string,
+	headers: Headers,
+	body: ResponsesBody,
+	model: Model<Api>,
+	transport: ProviderTransport,
+	requestMetadata: WebSocketRequestMetadata,
+	signal: AbortSignal | undefined,
+): Promise<unknown> {
+	let disableCachedContext = false;
+	let staleSocketRetried = false;
+	let missingPreviousResponseRetried = false;
+
+	while (true) {
+		const cacheKey = webSocketCacheKey(requestMetadata.sessionId, model, url, headers);
+		const { socket, entry, release, reused } = await acquireWebSocket(
+			url,
+			headers,
+			cacheKey,
+			requestMetadata.sessionId,
+			signal,
+			WEBSOCKET_CONNECT_TIMEOUT_MS,
+		);
+		let keepConnection = true;
+		let released = false;
+		let eventCount = 0;
+		const cachedTransport = transport === "websocket-cached" || transport === "auto";
+		const warmupContinuation = entry?.continuation?.lastRequestBody.generate === false;
+		const useCachedContext = cachedTransport || warmupContinuation;
+		const fullBody = withWebSocketRequestMetadata(body, requestMetadata);
+		const requestBody = useCachedContext && !disableCachedContext && entry
+			? buildCachedWebSocketRequestBody(entry, fullBody)
+			: fullBody;
+		const wireRequestBody = prepareWebSocketRequestBodyForWire(requestBody);
+		const releaseOnce = (releaseOptions?: { keep?: boolean }) => {
+			if (released) return;
+			released = true;
+			release(releaseOptions);
+		};
+
+		try {
+			await sendWebSocketRequest(
+				socket,
+				JSON.stringify({ type: "response.create", ...wireRequestBody }),
+				signal,
+				WEBSOCKET_SEND_TIMEOUT_MS,
+			);
+			const result = await collectCodexCompactionStream(
+				mapCodexEvents(
+					countWebSocketEvents(parseWebSocket(socket, signal), () => {
+						eventCount++;
+					}),
+				),
+			);
+			if (signal?.aborted) {
+				keepConnection = false;
+				throw new Error("Request was aborted");
+			}
+			if (cachedTransport && entry && result.responseId) {
+				entry.continuation = {
+					lastRequestBody: fullBody,
+					lastResponseId: result.responseId,
+					lastResponseItems: result.responseItems,
+				};
+			} else if (entry) {
+				entry.continuation = undefined;
+			}
+			releaseOnce({ keep: true });
+			return result.item;
+		} catch (error) {
+			if (entry) entry.continuation = undefined;
+			keepConnection = false;
+			releaseOnce({ keep: false });
+			if (
+				!staleSocketRetried
+				&& reused
+				&& eventCount === 0
+				&& !signal?.aborted
+				&& isRetryableEarlyWebSocketError(error)
+			) {
+				staleSocketRetried = true;
+				continue;
+			}
+			if (
+				!missingPreviousResponseRetried
+				&& requestBody.previous_response_id
+				&& !signal?.aborted
+				&& isPreviousResponseNotFoundError(error)
+			) {
+				missingPreviousResponseRetried = true;
+				disableCachedContext = true;
+				continue;
+			}
+			throw error;
+		} finally {
+			releaseOnce({ keep: keepConnection });
+		}
+	}
+}
+
+async function requestCodexCompactionTriggerWithTransport(
+	model: Model<Api>,
+	headers: {
+		sse: Headers;
+		websocket: Headers;
+	},
+	body: ResponsesBody,
+	options: {
+		sessionId?: string;
+		turnId?: string;
+		signal?: AbortSignal;
+		settings: ReturnType<typeof loadSettings>;
+		maxRetries?: number;
+		maxRetryDelayMs?: number;
+	},
+): Promise<unknown> {
+	const transport = options.settings.openaiTransport;
+	const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: true });
+	if (transport === "sse") {
+		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
+	}
+
+	const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: true });
+	const fallbackKey = webSocketFallbackKey(options.sessionId, model, websocketUrl);
+	if (
+		transport === "auto"
+		&& fallbackKey
+		&& websocketHttpFallbackSessions.has(fallbackKey)
+	) {
+		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
+	}
+
+	const requestMetadata: WebSocketRequestMetadata = {
+		...(options.sessionId ? { sessionId: options.sessionId, threadId: options.sessionId } : {}),
+		turnId: options.turnId || createPiTurnId(),
+	};
+	const maxRetries = Math.min(
+		CODEX_REMOTE_COMPACTION_STREAM_RETRIES,
+		webSocketStreamMaxRetries({
+			maxRetries: options.maxRetries,
+		} as SimpleStreamOptions),
+	);
+	const retryOptions = {
+		...(options.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: options.maxRetryDelayMs } : {}),
+	} as SimpleStreamOptions;
+	let retries = 0;
+	while (true) {
+		try {
+			return await requestCodexCompactionTriggerWebSocket(
+				websocketUrl,
+				headers.websocket,
+				body,
+				model,
+				transport,
+				requestMetadata,
+				options.signal,
+			);
+		} catch (error) {
+			if (options.signal?.aborted) throw new Error("Request was aborted");
+			const upgradeRequired = error instanceof WebSocketHandshakeError && error.status === 426;
+			const retryable = isWebSocketConnectionLimitReachedError(error) || isRetryableWebSocketError(error);
+			if (!upgradeRequired && retryable && retries < maxRetries) {
+				retries++;
+				await sleep(webSocketCompactionRetryDelayMs(error, retries, retryOptions), options.signal);
+				continue;
+			}
+			if (transport !== "auto" || (!upgradeRequired && !retryable)) {
+				throw error;
+			}
+			if (fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
+			break;
+		}
+	}
+
+	return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
+}
+
 function hasNonEmptyResponseMessageContent(item: Record<string, unknown>): boolean {
 	if (item.type !== "message") return false;
 	if (item.role !== "user" && item.role !== "assistant") return false;
@@ -2530,6 +2780,9 @@ export async function requestOpenAINativeCompaction(
 		signal?: AbortSignal;
 		reasoning?: SimpleStreamOptions["reasoning"];
 		sessionId?: string;
+		turnId?: string;
+		maxRetries?: number;
+		maxRetryDelayMs?: number;
 		settings: ReturnType<typeof loadSettings>;
 	},
 ): Promise<unknown[]> {
@@ -2540,35 +2793,53 @@ export async function requestOpenAINativeCompaction(
 	if (profile.responsesMode !== "standard") {
 		throw new Error("OpenAI native compaction requires Standard Responses mode");
 	}
-	const body = applyFastModeServiceTier(buildRequestBody(model, context, profile, {
+	let body = applyFastModeServiceTier(buildRequestBody(model, context, profile, {
 		apiKey: options.apiKey,
 		headers: options.headers,
 		signal: options.signal,
 		reasoning: options.reasoning,
 		sessionId: options.sessionId,
 	}), options.settings, model);
+	if (options.settings.nativeProviderTools && profile.supportsHostedTools) {
+		body = rewriteNativeOpenAiTools(body, {
+			imageModel: options.settings.imageModel,
+			webSearch: options.settings.webSearchEnabled,
+		}).payload;
+	}
+	ensureWebSearchDetailsIncluded(body);
 
 	if (options.mode === "responses") {
 		const retainedInput = [...body.input];
 		body.input = [...retainedInput, { type: CODEX_COMPACTION_TRIGGER_TYPE }];
-		const headers = buildSSEHeaders(
+		const sseHeaders = applyConfiguredResponsesFeatureHeaders(buildSSEHeaders(
 			model.headers,
 			options.headers,
 			undefined,
 			options.apiKey,
 			options.sessionId,
 			profile,
-		);
-		appendCommaSeparatedHeader(
-			headers,
-			X_CODEX_BETA_FEATURES,
-			CODEX_REMOTE_COMPACTION_V2_FEATURE,
-		);
-		const item = await requestCodexCompactionTrigger(
-			resolveCodexUrl(model.baseUrl, { apiKeyMode: true }),
-			headers,
+		), options.settings, model);
+		const requestId = options.sessionId || createCodexRequestId();
+		const websocketHeaders = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
+			model.headers,
+			options.headers,
+			undefined,
+			options.apiKey,
+			requestId,
+			requestId,
+		), options.settings, model);
+		const item = await requestCodexCompactionTriggerWithTransport(
+			model,
+			{ sse: sseHeaders, websocket: websocketHeaders },
 			body,
-			options.signal,
+			{
+				sessionId: options.sessionId,
+				turnId: options.turnId,
+				signal: options.signal,
+				settings: options.settings,
+				maxRetries: options.maxRetries,
+				maxRetryDelayMs: options.maxRetryDelayMs,
+			},
 		);
 		return buildCodexCompactionCheckpoint(retainedInput, item);
 	}
@@ -3093,15 +3364,19 @@ function createCodexStream<TApi extends Api>(
 				...(websocketThreadId ? { threadId: websocketThreadId } : {}),
 				turnId: websocketTurnId,
 			};
-			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId, requestProfile);
-			const websocketHeaders = buildWebSocketHeaders(
+			const sseHeaders = applyConfiguredResponsesFeatureHeaders(
+				buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId, requestProfile),
+				settings,
+				model as Model<Api>,
+			);
+			const websocketHeaders = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
 				model.headers,
 				options?.headers,
 				accountId,
 				apiKey,
 				websocketSessionId || websocketRequestId,
 				websocketThreadId || websocketRequestId,
-			);
+			), settings, model as Model<Api>);
 			const bodyJson = JSON.stringify(body);
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
 			const transport: ProviderTransport = model.provider === "openai"
@@ -3317,7 +3592,10 @@ function createCodexStream<TApi extends Api>(
 	return stream;
 }
 
-export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { getCurrentCwd: () => string }): void {
+export function registerOpenAIResponsesProviders(
+	pi: ExtensionAPI,
+	options: { getCurrentCwd: () => string },
+): OpenAIResponsesProviderController {
 	const pendingActivities: PendingActivity[] = [];
 	const imagePreviewCache = new Map<string, CachedImagePreview>();
 	const activeTurnIds = new Map<string, string>();
@@ -3462,14 +3740,14 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 		if (settings.openaiTransport === "auto" && fallbackKey && websocketHttpFallbackSessions.has(fallbackKey)) {
 			return;
 		}
-		const headers = buildWebSocketHeaders(
+		const headers = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
 			model.headers,
 			auth.headers,
 			undefined,
 			auth.apiKey ?? "",
 			sessionId,
 			sessionId,
-		);
+		), settings, model);
 		const cacheKey = webSocketCacheKey(sessionId, model, websocketUrl, headers);
 		if (!cacheKey) return;
 		const requestMetadata: WebSocketRequestMetadata = {
@@ -3560,4 +3838,10 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 		}
 		return container;
 	});
+
+	return {
+		getCurrentTurnId(sessionId) {
+			return sessionId ? activeTurnIds.get(sessionId) : undefined;
+		},
+	};
 }

@@ -117,7 +117,7 @@ For offline completion, replace the URL with a local path your editor can resolv
 | `openaiTransport` | Select the native `openai` Responses request path: `sse` (default), `websocket`, `websocket-cached`, or `auto`. WebSocket modes reuse one serialized Pi-session connection. Cached/auto modes send only the incremental input with `previous_response_id` when the request remains a strict extension of the preceding server output. `auto` retries retryable failures and permanently uses SSE for the rest of the Pi session after the retry budget is exhausted; HTTP 426 switches immediately. Explicit `websocket*` modes remain strict. |
 | `openaiWebSocketPrewarm` | With a WebSocket transport, preconnect and send a best-effort `response.create` with `generate: false` before each new agent turn. The first real request can then reuse the warm `previous_response_id` with an empty delta. Enabled by default. |
 | `fastMode` | Add `service_tier: "priority"` to GPT-5-series requests on the native `openai` and `openai-codex` provider paths. The setting is off by default. An explicit `service_tier` supplied by another request hook takes precedence. |
-| `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses` (Codex remote compaction v2 through `/responses` + `compaction_trigger`), or `responses-compact` (legacy `/responses/compact`). The old `responses-context-management` config value is read as `responses` for migration only. |
+| `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses` (Codex remote compaction v2 through `/responses` + `compaction_trigger`, using `openaiTransport` including WebSocket continuation/fallback), or `responses-compact` (legacy HTTP `/responses/compact`). The old `responses-context-management` config value is read as `responses` for migration only. |
 | `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `systemPromptPlacement` chooses top-level `instructions` or an input `developer` message in Standard mode; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always uses a developer message and forces hosted and parallel tools off. |
 | `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. The `openai` provider always uses this API-key transport. |
 | `webSearchEnabled` | Expose hosted `web_search` on supported models. Disabled by default. |
@@ -144,10 +144,16 @@ Codex remote compaction v2: it appends a `compaction_trigger` input item to a
 streaming `/responses` request, requires exactly one compaction output item,
 and installs bounded retained user/delegated-task messages plus the opaque
 checkpoint. It does not use the former Responses `context_management`
-request field or its inline marker lifecycle. `responses-compact` uses
-`/responses/compact` and installs only safe retained messages plus the opaque
-compaction item; stale reasoning and tool call/output items are discarded.
-Native modes ignore `/compact` custom summary instructions.
+request field or its inline marker lifecycle. It follows `openaiTransport`:
+cached/auto WebSocket modes reuse the session connection and send only
+`compaction_trigger` with `previous_response_id` when the current context
+extends the preceding response; `auto` shares the same sticky SSE fallback as
+normal model requests. Strict `websocket` normally sends the full compaction
+context on the reusable socket, while still allowing the first real request to
+consume a matching `generate:false` prewarm continuation. `responses-compact`
+remains an HTTP-only unary request and installs only safe retained messages
+plus the opaque compaction item; stale reasoning and tool call/output items are
+discarded. Native modes ignore `/compact` custom summary instructions.
 
 `/fast on` and `/fast off` update the package config file, so the selection
 survives Pi restarts. When enabled, the extension sends

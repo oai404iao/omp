@@ -12,6 +12,7 @@ import { isOpenAiGpt5Model, type ModelLike } from "./capabilities.js";
 import {
 	requestOpenAINativeCompaction,
 	sanitizeNativeCompactionOutput,
+	type OpenAIResponsesProviderController,
 } from "./provider-shim.js";
 import {
 	loadSettings,
@@ -315,7 +316,10 @@ async function buildNativeCompactionContext(
 	};
 }
 
-export function registerNativeCompaction(pi: ExtensionAPI): void {
+export function registerNativeCompaction(
+	pi: ExtensionAPI,
+	providerController?: OpenAIResponsesProviderController,
+): void {
 	pi.on("context", (event, ctx) => {
 		const settings = loadSettings(ctx.cwd);
 		if (settings.compactionMode === "pi") return undefined;
@@ -339,17 +343,22 @@ export function registerNativeCompaction(pi: ExtensionAPI): void {
 			}
 
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-			if (!auth.ok || !auth.apiKey) {
+			const hasAuthorizationHeader = Object.entries(auth.ok ? auth.headers ?? {} : {}).some(
+				([name, value]) => name.toLowerCase() === "authorization" && value.trim().length > 0,
+			);
+			if (!auth.ok || (!auth.apiKey && !hasAuthorizationHeader)) {
 				throw new Error(auth.ok ? "OpenAI API key is unavailable" : auth.error);
 			}
+			const sessionId = ctx.sessionManager.getSessionId();
 			const context = await buildNativeCompactionContext(pi, event, ctx, model);
 			const output = await requestOpenAINativeCompaction(model, context, {
 				mode,
-				apiKey: auth.apiKey,
+				apiKey: auth.apiKey ?? "",
 				headers: auth.headers,
 				signal: event.signal,
 				reasoning: pi.getThinkingLevel() as ThinkingLevel,
-				sessionId: ctx.sessionManager.getSessionId(),
+				sessionId,
+				turnId: providerController?.getCurrentTurnId(sessionId),
 				settings,
 			});
 			return {

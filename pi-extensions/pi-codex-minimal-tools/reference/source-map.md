@@ -65,6 +65,19 @@ The WebSocket rows in this section were revalidated against local Codex commit
 | `codex-rs/core/tests/suite/client.rs` | Request snapshots and HTTP client behavior. |
 | `codex-rs/core/tests/suite/client_websockets.rs` | WebSocket handshake headers, request frames, connection reuse, incremental continuation, and reconnect behavior. |
 
+## Remote compaction transport
+
+These rows were revalidated against local Codex commit
+`eb9dceba1a2e658142a456c5898836774835616b` on August 12, 2026.
+
+| Source | Evidence |
+| --- | --- |
+| `codex-rs/core/src/compact_remote_v2_attempt.rs` | Appends `ResponseItem::CompactionTrigger` to the current Responses prompt. |
+| `codex-rs/core/src/compact_remote_v2.rs` | Runs remote compaction v2 through `ModelClientSession::stream`, collects exactly one compaction output, and installs the new checkpoint history. |
+| `codex-rs/core/src/client.rs` | Routes `ModelClientSession::stream` through Responses WebSocket when enabled and computes `previous_response_id` input deltas from the same session continuation state. |
+| `codex-rs/core/src/responses_retry.rs` | Applies the compact stream retry budget and session-level HTTP fallback. |
+| `codex-rs/core/src/compact_remote_request.rs` | Keeps legacy `/responses/compact` as a separate unary HTTP request. |
+
 ## Responses Lite
 
 | Source | Evidence |

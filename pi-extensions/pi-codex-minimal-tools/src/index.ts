@@ -244,8 +244,8 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 
 	const initialSettings = loadSettings(currentCwd);
 	if (initialSettings.enabled) {
-		registerOpenAIResponsesProviders(pi, { getCurrentCwd: () => currentCwd });
-		registerNativeCompaction(pi);
+		const providerController = registerOpenAIResponsesProviders(pi, { getCurrentCwd: () => currentCwd });
+		registerNativeCompaction(pi, providerController);
 		registerBackgroundImageGenerationCommand(pi);
 	}
 

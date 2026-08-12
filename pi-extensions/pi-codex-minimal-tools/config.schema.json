@@ -50,7 +50,7 @@
     },
     "compactionMode": {
       "type": "string",
-      "description": "Compaction implementation for GPT-5-series models on the openai provider. pi uses Pi summaries; responses follows Codex remote compaction v2 through a streaming /responses compaction_trigger request; responses-compact uses the legacy /responses/compact endpoint.",
+      "description": "Compaction implementation for GPT-5-series models on the openai provider. pi uses Pi summaries; responses follows Codex remote compaction v2 through a streaming /responses compaction_trigger request and follows openaiTransport, including WebSocket continuation and auto fallback; responses-compact uses the legacy HTTP-only /responses/compact endpoint.",
       "enum": ["pi", "responses", "responses-compact"],
       "default": "pi"
     },
