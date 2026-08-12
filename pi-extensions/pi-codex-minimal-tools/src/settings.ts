@@ -12,6 +12,7 @@ export interface CodexMinimalToolsSettings {
 	autoEnable: boolean;
 	nativeProviderTools: boolean;
 	openaiTransport: "sse" | "websocket" | "websocket-cached" | "auto";
+	openaiWebSocketPrewarm: boolean;
 	fastMode: boolean;
 	compactionMode: "pi" | "responses" | "responses-compact";
 	requestProfile: CodexRequestProfileOverride;
@@ -34,6 +35,7 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	autoEnable: true,
 	nativeProviderTools: true,
 	openaiTransport: "sse",
+	openaiWebSocketPrewarm: true,
 	fastMode: false,
 	compactionMode: "pi",
 	requestProfile: {},
@@ -179,6 +181,7 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		autoEnable: boolSetting(raw, "autoEnable"),
 		nativeProviderTools: boolSetting(raw, "nativeProviderTools"),
 		openaiTransport: openaiTransportSetting(raw),
+		openaiWebSocketPrewarm: boolSetting(raw, "openaiWebSocketPrewarm"),
 		fastMode: boolSetting(raw, "fastMode"),
 		compactionMode: compactionModeSetting(raw),
 		requestProfile: requestProfileSetting(raw),

@@ -40,7 +40,7 @@ test("proxyForWebSocketUrl falls back to ALL_PROXY", () => {
 	assert.equal(proxyForWebSocketUrl("wss://chatgpt.com/backend-api/codex/responses"), "socks5://proxy.example:1080");
 });
 
-test("webSocketOptionsForUrl passes proxy configuration as an undici dispatcher", async () => {
+test("webSocketOptionsForUrl exposes proxy configuration for compatibility callers", async () => {
 	process.env.HTTPS_PROXY = "http://proxy.example:8080";
 	delete process.env.NO_PROXY;
 	const options = await webSocketOptionsForUrl("wss://chatgpt.com/backend-api/codex/responses", { Authorization: "Bearer token" });

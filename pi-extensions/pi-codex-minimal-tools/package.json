@@ -26,7 +26,9 @@
     "typebox": "*"
   },
   "dependencies": {
-    "undici": "^7.25.0"
+    "https-proxy-agent": "^7.0.6",
+    "undici": "^7.25.0",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.75.0",

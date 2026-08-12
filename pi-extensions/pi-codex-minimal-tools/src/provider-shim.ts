@@ -19,7 +19,7 @@ import {
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import type { ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
-import { ProxyAgent, WebSocket as UndiciWebSocket } from "undici";
+import { ProxyAgent } from "undici";
 import type { Dispatcher } from "undici";
 import {
 	collectHistoricalCitationSources,
@@ -32,6 +32,7 @@ import {
 	type WebSearchCitationSource,
 } from "./providers/openai-responses-shared.js";
 import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
+import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 import { applyFastModeServiceTier } from "./fast-mode.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -45,6 +46,12 @@ const BASE_DELAY_MS = 1000;
 const SSE_RESPONSE_HEADER_TIMEOUT_MS = 20_000;
 const WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
 const WEBSOCKET_IDLE_TIMEOUT_MS = 300_000;
+const WEBSOCKET_SEND_TIMEOUT_MS = 300_000;
+const WEBSOCKET_EVENT_QUEUE_CAPACITY = 1600;
+const DEFAULT_WEBSOCKET_STREAM_MAX_RETRIES = 5;
+const MAX_WEBSOCKET_STREAM_MAX_RETRIES = 100;
+const WEBSOCKET_RETRY_BASE_DELAY_MS = 200;
+const WEBSOCKET_RETRY_MAX_DELAY_MS = 60_000;
 const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
 const PREVIOUS_RESPONSE_NOT_FOUND_CODE = "previous_response_not_found";
@@ -126,7 +133,8 @@ interface CachedImagePreview {
 
 interface WebSocketLike {
 	readyState?: number;
-	send(data: string): void;
+	bufferedAmount?: number;
+	send(data: string, callback?: (error?: Error) => void): void;
 	close(code?: number, reason?: string): void;
 	addEventListener(type: string, listener: (event: unknown) => void): void;
 	removeEventListener(type: string, listener: (event: unknown) => void): void;
@@ -135,8 +143,16 @@ interface WebSocketLike {
 interface SessionWebSocketCacheEntry {
 	socket: WebSocketLike;
 	busy: boolean;
+	waiters: WebSocketAcquireWaiter[];
 	idleTimer?: ReturnType<typeof setTimeout>;
 	continuation?: CachedWebSocketContinuationState;
+}
+
+interface WebSocketAcquireWaiter {
+	resolve: (acquired: AcquiredWebSocket) => void;
+	reject: (error: Error) => void;
+	signal?: AbortSignal;
+	onAbort?: () => void;
 }
 
 interface AcquiredWebSocket {
@@ -150,6 +166,16 @@ interface CachedWebSocketContinuationState {
 	lastRequestBody: ResponsesBody;
 	lastResponseId: string;
 	lastResponseItems: unknown[];
+}
+
+interface WebSocketPrewarmRequest {
+	url: string;
+	headers: Headers;
+	cacheKey: string;
+	body: ResponsesBody;
+	requestMetadata: WebSocketRequestMetadata;
+	signal?: AbortSignal;
+	connectTimeoutMs?: number;
 }
 
 interface WebSocketRequestMetadata {
@@ -177,6 +203,7 @@ interface ResponsesBody {
 	parallel_tool_calls: boolean;
 	temperature?: number;
 	service_tier?: string;
+	generate?: boolean;
 	tools?: unknown[];
 	reasoning?: {
 		effort?: string;
@@ -205,14 +232,42 @@ type ServiceTier = ResponseCreateParamsStreaming["service_tier"];
 type ProviderTransport = NonNullable<SimpleStreamOptions["transport"]>;
 
 const websocketSessionCache = new Map<string, SessionWebSocketCacheEntry>();
+const websocketConnectionPromises = new Map<string, Promise<SessionWebSocketCacheEntry>>();
+const websocketHttpFallbackSessions = new Set<string>();
 
 class NonRetryableProviderError extends Error {}
 class ProviderResponseError extends Error {
 	code?: string;
 	errorType?: string;
 	status?: number;
+	retryAfterMs?: number;
 }
 class ProviderProtocolError extends Error {}
+class WebSocketHandshakeError extends Error {
+	constructor(
+		public readonly status: number,
+		message: string,
+		public readonly headers: Record<string, string> = {},
+		public readonly body?: string,
+	) {
+		super(withHttpStatusPrefix(status, message));
+		this.name = "WebSocketHandshakeError";
+	}
+}
+
+interface NodeWebSocketModule {
+	WebSocket: new (url: string, options?: Record<string, unknown>) => {
+		readyState: number;
+		bufferedAmount: number;
+		send(data: string, callback?: (error?: Error) => void): void;
+		close(code?: number, reason?: string): void;
+		terminate?(): void;
+		on(type: string, listener: (...args: any[]) => void): void;
+		off(type: string, listener: (...args: any[]) => void): void;
+	};
+}
+
+let nodeWebSocketModulePromise: Promise<NodeWebSocketModule> | undefined;
 
 const HTTP_STATUS_MESSAGE_PREFIX = /^HTTP\s+\d{3}(?::|\b)/i;
 
@@ -942,11 +997,26 @@ function closeWebSocketSilently(socket: WebSocketLike, code = 1000, reason = "do
 }
 
 export function closeProviderWebSocketSessions(sessionId?: string): void {
+	for (const cacheKey of websocketConnectionPromises.keys()) {
+		if (sessionId && !cacheKey.startsWith(`${sessionId}\n`)) continue;
+		websocketConnectionPromises.delete(cacheKey);
+	}
 	for (const [cacheKey, entry] of websocketSessionCache) {
 		if (sessionId && !cacheKey.startsWith(`${sessionId}\n`)) continue;
 		if (entry.idleTimer) clearTimeout(entry.idleTimer);
+		for (const waiter of entry.waiters.splice(0)) {
+			if (waiter.signal && waiter.onAbort) waiter.signal.removeEventListener("abort", waiter.onAbort);
+			waiter.reject(new Error("WebSocket session closed"));
+		}
 		closeWebSocketSilently(entry.socket, 1000, "session_shutdown");
 		websocketSessionCache.delete(cacheKey);
+	}
+	if (sessionId) {
+		for (const fallbackKey of websocketHttpFallbackSessions) {
+			if (fallbackKey.startsWith(`${sessionId}\n`)) websocketHttpFallbackSessions.delete(fallbackKey);
+		}
+	} else {
+		websocketHttpFallbackSessions.clear();
 	}
 }
 
@@ -956,10 +1026,87 @@ function scheduleSessionWebSocketExpiry(cacheKey: string, entry: SessionWebSocke
 		clearTimeout(entry.idleTimer);
 	}
 	entry.idleTimer = setTimeout(() => {
-		if (entry.busy) return;
+		if (entry.busy || entry.waiters.length > 0) return;
 		closeWebSocketSilently(entry.socket, 1000, "idle_timeout");
 		websocketSessionCache.delete(cacheKey);
 	}, SESSION_WEBSOCKET_CACHE_TTL_MS);
+}
+
+function removeWebSocketWaiter(entry: SessionWebSocketCacheEntry, waiter: WebSocketAcquireWaiter): void {
+	const index = entry.waiters.indexOf(waiter);
+	if (index >= 0) entry.waiters.splice(index, 1);
+	if (waiter.signal && waiter.onAbort) waiter.signal.removeEventListener("abort", waiter.onAbort);
+}
+
+function acquireCachedWebSocketEntry(
+	cacheKey: string,
+	entry: SessionWebSocketCacheEntry,
+	reused: boolean,
+): AcquiredWebSocket {
+	entry.busy = true;
+	let released = false;
+	const release = ({ keep } = {} as { keep?: boolean }) => {
+		if (released) return;
+		const reusable = keep !== false && isWebSocketReusable(entry.socket);
+		if (!reusable) {
+			released = true;
+			if (entry.idleTimer) clearTimeout(entry.idleTimer);
+			closeWebSocketSilently(entry.socket);
+			if (websocketSessionCache.get(cacheKey) === entry) {
+				websocketSessionCache.delete(cacheKey);
+			}
+			for (const waiter of entry.waiters.splice(0)) {
+				if (waiter.signal && waiter.onAbort) waiter.signal.removeEventListener("abort", waiter.onAbort);
+				waiter.reject(new Error("WebSocket connection became unavailable"));
+			}
+			return;
+		}
+
+		while (entry.waiters.length > 0) {
+			const waiter = entry.waiters.shift()!;
+			if (waiter.signal && waiter.onAbort) waiter.signal.removeEventListener("abort", waiter.onAbort);
+			if (waiter.signal?.aborted) {
+				waiter.reject(new Error("Request was aborted"));
+				continue;
+			}
+			released = true;
+			waiter.resolve(acquireCachedWebSocketEntry(cacheKey, entry, true));
+			return;
+		}
+
+		entry.busy = false;
+		released = true;
+		scheduleSessionWebSocketExpiry(cacheKey, entry);
+	};
+	return {
+		socket: entry.socket,
+		entry,
+		reused,
+		release,
+	};
+}
+
+async function waitForCachedWebSocket(
+	cacheKey: string,
+	entry: SessionWebSocketCacheEntry,
+	signal: AbortSignal | undefined,
+): Promise<AcquiredWebSocket> {
+	if (signal?.aborted) throw new Error("Request was aborted");
+	return new Promise<AcquiredWebSocket>((resolve, reject) => {
+		const waiter: WebSocketAcquireWaiter = {
+			resolve,
+			reject,
+			...(signal ? { signal } : {}),
+		};
+		if (signal) {
+			waiter.onAbort = () => {
+				removeWebSocketWaiter(entry, waiter);
+				reject(new Error("Request was aborted"));
+			};
+			signal.addEventListener("abort", waiter.onAbort, { once: true });
+		}
+		entry.waiters.push(waiter);
+	});
 }
 
 function extractWebSocketError(event: unknown): Error {
@@ -993,6 +1140,46 @@ function extractWebSocketCloseError(event: unknown): Error {
 	return new Error("WebSocket closed");
 }
 
+async function loadNodeWebSocketModule(): Promise<NodeWebSocketModule> {
+	if (!nodeWebSocketModulePromise) {
+		nodeWebSocketModulePromise = dynamicImport("ws") as Promise<NodeWebSocketModule>;
+	}
+	return nodeWebSocketModulePromise;
+}
+
+function nodeWebSocketHeaders(headers: Headers): Record<string, string> {
+	return Object.fromEntries(headers.entries());
+}
+
+function nodeWebSocketResponseHeaders(headers: unknown): Record<string, string> {
+	if (!headers || typeof headers !== "object") return {};
+	const result: Record<string, string> = {};
+	for (const [name, value] of Object.entries(headers as Record<string, unknown>)) {
+		if (Array.isArray(value)) result[name] = value.join(", ");
+		else if (typeof value === "string") result[name] = value;
+		else if (value !== undefined) result[name] = String(value);
+	}
+	return result;
+}
+
+function handshakeMessage(status: number, statusText: string | undefined, body: string): string {
+	const trimmedBody = body.trim();
+	if (trimmedBody) {
+		try {
+			const parsed = JSON.parse(trimmedBody) as { error?: { message?: unknown }; message?: unknown };
+			const message = typeof parsed.error?.message === "string"
+				? parsed.error.message
+				: typeof parsed.message === "string"
+					? parsed.message
+					: undefined;
+			if (message?.trim()) return message.trim();
+		} catch {
+			return trimmedBody;
+		}
+	}
+	return statusText?.trim() || "WebSocket upgrade failed";
+}
+
 async function connectWebSocket(
 	url: string,
 	headers: Headers,
@@ -1000,16 +1187,28 @@ async function connectWebSocket(
 	timeoutMs = WEBSOCKET_CONNECT_TIMEOUT_MS,
 ): Promise<WebSocketLike> {
 	if (signal?.aborted) throw new Error("Request was aborted");
-	const wsHeaders = headersToRecord(headers);
-	const options = await webSocketOptionsForUrl(url, wsHeaders);
+	const { WebSocket } = await loadNodeWebSocketModule();
+	const proxy = proxyForWebSocketUrl(url);
+	let agent: unknown;
+	if (proxy) {
+		if (!/^https?:/i.test(proxy)) {
+			throw new Error(`Unsupported WebSocket proxy protocol: ${new URL(proxy).protocol}`);
+		}
+		const { HttpsProxyAgent } = await dynamicImport("https-proxy-agent") as typeof import("https-proxy-agent");
+		agent = new HttpsProxyAgent(proxy);
+	}
 
 	return new Promise((resolve, reject) => {
 		let settled = false;
-		let socket: WebSocketLike;
+		let socket: InstanceType<NodeWebSocketModule["WebSocket"]>;
 		let timeout: ReturnType<typeof setTimeout> | undefined;
 
 		try {
-			socket = new UndiciWebSocket(url, options) as WebSocketLike;
+			socket = new WebSocket(url, {
+				headers: nodeWebSocketHeaders(headers),
+				perMessageDeflate: true,
+				...(agent ? { agent } : {}),
+			});
 		} catch (error) {
 			reject(error instanceof Error ? error : new Error(String(error)));
 			return;
@@ -1019,46 +1218,119 @@ async function connectWebSocket(
 			if (settled) return;
 			settled = true;
 			cleanup();
-			resolve(socket);
+			const messageListeners = new Map<(event: unknown) => void, (...args: any[]) => void>();
+			const closeListeners = new Map<(event: unknown) => void, (...args: any[]) => void>();
+			resolve({
+				get readyState() {
+					return socket.readyState;
+				},
+				get bufferedAmount() {
+					return socket.bufferedAmount;
+				},
+				send(data, callback) {
+					socket.send(data, callback);
+				},
+				close(code, reason) {
+					socket.close(code, reason);
+				},
+				addEventListener(type, listener) {
+					if (type === "message") {
+						const wrapped = (data: unknown, isBinary: boolean) => listener({ data, isBinary });
+						messageListeners.set(listener, wrapped);
+						socket.on("message", wrapped);
+						return;
+					}
+					if (type === "close") {
+						const wrapped = (code: number, reason: Buffer) => listener({
+							code,
+							reason: reason.toString("utf8"),
+						});
+						closeListeners.set(listener, wrapped);
+						socket.on("close", wrapped);
+						return;
+					}
+					socket.on(type, listener as (...args: any[]) => void);
+				},
+				removeEventListener(type, listener) {
+					if (type === "message") {
+						const wrapped = messageListeners.get(listener);
+						if (wrapped) socket.off("message", wrapped);
+						messageListeners.delete(listener);
+						return;
+					}
+					if (type === "close") {
+						const wrapped = closeListeners.get(listener);
+						if (wrapped) socket.off("close", wrapped);
+						closeListeners.delete(listener);
+						return;
+					}
+					socket.off(type, listener as (...args: any[]) => void);
+				},
+			});
 		};
 		const onError = (event: unknown) => {
 			if (settled) return;
 			settled = true;
 			cleanup();
-			reject(extractWebSocketError(event));
+			reject(event instanceof Error ? event : extractWebSocketError(event));
 		};
-		const onClose = (event: unknown) => {
+		const onClose = (code: number, reason: Buffer) => {
 			if (settled) return;
 			settled = true;
 			cleanup();
-			reject(extractWebSocketCloseError(event));
+			reject(extractWebSocketCloseError({ code, reason: reason.toString("utf8") }));
+		};
+		const onUnexpectedResponse = (
+			_request: unknown,
+			response: { statusCode?: number; statusMessage?: string; headers?: unknown; on(type: string, listener: (...args: any[]) => void): void },
+		) => {
+			if (settled) return;
+			let body = "";
+			response.on("data", (chunk: unknown) => {
+				if (body.length >= 64 * 1024) return;
+				body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+			});
+			response.on("end", () => {
+				if (settled) return;
+				settled = true;
+				cleanup();
+				const status = response.statusCode ?? 500;
+				reject(new WebSocketHandshakeError(
+					status,
+					handshakeMessage(status, response.statusMessage, body),
+					nodeWebSocketResponseHeaders(response.headers),
+					body || undefined,
+				));
+			});
 		};
 		const onAbort = () => {
 			if (settled) return;
 			settled = true;
 			cleanup();
-			closeWebSocketSilently(socket, 1000, "aborted");
+			socket.terminate?.();
 			reject(new Error("Request was aborted"));
 		};
 		const onTimeout = () => {
 			if (settled) return;
 			settled = true;
 			cleanup();
-			closeWebSocketSilently(socket, 1000, "connect_timeout");
+			socket.terminate?.();
 			reject(new Error(`OpenAI Responses WebSocket connection timed out after ${timeoutMs}ms`));
 		};
 
 		const cleanup = () => {
 			if (timeout) clearTimeout(timeout);
-			socket.removeEventListener("open", onOpen);
-			socket.removeEventListener("error", onError);
-			socket.removeEventListener("close", onClose);
+			socket.off("open", onOpen);
+			socket.off("error", onError);
+			socket.off("close", onClose);
+			socket.off("unexpected-response", onUnexpectedResponse);
 			signal?.removeEventListener("abort", onAbort);
 		};
 
-		socket.addEventListener("open", onOpen);
-		socket.addEventListener("error", onError);
-		socket.addEventListener("close", onClose);
+		socket.on("open", onOpen);
+		socket.on("error", onError);
+		socket.on("close", onClose);
+		socket.on("unexpected-response", onUnexpectedResponse);
 		signal?.addEventListener("abort", onAbort, { once: true });
 		timeout = setTimeout(onTimeout, Math.max(1, timeoutMs));
 	});
@@ -1095,32 +1367,11 @@ async function acquireWebSocket(
 		}
 
 		if (!cached.busy && isWebSocketReusable(cached.socket)) {
-			cached.busy = true;
-			return {
-				socket: cached.socket,
-				entry: cached,
-				reused: true,
-				release: ({ keep } = {}) => {
-					if (!keep || !isWebSocketReusable(cached.socket)) {
-						closeWebSocketSilently(cached.socket);
-						websocketSessionCache.delete(cacheKey);
-						return;
-					}
-					cached.busy = false;
-					scheduleSessionWebSocketExpiry(cacheKey, cached);
-				},
-			};
+			return acquireCachedWebSocketEntry(cacheKey, cached, true);
 		}
 
 		if (cached.busy) {
-			const socket = await connectWebSocket(url, headers, signal, connectTimeoutMs);
-			return {
-				socket,
-				reused: false,
-				release: () => {
-					closeWebSocketSilently(socket);
-				},
-			};
+			return waitForCachedWebSocket(cacheKey, cached, signal);
 		}
 
 		if (!isWebSocketReusable(cached.socket)) {
@@ -1129,41 +1380,30 @@ async function acquireWebSocket(
 		}
 	}
 
-	const socket = await connectWebSocket(url, headers, signal, connectTimeoutMs);
-	const entry: SessionWebSocketCacheEntry = { socket, busy: true };
-	websocketSessionCache.set(cacheKey, entry);
-	return {
-		socket,
-		entry,
-		reused: false,
-		release: ({ keep } = {}) => {
-			if (!keep || !isWebSocketReusable(entry.socket)) {
-				closeWebSocketSilently(entry.socket);
-				if (entry.idleTimer) clearTimeout(entry.idleTimer);
-				if (websocketSessionCache.get(cacheKey) === entry) {
-					websocketSessionCache.delete(cacheKey);
+	let pendingConnection = websocketConnectionPromises.get(cacheKey);
+	if (!pendingConnection) {
+		let connectionPromise!: Promise<SessionWebSocketCacheEntry>;
+		connectionPromise = connectWebSocket(url, headers, signal, connectTimeoutMs)
+			.then((socket) => {
+				if (websocketConnectionPromises.get(cacheKey) !== connectionPromise) {
+					closeWebSocketSilently(socket, 1000, "session_shutdown");
+					throw new Error("WebSocket session closed");
 				}
-				return;
-			}
-			entry.busy = false;
-			scheduleSessionWebSocketExpiry(cacheKey, entry);
-		},
-	};
-}
-
-async function decodeWebSocketData(data: unknown): Promise<string | null> {
-	if (typeof data === "string") return data;
-	if (data instanceof ArrayBuffer) {
-		return new TextDecoder().decode(new Uint8Array(data));
+				const entry: SessionWebSocketCacheEntry = { socket, busy: false, waiters: [] };
+				websocketSessionCache.set(cacheKey, entry);
+				return entry;
+			})
+			.finally(() => {
+				if (websocketConnectionPromises.get(cacheKey) === connectionPromise) {
+					websocketConnectionPromises.delete(cacheKey);
+				}
+			});
+		websocketConnectionPromises.set(cacheKey, connectionPromise);
+		pendingConnection = connectionPromise;
 	}
-	if (ArrayBuffer.isView(data)) {
-		return new TextDecoder().decode(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-	}
-	if (data && typeof data === "object" && "arrayBuffer" in data) {
-		const arrayBuffer = await (data as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer();
-		return new TextDecoder().decode(new Uint8Array(arrayBuffer));
-	}
-	return null;
+	const entry = await pendingConnection;
+	if (entry.busy) return waitForCachedWebSocket(cacheKey, entry, signal);
+	return acquireCachedWebSocketEntry(cacheKey, entry, false);
 }
 
 function requestBodyWithoutInput(body: ResponsesBody): ResponsesBody {
@@ -1172,17 +1412,45 @@ function requestBodyWithoutInput(body: ResponsesBody): ResponsesBody {
 		previous_response_id: _previousResponseId,
 		client_metadata: _clientMetadata,
 		stream_options: _streamOptions,
+		generate: _generate,
 		...rest
 	} = body;
 	return rest as ResponsesBody;
 }
 
+function normalizeResponseItemForComparison(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(normalizeResponseItemForComparison);
+	if (!value || typeof value !== "object") return value;
+	const result: Record<string, unknown> = {};
+	for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+		if (key === "internal_chat_message_metadata_passthrough") continue;
+		result[key] = normalizeResponseItemForComparison(entry);
+	}
+	return result;
+}
+
+function stableJson(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+	if (value && typeof value === "object") {
+		return `{${Object.entries(value as Record<string, unknown>)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+			.join(",")}}`;
+	}
+	return JSON.stringify(value) ?? "undefined";
+}
+
 function responseInputsEqual(a: unknown[] | undefined, b: unknown[] | undefined): boolean {
-	return JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+	const left = a ?? [];
+	const right = b ?? [];
+	if (left.length !== right.length) return false;
+	return left.every((item, index) =>
+		stableJson(normalizeResponseItemForComparison(item))
+		=== stableJson(normalizeResponseItemForComparison(right[index])));
 }
 
 function requestBodiesMatchExceptInput(a: ResponsesBody, b: ResponsesBody): boolean {
-	return JSON.stringify(requestBodyWithoutInput(a)) === JSON.stringify(requestBodyWithoutInput(b));
+	return stableJson(requestBodyWithoutInput(a)) === stableJson(requestBodyWithoutInput(b));
 }
 
 function getCachedWebSocketInputDelta(body: ResponsesBody, continuation: CachedWebSocketContinuationState): unknown[] | undefined {
@@ -1204,14 +1472,22 @@ function getCachedWebSocketInputDelta(body: ResponsesBody, continuation: CachedW
 	return currentInput.slice(baseline.length);
 }
 
-function buildCachedWebSocketRequestBody(entry: SessionWebSocketCacheEntry, body: ResponsesBody): ResponsesBody {
+function buildCachedWebSocketRequestBody(
+	entry: SessionWebSocketCacheEntry,
+	body: ResponsesBody,
+	options?: { allowEmptyDelta?: boolean },
+): ResponsesBody {
 	const continuation = entry.continuation;
 	if (!continuation) {
 		return body;
 	}
 
 	const delta = getCachedWebSocketInputDelta(body, continuation);
-	if (!delta || !continuation.lastResponseId) {
+	if (delta === undefined || !continuation.lastResponseId) {
+		entry.continuation = undefined;
+		return body;
+	}
+	if (delta.length === 0 && !options?.allowEmptyDelta) {
 		entry.continuation = undefined;
 		return body;
 	}
@@ -1221,6 +1497,66 @@ function buildCachedWebSocketRequestBody(entry: SessionWebSocketCacheEntry, body
 		previous_response_id: continuation.lastResponseId,
 		input: delta,
 	};
+}
+
+function isPrefixedResponseItemId(value: string): boolean {
+	const separator = value.indexOf("_");
+	return separator > 0 && separator < value.length - 1;
+}
+
+function prepareResponseItemsForWire(items: unknown[]): unknown[] {
+	return items.map((item) => {
+		if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+		const record = item as Record<string, unknown>;
+		if (typeof record.id !== "string" || isPrefixedResponseItemId(record.id)) return item;
+		const { id: _id, ...rest } = record;
+		return rest;
+	});
+}
+
+function prepareWebSocketRequestBodyForWire(body: ResponsesBody): ResponsesBody {
+	return {
+		...body,
+		input: prepareResponseItemsForWire(body.input ?? []),
+	};
+}
+
+async function sendWebSocketRequest(
+	socket: WebSocketLike,
+	payload: string,
+	signal: AbortSignal | undefined,
+	timeoutMs = WEBSOCKET_SEND_TIMEOUT_MS,
+): Promise<void> {
+	if (signal?.aborted) throw new Error("Request was aborted");
+	await new Promise<void>((resolve, reject) => {
+		let settled = false;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const finish = (error?: Error) => {
+			if (settled) return;
+			settled = true;
+			if (timeout) clearTimeout(timeout);
+			signal?.removeEventListener("abort", onAbort);
+			if (error) reject(error);
+			else resolve();
+		};
+		const onAbort = () => finish(new Error("Request was aborted"));
+		timeout = setTimeout(
+			() => finish(new Error(`OpenAI Responses WebSocket send timed out after ${timeoutMs}ms`)),
+			Math.max(1, timeoutMs),
+		);
+		signal?.addEventListener("abort", onAbort, { once: true });
+		try {
+			socket.send(payload, (error?: Error) => {
+				if (error) {
+					finish(new Error(`Failed to send OpenAI Responses WebSocket request: ${error.message}`));
+					return;
+				}
+				finish();
+			});
+		} catch (error) {
+			finish(error instanceof Error ? error : new Error(String(error)));
+		}
+	});
 }
 
 async function* parseWebSocket(socket: WebSocketLike, signal: AbortSignal | undefined): AsyncIterable<StreamEventShape> {
@@ -1245,8 +1581,24 @@ async function* parseWebSocket(socket: WebSocketLike, signal: AbortSignal | unde
 		messageChain = messageChain
 			.then(async () => {
 				if (!event || typeof event !== "object" || !("data" in event)) return;
-				const text = await decodeWebSocketData((event as { data?: unknown }).data);
-				if (!text) return;
+				if ((event as { isBinary?: unknown }).isBinary === true) {
+					failed = new ProviderProtocolError("Unexpected binary OpenAI Responses WebSocket event");
+					done = true;
+					return;
+				}
+				const data = (event as { data?: unknown }).data;
+				const text = typeof data === "string"
+					? data
+					: Buffer.isBuffer(data)
+						? data.toString("utf8")
+						: ArrayBuffer.isView(data)
+							? Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8")
+							: null;
+				if (text === null) {
+					failed = new ProviderProtocolError("Unsupported OpenAI Responses WebSocket message payload");
+					done = true;
+					return;
+				}
 				try {
 					const parsed = JSON.parse(text) as StreamEventShape;
 					const type = typeof parsed.type === "string" ? parsed.type : "";
@@ -1255,12 +1607,17 @@ async function* parseWebSocket(socket: WebSocketLike, signal: AbortSignal | unde
 						closeError = null;
 						done = true;
 					}
+					if (queue.length >= WEBSOCKET_EVENT_QUEUE_CAPACITY) {
+						failed = new ProviderProtocolError(
+							`OpenAI Responses WebSocket event queue exceeded ${WEBSOCKET_EVENT_QUEUE_CAPACITY} items`,
+						);
+						done = true;
+						return;
+					}
 					queue.push(parsed);
-				} catch (error) {
-					failed = new ProviderProtocolError(
-						`Invalid OpenAI Responses WebSocket JSON: ${error instanceof Error ? error.message : String(error)}`,
-					);
-					done = true;
+				} catch {
+					// Match Codex: malformed text frames are logged/ignored rather than
+					// tearing down an otherwise healthy response stream.
 				}
 			})
 			.catch((error: unknown) => {
@@ -1367,6 +1724,76 @@ function isRetryableEarlyWebSocketError(error: unknown): boolean {
 	return /^WebSocket (error|closed)(?:\s|$)/.test(message);
 }
 
+function retryAfterMsFromHeaders(headers: Record<string, string> | undefined): number | undefined {
+	if (!headers) return undefined;
+	const retryAfterMs = Object.entries(headers).find(([name]) => name.toLowerCase() === "retry-after-ms")?.[1];
+	if (retryAfterMs) {
+		const parsed = Number.parseFloat(retryAfterMs);
+		if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+	}
+	const retryAfter = Object.entries(headers).find(([name]) => name.toLowerCase() === "retry-after")?.[1];
+	if (!retryAfter) return undefined;
+	const seconds = Number.parseFloat(retryAfter);
+	if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+	const date = Date.parse(retryAfter);
+	return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+}
+
+function isRetryableWebSocketError(error: unknown): boolean {
+	if (error instanceof WebSocketHandshakeError) {
+		return isRetryableError(error.status, error.body ?? error.message);
+	}
+	if (error instanceof ProviderResponseError) {
+		if (
+			/usage_limit_reached|usage_not_included/i.test(`${error.code ?? ""} ${error.errorType ?? ""}`)
+			|| /You have hit your OpenAI usage limit/i.test(error.message)
+		) {
+			return false;
+		}
+		if (typeof error.status === "number" && isRetryableError(error.status, error.message)) return true;
+		return /retry|rate.?limit|overloaded|service.?unavailable|connection.?limit/i.test(
+			`${error.code ?? ""} ${error.errorType ?? ""} ${error.message}`,
+		);
+	}
+	if (error instanceof ProviderProtocolError || error instanceof NonRetryableProviderError) return false;
+	const message = error instanceof Error ? error.message : String(error);
+	return /websocket|network|connection|socket|timed? out|timeout|fetch failed|terminated|closed before response\.completed|stream closed before response\.completed/i.test(
+		message,
+	);
+}
+
+function webSocketRetryDelayMs(
+	error: unknown,
+	retryCount: number,
+	options: SimpleStreamOptions | undefined,
+): number {
+	const explicit = error instanceof WebSocketHandshakeError
+		? retryAfterMsFromHeaders(error.headers)
+		: error instanceof ProviderResponseError
+			? error.retryAfterMs
+			: undefined;
+	const base = explicit ?? WEBSOCKET_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, retryCount - 1);
+	const jittered = explicit === undefined ? Math.round(base * (0.9 + Math.random() * 0.2)) : base;
+	const configuredMax = options?.maxRetryDelayMs;
+	const maxDelay = typeof configuredMax === "number" && Number.isFinite(configuredMax) && configuredMax >= 0
+		? configuredMax
+		: WEBSOCKET_RETRY_MAX_DELAY_MS;
+	if (maxDelay > 0 && jittered > maxDelay) {
+		throw new NonRetryableProviderError(
+			`WebSocket retry delay ${Math.round(jittered)}ms exceeds maxRetryDelayMs ${Math.round(maxDelay)}ms`,
+		);
+	}
+	return jittered;
+}
+
+function webSocketStreamMaxRetries(options: SimpleStreamOptions | undefined): number {
+	const value = options?.maxRetries;
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+		return DEFAULT_WEBSOCKET_STREAM_MAX_RETRIES;
+	}
+	return Math.min(MAX_WEBSOCKET_STREAM_MAX_RETRIES, Math.floor(value));
+}
+
 function isProviderNonTransportError(error: unknown): error is ProviderResponseError | ProviderProtocolError {
 	return error instanceof ProviderResponseError || error instanceof ProviderProtocolError;
 }
@@ -1392,6 +1819,25 @@ function webSocketHeaderIdentity(headers: Headers): string {
 	);
 }
 
+function webSocketCacheKey(
+	sessionId: string | undefined,
+	model: Model<Api>,
+	url: string,
+	headers: Headers,
+): string | undefined {
+	return sessionId
+		? `${sessionId}\n${model.provider}\n${model.api}\n${url}\n${webSocketHeaderIdentity(headers)}`
+		: undefined;
+}
+
+function webSocketFallbackKey(
+	sessionId: string | undefined,
+	model: Model<Api>,
+	url: string,
+): string | undefined {
+	return sessionId ? `${sessionId}\n${model.provider}\n${model.api}\n${url}` : undefined;
+}
+
 function friendlyUsageLimitMessage(error: StreamEventShape["error"], status: number | undefined): string | undefined {
 	const code = error?.code ?? error?.type ?? "";
 	if (status !== 429 && !/usage_limit_reached|usage_not_included|rate_limit_exceeded/i.test(code)) {
@@ -1403,6 +1849,93 @@ function friendlyUsageLimitMessage(error: StreamEventShape["error"], status: num
 		: undefined;
 	const when = mins !== undefined ? ` Try again in ~${mins} min.` : "";
 	return `You have hit your OpenAI usage limit${plan}.${when}`.trim();
+}
+
+async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promise<void> {
+	const acquired = await acquireWebSocket(
+		request.url,
+		request.headers,
+		request.cacheKey,
+		request.requestMetadata.sessionId,
+		request.signal,
+		request.connectTimeoutMs ?? WEBSOCKET_CONNECT_TIMEOUT_MS,
+	);
+	const { socket, entry } = acquired;
+	let keepConnection = true;
+	let released = false;
+	const releaseOnce = (options?: { keep?: boolean }) => {
+		if (released) return;
+		released = true;
+		acquired.release(options);
+	};
+
+	try {
+		const fullBody = withWebSocketRequestMetadata(request.body, request.requestMetadata);
+		const prewarmBody: ResponsesBody = {
+			...fullBody,
+			generate: false,
+		};
+		const wireBody = prepareWebSocketRequestBodyForWire({
+			...prewarmBody,
+		});
+		await sendWebSocketRequest(
+			socket,
+			JSON.stringify({ type: "response.create", ...wireBody }),
+			request.signal,
+			WEBSOCKET_SEND_TIMEOUT_MS,
+		);
+		const responseItems: unknown[] = [];
+		let responseId: string | undefined;
+		for await (const event of mapCodexEvents(parseWebSocket(socket, request.signal))) {
+			if (event.type === "response.created" && event.response?.id) responseId = event.response.id;
+			if (event.type === "response.output_item.done" && event.item) responseItems.push(event.item);
+			if (
+				(event.type === "response.completed" || event.type === "response.incomplete")
+				&& event.response?.id
+			) {
+				responseId = event.response.id;
+				const terminalOutput = Array.isArray(event.response.output) ? event.response.output : [];
+				for (const item of terminalOutput) {
+					if (!responseItems.some((candidate) => stableJson(candidate) === stableJson(item))) {
+						responseItems.push(item);
+					}
+				}
+			}
+		}
+		if (entry && responseId) {
+			entry.continuation = {
+				lastRequestBody: prewarmBody,
+				lastResponseId: responseId,
+				lastResponseItems: responseItems,
+			};
+		}
+		releaseOnce({ keep: true });
+	} catch (error) {
+		keepConnection = false;
+		if (entry) entry.continuation = undefined;
+		releaseOnce({ keep: false });
+		throw error;
+	} finally {
+		releaseOnce({ keep: keepConnection });
+	}
+}
+
+async function preconnectWebSocket(
+	url: string,
+	headers: Headers,
+	cacheKey: string,
+	sessionId: string,
+	signal: AbortSignal | undefined,
+): Promise<void> {
+	const acquired = await acquireWebSocket(
+		url,
+		headers,
+		cacheKey,
+		sessionId,
+		signal,
+		WEBSOCKET_CONNECT_TIMEOUT_MS,
+	);
+	acquired.release({ keep: true });
 }
 
 async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIterable<StreamEventShape> {
@@ -1425,6 +1958,14 @@ async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIt
 				: typeof event.status_code === "number"
 					? event.status_code
 					: undefined;
+			const eventHeaders = event.headers && typeof event.headers === "object" && !Array.isArray(event.headers)
+				? Object.fromEntries(
+						Object.entries(event.headers as Record<string, unknown>)
+							.filter((entry): entry is [string, string | number | boolean] =>
+								typeof entry[1] === "string" || typeof entry[1] === "number" || typeof entry[1] === "boolean")
+							.map(([name, value]) => [name, String(value)]),
+					)
+				: undefined;
 			const code = typeof nestedError?.code === "string"
 				? nestedError.code
 				: typeof event.code === "string"
@@ -1443,6 +1984,7 @@ async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIt
 			if (code) error.code = code;
 			if (typeof nestedError?.type === "string") error.errorType = nestedError.type;
 			if (status !== undefined) error.status = status;
+			error.retryAfterMs = retryAfterMsFromHeaders(eventHeaders);
 			if (typeof event.sequence_number === "number") error.sequenceNumber = event.sequence_number;
 			throw error;
 		}
@@ -1598,8 +2140,10 @@ async function processCapturedResponsesStream<TApi extends Api>(
 	requestPrompt: string | undefined,
 	webSearchCitationSources: ReadonlyArray<WebSearchCitationSource>,
 	historicalCitationSources: ReadonlyArray<CitationSource>,
-): Promise<void> {
+): Promise<{ responseId?: string; responseItems: unknown[] }> {
 	type TextBlock = Extract<AssistantMessage["content"][number], { type: "text" }>;
+	const responseItems: unknown[] = [];
+	let responseId: string | undefined;
 	const webSearchStates = new Map<string, { search: SurfacedWebSearch; block: TextBlock; contentIndex: number }>();
 	const updateWebSearchActivity = (search: SurfacedWebSearch) => {
 		const existing = webSearchStates.get(search.callId);
@@ -1626,7 +2170,35 @@ async function processCapturedResponsesStream<TApi extends Api>(
 		block.text = text;
 		stream.push({ type: "text_delta", contentIndex, delta: text, partial: output });
 	};
-	const tappedEvents = captureGeneratedImages(mapCodexEvents(events), {
+	const captureContinuation = async function* (
+		input: AsyncIterable<StreamEventShape>,
+	): AsyncIterable<StreamEventShape> {
+		for await (const event of input) {
+			if (event.type === "response.created" && event.response?.id) responseId = event.response.id;
+			if (
+				event.type === "response.output_item.done"
+				&& event.item
+				&& !responseItems.some((item) =>
+					stableJson(item) === stableJson(event.item))
+			) {
+				responseItems.push(event.item);
+			}
+			if (
+				(event.type === "response.completed" || event.type === "response.incomplete")
+				&& event.response
+			) {
+				if (event.response.id) responseId = event.response.id;
+				const terminalOutput = Array.isArray(event.response.output) ? event.response.output : [];
+				for (const item of terminalOutput) {
+					if (!responseItems.some((candidate) => stableJson(candidate) === stableJson(item))) {
+						responseItems.push(item);
+					}
+				}
+			}
+			yield event;
+		}
+	};
+	const tappedEvents = captureGeneratedImages(captureContinuation(mapCodexEvents(events)), {
 		cwd,
 		requestPrompt,
 		onImageSaved: (image, imageData) => deps.onImageSaved?.(image, imageData),
@@ -1640,6 +2212,7 @@ async function processCapturedResponsesStream<TApi extends Api>(
 		webSearchCitationSources,
 		historicalCitationSources,
 	});
+	return { responseId: responseId ?? output.responseId, responseItems };
 }
 
 function compactUrl(baseUrl: string | undefined): string {
@@ -2024,11 +2597,11 @@ async function processWebSocketStream<TApi extends Api>(
 ): Promise<void> {
 	let streamStarted = false;
 	let disableCachedContext = false;
+	let staleSocketRetried = false;
+	let missingPreviousResponseRetried = false;
 
-	for (let attempt = 0; attempt < 2; attempt++) {
-		const cacheKey = options?.sessionId
-			? `${options.sessionId}\n${model.provider}\n${model.api}\n${url}\n${webSocketHeaderIdentity(headers)}`
-			: undefined;
+	while (true) {
+		const cacheKey = webSocketCacheKey(options?.sessionId, model as Model<Api>, url, headers);
 		const { socket, entry, release, reused } = await acquireWebSocket(
 			url,
 			headers,
@@ -2045,8 +2618,11 @@ async function processWebSocketStream<TApi extends Api>(
 		// WebSocket continuation still works via connection-scoped previous_response_id state.
 		const fullBody = withWebSocketRequestMetadata(body, requestMetadata);
 		const requestBody = useCachedContext && !disableCachedContext && entry
-			? buildCachedWebSocketRequestBody(entry, fullBody)
+			? buildCachedWebSocketRequestBody(entry, fullBody, {
+					allowEmptyDelta: entry.continuation?.lastRequestBody.generate === false,
+				})
 			: fullBody;
+		const wireRequestBody = prepareWebSocketRequestBodyForWire(requestBody);
 
 		const releaseOnce = (releaseOptions?: { keep?: boolean }) => {
 			if (released) return;
@@ -2055,14 +2631,19 @@ async function processWebSocketStream<TApi extends Api>(
 		};
 
 		try {
-			socket.send(JSON.stringify({ type: "response.create", ...requestBody }));
+			await sendWebSocketRequest(
+				socket,
+				JSON.stringify({ type: "response.create", ...wireRequestBody }),
+				options?.signal,
+				WEBSOCKET_SEND_TIMEOUT_MS,
+			);
 			const startOutput = () => {
 				if (streamStarted) return;
 				onStart();
 				stream.push({ type: "start", partial: output });
 				streamStarted = true;
 			};
-			await processCapturedResponsesStream(
+			const continuationResult = await processCapturedResponsesStream(
 				startWebSocketOutputOnFirstEvent(
 					countWebSocketEvents(parseWebSocket(socket, options?.signal), () => {
 						eventCount++;
@@ -2081,14 +2662,11 @@ async function processWebSocketStream<TApi extends Api>(
 			);
 			if (options?.signal?.aborted) {
 				keepConnection = false;
-			} else if (useCachedContext && entry && output.responseId) {
-				const responseItems = convertResponsesMessages(model, { messages: [output] }, CODEX_TOOL_CALL_PROVIDERS, {
-					includeSystemPrompt: false,
-				}).filter((item) => typeof item === "object" && item !== null && (item as { type?: unknown }).type !== "function_call_output");
+			} else if (useCachedContext && entry && continuationResult.responseId) {
 				entry.continuation = {
 					lastRequestBody: fullBody,
-					lastResponseId: output.responseId,
-					lastResponseItems: responseItems,
+					lastResponseId: continuationResult.responseId,
+					lastResponseItems: continuationResult.responseItems,
 				};
 			}
 			releaseOnce({ keep: keepConnection });
@@ -2103,16 +2681,18 @@ async function processWebSocketStream<TApi extends Api>(
 			// backend sometimes cleanly closes an idle cached socket between turns;
 			// if that stale socket fails before any response event, retry once on a
 			// fresh WebSocket without changing request shape or falling back transports.
-			if (attempt === 0 && reused && eventCount === 0 && !options?.signal?.aborted && isRetryableEarlyWebSocketError(error)) {
+			if (!staleSocketRetried && reused && eventCount === 0 && !options?.signal?.aborted && isRetryableEarlyWebSocketError(error)) {
+				staleSocketRetried = true;
 				continue;
 			}
 			if (
-				attempt === 0
+				!missingPreviousResponseRetried
 				&& requestBody.previous_response_id
 				&& !streamStarted
 				&& !options?.signal?.aborted
 				&& isPreviousResponseNotFoundError(error)
 			) {
+				missingPreviousResponseRetried = true;
 				disableCachedContext = true;
 				continue;
 			}
@@ -2510,15 +3090,22 @@ function createCodexStream<TApi extends Api>(
 					? "sse"
 					: options?.transport || "auto";
 
-			if (transport !== "sse") {
+			const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport });
+			const fallbackKey = webSocketFallbackKey(options?.sessionId, model as Model<Api>, websocketUrl);
+			const sessionFellBackToHttp = transport === "auto"
+				&& fallbackKey !== undefined
+				&& websocketHttpFallbackSessions.has(fallbackKey);
+
+			if (transport !== "sse" && !sessionFellBackToHttp) {
 				const websocketBody = withResponsesLiteWebSocketMetadata(body, requestProfile.responsesMode);
 				let websocketStarted = false;
-				let retriedWebSocketConnectionLimit = false;
+				let websocketRetries = 0;
+				const maxWebSocketRetries = webSocketStreamMaxRetries(options);
 				while (true) {
 					websocketStarted = false;
 					try {
 						await processWebSocketStream(
-							resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport }),
+							websocketUrl,
 							websocketBody,
 							websocketHeaders,
 							output,
@@ -2545,12 +3132,36 @@ function createCodexStream<TApi extends Api>(
 						return;
 					} catch (error) {
 						const aborted = options?.signal?.aborted;
-						const connectionLimitBeforeStart = !websocketStarted && isWebSocketConnectionLimitReachedError(error);
-						if (!aborted && connectionLimitBeforeStart && !retriedWebSocketConnectionLimit) {
-							retriedWebSocketConnectionLimit = true;
+						const upgradeRequired = error instanceof WebSocketHandshakeError && error.status === 426;
+						const retryable = !aborted
+							&& !websocketStarted
+							&& (isWebSocketConnectionLimitReachedError(error) || isRetryableWebSocketError(error));
+						if (retryable && websocketRetries < maxWebSocketRetries) {
+							websocketRetries++;
+							await sleep(webSocketRetryDelayMs(error, websocketRetries, options), options?.signal);
 							continue;
 						}
-						if (aborted || isProviderNonTransportError(error)) {
+						if (
+							transport === "auto"
+							&& fallbackKey
+							&& !websocketStarted
+							&& (upgradeRequired || retryable)
+						) {
+							websocketHttpFallbackSessions.add(fallbackKey);
+							appendAssistantMessageDiagnostic(
+								output,
+								createAssistantMessageDiagnostic("provider_transport_failure", error, {
+									configuredTransport: transport,
+									fallbackTransport: "sse",
+									eventsEmitted: false,
+									phase: upgradeRequired ? "websocket_upgrade_rejected" : "websocket_retries_exhausted",
+									retries: websocketRetries,
+									requestBytes: new TextEncoder().encode(bodyJson).byteLength,
+								}),
+							);
+							break;
+						}
+						if (aborted || (isProviderNonTransportError(error) && !isWebSocketConnectionLimitReachedError(error))) {
 							throw error;
 						}
 						appendAssistantMessageDiagnostic(
@@ -2670,6 +3281,7 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 	const pendingActivities: PendingActivity[] = [];
 	const imagePreviewCache = new Map<string, CachedImagePreview>();
 	const activeTurnIds = new Map<string, string>();
+	const prewarmPromises = new Map<string, Promise<void>>();
 	let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const flushPendingMessages = () => {
@@ -2706,14 +3318,38 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 		imagePreviewCache.clear();
 	};
 
-	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: Context, streamOptions?: SimpleStreamOptions) =>
-		createCodexStream(model, context, streamOptions, {
+	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: Context, streamOptions?: SimpleStreamOptions) => {
+		const sessionId = streamOptions?.sessionId;
+		const prewarm = sessionId ? prewarmPromises.get(sessionId) : undefined;
+		if (prewarm) {
+			prewarmPromises.delete(sessionId!);
+			const outer = createAssistantMessageEventStream();
+			void (async () => {
+				try {
+					await prewarm;
+				} catch {
+					// Prewarm is best effort. Normal request retry/fallback owns recovery.
+				}
+				const inner = createCodexStream(model, context, streamOptions, {
+					getCurrentCwd: options.getCurrentCwd,
+					getCurrentTurnId: (currentSessionId) => currentSessionId ? activeTurnIds.get(currentSessionId) : undefined,
+					onImageSaved: (savedImage, imageData) => {
+						pendingActivities.push({ kind: "image", savedImage, imageData });
+					},
+				});
+				for await (const event of inner) outer.push(event);
+				outer.end();
+			})();
+			return outer;
+		}
+		return createCodexStream(model, context, streamOptions, {
 			getCurrentCwd: options.getCurrentCwd,
 			getCurrentTurnId: (sessionId) => sessionId ? activeTurnIds.get(sessionId) : undefined,
 			onImageSaved: (savedImage, imageData) => {
 				pendingActivities.push({ kind: "image", savedImage, imageData });
 			},
 		});
+	};
 
 	pi.registerProvider("openai-codex", {
 		api: "openai-codex-responses",
@@ -2726,6 +3362,7 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 
 	pi.on("session_start", async () => {
 		activeTurnIds.clear();
+		prewarmPromises.clear();
 		clearPendingMessages();
 	});
 
@@ -2734,20 +3371,142 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 			flushPendingMessages();
 		}
 		activeTurnIds.clear();
+		prewarmPromises.clear();
 		closeProviderWebSocketSessions();
 		clearPendingMessages();
 	});
 
-	pi.on("before_agent_start", async (_event, ctx) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		const sessionId = ctx?.sessionManager?.getSessionId();
-		if (sessionId) activeTurnIds.set(sessionId, createPiTurnId());
+		if (!sessionId) return;
+		const turnId = createPiTurnId();
+		activeTurnIds.set(sessionId, turnId);
+
+		const settings = loadSettings(ctx.cwd);
+		const model = ctx.model;
+		if (
+			!settings.openaiWebSocketPrewarm
+			|| settings.openaiTransport === "sse"
+			|| !model
+			|| model.provider !== "openai"
+		) {
+			prewarmPromises.delete(sessionId);
+			return;
+		}
+
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+		if (!auth.ok || (!auth.apiKey && !auth.headers?.Authorization && !auth.headers?.authorization)) {
+			prewarmPromises.delete(sessionId);
+			return;
+		}
+
+		const profile = resolveCodexRequestProfile(settings.requestProfile);
+		let body = applyFastModeServiceTier(
+			buildRequestBody(model, {
+				systemPrompt: event.systemPrompt,
+				messages: [{
+					role: "user",
+					content: [
+						{ type: "text", text: event.prompt },
+						...(event.images ?? []),
+					],
+					timestamp: Date.now(),
+				}],
+				tools: (typeof pi.getAllTools === "function" ? pi.getAllTools() : [])
+					.filter((tool) =>
+						(typeof pi.getActiveTools === "function" ? pi.getActiveTools() : []).includes(tool.name))
+					.map((tool) => ({
+						name: tool.name,
+						description: tool.description,
+						parameters: tool.parameters,
+					})),
+			}, profile, {
+				apiKey: auth.apiKey,
+				headers: auth.headers,
+				sessionId,
+			}),
+			settings,
+			model,
+		);
+		if (settings.nativeProviderTools && profile.supportsHostedTools) {
+			const rewritten = rewriteNativeOpenAiTools(body, {
+				imageModel: settings.imageModel,
+				webSearch: settings.webSearchEnabled,
+			});
+			body = rewritten.payload;
+		}
+		ensureWebSearchDetailsIncluded(body);
+		body = withResponsesLiteWebSocketMetadata(body, profile.responsesMode);
+		const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: true });
+		const fallbackKey = webSocketFallbackKey(sessionId, model, websocketUrl);
+		if (settings.openaiTransport === "auto" && fallbackKey && websocketHttpFallbackSessions.has(fallbackKey)) {
+			prewarmPromises.delete(sessionId);
+			return;
+		}
+		const headers = buildWebSocketHeaders(
+			model.headers,
+			auth.headers,
+			undefined,
+			auth.apiKey ?? "",
+			sessionId,
+			sessionId,
+		);
+		const cacheKey = webSocketCacheKey(sessionId, model, websocketUrl, headers);
+		if (!cacheKey) return;
+		const requestMetadata: WebSocketRequestMetadata = {
+			sessionId,
+			threadId: sessionId,
+			turnId,
+		};
+		const promise = preconnectWebSocket(
+			websocketUrl,
+			headers,
+			cacheKey,
+			sessionId,
+			ctx.signal,
+		).then(() => prewarmWebSocket({
+			url: websocketUrl,
+			headers,
+			cacheKey,
+			body,
+			requestMetadata,
+			signal: ctx.signal,
+		})).catch((error) => {
+			if (
+				settings.openaiTransport === "auto"
+				&& fallbackKey
+				&& error instanceof WebSocketHandshakeError
+				&& error.status === 426
+			) {
+				websocketHttpFallbackSessions.add(fallbackKey);
+			}
+		}).finally(() => {
+			if (prewarmPromises.get(sessionId) === promise) {
+				prewarmPromises.delete(sessionId);
+			}
+		});
+		prewarmPromises.set(sessionId, promise);
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
-		const sessionId = ctx?.sessionManager?.getSessionId();
-		if (sessionId) activeTurnIds.delete(sessionId);
 		schedulePendingMessageFlush();
 	});
+
+	const maybeRegisterAgentSettled = pi as ExtensionAPI & {
+		on(event: "agent_settled", handler: (event: { type: "agent_settled" }, ctx: any) => void | Promise<void>): void;
+	};
+	try {
+		maybeRegisterAgentSettled.on("agent_settled", async (_event, ctx) => {
+			const sessionId = ctx?.sessionManager?.getSessionId();
+			if (sessionId) {
+				activeTurnIds.delete(sessionId);
+				prewarmPromises.delete(sessionId);
+			}
+		});
+	} catch {
+		// Pi versions before agent_settled keep the id until the next
+		// before_agent_start overwrites it or the session shuts down.
+	}
 
 	pi.registerMessageRenderer<ImageDisplayMessageDetails>(IMAGE_SAVE_DISPLAY_MESSAGE_TYPE, (message, options, theme) => {
 		const savedImage = message.details?.savedImages?.[0];

@@ -150,6 +150,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`autoEnable: ${settings.autoEnable}`,
 		`nativeProviderTools: ${settings.nativeProviderTools}`,
 		`openai transport: ${settings.openaiTransport}`,
+		`openai WebSocket prewarm: ${settings.openaiWebSocketPrewarm}`,
 		`fast mode: ${settings.fastMode ? "priority" : "off"}${fastModeTier ? ", active" : ""}`,
 		`compaction: ${settings.compactionMode}`,
 		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, system=${requestProfile.systemPromptPlacement}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,

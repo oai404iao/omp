@@ -78,6 +78,7 @@ test("loadSettings reads package config and nested request profile", () => {
 			autoEnable: false,
 			apiKeyMode: true,
 			openaiTransport: "websocket-cached",
+			openaiWebSocketPrewarm: false,
 			fastMode: true,
 			imageOutputDir: "custom-images",
 			imageModel: "gpt-image-1",
@@ -101,6 +102,7 @@ test("loadSettings reads package config and nested request profile", () => {
 		assert.equal(settings.autoEnable, false);
 		assert.equal(settings.apiKeyMode, true);
 		assert.equal(settings.openaiTransport, "websocket-cached");
+		assert.equal(settings.openaiWebSocketPrewarm, false);
 		assert.equal(settings.fastMode, true);
 		assert.equal(settings.imageOutputDir, "custom-images");
 		assert.equal(settings.imageModel, "gpt-image-1");

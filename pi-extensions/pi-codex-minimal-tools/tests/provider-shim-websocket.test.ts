@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type RequestListener } from "node:http";
+import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -109,17 +109,22 @@ function successEvents(responseId: string, text?: string): unknown[] {
 	];
 }
 
-function encodeServerText(payload: unknown): Buffer {
-	const data = Buffer.from(JSON.stringify(payload));
-	if (data.length < 126) return Buffer.concat([Buffer.from([0x81, data.length]), data]);
+function encodeServerFrame(payload: string | Buffer, options?: { binary?: boolean }): Buffer {
+	const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+	const opcode = options?.binary ? 0x2 : 0x1;
+	if (data.length < 126) return Buffer.concat([Buffer.from([0x80 | opcode, data.length]), data]);
 	if (data.length <= 0xffff) {
 		const header = Buffer.alloc(4);
-		header[0] = 0x81;
+		header[0] = 0x80 | opcode;
 		header[1] = 126;
 		header.writeUInt16BE(data.length, 2);
 		return Buffer.concat([header, data]);
 	}
 	throw new Error("Test payload is too large");
+}
+
+function encodeServerText(payload: unknown): Buffer {
+	return encodeServerFrame(JSON.stringify(payload));
 }
 
 function decodeClientFrames(buffer: Uint8Array): { frames: string[]; remaining: Buffer } {
@@ -157,10 +162,18 @@ function decodeClientFrames(buffer: Uint8Array): { frames: string[]; remaining: 
 	return { frames, remaining: Buffer.from(source.subarray(offset)) };
 }
 
-type WebSocketResponse = unknown[] | { handshakeStatus: number };
+type WebSocketResponse = unknown[] | {
+	handshakeStatus: number;
+	handshakeBody?: unknown;
+	handshakeHeaders?: Record<string, string>;
+};
+type WebSocketResponseSequence = WebSocketResponse | {
+	before?: (body: Record<string, any>, socket: import("node:stream").Duplex) => void | Promise<void>;
+	events: unknown[];
+};
 
 async function startWebSocketServer(
-	responses: Array<(request: Record<string, any> | undefined) => WebSocketResponse>,
+	responses: Array<(request: Record<string, any> | undefined) => WebSocketResponseSequence>,
 	onRequest?: RequestListener,
 ): Promise<{
 	url: string;
@@ -184,13 +197,22 @@ async function startWebSocketServer(
 		const response = responses[requests.length];
 		assert.ok(response, `Unexpected WebSocket connection ${connections}`);
 		const handshakeResponse = response(undefined);
-		if (!Array.isArray(handshakeResponse)) {
+		if (
+			!Array.isArray(handshakeResponse)
+			&& "handshakeStatus" in handshakeResponse
+		) {
+			const body = handshakeResponse.handshakeBody === undefined
+				? JSON.stringify({ error: { message: "WebSocket unavailable" } })
+				: typeof handshakeResponse.handshakeBody === "string"
+					? handshakeResponse.handshakeBody
+					: JSON.stringify(handshakeResponse.handshakeBody);
 			socket.end([
 				`HTTP/1.1 ${handshakeResponse.handshakeStatus} Upgrade Required`,
 				"Content-Type: application/json",
 				"Connection: close",
+				...Object.entries(handshakeResponse.handshakeHeaders ?? {}).map(([name, value]) => `${name}: ${value}`),
 				"",
-				JSON.stringify({ error: { message: "WebSocket unavailable" } }),
+				body,
 			].join("\r\n"));
 			return;
 		}
@@ -209,7 +231,7 @@ async function startWebSocketServer(
 		].join("\r\n"));
 
 		let buffer: Uint8Array = Buffer.alloc(0);
-		socket.on("data", (chunk) => {
+		socket.on("data", async (chunk) => {
 			buffer = Buffer.concat([buffer, chunk]);
 			const decoded = decodeClientFrames(buffer);
 			buffer = decoded.remaining;
@@ -218,9 +240,28 @@ async function startWebSocketServer(
 				const response = responses[requests.length];
 				assert.ok(response, `Unexpected WebSocket request ${requests.length + 1}`);
 				requests.push(body);
-				const events = response(body);
+				const sequence = response(body);
+				assert.ok(
+					Array.isArray(sequence) || !("handshakeStatus" in sequence),
+					"Request response must not be a handshake response",
+				);
+				const events = Array.isArray(sequence) ? sequence : sequence.events;
+				if (!Array.isArray(sequence) && sequence.before) {
+					await sequence.before(body, socket);
+				}
 				assert.ok(Array.isArray(events), "Request response must be an event list");
-				for (const event of events) socket.write(encodeServerText(event));
+				for (const event of events) {
+					if (event && typeof event === "object" && "$rawText" in event) {
+						socket.write(encodeServerFrame(String((event as { $rawText: unknown }).$rawText)));
+					} else if (event && typeof event === "object" && "$binary" in event) {
+						socket.write(encodeServerFrame(
+							Buffer.from(String((event as { $binary: unknown }).$binary)),
+							{ binary: true },
+						));
+					} else {
+						socket.write(encodeServerText(event));
+					}
+				}
 			}
 		});
 	});
@@ -242,6 +283,14 @@ async function startWebSocketServer(
 			});
 		},
 	};
+}
+
+async function readJsonRequest(request: IncomingMessage, response: ServerResponse): Promise<Record<string, any>> {
+	const chunks: Buffer[] = [];
+	for await (const chunk of request) chunks.push(Buffer.from(chunk));
+	const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, any>;
+	response.writeHead(200, { "content-type": "text/event-stream" });
+	return body;
 }
 
 async function runOpenAIProvider(
@@ -346,11 +395,12 @@ test("explicit Pi request metadata supplies the WebSocket turn identity", async 
 	}
 });
 
-test("Pi agent lifecycle keeps one turn_id across tool-loop WebSocket requests", async () => {
+test("Pi agent lifecycle keeps one turn_id across tool-loop and automatic retry requests", async () => {
 	writeSettings({ openaiTransport: "websocket" });
 	const server = await startWebSocketServer([
 		() => successEvents("resp_1", "first"),
 		() => successEvents("resp_2", "second"),
+		() => successEvents("resp_3", "third"),
 	]);
 	try {
 		const harness = createProviderHarnessWithEvents();
@@ -370,6 +420,8 @@ test("Pi agent lifecycle keeps one turn_id across tool-loop WebSocket requests",
 		for (const handler of harness.handlers.agent_end ?? []) {
 			await handler({ type: "agent_end", messages: [] }, ctx);
 		}
+		await runOpenAIProvider(harness.providers.openai, server.url, [{ role: "user", content: "automatic retry" }]);
+		assert.equal(server.requests[2]?.client_metadata?.turn_id, firstTurnId);
 	} finally {
 		await server.close();
 	}
@@ -620,6 +672,283 @@ test("openai websocket-cached retries a missing previous response with full cont
 		assert.equal(server.requests[1]?.previous_response_id, "resp_1");
 		assert.equal(server.requests[2]?.previous_response_id, undefined);
 		assert.equal(server.requests[2]?.input.length, 3);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai auto retries WebSocket failures and keeps session-level SSE fallback sticky", async () => {
+	writeSettings({ openaiTransport: "auto" });
+	const sseEvents = [
+		successEvents("resp_sse_1", "first over sse"),
+		successEvents("resp_sse_2", "second over sse"),
+	];
+	let sseRequests = 0;
+	const server = await startWebSocketServer([
+		() => ({ handshakeStatus: 503, handshakeBody: { error: { message: "temporarily unavailable" } } }),
+		() => ({ handshakeStatus: 503, handshakeBody: { error: { message: "temporarily unavailable" } } }),
+	], (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/responses") {
+			response.writeHead(404).end();
+			return;
+		}
+		request.resume();
+		request.on("end", () => {
+			const events = sseEvents[sseRequests++];
+			assert.ok(events);
+			response.writeHead(200, { "content-type": "text/event-stream" });
+			for (const item of events) response.write(`data: ${JSON.stringify(item)}\n\n`);
+			response.end();
+		});
+	});
+	try {
+		const provider = createProviderHarness().openai;
+		const first = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "first" }], {
+			maxRetries: 1,
+			maxRetryDelayMs: 1_000,
+		});
+		const second = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "second" }], {
+			maxRetries: 1,
+			maxRetryDelayMs: 1_000,
+		});
+
+		assert.equal(first.content[0]?.text, "first over sse");
+		assert.equal(second.content[0]?.text, "second over sse");
+		assert.equal(server.connections, 2);
+		assert.equal(sseRequests, 2);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai auto switches immediately on HTTP 426 and remembers the fallback", async () => {
+	writeSettings({ openaiTransport: "auto" });
+	let sseRequests = 0;
+	const server = await startWebSocketServer([
+		() => ({ handshakeStatus: 426 }),
+	], (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/responses") {
+			response.writeHead(404).end();
+			return;
+		}
+		request.resume();
+		request.on("end", () => {
+			sseRequests++;
+			response.writeHead(200, { "content-type": "text/event-stream" });
+			for (const item of successEvents(`resp_sse_${sseRequests}`, `sse ${sseRequests}`)) {
+				response.write(`data: ${JSON.stringify(item)}\n\n`);
+			}
+			response.end();
+		});
+	});
+	try {
+		const provider = createProviderHarness().openai;
+		await runOpenAIProvider(provider, server.url, [{ role: "user", content: "first" }]);
+		await runOpenAIProvider(provider, server.url, [{ role: "user", content: "second" }]);
+		assert.equal(server.connections, 1);
+		assert.equal(sseRequests, 2);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai websocket-cached uses exact server output items and ignores internal metadata", async () => {
+	writeSettings({ openaiTransport: "websocket-cached" });
+	const serverItem = {
+		type: "message",
+		id: "msg_server",
+		role: "assistant",
+		status: "completed",
+		content: [{ type: "output_text", text: "assistant output", annotations: [] }],
+	};
+	const server = await startWebSocketServer([
+		() => [
+			{ type: "response.created", response: { id: "resp_1" } },
+			{ type: "response.output_item.added", output_index: 0, item: { ...serverItem, status: "in_progress", content: [] } },
+			{ type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "assistant output" },
+			{ type: "response.output_item.done", output_index: 0, item: serverItem },
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_1",
+					status: "completed",
+					output: [serverItem],
+					usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } },
+				},
+			},
+		],
+		() => successEvents("resp_2", "continued"),
+	]);
+	try {
+		const provider = createProviderHarness().openai;
+		const first = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
+		const replayItem = JSON.parse(first.content[0]?.textSignature).item;
+		replayItem.internal_chat_message_metadata_passthrough = { turn_id: "pi-turn" };
+		first.content[0].textSignature = JSON.stringify({ v: 2, item: replayItem });
+		const second = await runOpenAIProvider(provider, server.url, [
+			{ role: "user", content: "hello" },
+			first,
+			{ role: "user", content: "again" },
+		]);
+
+		assert.equal(second.stopReason, "stop");
+		assert.equal(server.requests[1]?.previous_response_id, "resp_1");
+		assert.equal(server.requests[1]?.input.length, 1);
+		assert.equal(server.requests[1]?.input[0]?.content[0]?.text, "again");
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai websocket strips unprefixed response item ids without mutating request context", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => successEvents("resp_1", "ok"),
+	]);
+	const assistant = {
+		role: "assistant",
+		content: [{
+			type: "text",
+			text: "legacy",
+			textSignature: JSON.stringify({
+				v: 2,
+				item: {
+					type: "message",
+					id: "legacy-id",
+					role: "assistant",
+					status: "completed",
+					content: [{ type: "output_text", text: "legacy", annotations: [] }],
+				},
+			}),
+		}],
+		api: "openai-responses",
+		provider: "openai",
+		model: "gpt-5.5",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+		timestamp: Date.now(),
+	};
+	try {
+		const provider = createProviderHarness().openai;
+		await runOpenAIProvider(provider, server.url, [
+			{ role: "user", content: "hello" },
+			assistant,
+			{ role: "user", content: "again" },
+		]);
+		assert.equal(server.requests[0]?.input[1]?.id, undefined);
+		assert.equal(JSON.parse(assistant.content[0].textSignature).item.id, "legacy-id");
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai websocket ignores malformed text frames and completes", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => [{ $rawText: "not json" }, ...successEvents("resp_1", "ok")],
+	]);
+	try {
+		const provider = createProviderHarness().openai;
+		const result = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
+		assert.equal(result.stopReason, "stop");
+		assert.equal(result.content[0]?.text, "ok");
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai websocket rejects binary response frames", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => [{ $binary: "{\"type\":\"response.completed\"}" }],
+	]);
+	try {
+		const provider = createProviderHarness().openai;
+		const result = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
+		assert.equal(result.stopReason, "error");
+		assert.match(result.errorMessage, /Unexpected binary OpenAI Responses WebSocket event/);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai websocket serializes concurrent requests on one session connection", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => ({
+			async before() {
+				await new Promise((resolve) => setTimeout(resolve, 30));
+			},
+			events: successEvents("resp_1", "first"),
+		}),
+		() => successEvents("resp_2", "second"),
+	]);
+	try {
+		const provider = createProviderHarness().openai;
+		const [first, second] = await Promise.all([
+			runOpenAIProvider(provider, server.url, [{ role: "user", content: "first" }]),
+			runOpenAIProvider(provider, server.url, [{ role: "user", content: "second" }]),
+		]);
+		assert.equal(first.content[0]?.text, "first");
+		assert.equal(second.content[0]?.text, "second");
+		assert.equal(server.connections, 1);
+		assert.equal(server.requests.length, 2);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai WebSocket prewarm sends generate:false and the first request reuses it", async () => {
+	writeSettings({ openaiTransport: "websocket-cached", openaiWebSocketPrewarm: true });
+	const server = await startWebSocketServer([
+		() => successEvents("warm_1"),
+		() => successEvents("resp_1", "real response"),
+	]);
+	try {
+		const harness = createProviderHarnessWithEvents();
+		const model = {
+			provider: "openai",
+			api: "openai-responses",
+			id: "gpt-5.5",
+			baseUrl: server.url,
+			headers: {},
+			input: ["text"],
+			reasoning: false,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		};
+		const ctx = {
+			cwd: process.cwd(),
+			model,
+			signal: undefined,
+			sessionManager: { getSessionId: () => "pi-session" },
+			modelRegistry: {
+				async getApiKeyAndHeaders() {
+					return { ok: true, apiKey: "pi-resolved-api-key" };
+				},
+			},
+		};
+		for (const handler of harness.handlers.before_agent_start ?? []) {
+			await handler({
+				type: "before_agent_start",
+				prompt: "hello",
+				systemPrompt: "",
+				images: undefined,
+			}, ctx);
+		}
+		const result = await runOpenAIProvider(harness.providers.openai, server.url, [{ role: "user", content: "hello" }]);
+
+		assert.equal(result.content[0]?.text, "real response");
+		assert.equal(server.connections, 1);
+		assert.equal(server.requests[0]?.generate, false);
+		assert.equal(server.requests[1]?.previous_response_id, "warm_1");
+		assert.deepEqual(server.requests[1]?.input, []);
 	} finally {
 		await server.close();
 	}
