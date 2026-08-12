@@ -11,6 +11,7 @@ import {
 	closeProviderWebSocketSessions,
 	registerOpenAIResponsesProviders,
 	resolveResponsesWebSocketUrl,
+	sendWebSocketRequest,
 } from "../src/provider-shim.js";
 
 const originalPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -337,6 +338,19 @@ test("OpenAI WebSocket URL and headers use the normal Responses endpoint and Pi 
 	assert.equal(headers.get("x-client-request-id"), "pi-session");
 });
 
+test("WebSocket request send has an abortable timeout", async () => {
+	const socket = {
+		send() {},
+		close() {},
+		addEventListener() {},
+		removeEventListener() {},
+	};
+	await assert.rejects(
+		sendWebSocketRequest(socket, "{}", undefined, 5),
+		/OpenAI Responses WebSocket send timed out after 5ms/,
+	);
+});
+
 test("openai websocket transport performs an authenticated response.create request", async () => {
 	writeSettings({ openaiTransport: "websocket" });
 	const server = await startWebSocketServer([
@@ -588,6 +602,34 @@ test("openai websocket preserves HTTP status and usage-limit details from error 
 	}
 });
 
+test("openai websocket retries generic HTTP 429 envelopes before streaming starts", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => [{
+			type: "error",
+			status: 429,
+			error: {
+				type: "rate_limit_exceeded",
+				code: "rate_limit_exceeded",
+				message: "Please slow down.",
+			},
+		}],
+		() => successEvents("resp_2", "retried"),
+	]);
+	try {
+		const provider = createProviderHarness().openai;
+		const result = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }], {
+			maxRetries: 1,
+			maxRetryDelayMs: 1_000,
+		});
+		assert.equal(result.stopReason, "stop");
+		assert.equal(result.content[0]?.text, "retried");
+		assert.equal(server.connections, 2);
+	} finally {
+		await server.close();
+	}
+});
+
 test("openai auto falls back to SSE when the WebSocket handshake fails", async () => {
 	writeSettings({ openaiTransport: "auto" });
 	let sseRequestBody: any;
@@ -638,6 +680,50 @@ test("openai auto does not fall back after the WebSocket stream has started", as
 		assert.equal(result.stopReason, "error");
 		assert.equal(result.errorMessage, "synthetic failure");
 		assert.equal(server.requests.length, 1);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai auto remembers a retryable post-start failure for Pi's next agent retry", async () => {
+	writeSettings({ openaiTransport: "auto" });
+	let sseRequests = 0;
+	const server = await startWebSocketServer([
+		() => [{
+			type: "response.created",
+			response: { id: "resp_partial" },
+		}, {
+			type: "error",
+			status: 503,
+			error: {
+				type: "server_error",
+				code: "service_unavailable",
+				message: "retry this request",
+			},
+		}],
+	], (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/responses") {
+			response.writeHead(404).end();
+			return;
+		}
+		request.resume();
+		request.on("end", () => {
+			sseRequests++;
+			response.writeHead(200, { "content-type": "text/event-stream" });
+			for (const item of successEvents("resp_sse", "retried over sse")) {
+				response.write(`data: ${JSON.stringify(item)}\n\n`);
+			}
+			response.end();
+		});
+	});
+	try {
+		const provider = createProviderHarness().openai;
+		const failed = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
+		const retried = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
+		assert.equal(failed.stopReason, "error");
+		assert.equal(retried.content[0]?.text, "retried over sse");
+		assert.equal(server.connections, 1);
+		assert.equal(sseRequests, 1);
 	} finally {
 		await server.close();
 	}
@@ -906,7 +992,7 @@ test("openai websocket serializes concurrent requests on one session connection"
 });
 
 test("openai WebSocket prewarm sends generate:false and the first request reuses it", async () => {
-	writeSettings({ openaiTransport: "websocket-cached", openaiWebSocketPrewarm: true });
+	writeSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true });
 	const server = await startWebSocketServer([
 		() => successEvents("warm_1"),
 		() => successEvents("resp_1", "real response"),
