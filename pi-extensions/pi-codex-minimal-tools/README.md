@@ -1,68 +1,63 @@
 # pi-codex-minimal-tools
 
-Minimal Codex/OpenAI tools for Pi. It preserves Pi's native tools except that
-models whose full id starts with `openai/gpt-5` use `apply_patch` instead of
-`edit` and `write`.
+Codex-specific Responses support for Pi, driven by an exact per-model JSON
+catalog instead of model-name heuristics.
 
-## Highlights
+The extension adds:
 
-- `image_generation` — Codex/OpenAI Responses image generation bridge, with saved local outputs.
-- `view_image` — return a local image as model image content (off by default).
-- `apply_patch` — local Codex-style patch application, with function transport by default and opt-in Codex freeform custom transport.
-- `web_search` — hosted OpenAI Responses web search for `openai/gpt-5*` models and explicitly configured compatible model ids (off by default).
-- `/image-gen <prompt> [reference.png]` — background image generation/editing with a live status card.
-- Generated images are saved with timestamp filenames, `latest.<ext>` mirrors, metadata, and inline previews.
-- Tools activate on built-in supported models or exact model ids added through configuration; native hosted tools and request profiles are supported on `openai` and `openai-codex`.
-- Responses web-search progress events render as compact `Searching the web` / `Searched the web` activity rows.
-- Web search citations remain clickable across turns by replaying hosted search results and citation annotations; leaked provider reference markers are resolved locally when possible.
-- Optional direct OpenAI Images API fallback when `OPENAI_API_KEY` is set.
-- Optional GPT-5 native compaction using Codex remote compaction v2 over
-  `/responses`, with the legacy `/responses/compact` endpoint still available.
-- Optional GPT-5 Fast processing with a persistent `/fast` toggle using
-  `service_tier: "priority"`.
-- Configurable `openai` Responses transport with SSE, WebSocket, cached
-  WebSocket continuation, Codex-style retry/session fallback, and prewarm.
+- Responses SSE, WebSocket, cached continuation, automatic retry/fallback, and
+  WebSocket prewarm.
+- Standard Responses and the internal Codex Responses Lite envelope.
+- Codex freeform `apply_patch`, including streaming preview and exact replay.
+- Hosted Responses web search or standalone Codex `web.run`.
+- Hosted Responses image generation or standalone Codex `image_gen.imagegen`.
+- Codex remote compaction v2 and legacy `/responses/compact`.
+- Per-model Fast service tiers.
+- User overrides and user-added provider/model profiles.
 
-## Protocol reference
-
-The [`reference/`](reference/README.md) directory documents the OpenAI Codex
-Responses modes, `apply_patch` wire protocols, Responses Lite request shape,
-custom-tool streaming parser, history replay, and model tool-exposure modes
-used as the source material for this extension's provider work.
+Unknown models are not guessed. They keep Pi's native provider implementation
+and do not receive package tools.
 
 ## Install
-
-Install as a local Pi package:
 
 ```bash
 pi install /absolute/path/to/pi-codex-minimal-tools
 ```
 
-Restart Pi or run `/reload` after installation.
+Restart Pi or run `/reload`.
 
 ## Commands
 
 | Command | Action |
 | --- | --- |
-| `/codex-minimal-tools` | Show current status and config path. |
-| `/codex-minimal-tools:doctor` | Run self-checks. |
-| `/fast [on\|off\|status]` | Toggle persistent GPT-5 Fast processing. |
-| `/image-gen <prompt> [reference.png]` | Background image generation/editing. |
+| `/codex-minimal-tools` | Show the active model profile and effective capabilities. |
+| `/codex-minimal-tools:doctor` | Show config/catalog diagnostics. |
+| `/fast [on\|off\|status]` | Toggle the active profile's Fast service tier. |
+| `/image-gen <prompt> [@reference.png]` | Run background image generation or editing. |
 
-`/image-gen` uses Codex/ChatGPT OAuth headers from Pi's model registry by default. With `apiKeyMode` enabled it uses plain `Authorization: Bearer <api key>` auth instead and skips ChatGPT account-id headers. It does **not** require `OPENAI_API_KEY` unless you enable the separate direct Images API fallback. Reference images may be `@reference.png` or bare local PNG/JPEG/WebP paths.
+## Two Configuration Files
 
-## Configuration
+There are two separate model-related files:
 
-This package is configured by a standalone JSON file under Pi's agent directory:
+1. Pi's agent `models.json` defines providers and actual models: API type,
+   base URL, authentication, headers, modalities, context window, and cost.
+2. This extension's `models.json` defines Codex behavior for an exact
+   `provider/model` ID: Responses mode, transport, tools, compaction, and Fast.
+
+Typical paths:
 
 ```text
+<PI_CODING_AGENT_DIR>/models.json
+<PI_CODING_AGENT_DIR>/extensions/pi-codex-minimal-tools/models.json
 <PI_CODING_AGENT_DIR>/extensions/pi-codex-minimal-tools/config.json
 ```
 
-If `PI_CODING_AGENT_DIR` is not set, the extension looks under the Pi user agent directory (normally `~/.config/pi/agent` or `~/.pi/agent`, depending on your Pi installation).
+Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
+`~/.pi/agent`, depending on the installation.
 
-All keys are optional. Add `$schema` to enable validation and completion in
-JSON Schema-aware editors. `requestProfile` is the only nested section:
+### Extension Global Config
+
+`config.json` now contains only package-wide preferences:
 
 ```json
 {
@@ -70,162 +65,294 @@ JSON Schema-aware editors. `requestProfile` is the only nested section:
   "enabled": true,
   "glyphStyle": "unicode",
   "autoEnable": true,
-  "nativeProviderTools": true,
-  "openaiTransport": "sse",
-  "openaiWebSocketPrewarm": true,
   "fastMode": false,
-  "compactionMode": "pi",
-  "requestProfile": {
-    "responsesMode": "standard",
-    "systemPromptPlacement": "instructions",
-    "patchTransport": "function",
-    "supportsHostedTools": true,
-    "supportsParallelTools": true
-  },
-  "apiKeyMode": false,
-  "imageGeneration": true,
-  "webSearchEnabled": false,
   "imageOutputDir": ".pi/openai-codex-images",
   "imageModel": "gpt-image-2",
   "directImageApiFallback": false,
-  "viewImage": false,
   "viewImageWorkspaceOnly": false,
-  "applyPatchEnabled": true,
-  "additionalModelIds": [
-    "openai/deepseek-v4-flash"
-  ],
   "deferApplyPatchRendering": false
 }
 ```
 
-The schema is shipped with the package as [`config.schema.json`](config.schema.json).
-For offline completion, replace the URL with a local path your editor can resolve.
-
-### General
-
-| Setting | What it does |
+| Setting | Meaning |
 | --- | --- |
-| `enabled` | Register this package's tools and provider shim. |
-| `glyphStyle` | UI glyphs: `unicode` or `ascii`. |
-| `autoEnable` | Auto-add this package's enabled tools on supported models. |
+| `enabled` | Enable all package behavior. |
+| `glyphStyle` | Use `unicode` or `ascii` UI glyphs. |
+| `autoEnable` | Add supported package tools automatically. |
+| `fastMode` | Global user toggle; only profiles with `fast` are affected. |
+| `imageOutputDir` | Generated-image output directory. Relative paths resolve from the workspace root. |
+| `imageModel` | Image model used by standalone/hosted image requests and direct fallback. |
+| `directImageApiFallback` | Permit the separate `OPENAI_API_KEY` Images API fallback. |
+| `viewImageWorkspaceOnly` | Restrict `view_image` to the workspace. |
+| `deferApplyPatchRendering` | Use Pi's fallback renderer instead of the streaming patch preview. |
 
-### Provider
+The older model-level keys remain readable for one migration version, but are
+deprecated. See [Legacy migration](#legacy-migration).
 
-| Setting | What it does |
-| --- | --- |
-| `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai` and `openai-codex` (`image_generation`, and `web_search` when enabled). |
-| `openaiTransport` | Select the native `openai` Responses request path: `sse` (default), `websocket`, `websocket-cached`, or `auto`. WebSocket modes reuse one serialized Pi-session connection. Cached/auto modes send only the incremental input with `previous_response_id` when the request remains a strict extension of the preceding server output. `auto` retries retryable failures and permanently uses SSE for the rest of the Pi session after the retry budget is exhausted; HTTP 426 switches immediately. Explicit `websocket*` modes remain strict. |
-| `openaiWebSocketPrewarm` | With a WebSocket transport, preconnect and send a best-effort `response.create` with `generate: false` before each new agent turn. The first real request can then reuse the warm `previous_response_id` with an empty delta. Enabled by default. |
-| `fastMode` | Add `service_tier: "priority"` to GPT-5-series requests on the native `openai` and `openai-codex` provider paths. The setting is off by default. An explicit `service_tier` supplied by another request hook takes precedence. |
-| `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses` (Codex remote compaction v2 through `/responses` + `compaction_trigger`, using `openaiTransport` including WebSocket continuation/fallback), or `responses-compact` (legacy HTTP `/responses/compact`). The old `responses-context-management` config value is read as `responses` for migration only. |
-| `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `systemPromptPlacement` chooses top-level `instructions` or an input `developer` message in Standard mode; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always uses a developer message and forces hosted and parallel tools off. |
-| `apiKeyMode` | Use plain `Authorization: Bearer <api key>` auth for `openai-codex` requests and skip ChatGPT account-id extraction/header injection. In this mode, provider `baseUrl` is treated like an OpenAI Responses endpoint root: `/v1` becomes `/v1/responses`, while `/v1/responses` is used as-is. The `openai` provider always uses this API-key transport. |
-| `webSearchEnabled` | Expose hosted `web_search` on supported models. Disabled by default. |
-| `additionalModelIds` | Extend the shared `web_search`/`apply_patch` model allowlist with exact `provider/modelId` values, for example `openai/deepseek-v4-flash`. `web_search` additionally requires the `openai` or `openai-codex` native Responses provider path. |
+### Per-Model Catalog
 
-Responses Lite uses Codex-internal request fields and transport signals. Enable
-`requestProfile.responsesMode: "lite"` only for an endpoint known to implement
-that contract. Both patch transports work in Lite; this package does not
-implement Codex Code Mode.
+Create:
 
-Native compaction is available only for GPT-5-series models on the `openai`
-provider and requires the Standard Responses profile. Native compaction output
-contains opaque encrypted state. This extension stores that state in the Pi
-session and replays it only to the exact originating provider, model, and API.
-The encrypted payload is not a readable summary, may be model-bound, and is
-sensitive session data. Switching model or provider after native compaction
-falls back to Pi's placeholder summary plus retained recent messages.
+```text
+<PI_CODING_AGENT_DIR>/extensions/pi-codex-minimal-tools/models.json
+```
 
-Native compaction runs through Pi's normal compaction lifecycle, so the
-`Compacting context...` status and `[compaction]` summary renderer remain
-visible. Pi's existing automatic threshold, overflow recovery, and `/compact`
-command decide when compaction runs. The `responses` mode follows current
-Codex remote compaction v2: it appends a `compaction_trigger` input item to a
-streaming `/responses` request, requires exactly one compaction output item,
-and installs bounded retained user/delegated-task messages plus the opaque
-checkpoint. It does not use the former Responses `context_management`
-request field or its inline marker lifecycle. It follows `openaiTransport`:
-cached/auto WebSocket modes reuse the session connection and send only
-`compaction_trigger` with `previous_response_id` when the current context
-extends the preceding response; `auto` shares the same sticky SSE fallback as
-normal model requests. Strict `websocket` normally sends the full compaction
-context on the reusable socket, while still allowing the first real request to
-consume a matching `generate:false` prewarm continuation. `responses-compact`
-remains an HTTP-only unary request and installs only safe retained messages
-plus the opaque compaction item; stale reasoning and tool call/output items are
-discarded. Native modes ignore `/compact` custom summary instructions.
+Example overriding a bundled model and adding a custom provider/model:
 
-`/fast on` and `/fast off` update the package config file, so the selection
-survives Pi restarts. When enabled, the extension sends
-`service_tier: "priority"`. Fast mode applies only to GPT-5-series models on
-`openai` or `openai-codex`.
+```json
+{
+  "$schema": "https://unpkg.com/pi-codex-minimal-tools@1/models.schema.json",
+  "version": 1,
+  "models": [
+    {
+      "id": "openai/gpt-5.5",
+      "responses": {
+        "transport": "sse",
+        "websocketPrewarm": false
+      },
+      "tools": {
+        "webSearch": false
+      }
+    },
+    {
+      "id": "my-provider/my-codex-model",
+      "extends": "openai/gpt-5.5",
+      "responses": {
+        "endpoint": "openai",
+        "transport": "websocket-cached"
+      },
+      "tools": {
+        "imageGeneration": false
+      }
+    }
+  ]
+}
+```
 
-`openaiTransport` overrides Pi's global transport preference only for this
-extension's `openai` provider shim. Authentication still comes from Pi's
-resolved provider credentials and headers. The WebSocket handshake targets
-the provider's normal `/responses` endpoint with `http(s)` rewritten to
-`ws(s)` and includes the Responses WebSocket beta header. Pi's session id is
-projected to the Codex-compatible `session-id`/`thread-id` handshake headers
-and `client_metadata.session_id`/`thread_id`; each agent run gets one stable
-`client_metadata.turn_id`, and each `response.create` gets a stream-start
-timestamp. The turn id remains stable across Pi's low-level automatic retry and
-compaction/retry lifecycle. WebSocket input items with legacy unprefixed ids are
-sent without those ids, while the in-memory Pi context is left unchanged.
+Resolution rules:
 
-Set `requestProfile.patchTransport: "custom"` to send `apply_patch` as the
-Codex freeform custom tool with the packaged Lark grammar. Other tools remain
-normal function tools.
+- IDs are exact, case-insensitive `provider/model` matches.
+- A user entry with the same ID deep-overrides the bundled entry.
+- `extends` can inherit from a bundled or user profile.
+- Objects merge recursively; arrays replace the inherited array.
+- Duplicate IDs, malformed JSON, missing parents, cycles, and unknown fields
+  are reported by `/codex-minimal-tools:doctor`.
+- Each effective profile has a stable hash. WebSocket continuation, sticky
+  fallback, and native-compaction replay are isolated by that hash.
 
-Set `requestProfile.systemPromptPlacement: "developer"` to place Pi's system
-prompt at the start of Standard Responses `input`. The default `"instructions"`
-keeps it in the top-level `instructions` field.
+Full field documentation is in
+[`reference/model-catalog.md`](reference/model-catalog.md), and editor
+validation is provided by [`models.schema.json`](models.schema.json).
 
-### Images
+## Custom Provider Example
 
-| Setting | What it does |
-| --- | --- |
-| `imageGeneration` | Expose `image_generation` on supported OpenAI Codex image-capable models. |
-| `imageOutputDir` | Where generated images are saved. Relative paths resolve against the workspace root. |
-| `imageModel` | Image model for native/fallback image generation. |
-| `directImageApiFallback` | Allow direct OpenAI Images API generation when native Codex generation is unavailable. |
-| `viewImage` | Expose `view_image` on image-capable models. |
-| `viewImageWorkspaceOnly` | Reject `view_image` paths outside the workspace. |
-
-### Patch
-
-| Setting | What it does |
-| --- | --- |
-| `applyPatchEnabled` | Expose `apply_patch` on `openai/gpt-5*` models and models listed in `additionalModelIds`. When active, Pi's `edit` and `write` tools are hidden; their previous activation is restored after switching away. |
-| `deferApplyPatchRendering` | Let Pi's fallback renderer handle display instead of the built-in streaming filesystem preview. Defaults to `false`. |
-
-The executor supports Codex `@@ class/function` contexts, ordered update
-chunks, `*** End of File`, and Codex-style fuzzy line matching. It verifies all
-actions before writing, preserves CRLF files, refuses Add/Move overwrites, and
-resolves relative paths against the active cwd while also accepting `..`
-traversal and absolute paths. Workspace permissions or sandboxing should be
-provided by the user's Pi setup rather than this extension. See
-[`reference/apply-patch-behavior.md`](reference/apply-patch-behavior.md) for the
-exact behavior and intentional safety differences from Codex.
-
-While patch arguments stream, the built-in renderer consumes completed lines
-and previews the currently valid A/M/D actions against paths resolved from the
-active cwd. Preview reads are throttled to at most once every 500 ms, never
-mutate the filesystem, and stop before tool execution begins. Set
-`deferApplyPatchRendering: true` to use Pi's fallback tool renderer instead.
-
-## API key mode provider example
-
-When `apiKeyMode` is enabled, configure `openai-codex` in Pi's `models.json` like a Responses-compatible endpoint:
+The custom model must exist in Pi's agent `models.json`. For provider-shim
+features, its Pi `api` must be `openai-responses` or
+`openai-codex-responses`:
 
 ```json
 {
   "providers": {
-    "openai-codex": {
+    "my-provider": {
       "baseUrl": "https://api.example.com/v1",
-      "apiKey": "$OPENAI_API_KEY"
+      "apiKey": "$MY_PROVIDER_API_KEY",
+      "api": "openai-responses",
+      "models": [
+        {
+          "id": "my-codex-model",
+          "name": "My Codex Model",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 272000,
+          "maxTokens": 16384,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
     }
   }
 }
 ```
 
-The extension will request `https://api.example.com/v1/responses`.
+The extension dynamically attaches only its stream handler to a selected
+custom provider. It does not replace the provider's URL, authentication,
+headers, or model definitions.
+
+If a profile requests the provider shim but the Pi model uses another API
+type, wire-only features are disabled:
+
+- hosted web/image tools;
+- custom/freeform `apply_patch`;
+- native Responses compaction;
+- Fast service tiers.
+
+Standalone web/image tools and function `apply_patch` can still be used when
+the profile enables them.
+
+## Model Profile Fields
+
+```json
+{
+  "id": "provider/model",
+  "extends": "provider/parent-model",
+  "enabled": true,
+  "responses": {
+    "providerShim": true,
+    "endpoint": "auto",
+    "mode": "standard",
+    "systemPromptPlacement": "instructions",
+    "transport": "auto",
+    "websocketPrewarm": true
+  },
+  "tools": {
+    "parallelCalls": true,
+    "applyPatch": "custom",
+    "webSearch": {
+      "implementation": "hosted",
+      "contentTypes": ["text", "image"]
+    },
+    "imageGeneration": "standalone",
+    "viewImage": false
+  },
+  "compaction": "responses",
+  "fast": {
+    "serviceTier": "priority",
+    "costMultiplier": 2
+  }
+}
+```
+
+Important constraints:
+
+- `responses.mode:"lite"` always uses a developer message, namespace tools in
+  `additional_tools`, `parallel_tool_calls:false`,
+  `reasoning.context:"all_turns"`, and strips input-image `detail`.
+- Lite cannot use hosted `web_search` or hosted `image_generation`; choose
+  `standalone` instead.
+- `tools.applyPatch:"custom"` uses the Codex freeform grammar and requires the
+  provider shim. `"function"` works as a normal Pi tool.
+- `responses.endpoint:"openai"` uses API-key endpoint/auth semantics.
+  `"codex"` uses ChatGPT/Codex endpoint/auth semantics. `"auto"` infers from
+  the provider.
+- `compaction:"responses"` uses `compaction_trigger` through the selected
+  SSE/WebSocket transport. `"responses-compact"` uses the legacy unary
+  endpoint. `"pi"` keeps Pi summaries.
+
+## Built-In Profiles
+
+The bundled catalog is based on local Codex commit
+`eb9dceba1a2e658142a456c5898836774835616b` from August 12, 2026.
+
+| Models | Responses | Web | Image | Patch | Compaction |
+| --- | --- | --- | --- | --- | --- |
+| `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | Lite, auto WS/SSE | standalone text+image | standalone | custom | responses |
+| `gpt-5.5`, `gpt-5.4` | Standard, auto WS/SSE | hosted text+image | standalone | custom | responses |
+| `gpt-5.4-mini`, `codex-auto-review` | Standard, auto WS/SSE | hosted text+image | standalone | custom | responses |
+| `gpt-5.2` | Standard, auto WS/SSE | hosted text | standalone | custom | responses |
+| legacy GPT-5/Codex entries | inherited Standard profile | profile-specific | standalone | custom | responses |
+| `gpt-4.1` | Standard SSE | off | hosted | off | Pi |
+| `o4-mini` | Standard SSE | off | off | off | Pi |
+
+Equivalent `openai/...` and `openai-codex/...` IDs are included; the latter
+switch only the endpoint/auth shape to `codex`.
+
+These entries are defaults, not claims that every proxy with the same model
+slug supports the protocol. Override or disable a profile for the endpoint
+actually in use.
+
+## Web Search
+
+`tools.webSearch` supports two implementations:
+
+- `hosted`: rewrites the Pi placeholder to Responses
+  `{"type":"web_search"}` and preserves progress, sources, results, and
+  citation replay. Standard Responses only.
+- `standalone`: exposes `web.run` as a client-executed namespace tool and calls
+  the provider's `alpha/search` endpoint. It supports search/image queries,
+  open/click/find, PDF screenshots, finance, weather, sports, and time.
+
+Standalone search sends a bounded recent visible conversation tail, resolved
+Pi authentication, direct-caller/live-web settings, and a response-length
+token budget.
+
+## Image Generation
+
+`tools.imageGeneration` supports:
+
+- `hosted`: Responses `image_generation`.
+- `standalone`: `image_gen.imagegen`, backed by the provider's
+  `images/generations` and `images/edits` endpoints.
+
+Standalone input follows current Codex:
+
+- required `prompt`;
+- up to five `referenced_image_paths`; or
+- `num_last_images_to_include` from 1 through 5.
+
+Generated PNGs are saved under `imageOutputDir`, mirrored to `latest.png`, and
+returned to the model before the saved-path text. `/image-gen` selects any
+loaded image-capable model with an enabled catalog profile.
+
+## WebSocket And Compaction
+
+`transport` values:
+
+- `sse`: HTTP streaming only.
+- `websocket`: reusable WebSocket with full logical requests.
+- `websocket-cached`: reuse plus `previous_response_id` input deltas.
+- `auto`: retry WebSocket failures and use sticky per-session SSE fallback;
+  HTTP 426 switches immediately.
+
+Prewarm sends a best-effort `response.create` with `generate:false`.
+Continuation reuse requires the new request to extend the previous logical
+request exactly.
+
+Native compaction stores opaque encrypted state in the Pi session. New
+checkpoints replay only to the same provider, model, API, and effective
+profile hash. Switching any of those falls back to Pi's retained local
+context. Treat session files containing native compaction as sensitive data.
+
+## Apply Patch
+
+When `apply_patch` activates, the extension temporarily hides Pi's `edit` and
+`write` tools and restores their prior positions after switching away.
+
+The executor supports Codex `@@ class/function` contexts, ordered update
+chunks, `*** Move to:`, `*** End of File`, fuzzy matching, CRLF preservation,
+and atomic verification before writes. See
+[`reference/apply-patch-behavior.md`](reference/apply-patch-behavior.md).
+
+## Legacy Migration
+
+These `config.json` keys are deprecated but still projected into an in-memory
+model override for compatibility:
+
+| Old key | New model-profile field |
+| --- | --- |
+| `nativeProviderTools` | `responses.providerShim` plus hosted/standalone tool selection |
+| `openaiTransport` | `responses.transport` |
+| `openaiWebSocketPrewarm` | `responses.websocketPrewarm` |
+| `compactionMode` | `compaction` |
+| `requestProfile.responsesMode` | `responses.mode` |
+| `requestProfile.systemPromptPlacement` | `responses.systemPromptPlacement` |
+| `requestProfile.patchTransport` | `tools.applyPatch` |
+| `apiKeyMode` | `responses.endpoint` |
+| `imageGeneration` | `tools.imageGeneration` |
+| `webSearchEnabled` | `tools.webSearch` |
+| `viewImage` | `tools.viewImage` |
+| `applyPatchEnabled` | `tools.applyPatch` |
+| `additionalModelIds` | one exact user catalog entry per model |
+
+Move these values to extension `models.json`; legacy projection is intended
+only as a transition path.
+
+## Protocol Reference
+
+[`reference/`](reference/README.md) documents the Codex snapshot, Responses
+Standard/Lite envelopes, namespace tools, WebSocket continuation, custom-tool
+streaming/replay, standalone web/image endpoints, compaction, and apply-patch
+protocol.

@@ -1,91 +1,87 @@
 # Codex Responses protocol reference
 
-This directory records the OpenAI Codex request modes, tool wire contracts, and
-response parsing behavior examined while designing this extension. It is a
-source-backed reference, not a statement that the current extension already
-implements every behavior described here.
+This directory records the Codex request modes, tool wire contracts, model
+capabilities, standalone extensions, and replay behavior used to design this
+extension.
 
 ## Snapshot and scope
 
 - Codex checkout: `openai/codex`
-- Analyzed commit: `03bb3b12367397e14a8facc2e018d645ff4d8e83`
-- Local analysis date: 2026-07-17
+- Primary analyzed commit:
+  `eb9dceba1a2e658142a456c5898836774835616b`
+- Local analysis date: August 12, 2026
 - Primary implementation: `codex-rs/`
 
-Source paths in these documents are relative to that Codex checkout unless a
-different repository is named. Model availability and internal protocol fields
-can change after the analyzed commit.
+Source paths are relative to that checkout unless noted. Model availability
+and internal fields can change after the snapshot.
 
-The Responses WebSocket implementation was separately revalidated against
-local Codex commit `eb9dceba1a2e658142a456c5898836774835616b` on
-August 12, 2026.
+The local apply-patch executor behavior note retains the earlier
+`03bb3b12367397e14a8facc2e018d645ff4d8e83` execution baseline and documents
+Pi-specific safety differences. The freeform grammar itself was unchanged in
+the current snapshot.
 
 ## Reading order
 
-1. [Apply-patch wire protocols](apply-patch-protocols.md) separates the public
-   built-in tool, Codex freeform custom tool, and JSON function fallbacks.
-2. [Apply-patch behavior](apply-patch-behavior.md) records the local parser,
-   matching algorithm, result format, and intentional Pi safety differences.
-3. [Standard Responses mode](responses-standard.md) records the normal Codex
-   request envelope and prompt/tool placement.
-4. [Responses Lite mode](responses-lite.md) records the internal Lite request
-   transformation, headers, and restrictions.
-5. [Streaming, parsing, and replay](streaming-parsing-and-replay.md) follows a
-   custom tool call from SSE/WebSocket deltas through execution and the next
-   request.
-6. [Model modes and Code Mode](model-modes-and-code-mode.md) separates model
-   capability, Responses transport mode, and model-visible tool exposure.
-7. [Hosted web-search streaming and rendering](web-search-streaming-rendering.md)
-   records the Responses item lifecycle and Codex begin/end TUI behavior.
-8. [Source map](source-map.md) maps each conclusion to Codex source and tests.
+1. [Model catalog and standalone extensions](model-catalog.md) explains the
+   extension's exact per-model configuration and provider binding.
+2. [Standard Responses mode](responses-standard.md) records the normal request
+   envelope and tool placement.
+3. [Responses Lite mode](responses-lite.md) records the internal Lite
+   transformation, namespace tools, headers, and restrictions.
+4. [Apply-patch wire protocols](apply-patch-protocols.md) separates the Codex
+   freeform custom tool, public built-in tool, and JSON function fallback.
+5. [Streaming, parsing, and replay](streaming-parsing-and-replay.md) follows
+   custom and namespaced calls through SSE/WebSocket and the next request.
+6. [Apply-patch behavior](apply-patch-behavior.md) records local parsing,
+   matching, mutation, and rendering behavior.
+7. [Model modes and Code Mode](model-modes-and-code-mode.md) separates request
+   envelope, tool exposure, and model capability.
+8. [Web search](web-search-streaming-rendering.md) covers hosted lifecycle,
+   citations, and standalone `web.run`.
+9. [Source map](source-map.md) maps conclusions to Codex source and tests.
 
-Remote compaction v2 was also revalidated against the August 12, 2026 Codex
-snapshot. It appends `compaction_trigger` and dispatches through the ordinary
-Responses streaming client, so an enabled Responses WebSocket transport can
-reuse the same connection and `previous_response_id`. The legacy
-`/responses/compact` endpoint remains a separate unary HTTP request.
+Remote compaction v2 appends `compaction_trigger` and uses the ordinary
+Responses streaming client. It can therefore reuse the same WebSocket and
+`previous_response_id` state as a normal turn. The legacy
+`/responses/compact` endpoint remains a separate unary request. Both request
+forms retain the Lite envelope when the active model uses Responses Lite.
 
-The exact freeform patch grammar from the analyzed commit is also preserved as
-the packaged provider resource
+The packaged freeform grammar is
 [`src/providers/codex-apply-patch.lark`](../src/providers/codex-apply-patch.lark).
 
 ## Protocol taxonomy
 
-| Name in this reference | Tool declaration | Model call item | Result item | Used by analyzed Codex CLI |
+| Name | Declaration | Call item | Result item | Codex CLI |
 | --- | --- | --- | --- | --- |
-| Public built-in apply patch | `{"type":"apply_patch"}` | `apply_patch_call` | `apply_patch_call_output` | No |
-| Codex freeform apply patch | `{"type":"custom","name":"apply_patch",...}` | `custom_tool_call` | `custom_tool_call_output` | Yes |
-| JSON function fallback | `{"type":"function","name":"apply_patch",...}` | `function_call` | `function_call_output` | No |
+| Codex freeform apply patch | `type:"custom"` | `custom_tool_call` | `custom_tool_call_output` | Yes |
+| Public built-in apply patch | `type:"apply_patch"` | `apply_patch_call` | `apply_patch_call_output` | No |
+| JSON function fallback | `type:"function"` | `function_call` | `function_call_output` | No |
 
-The analyzed Codex CLI has only the `freeform` variant in
-`ApplyPatchToolType`. Its patch handler rejects a function payload.
+In current Responses Lite, top-level function and freeform specs are nested
+under the `functions` namespace. Standalone web and image tools use `web.run`
+and `image_gen.imagegen`.
 
 ## Terms
 
-- **Standard Responses**: tools are top-level `tools`, while stable base
-  instructions are sent in top-level `instructions`.
-- **Responses Lite**: tools are placed in an `additional_tools` developer input
-  item, instructions become another developer input item, and top-level tools
-  and instructions are omitted or empty.
-- **Custom/freeform tool**: a Responses `type:"custom"` tool whose model output
-  is raw text rather than a JSON argument string.
-- **Function tool**: a Responses `type:"function"` tool whose `arguments` field
-  contains JSON text.
-- **Code Mode**: a model-visible tool-exposure strategy in which code calls
-  nested tools through a freeform `exec` runtime. It is independent from the
-  Standard/Lite request envelope.
+- **Standard Responses**: stable instructions and tools are top-level fields.
+- **Responses Lite**: tools are in an `additional_tools` developer item,
+  instructions are a developer message, and Lite transport signals are added.
+- **Namespace tool**: a named group containing function and/or custom child
+  tools. Calls retain separate `namespace` and `name` fields.
+- **Custom/freeform tool**: raw text input constrained by an optional grammar.
+- **Hosted tool**: server-executed Responses tool such as `web_search`.
+- **Standalone tool**: client-executed namespace tool that calls a dedicated
+  Codex endpoint.
+- **Code Mode**: a separate execution/tool-exposure strategy using a freeform
+  `exec` runtime.
 
 ## Evidence boundaries
 
-The following distinctions matter when using these notes:
-
-- `additional_tools` and the Responses Lite headers are internal Codex
-  transport behavior. They must not be assumed to work on arbitrary public or
-  proxy Responses endpoints.
-- The public built-in apply-patch tool is documented by OpenAI, but it is not
-  the protocol used by the analyzed Codex CLI checkout.
-- Model entries in Codex `models.json` are capability metadata, not a guarantee
-  that another provider exposing a model with the same name accepts the same
-  protocol.
-- Request compatibility requires both outbound serialization and inbound event
-  parsing. Rewriting only `tools` is insufficient for custom/freeform tools.
+- Responses Lite fields and signals are internal Codex behavior and must be
+  enabled only for known-compatible endpoints.
+- A model slug does not prove that a proxy implements its Codex protocol.
+- Hosted and standalone tools with similar names have different declarations,
+  execution paths, and result lifecycles.
+- Supporting custom or namespace tools requires outbound serialization,
+  inbound parsing, execution mapping, and exact history replay.
+- This extension implements direct custom/namespace tools, not Codex Code Mode.

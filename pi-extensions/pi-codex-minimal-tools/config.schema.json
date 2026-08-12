@@ -13,7 +13,7 @@
     },
     "enabled": {
       "type": "boolean",
-      "description": "Register this package's tools and provider shim.",
+      "description": "Enable this package's tools, provider shim, compaction hooks, and commands.",
       "default": true
     },
     "glyphStyle": {
@@ -29,34 +29,39 @@
     },
     "nativeProviderTools": {
       "type": "boolean",
-      "description": "Rewrite hosted-tool placeholders into native OpenAI Responses tools on openai and openai-codex.",
+      "description": "Deprecated compatibility override. Move per-model hosted tool behavior to extension models.json.",
+      "deprecated": true,
       "default": true
     },
     "openaiTransport": {
       "type": "string",
-      "description": "Transport for native openai provider Responses requests. sse always uses HTTP streaming; websocket uses a reusable WebSocket with full request context; websocket-cached also uses previous_response_id input deltas; auto retries WebSocket failures and permanently falls back to SSE for the Pi session after the retry budget is exhausted.",
+      "description": "Deprecated compatibility override. Move per-model Responses transport to extension models.json.",
+      "deprecated": true,
       "enum": ["sse", "websocket", "websocket-cached", "auto"],
       "default": "sse"
     },
     "openaiWebSocketPrewarm": {
       "type": "boolean",
-      "description": "When a WebSocket transport is enabled, preconnect and send a best-effort generate:false response.create before each new Pi agent turn so the first real request can reuse the warm response id.",
+      "description": "Deprecated compatibility override. Move per-model WebSocket prewarm behavior to extension models.json.",
+      "deprecated": true,
       "default": true
     },
     "fastMode": {
       "type": "boolean",
-      "description": "Request OpenAI GPT-5 Fast processing by adding service_tier: priority to native openai and openai-codex Responses requests.",
+      "description": "Global user toggle for the Fast service tier declared by the active model profile.",
       "default": false
     },
     "compactionMode": {
       "type": "string",
-      "description": "Compaction implementation for GPT-5-series models on the openai provider. pi uses Pi summaries; responses follows Codex remote compaction v2 through a streaming /responses compaction_trigger request and follows openaiTransport, including WebSocket continuation and auto fallback; responses-compact uses the legacy HTTP-only /responses/compact endpoint.",
+      "description": "Deprecated compatibility override. Move per-model compaction behavior to extension models.json.",
+      "deprecated": true,
       "enum": ["pi", "responses", "responses-compact"],
       "default": "pi"
     },
     "requestProfile": {
       "type": "object",
-      "description": "Explicit overrides for the OpenAI Responses request profile.",
+      "description": "Deprecated compatibility override. Move Responses mode, prompt placement, patch transport, and tool capabilities to extension models.json.",
+      "deprecated": true,
       "default": {},
       "additionalProperties": false,
       "properties": {
@@ -92,17 +97,20 @@
     },
     "apiKeyMode": {
       "type": "boolean",
-      "description": "Use plain Bearer API-key authentication for openai-codex instead of ChatGPT account headers. The openai provider always uses API-key transport.",
+      "description": "Deprecated compatibility override. Move the endpoint/auth shape to responses.endpoint in extension models.json.",
+      "deprecated": true,
       "default": false
     },
     "imageGeneration": {
       "type": "boolean",
-      "description": "Expose image_generation on supported OpenAI Codex models.",
+      "description": "Deprecated compatibility override. Move per-model image-generation support to extension models.json.",
+      "deprecated": true,
       "default": true
     },
     "webSearchEnabled": {
       "type": "boolean",
-      "description": "Expose hosted web_search on openai/gpt-5 models and compatible native OpenAI models listed in additionalModelIds.",
+      "description": "Deprecated compatibility override. Move per-model web-search support to extension models.json.",
+      "deprecated": true,
       "default": false
     },
     "imageOutputDir": {
@@ -114,7 +122,7 @@
     },
     "imageModel": {
       "type": "string",
-      "description": "Image model used for native or fallback image generation.",
+      "description": "Image model used by standalone generation, hosted image tool rewriting, and direct fallback.",
       "enum": ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"],
       "default": "gpt-image-2"
     },
@@ -125,7 +133,8 @@
     },
     "viewImage": {
       "type": "boolean",
-      "description": "Expose the view_image tool on image-capable models.",
+      "description": "Deprecated compatibility override. Move per-model view_image support to extension models.json.",
+      "deprecated": true,
       "default": false
     },
     "viewImageWorkspaceOnly": {
@@ -135,12 +144,14 @@
     },
     "applyPatchEnabled": {
       "type": "boolean",
-      "description": "Expose apply_patch on openai/gpt-5 models and models listed in additionalModelIds.",
+      "description": "Deprecated compatibility override. Move per-model apply_patch support to extension models.json.",
+      "deprecated": true,
       "default": true
     },
     "additionalModelIds": {
       "type": "array",
-      "description": "Additional exact provider/model ids in the shared web_search/apply_patch allowlist, for example openai/deepseek-v4-flash. web_search also requires the openai or openai-codex native Responses provider path.",
+      "description": "Deprecated compatibility allowlist. Add exact per-model entries to extension models.json instead.",
+      "deprecated": true,
       "items": {
         "type": "string",
         "pattern": "^[^\\s/]+/\\S+$"

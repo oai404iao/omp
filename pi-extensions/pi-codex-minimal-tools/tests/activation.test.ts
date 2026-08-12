@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import codexMinimalTools from "../src/index.js";
-import { hasAdditionalToolModelsLoaded, hasOpenAiModelsLoaded } from "../src/activation.js";
+import { hasConfiguredModelsLoaded } from "../src/activation.js";
+import { DEFAULT_SETTINGS } from "../src/settings.js";
 
 function fakePi() {
 	const handlers: Record<string, Function[]> = {};
@@ -36,6 +37,12 @@ function writeConfig(agentDir: string, config: Record<string, unknown>): void {
 	writeFileSync(join(configDir, "config.json"), JSON.stringify(config));
 }
 
+function writeModels(agentDir: string, models: unknown[]): void {
+	const configDir = join(agentDir, "extensions", "pi-codex-minimal-tools");
+	mkdirSync(configDir, { recursive: true });
+	writeFileSync(join(configDir, "models.json"), JSON.stringify({ version: 1, models }));
+}
+
 async function withAgentDir(fn: (agentDir: string) => Promise<void>): Promise<void> {
 	const previous = process.env.PI_CODING_AGENT_DIR;
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-codex-minimal-tools-activation-"));
@@ -49,22 +56,27 @@ async function withAgentDir(fn: (agentDir: string) => Promise<void>): Promise<vo
 	}
 }
 
-test("hasOpenAiModelsLoaded detects active or registry OpenAI models", () => {
-	assert.equal(hasOpenAiModelsLoaded({ model: { provider: "anthropic", id: "claude" }, modelRegistry: { getAll: () => [] } }), false);
-	assert.equal(hasOpenAiModelsLoaded({ model: { provider: "notopenai", id: "claude" }, modelRegistry: { getAll: () => [] } }), false);
-	assert.equal(hasOpenAiModelsLoaded({ model: { provider: "openai-codex", id: "gpt-5.5" }, modelRegistry: { getAll: () => [] } }), true);
-	assert.equal(hasOpenAiModelsLoaded({ modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-5.5" }] } }), true);
-	assert.equal(hasOpenAiModelsLoaded({ modelRegistry: { find: (provider, id) => provider === "openai" && id === "gpt-5.2" ? { provider, id } : undefined } }), true);
+test("hasConfiguredModelsLoaded detects exact catalog profiles", () => {
+	assert.equal(hasConfiguredModelsLoaded({
+		model: { provider: "anthropic", id: "claude" },
+		modelRegistry: { getAll: () => [] },
+	}, DEFAULT_SETTINGS), false);
+	assert.equal(hasConfiguredModelsLoaded({
+		model: { provider: "openai-codex", id: "gpt-5.5" },
+		modelRegistry: { getAll: () => [] },
+	}, DEFAULT_SETTINGS), true);
+	assert.equal(hasConfiguredModelsLoaded({
+		modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-5.6-sol" }] },
+	}, DEFAULT_SETTINGS), true);
+	assert.equal(hasConfiguredModelsLoaded({
+		modelRegistry: {
+			find: (provider: string, id: string) =>
+				provider === "openai" && id === "gpt-5.2" ? { provider, id } : undefined,
+		},
+	}, DEFAULT_SETTINGS), true);
 });
 
-test("hasAdditionalToolModelsLoaded matches configured provider/model ids", () => {
-	const ids = ["custom/deepseek-v4-flash"];
-	assert.equal(hasAdditionalToolModelsLoaded({ model: { provider: "custom", id: "deepseek-v4-flash" } }, ids), true);
-	assert.equal(hasAdditionalToolModelsLoaded({ modelRegistry: { getAll: () => [{ provider: "custom", id: "deepseek-v4-flash" }] } }, ids), true);
-	assert.equal(hasAdditionalToolModelsLoaded({ model: { provider: "custom", id: "deepseek-v4" } }, ids), false);
-});
-
-test("extension does not register tools until OpenAI models are loaded", async () => withAgentDir(async () => {
+test("extension does not register tools until a configured model is loaded", async () => withAgentDir(async () => {
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
 	assert.equal(pi.tools.length, 0);
@@ -86,8 +98,9 @@ test("extension does not register tools until OpenAI models are loaded", async (
 	assert.deepEqual(pi.tools.map((tool) => tool.name).sort(), ["apply_patch", "image_generation", "view_image", "web_search"].sort());
 	assert.ok(pi.activeTools.includes("read"));
 	assert.ok(pi.activeTools.includes("bash"));
-	assert.equal(pi.activeTools.includes("apply_patch"), false);
-	assert.equal(pi.activeTools.includes("web_search"), false);
+	assert.equal(pi.activeTools.includes("apply_patch"), true);
+	assert.equal(pi.activeTools.includes("web_search"), true);
+	assert.equal(pi.activeTools.includes("image_generation"), true);
 }));
 
 test("provider shim remains registered when native hosted tools are disabled", async () => withAgentDir(async (agentDir) => {
@@ -95,6 +108,44 @@ test("provider shim remains registered when native hosted tools are disabled", a
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
 	assert.deepEqual(pi.providers.map((provider) => provider.name), ["openai-codex", "openai"]);
+}));
+
+test("user model profiles register a provider-preserving Responses shim", async () => withAgentDir(async (agentDir) => {
+	writeModels(agentDir, [{
+		id: "custom/my-codex-model",
+		extends: "openai/gpt-5.5",
+		responses: {
+			endpoint: "openai",
+			transport: "sse",
+		},
+	}]);
+	const pi = fakePi();
+	codexMinimalTools(pi as any);
+	assert.equal(pi.providers.some((provider) => provider.name === "custom"), false);
+	await emit(pi, "model_select", {
+		cwd: process.cwd(),
+		model: {
+			provider: "custom",
+			api: "openai-responses",
+			id: "my-codex-model",
+			input: ["text"],
+		},
+		modelRegistry: {
+			getAll: () => [{
+				provider: "custom",
+				api: "openai-responses",
+				id: "my-codex-model",
+				input: ["text"],
+			}],
+		},
+	});
+	const custom = pi.providers.find((provider) => provider.name === "custom");
+	assert.ok(custom);
+	assert.equal(custom.value.api, "openai-responses");
+	assert.equal(typeof custom.value.streamSimple, "function");
+	assert.equal("baseUrl" in custom.value, false);
+	assert.equal("apiKey" in custom.value, false);
+	assert.equal("models" in custom.value, false);
 }));
 
 test("active non-OpenAI models remove package tools even when OpenAI models exist in registry", async () => withAgentDir(async () => {
@@ -111,7 +162,7 @@ test("active non-OpenAI models remove package tools even when OpenAI models exis
 	assert.deepEqual(pi.activeTools, ["read"]);
 }));
 
-test("apply_patch hides edit/write only for GPT-5 models on the openai provider and restores them after switching away", async () => withAgentDir(async () => {
+test("apply_patch follows model profiles and restores edit/write after switching away", async () => withAgentDir(async () => {
 	const pi = fakePi();
 	pi.setActiveTools(["read", "edit", "write"]);
 	codexMinimalTools(pi as any);
@@ -121,12 +172,12 @@ test("apply_patch hides edit/write only for GPT-5 models on the openai provider 
 		model: { provider: "openai", id: "gpt-5.5", input: ["text"] },
 		modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-5.5", input: ["text"] }] },
 	});
-	assert.deepEqual(pi.activeTools, ["read", "apply_patch"]);
+	assert.deepEqual(pi.activeTools, ["read", "apply_patch", "web_search"]);
 
 	await emit(pi, "model_select", {
 		cwd: process.cwd(),
-		model: { provider: "openai-codex", id: "gpt-5.5", input: ["text"] },
-		modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-5.5", input: ["text"] }] },
+		model: { provider: "openai", id: "gpt-4.1", input: ["text"] },
+		modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-4.1", input: ["text"] }] },
 	});
 	assert.deepEqual(pi.activeTools, ["read", "edit", "write"]);
 
@@ -138,8 +189,7 @@ test("apply_patch hides edit/write only for GPT-5 models on the openai provider 
 	assert.deepEqual(pi.activeTools, ["read", "edit", "write"]);
 }));
 
-test("before_provider_request rewrites web_search only for enabled openai/gpt-5 models", async () => withAgentDir(async (agentDir) => {
-	writeConfig(agentDir, { webSearchEnabled: true });
+test("before_provider_request rewrites hosted web_search from the model profile", async () => withAgentDir(async () => {
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
 	const handler = pi.handlers.before_provider_request?.[0];
@@ -151,18 +201,24 @@ test("before_provider_request rewrites web_search only for enabled openai/gpt-5 
 		model: { provider: "openai-codex", id: "gpt-5.5", input: ["text"] },
 		modelRegistry: { getAll: () => [] },
 	});
-	assert.equal(rewritten, undefined);
+	assert.deepEqual(rewritten.tools, [{
+		type: "web_search",
+		search_content_types: ["text", "image"],
+	}]);
 
 	const rewrittenOpenAi = handler({ payload }, {
 		cwd: process.cwd(),
 		model: { provider: "openai", id: "gpt-5.5", input: ["text"] },
 		modelRegistry: { getAll: () => [] },
 	});
-	assert.deepEqual(rewrittenOpenAi.tools, [{ type: "web_search" }]);
+	assert.deepEqual(rewrittenOpenAi.tools, [{
+		type: "web_search",
+		search_content_types: ["text", "image"],
+	}]);
 
 	const notGpt5 = handler({ payload }, {
 		cwd: process.cwd(),
-		model: { provider: "openai-codex", id: "gpt-4.1", input: ["text"] },
+		model: { provider: "openai", id: "gpt-4.1", input: ["text"] },
 		modelRegistry: { getAll: () => [] },
 	});
 	assert.equal(notGpt5, undefined);
@@ -190,7 +246,10 @@ test("additionalModelIds enables apply_patch and web_search for an exact custom 
 	const rewritten = handler({
 		payload: { tools: [{ type: "function", name: "web_search", parameters: {} }] },
 	}, ctx);
-	assert.deepEqual(rewritten.tools, [{ type: "web_search" }]);
+	assert.deepEqual(rewritten.tools, [{
+		type: "web_search",
+		search_content_types: ["text"],
+	}]);
 }));
 
 test("additionalModelIds can activate apply_patch for a non-OpenAI custom provider", async () => withAgentDir(async (agentDir) => {

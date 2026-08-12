@@ -49,8 +49,8 @@ ResponseEvent::ToolCallInputDelta {
 ```
 
 The completed item arrives through `response.output_item.done` and is
-deserialized as `ResponseItem::CustomToolCall` with `call_id`, `name`, and the
-complete raw `input` string.
+deserialized as `ResponseItem::CustomToolCall` with `call_id`, optional
+`namespace`, `name`, and the complete raw `input` string.
 
 This differs from a JSON function call, whose argument stream uses
 `response.function_call_arguments.delta` or equivalent function events and
@@ -153,6 +153,7 @@ wire forms:
 {
   "type": "custom_tool_call",
   "call_id": "call_...",
+  "namespace": "functions",
   "name": "apply_patch",
   "input": "*** Begin Patch\n...\n*** End Patch\n"
 }
@@ -169,6 +170,7 @@ wire forms:
 An adapter therefore needs to retain or reliably reconstruct at least:
 
 - tool name;
+- tool namespace, when present;
 - call ID;
 - custom versus function wire kind;
 - complete raw patch input;
@@ -178,6 +180,11 @@ Inferring custom kind only from the current model is fragile when a session
 switches providers or transports. Persisting provider-specific call metadata
 is the robust design. If the host type cannot carry metadata, the adapter must
 maintain a call-ID mapping and define behavior for model/provider handoff.
+
+This extension stores the original namespace/name pair in the Pi tool call's
+`thoughtSignature` using a reserved local prefix. Pi-visible calls remain
+`apply_patch`, `web_search`, or `image_generation`, while replay restores
+`functions.apply_patch`, `web.run`, or `image_gen.imagegen`.
 
 ## WebSocket continuation
 
@@ -198,8 +205,8 @@ A custom-aware Responses parser needs per-output-item state similar to:
 type OutputSlot =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
-  | { kind: "function"; callId: string; name: string; arguments: string }
-  | { kind: "custom"; callId: string; name: string; input: string };
+  | { kind: "function"; callId: string; namespace?: string; name: string; arguments: string }
+  | { kind: "custom"; callId: string; namespace?: string; name: string; input: string };
 ```
 
 Required transitions are:

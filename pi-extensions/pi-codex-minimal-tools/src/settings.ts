@@ -54,6 +54,7 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 
 type SettingsRecord = Record<string, unknown>;
 const settingsParseWarnings = new Map<string, string>();
+const SETTINGS_SOURCE = Symbol("pi-codex-minimal-tools.settings-source");
 
 function expandHome(input: string): string {
 	if (input === "~") return homedir();
@@ -175,7 +176,7 @@ function requestProfileSetting(raw: SettingsRecord): CodexRequestProfileOverride
 
 export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 	const raw = readRawConfig();
-	return {
+	const settings: CodexMinimalToolsSettings = {
 		enabled: boolSetting(raw, "enabled"),
 		glyphStyle: glyphStyleSetting(raw),
 		autoEnable: boolSetting(raw, "autoEnable"),
@@ -197,6 +198,17 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		additionalModelIds: modelIdListSetting(raw),
 		deferApplyPatchRendering: boolSetting(raw, "deferApplyPatchRendering"),
 	};
+	Object.defineProperty(settings, SETTINGS_SOURCE, {
+		value: raw,
+		enumerable: false,
+		configurable: false,
+		writable: false,
+	});
+	return settings;
+}
+
+export function getSettingsSource(settings: CodexMinimalToolsSettings): SettingsRecord | undefined {
+	return (settings as CodexMinimalToolsSettings & { [SETTINGS_SOURCE]?: SettingsRecord })[SETTINGS_SOURCE];
 }
 
 export function updateConfig(patch: Partial<CodexMinimalToolsSettings>): string {

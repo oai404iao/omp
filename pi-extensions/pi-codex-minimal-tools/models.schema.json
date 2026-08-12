@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unpkg.com/pi-codex-minimal-tools@1/models.schema.json",
+  "title": "pi-codex-minimal-tools model catalog overrides",
+  "description": "Per-model Codex protocol and tool capability profiles. User entries override bundled entries by exact provider/model id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "models"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL used by editors for validation and completion.",
+      "default": "https://unpkg.com/pi-codex-minimal-tools@1/models.schema.json"
+    },
+    "version": {
+      "const": 1,
+      "description": "Model catalog format version.",
+      "default": 1
+    },
+    "models": {
+      "type": "array",
+      "description": "Exact per-model profiles. Duplicate ids in one user file are rejected.",
+      "items": {
+        "$ref": "#/$defs/model"
+      },
+      "default": []
+    }
+  },
+  "$defs": {
+    "modelId": {
+      "type": "string",
+      "pattern": "^[^\\s/]+/\\S+$"
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/modelId",
+          "description": "Exact provider/model id, for example openai/gpt-5.5."
+        },
+        "extends": {
+          "$ref": "#/$defs/modelId",
+          "description": "Optional parent profile. The parent is deep-merged first; arrays are replaced."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this profile can activate extension behavior."
+        },
+        "responses": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "providerShim": {
+              "type": "boolean",
+              "description": "Use this extension's Codex Responses serializer/parser. The Pi model must use api openai-responses or openai-codex-responses."
+            },
+            "endpoint": {
+              "enum": ["auto", "openai", "codex"],
+              "description": "Endpoint and authentication shape."
+            },
+            "mode": {
+              "enum": ["standard", "lite"],
+              "description": "Standard Responses or the internal Codex Responses Lite envelope."
+            },
+            "systemPromptPlacement": {
+              "enum": ["instructions", "developer"],
+              "description": "Standard-mode prompt placement. Lite always uses a developer message."
+            },
+            "transport": {
+              "enum": ["sse", "websocket", "websocket-cached", "auto"],
+              "description": "Responses transport and continuation strategy."
+            },
+            "websocketPrewarm": {
+              "type": "boolean",
+              "description": "Send a best-effort generate:false prewarm request for WebSocket transports."
+            }
+          }
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "parallelCalls": {
+              "type": "boolean",
+              "description": "Whether the request permits parallel tool calls. Lite always forces false."
+            },
+            "applyPatch": {
+              "description": "Disable apply_patch, expose a JSON function tool, or use the Codex freeform custom tool.",
+              "oneOf": [
+                { "const": false },
+                { "enum": ["function", "custom"] }
+              ]
+            },
+            "webSearch": {
+              "description": "Disable web search or choose hosted Responses search versus standalone Codex web.run.",
+              "oneOf": [
+                { "const": false },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["implementation"],
+                  "properties": {
+                    "implementation": {
+                      "enum": ["hosted", "standalone"],
+                      "description": "hosted is server-executed; standalone calls the Codex alpha/search endpoint."
+                    },
+                    "contentTypes": {
+                      "type": "array",
+                      "description": "Search modalities advertised or accepted by this model.",
+                      "minItems": 1,
+                      "items": {
+                        "enum": ["text", "image"]
+                      },
+                      "uniqueItems": true
+                    }
+                  }
+                }
+              ]
+            },
+            "imageGeneration": {
+              "description": "Disable image generation, use hosted Responses image_generation, or use standalone Codex Images endpoints.",
+              "oneOf": [
+                { "const": false },
+                { "enum": ["hosted", "standalone"] }
+              ]
+            },
+            "viewImage": {
+              "type": "boolean",
+              "description": "Expose the local view_image tool when the Pi model accepts image input."
+            }
+          }
+        },
+        "compaction": {
+          "enum": ["pi", "responses", "responses-compact"],
+          "description": "Pi summary compaction, Codex remote compaction v2, or the legacy /responses/compact endpoint."
+        },
+        "fast": {
+          "description": "Disable Fast mode for this model or configure its service tier and optional usage-cost multiplier.",
+          "oneOf": [
+            { "const": false },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["serviceTier"],
+              "properties": {
+                "serviceTier": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Responses service_tier value sent when the global Fast toggle is enabled."
+                },
+                "costMultiplier": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Optional multiplier applied to Pi's reported request cost for this tier."
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

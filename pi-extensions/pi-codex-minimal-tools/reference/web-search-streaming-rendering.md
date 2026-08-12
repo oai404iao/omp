@@ -1,8 +1,11 @@
-# Hosted web-search streaming and rendering
+# Web search transport, streaming, and rendering
 
 This note records how the analyzed Codex checkout turns hosted OpenAI
 Responses web-search items into a begin/end UI lifecycle. It also defines the
 minimum behavior for this extension's SSE and WebSocket adapters.
+
+Codex also has a standalone client-executed `web.run` extension. Hosted and
+standalone search share a user-facing purpose but use different protocols.
 
 ## Wire lifecycle
 
@@ -207,6 +210,49 @@ three progress events, and a terminal-output fallback update one row rather
 than creating duplicates. The old custom-message renderer remains readable for
 sessions created by earlier extension versions.
 
+## Standalone `web.run`
+
+The current Codex web-search extension registers a namespace tool:
+
+```json
+{
+  "type": "namespace",
+  "name": "web",
+  "description": "Tools in the web namespace.",
+  "tools": [
+    {
+      "type": "function",
+      "name": "run",
+      "strict": false,
+      "parameters": "<SearchCommands schema>"
+    }
+  ]
+}
+```
+
+`SearchCommands` supports:
+
+- text and image queries;
+- open, click, and find operations;
+- PDF screenshots;
+- finance, weather, sports, and time lookups;
+- short, medium, or long output.
+
+The executor posts a `SearchRequest` to `alpha/search` containing the session
+ID, active model, a bounded recent visible conversation tail, commands,
+settings, and a maximum output-token budget. Current extension settings use
+`allowed_callers:["direct"]` and live external web access.
+
+The response carries plaintext `output`, optional opaque structured `results`,
+and an optional encrypted field. Codex returns only plaintext as the
+function-call output and publishes structured results out of band. This
+extension follows that model: the text is model-visible and `results` remain
+in Pi tool-result details.
+
+In Lite, hosted tools are invalid, so an enabled search profile must use
+standalone `web.run`. In Standard mode the profile explicitly chooses hosted
+or standalone behavior.
+
 ## Codex sources
 
 - `codex-rs/codex-api/src/sse/responses.rs`
@@ -218,5 +264,10 @@ sessions created by earlier extension versions.
 - `codex-rs/core/tests/suite/items.rs`
 - `codex-rs/tui/src/chatwidget/tool_lifecycle.rs`
 - `codex-rs/tui/src/history_cell/search.rs`
+- `codex-rs/ext/web-search/src/tool.rs`
+- `codex-rs/ext/web-search/src/history.rs`
+- `codex-rs/ext/web-search/src/extension.rs`
+- `codex-rs/codex-api/src/search.rs`
+- `codex-rs/codex-api/src/endpoint/search.rs`
 - `openai/resources/responses/responses.d.ts` from the installed OpenAI
   JavaScript SDK (definitions of the three progress events)

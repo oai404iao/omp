@@ -1,4 +1,6 @@
-import { isAdditionalToolModel, type ModelLike } from "./capabilities.js";
+import type { ModelLike } from "./capabilities.js";
+import { listResolvedModelProfiles, resolveModelProfile } from "./model-catalog/catalog.js";
+import type { CodexMinimalToolsSettings } from "./settings.js";
 
 export interface ModelRegistryLike {
 	getAll?: () => unknown;
@@ -11,15 +13,7 @@ export interface ActivationContextLike {
 	modelRegistry?: ModelRegistryLike;
 }
 
-const OPENAI_PROVIDER_PROBES = ["openai-codex", "openai"];
-const OPENAI_MODEL_PROBE_IDS = ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "o4-mini"];
-
-export function isOpenAiLoadedModel(model: ModelLike | undefined): boolean {
-	const provider = (model?.provider ?? "").toLowerCase();
-	return provider === "openai" || provider === "openai-codex" || provider === "opencode" || provider.startsWith("openai-") || provider.endsWith("-openai") || provider.endsWith("-codex");
-}
-
-function registryModels(registry: ModelRegistryLike | undefined): ModelLike[] {
+export function registryModels(registry: ModelRegistryLike | undefined): ModelLike[] {
 	if (!registry) return [];
 	for (const method of [registry.getAll, registry.getAvailable]) {
 		if (typeof method !== "function") continue;
@@ -33,19 +27,30 @@ function registryModels(registry: ModelRegistryLike | undefined): ModelLike[] {
 	return [];
 }
 
-export function hasOpenAiModelsLoaded(ctx: ActivationContextLike): boolean {
-	if (isOpenAiLoadedModel(ctx.model)) return true;
-	const models = registryModels(ctx.modelRegistry);
-	if (models.some(isOpenAiLoadedModel)) return true;
+export function hasConfiguredModelsLoaded(
+	ctx: ActivationContextLike,
+	settings?: CodexMinimalToolsSettings,
+): boolean {
+	const current = resolveModelProfile(ctx.model, { settings });
+	if (current?.effective.enabled) return true;
+	const configured = new Set(
+		listResolvedModelProfiles({ settings })
+			.filter((profile) => profile.effective.enabled)
+			.map((profile) => profile.id.toLowerCase()),
+	);
+	if (registryModels(ctx.modelRegistry).some((model) => {
+		const provider = model.provider?.trim().toLowerCase();
+		const id = model.id?.trim().toLowerCase();
+		return Boolean(provider && id && configured.has(`${provider}/${id}`));
+	})) {
+		return true;
+	}
 	try {
-		return OPENAI_PROVIDER_PROBES.some((provider) => OPENAI_MODEL_PROBE_IDS.some((id) => Boolean(ctx.modelRegistry?.find?.(provider, id))));
+		return [...configured].some((fullId) => {
+			const slash = fullId.indexOf("/");
+			return Boolean(ctx.modelRegistry?.find?.(fullId.slice(0, slash), fullId.slice(slash + 1)));
+		});
 	} catch {
 		return false;
 	}
-}
-
-export function hasAdditionalToolModelsLoaded(ctx: ActivationContextLike, additionalModelIds: readonly string[]): boolean {
-	if (additionalModelIds.length === 0) return false;
-	if (isAdditionalToolModel(ctx.model, additionalModelIds)) return true;
-	return registryModels(ctx.modelRegistry).some((model) => isAdditionalToolModel(model, additionalModelIds));
 }

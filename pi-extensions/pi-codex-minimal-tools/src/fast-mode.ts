@@ -4,11 +4,11 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
-	isGpt5SeriesModel,
-	isNativeOpenAiProviderModel,
 	modelKey,
 	type ModelLike,
 } from "./capabilities.js";
+import { loadModelSettings } from "./model-catalog/runtime.js";
+import type { ResolvedCodexModelSettings } from "./model-catalog/runtime.js";
 import {
 	configPath,
 	loadSettings,
@@ -20,21 +20,21 @@ export const FAST_MODE_STATUS_KEY = "codex-fast-mode";
 export const FAST_MODE_SERVICE_TIER = "priority" as const;
 
 export function isFastModeModel(model: ModelLike | undefined): boolean {
-	return isNativeOpenAiProviderModel(model) && isGpt5SeriesModel(model);
+	return Boolean(loadModelSettings(model).fastServiceTier);
 }
 
 export function resolveFastModeServiceTier(
-	settings: Pick<CodexMinimalToolsSettings, "enabled" | "fastMode">,
+	settings: Pick<CodexMinimalToolsSettings, "enabled" | "fastMode"> & Partial<ResolvedCodexModelSettings>,
 	model: ModelLike | undefined,
-): typeof FAST_MODE_SERVICE_TIER | undefined {
-	return settings.enabled && settings.fastMode && isFastModeModel(model)
-		? FAST_MODE_SERVICE_TIER
-		: undefined;
+): string | undefined {
+	if (!settings.enabled || !settings.fastMode) return undefined;
+	if (settings.modelProfile) return settings.fastServiceTier;
+	return loadModelSettings(model, undefined, settings as CodexMinimalToolsSettings).fastServiceTier;
 }
 
 export function applyFastModeServiceTier<T extends Record<string, unknown>>(
 	body: T,
-	settings: Pick<CodexMinimalToolsSettings, "enabled" | "fastMode">,
+	settings: Pick<CodexMinimalToolsSettings, "enabled" | "fastMode"> & Partial<ResolvedCodexModelSettings>,
 	model: ModelLike | undefined,
 ): T {
 	const serviceTier = resolveFastModeServiceTier(settings, model);
@@ -45,11 +45,12 @@ export function applyFastModeServiceTier<T extends Record<string, unknown>>(
 function fastModeLines(ctx: ExtensionContext): string[] {
 	const settings = loadSettings(ctx.cwd);
 	const model = ctx.model as ModelLike | undefined;
-	const activeTier = resolveFastModeServiceTier(settings, model);
+	const modelSettings = loadModelSettings(model, ctx.cwd, settings);
+	const activeTier = resolveFastModeServiceTier(modelSettings, model);
 	return [
-		"OpenAI GPT-5 Fast mode",
+		"Codex Fast mode",
 		`enabled: ${settings.fastMode}`,
-		`service tier: ${FAST_MODE_SERVICE_TIER}`,
+		`service tier: ${modelSettings.fastServiceTier ?? "(unsupported)"}`,
 		`model: ${modelKey(model)}`,
 		`active for current model: ${Boolean(activeTier)}`,
 		`config: ${configPath()}`,
@@ -58,7 +59,8 @@ function fastModeLines(ctx: ExtensionContext): string[] {
 
 export function syncFastModeStatus(ctx: ExtensionContext): void {
 	const settings = loadSettings(ctx.cwd);
-	const tier = resolveFastModeServiceTier(settings, ctx.model as ModelLike | undefined);
+	const model = ctx.model as ModelLike | undefined;
+	const tier = resolveFastModeServiceTier(loadModelSettings(model, ctx.cwd, settings), model);
 	const ui = ctx.ui as ExtensionContext["ui"] | undefined;
 	ui?.setStatus?.(
 		FAST_MODE_STATUS_KEY,
@@ -73,7 +75,7 @@ function showFastModeStatus(ctx: ExtensionCommandContext): void {
 
 export function registerFastMode(pi: ExtensionAPI): void {
 	pi.registerCommand("fast", {
-		description: "Toggle OpenAI GPT-5 Fast mode. Usage: /fast [on|off|status]",
+		description: "Toggle model-profile Fast mode. Usage: /fast [on|off|status]",
 		handler: async (args: string, ctx) => {
 			const command = args.trim().toLowerCase().split(/\s+/, 1)[0] ?? "";
 			const settings = loadSettings(ctx.cwd);

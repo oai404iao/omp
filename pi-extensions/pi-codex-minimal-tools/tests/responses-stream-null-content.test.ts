@@ -148,6 +148,164 @@ test("convertResponsesMessages replays custom calls and outputs by ctc item id",
 	});
 });
 
+test("namespaced function calls map to Pi tool names and replay their wire identity", async () => {
+	const output = createAssistantOutput();
+	await processResponsesStream(
+		asAsyncIterable([
+			{ type: "response.created", response: { id: "resp_namespace" } },
+			{
+				type: "response.output_item.added",
+				output_index: 0,
+				item: {
+					type: "function_call",
+					id: "fc_web",
+					call_id: "call_web",
+					namespace: "web",
+					name: "run",
+					arguments: "",
+				},
+			},
+			{
+				type: "response.function_call_arguments.done",
+				output_index: 0,
+				arguments: '{"search_query":[{"q":"latest docs"}]}',
+			},
+			{
+				type: "response.output_item.done",
+				output_index: 0,
+				item: {
+					type: "function_call",
+					id: "fc_web",
+					call_id: "call_web",
+					namespace: "web",
+					name: "run",
+					arguments: '{"search_query":[{"q":"latest docs"}]}',
+				},
+			},
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_namespace",
+					status: "completed",
+					usage: {
+						input_tokens: 0,
+						output_tokens: 0,
+						total_tokens: 0,
+						input_tokens_details: { cached_tokens: 0 },
+					},
+				},
+			},
+		]),
+		output,
+		{ push() {} } as any,
+		model,
+	);
+
+	const toolCall = output.content.find((block: any) => block.type === "toolCall") as any;
+	assert.equal(toolCall.name, "web_search");
+	assert.match(toolCall.thoughtSignature, /^pi:codex-tool-namespace:/);
+
+	const replay = convertResponsesMessages(model, {
+		systemPrompt: "",
+		tools: [],
+		messages: [
+			output,
+			{
+				role: "toolResult",
+				toolCallId: toolCall.id,
+				toolName: toolCall.name,
+				content: [{ type: "text", text: "search result" }],
+				isError: false,
+				timestamp: Date.now(),
+			},
+		],
+	} as any, new Set(["openai-codex"]), { includeSystemPrompt: false }) as any[];
+
+	assert.deepEqual(replay[0], {
+		type: "function_call",
+		id: "fc_web",
+		call_id: "call_web",
+		namespace: "web",
+		name: "run",
+		arguments: '{"search_query":[{"q":"latest docs"}]}',
+	});
+	assert.equal(replay[1].type, "function_call_output");
+	assert.equal(replay[1].call_id, "call_web");
+});
+
+test("namespaced custom calls retain the functions namespace across replay", async () => {
+	const output = createAssistantOutput();
+	const patch = "*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch\n";
+	await processResponsesStream(
+		asAsyncIterable([
+			{ type: "response.created", response: { id: "resp_custom_namespace" } },
+			{
+				type: "response.output_item.added",
+				output_index: 0,
+				item: {
+					type: "custom_tool_call",
+					id: "ctc_namespace",
+					call_id: "call_patch",
+					namespace: "functions",
+					name: "apply_patch",
+					input: "",
+				},
+			},
+			{
+				type: "response.custom_tool_call_input.delta",
+				item_id: "ctc_namespace",
+				call_id: "call_patch",
+				delta: patch,
+			},
+			{
+				type: "response.output_item.done",
+				output_index: 0,
+				item: {
+					type: "custom_tool_call",
+					id: "ctc_namespace",
+					call_id: "call_patch",
+					namespace: "functions",
+					name: "apply_patch",
+					input: patch,
+				},
+			},
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_custom_namespace",
+					status: "completed",
+					usage: {
+						input_tokens: 0,
+						output_tokens: 0,
+						total_tokens: 0,
+						input_tokens_details: { cached_tokens: 0 },
+					},
+				},
+			},
+		]),
+		output,
+		{ push() {} } as any,
+		model,
+	);
+
+	const toolCall = output.content.find((block: any) => block.type === "toolCall") as any;
+	assert.equal(toolCall.name, "apply_patch");
+	assert.match(toolCall.thoughtSignature, /^pi:codex-tool-namespace:/);
+	const replay = convertResponsesMessages(model, {
+		systemPrompt: "",
+		tools: [],
+		messages: [output],
+	} as any, new Set(["openai-codex"]), { includeSystemPrompt: false }) as any[];
+	assert.deepEqual(replay[0], {
+		type: "custom_tool_call",
+		id: "ctc_namespace",
+		call_id: "call_patch",
+		namespace: "functions",
+		name: "apply_patch",
+		input: patch,
+	});
+});
+
 test("convertResponsesMessages omits rendered web search activity from model history", () => {
 	const messages = convertResponsesMessages(model, {
 		systemPrompt: "",

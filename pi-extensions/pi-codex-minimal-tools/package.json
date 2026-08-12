@@ -1,7 +1,7 @@
 {
   "name": "pi-codex-minimal-tools",
-  "version": "1.2.4",
-  "description": "Minimal Codex/OpenAI native tools for Pi: image_generation, web_search, view_image, apply_patch",
+  "version": "1.3.0",
+  "description": "Model-profiled Codex Responses tools for Pi: WebSocket, Lite, web search, images, compaction, and apply_patch",
   "type": "module",
   "keywords": [
     "pi-package",
@@ -51,6 +51,7 @@
     "reference/",
     "README.md",
     "config.schema.json",
+    "models.schema.json",
     "package.json",
     "tsconfig.json"
   ],

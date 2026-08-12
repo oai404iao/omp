@@ -27,3 +27,53 @@ test("rewriteNativeOpenAiTools rewrites web_search only when enabled", () => {
 	assert.deepEqual(enabled.rewritten, ["web_search"]);
 	assert.deepEqual(enabled.payload.tools[0], { type: "web_search" });
 });
+
+test("rewriteNativeOpenAiTools emits Codex namespace tools for standalone profiles", () => {
+	const payload = {
+		tools: [
+			{
+				type: "function",
+				name: "web_search",
+				description: "Search the web",
+				parameters: { type: "object", properties: {} },
+			},
+			{
+				type: "function",
+				name: "image_generation",
+				description: "Generate an image",
+				parameters: { type: "object", properties: { prompt: { type: "string" } } },
+			},
+		],
+	};
+	const result = rewriteNativeOpenAiTools(payload, {
+		webSearch: { implementation: "standalone", contentTypes: ["text", "image"] },
+		imageGeneration: "standalone",
+	});
+	assert.deepEqual(result.rewritten, ["web_search", "image_generation"]);
+	assert.deepEqual(result.payload.tools, [
+		{
+			type: "namespace",
+			name: "web",
+			description: "Tools in the web namespace.",
+			tools: [{
+				type: "function",
+				name: "run",
+				description: "Search the web",
+				parameters: { type: "object", properties: {} },
+				strict: false,
+			}],
+		},
+		{
+			type: "namespace",
+			name: "image_gen",
+			description: "Tools in the image_gen namespace.",
+			tools: [{
+				type: "function",
+				name: "imagegen",
+				description: "Generate an image",
+				parameters: { type: "object", properties: { prompt: { type: "string" } } },
+				strict: false,
+			}],
+		},
+	]);
+});

@@ -32,7 +32,7 @@ function withAgentDir<T>(fn: (agentDir: string) => Promise<T> | T): Promise<T> |
 	}
 }
 
-test("Fast mode applies only to native OpenAI GPT-5 models and preserves explicit tiers", () => {
+test("Fast mode follows exact model profiles and preserves explicit tiers", () => {
 	const settings = { ...DEFAULT_SETTINGS, fastMode: true };
 	assert.equal(resolveFastModeServiceTier(settings, { provider: "openai", id: "gpt-5.6-sol" }), "priority");
 	assert.equal(resolveFastModeServiceTier(settings, { provider: "openai-codex", id: "gpt-5.5" }), "priority");

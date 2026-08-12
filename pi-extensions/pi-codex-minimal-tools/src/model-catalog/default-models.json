@@ -1,0 +1,252 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "openai/gpt-5.6-sol",
+      "enabled": true,
+      "responses": {
+        "providerShim": true,
+        "endpoint": "openai",
+        "mode": "lite",
+        "systemPromptPlacement": "developer",
+        "transport": "auto",
+        "websocketPrewarm": true
+      },
+      "tools": {
+        "parallelCalls": false,
+        "applyPatch": "custom",
+        "webSearch": {
+          "implementation": "standalone",
+          "contentTypes": ["text", "image"]
+        },
+        "imageGeneration": "standalone",
+        "viewImage": false
+      },
+      "compaction": "responses",
+      "fast": {
+        "serviceTier": "priority",
+        "costMultiplier": 2
+      }
+    },
+    {
+      "id": "openai/gpt-5.6-terra",
+      "extends": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "openai/gpt-5.6-luna",
+      "extends": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "openai/gpt-5.5",
+      "enabled": true,
+      "responses": {
+        "providerShim": true,
+        "endpoint": "openai",
+        "mode": "standard",
+        "systemPromptPlacement": "instructions",
+        "transport": "auto",
+        "websocketPrewarm": true
+      },
+      "tools": {
+        "parallelCalls": true,
+        "applyPatch": "custom",
+        "webSearch": {
+          "implementation": "hosted",
+          "contentTypes": ["text", "image"]
+        },
+        "imageGeneration": "standalone",
+        "viewImage": false
+      },
+      "compaction": "responses",
+      "fast": {
+        "serviceTier": "priority",
+        "costMultiplier": 2.5
+      }
+    },
+    {
+      "id": "openai/gpt-5.4",
+      "extends": "openai/gpt-5.5",
+      "fast": {
+        "serviceTier": "priority",
+        "costMultiplier": 2
+      }
+    },
+    {
+      "id": "openai/gpt-5.4-mini",
+      "extends": "openai/gpt-5.4",
+      "fast": false
+    },
+    {
+      "id": "openai/gpt-5.2",
+      "extends": "openai/gpt-5.4-mini",
+      "tools": {
+        "webSearch": {
+          "implementation": "hosted",
+          "contentTypes": ["text"]
+        }
+      }
+    },
+    {
+      "id": "openai/codex-auto-review",
+      "extends": "openai/gpt-5.4-mini"
+    },
+    {
+      "id": "openai/gpt-5",
+      "extends": "openai/gpt-5.2",
+      "fast": {
+        "serviceTier": "priority",
+        "costMultiplier": 2
+      }
+    },
+    {
+      "id": "openai/gpt-5-mini",
+      "extends": "openai/gpt-5",
+      "fast": false
+    },
+    {
+      "id": "openai/gpt-5.1",
+      "extends": "openai/gpt-5"
+    },
+    {
+      "id": "openai/gpt-5.1-codex",
+      "extends": "openai/gpt-5.1"
+    },
+    {
+      "id": "openai/gpt-5.3-codex",
+      "extends": "openai/gpt-5.4-mini"
+    },
+    {
+      "id": "openai/gpt-4.1",
+      "enabled": true,
+      "responses": {
+        "providerShim": true,
+        "endpoint": "openai",
+        "mode": "standard",
+        "systemPromptPlacement": "instructions",
+        "transport": "sse",
+        "websocketPrewarm": false
+      },
+      "tools": {
+        "parallelCalls": true,
+        "applyPatch": false,
+        "webSearch": false,
+        "imageGeneration": "hosted",
+        "viewImage": false
+      },
+      "compaction": "pi",
+      "fast": false
+    },
+    {
+      "id": "openai/o4-mini",
+      "extends": "openai/gpt-4.1",
+      "tools": {
+        "imageGeneration": false
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.6-sol",
+      "extends": "openai/gpt-5.6-sol",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.6-terra",
+      "extends": "openai/gpt-5.6-terra",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.6-luna",
+      "extends": "openai/gpt-5.6-luna",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.5",
+      "extends": "openai/gpt-5.5",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.4",
+      "extends": "openai/gpt-5.4",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.4-mini",
+      "extends": "openai/gpt-5.4-mini",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.2",
+      "extends": "openai/gpt-5.2",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/codex-auto-review",
+      "extends": "openai/codex-auto-review",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5",
+      "extends": "openai/gpt-5",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5-mini",
+      "extends": "openai/gpt-5-mini",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.1",
+      "extends": "openai/gpt-5.1",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.1-codex",
+      "extends": "openai/gpt-5.1-codex",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-5.3-codex",
+      "extends": "openai/gpt-5.3-codex",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/gpt-4.1",
+      "extends": "openai/gpt-4.1",
+      "responses": {
+        "endpoint": "codex"
+      }
+    },
+    {
+      "id": "openai-codex/o4-mini",
+      "extends": "openai/o4-mini",
+      "responses": {
+        "endpoint": "codex"
+      }
+    }
+  ]
+}
