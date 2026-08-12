@@ -39,6 +39,7 @@ import {
 	type WebSearchCitationSource,
 } from "./providers/openai-responses-shared.js";
 import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
+import { createCodexReservedNamespaceTool } from "./codex-reserved-tools.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 import { applyFastModeServiceTier } from "./fast-mode.js";
 import {
@@ -772,27 +773,24 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 			description: string;
 			tools: unknown[];
 		}>();
-		const namespaceFor = (name: string): { namespace: string; toolName: string } => {
-			if (name === "web_search") return { namespace: "web", toolName: "run" };
-			if (name === "image_generation") return { namespace: "image_gen", toolName: "imagegen" };
-			return { namespace: "functions", toolName: name };
-		};
 		for (const tool of tools as Array<Record<string, unknown>>) {
 			if (typeof tool.name !== "string") continue;
-			const identity = namespaceFor(tool.name);
-			let namespace = namespaces.get(identity.namespace);
+			if (tool.name === "web_search" || tool.name === "image_generation") {
+				const reserved = createCodexReservedNamespaceTool(tool.name);
+				namespaces.set(reserved.name, reserved);
+				continue;
+			}
+			let namespace = namespaces.get("functions");
 			if (!namespace) {
 				namespace = {
 					type: "namespace",
-					name: identity.namespace,
-					description: identity.namespace === "functions"
-						? ""
-						: `Tools in the ${identity.namespace} namespace.`,
+					name: "functions",
+					description: "",
 					tools: [],
 				};
-				namespaces.set(identity.namespace, namespace);
+				namespaces.set("functions", namespace);
 			}
-			const nestedTool: Record<string, unknown> = { ...tool, name: identity.toolName };
+			const nestedTool: Record<string, unknown> = { ...tool };
 			if (nestedTool.type === "function" && typeof nestedTool.strict !== "boolean") {
 				nestedTool.strict = false;
 			}

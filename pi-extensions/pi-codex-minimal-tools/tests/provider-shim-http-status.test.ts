@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
+import { createCodexReservedNamespaceTool } from "../src/codex-reserved-tools.js";
 import { loadModelSettings } from "../src/model-catalog/runtime.js";
 import { decodeWebSearchActivityTextSignature } from "../src/providers/openai-responses-shared.js";
 import {
@@ -518,6 +519,33 @@ test("Responses Lite namespace function tools normalize strict to false", async 
 	assert.equal(requestBody.input[0]?.tools[0]?.name, "functions");
 	assert.equal(requestBody.input[0]?.tools[0]?.tools[0]?.type, "function");
 	assert.equal(requestBody.input[0]?.tools[0]?.tools[0]?.strict, false);
+});
+
+test("Responses Lite emits canonical Codex reserved namespaces", async () => {
+	writeSettings({ requestProfile: { responsesMode: "lite" } });
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	await runCodexProvider({}, {}, [
+		{
+			name: "web_search",
+			description: "Pi web schema must not be forwarded",
+			parameters: { type: "object", properties: {} },
+		},
+		{
+			name: "image_generation",
+			description: "Pi image schema must not be forwarded",
+			parameters: { type: "object", properties: { prompt: { type: "string" } } },
+		},
+	]);
+
+	assert.deepEqual(requestBody.input[0].tools, [
+		createCodexReservedNamespaceTool("web_search"),
+		createCodexReservedNamespaceTool("image_generation"),
+	]);
 });
 
 test("Responses Lite native compaction preserves the Lite envelope on both compaction endpoints", async () => {

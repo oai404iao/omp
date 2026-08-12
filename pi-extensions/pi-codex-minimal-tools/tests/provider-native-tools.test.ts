@@ -1,6 +1,40 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
+import { createCodexReservedNamespaceTool } from "../src/codex-reserved-tools.js";
 import { rewriteNativeOpenAiTools } from "../src/provider-native-tools.js";
+
+function canonicalJson(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+	if (value && typeof value === "object") {
+		return `{${Object.entries(value as Record<string, unknown>)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+			.join(",")}}`;
+	}
+	return JSON.stringify(value);
+}
+
+function sha256(value: unknown): string {
+	return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+test("Codex reserved namespace definitions match the 0.146.0 gpt-5.6-sol capture", () => {
+	assert.equal(
+		sha256(createCodexReservedNamespaceTool("web_search")),
+		"f67597d3df3f3a77cb517646508e7305804ea029c6f8b1c1c1f241f0de0b214f",
+	);
+	assert.equal(
+		sha256(createCodexReservedNamespaceTool("image_generation")),
+		"ccc508cff0a216bbdf368be8c98be94134a1aed0479cddd28c77d8e004f5b73e",
+	);
+});
+
+test("Codex reserved namespace definitions are cloned per request", () => {
+	const first = createCodexReservedNamespaceTool("web_search");
+	first.tools[0]!.description = "mutated";
+	assert.notEqual(createCodexReservedNamespaceTool("web_search").tools[0]!.description, "mutated");
+});
 
 test("rewriteNativeOpenAiTools rewrites image_generation function tools to native Responses tools", () => {
 	const payload = {
@@ -51,29 +85,7 @@ test("rewriteNativeOpenAiTools emits Codex namespace tools for standalone profil
 	});
 	assert.deepEqual(result.rewritten, ["web_search", "image_generation"]);
 	assert.deepEqual(result.payload.tools, [
-		{
-			type: "namespace",
-			name: "web",
-			description: "Tools in the web namespace.",
-			tools: [{
-				type: "function",
-				name: "run",
-				description: "Search the web",
-				parameters: { type: "object", properties: {} },
-				strict: false,
-			}],
-		},
-		{
-			type: "namespace",
-			name: "image_gen",
-			description: "Tools in the image_gen namespace.",
-			tools: [{
-				type: "function",
-				name: "imagegen",
-				description: "Generate an image",
-				parameters: { type: "object", properties: { prompt: { type: "string" } } },
-				strict: false,
-			}],
-		},
+		createCodexReservedNamespaceTool("web_search"),
+		createCodexReservedNamespaceTool("image_generation"),
 	]);
 });
