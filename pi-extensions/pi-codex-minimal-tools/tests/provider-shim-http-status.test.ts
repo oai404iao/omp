@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test, { afterEach } from "node:test";
+import test, { afterEach, beforeEach } from "node:test";
+import { loadModelSettings } from "../src/model-catalog/runtime.js";
 import { decodeWebSearchActivityTextSignature } from "../src/providers/openai-responses-shared.js";
 import {
 	buildCodexCompactionCheckpoint,
@@ -29,6 +30,10 @@ afterEach(() => {
 	globalThis.setTimeout = originalSetTimeout;
 	if (originalPiCodingAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = originalPiCodingAgentDir;
+});
+
+beforeEach(() => {
+	writeSettings({ openaiTransport: "sse" });
 });
 
 function installImmediateRetryTimers(): void {
@@ -123,6 +128,14 @@ function writeSettings(value: Record<string, unknown>): void {
 	mkdirSync(configDir, { recursive: true });
 	writeFileSync(join(configDir, "config.json"), JSON.stringify(value));
 	process.env.PI_CODING_AGENT_DIR = agentDir;
+}
+
+function writeModels(value: unknown): void {
+	const agentDir = process.env.PI_CODING_AGENT_DIR;
+	assert.ok(agentDir);
+	const configDir = join(agentDir, "extensions", "pi-codex-minimal-tools");
+	mkdirSync(configDir, { recursive: true });
+	writeFileSync(join(configDir, "models.json"), JSON.stringify(value));
 }
 
 function errorResponse(status: number, body: unknown, statusText = "Error"): Response {
@@ -461,9 +474,11 @@ test("Responses Lite carries custom apply_patch and replays custom history in in
 	assert.equal(requestHeaders?.get("x-openai-internal-codex-responses-lite"), "true");
 	assert.equal(requestBody.input[0].type, "additional_tools");
 	assert.equal(requestBody.input[0].role, "developer");
-	assert.equal(requestBody.input[0].tools[0].type, "custom");
-	assert.equal(requestBody.input[0].tools[0].name, "apply_patch");
-	assert.equal(requestBody.input[0].tools[0].format.syntax, "lark");
+	assert.equal(requestBody.input[0].tools[0].type, "namespace");
+	assert.equal(requestBody.input[0].tools[0].name, "functions");
+	assert.equal(requestBody.input[0].tools[0].tools[0].type, "custom");
+	assert.equal(requestBody.input[0].tools[0].tools[0].name, "apply_patch");
+	assert.equal(requestBody.input[0].tools[0].tools[0].format.syntax, "lark");
 	assert.deepEqual(requestBody.input[1], {
 		type: "message",
 		role: "developer",
@@ -478,6 +493,121 @@ test("Responses Lite carries custom apply_patch and replays custom history in in
 	assert.equal(requestBody.input[4].type, "custom_tool_call_output");
 	assert.equal(requestBody.input[4].call_id, "call_patch");
 	assert.equal(requestBody.input[4].output, "Applied patch");
+});
+
+test("Responses Lite namespace function tools normalize strict to false", async () => {
+	writeSettings({ requestProfile: { responsesMode: "lite" } });
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	await runCodexProvider({}, {}, [{
+		name: "read",
+		description: "Read a file",
+		parameters: {
+			type: "object",
+			properties: { path: { type: "string" } },
+			required: ["path"],
+			additionalProperties: false,
+		},
+	}]);
+
+	assert.equal(requestBody.input[0]?.tools[0]?.type, "namespace");
+	assert.equal(requestBody.input[0]?.tools[0]?.name, "functions");
+	assert.equal(requestBody.input[0]?.tools[0]?.tools[0]?.type, "function");
+	assert.equal(requestBody.input[0]?.tools[0]?.tools[0]?.strict, false);
+});
+
+test("Responses Lite native compaction preserves the Lite envelope on both compaction endpoints", async () => {
+	writeSettings({});
+	writeModels({
+		version: 1,
+		models: [{
+			id: "openai/gpt-5.6-sol",
+			responses: { transport: "sse" },
+		}],
+	});
+	const model = {
+		provider: "openai",
+		api: "openai-responses",
+		id: "gpt-5.6-sol",
+		baseUrl: "https://example.test/v1",
+		headers: {},
+		input: ["text", "image"],
+		reasoning: false,
+		contextWindow: 400_000,
+		maxTokens: 16_384,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	} as any;
+	const context = {
+		systemPrompt: "stable instructions",
+		messages: [{ role: "user", content: "compact this", timestamp: 1 }],
+		tools: [{
+			name: "apply_patch",
+			description: "Apply a patch",
+			parameters: {
+				type: "object",
+				properties: { input: { type: "string" } },
+				required: ["input"],
+				additionalProperties: false,
+			},
+		}],
+	} as any;
+	const settings = loadModelSettings(model);
+	assert.equal(settings.requestProfile.responsesMode, "lite");
+	assert.equal(settings.compactionMode, "responses");
+	assert.equal(settings.openaiTransport, "sse");
+
+	const requests: Array<{ url: string; body: any; headers: Headers }> = [];
+	globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+		const body = JSON.parse(String(init?.body));
+		requests.push({ url: String(url), body, headers: new Headers(init?.headers as HeadersInit) });
+		if (String(url).endsWith("/responses/compact")) {
+			return Response.json({
+				output: [{ type: "compaction", encrypted_content: "legacy-lite-state" }],
+			});
+		}
+		return successSseResponse([{ type: "compaction", encrypted_content: "lite-state" }]);
+	}) as typeof fetch;
+
+	const responses = await requestOpenAINativeCompaction(model, context, {
+		mode: "responses",
+		apiKey: "plain-api-key",
+		sessionId: "lite-session",
+		settings,
+	});
+	const legacy = await requestOpenAINativeCompaction(model, context, {
+		mode: "responses-compact",
+		apiKey: "plain-api-key",
+		settings: {
+			...settings,
+			compactionMode: "responses-compact",
+		},
+	});
+
+	assert.deepEqual(responses, [
+		{ type: "message", role: "user", content: [{ type: "input_text", text: "compact this" }] },
+		{ type: "compaction", encrypted_content: "lite-state" },
+	]);
+	assert.deepEqual(legacy, [
+		{ type: "compaction", encrypted_content: "legacy-lite-state" },
+	]);
+	for (const request of requests) {
+		assert.equal(request.headers.get("x-openai-internal-codex-responses-lite"), "true");
+		assert.equal("instructions" in request.body, false);
+		assert.equal("tools" in request.body, false);
+		assert.equal(request.body.parallel_tool_calls, false);
+		assert.deepEqual(request.body.reasoning, { context: "all_turns" });
+		assert.equal(request.body.input[0]?.type, "additional_tools");
+		assert.equal(request.body.input[0]?.role, "developer");
+		assert.equal(request.body.input[0]?.tools[0]?.type, "namespace");
+		assert.equal(request.body.input[0]?.tools[0]?.name, "functions");
+		assert.equal(request.body.input[0]?.tools[0]?.tools[0]?.type, "custom");
+		assert.equal(request.body.input[0]?.tools[0]?.tools[0]?.name, "apply_patch");
+	}
+	assert.deepEqual(requests[0]?.body.input.at(-1), { type: "compaction_trigger" });
 });
 
 test("Responses Lite adds its WebSocket signal only to WebSocket client metadata", () => {
@@ -660,6 +790,71 @@ test("openai provider applies request profiles with API-key Responses transport"
 	assert.equal(requestBody.parallel_tool_calls, false);
 	assert.equal(requestBody.tools[0].type, "custom");
 	assert.equal(requestBody.tools[0].name, "apply_patch");
+});
+
+test("user catalog entries enable the Responses shim for custom providers bound to the Responses API", async () => {
+	writeSettings({});
+	writeModels({
+		version: 1,
+		models: [{
+			id: "custom/my-codex-model",
+			extends: "openai/gpt-5.5",
+			responses: {
+				endpoint: "openai",
+				transport: "sse",
+			},
+		}],
+	});
+	const harness = createProviderHarness();
+	const model = {
+		provider: "custom",
+		api: "openai-responses",
+		id: "my-codex-model",
+		baseUrl: "https://custom.example/v1",
+		headers: {},
+		input: ["text"],
+		reasoning: false,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	};
+	for (const handler of harness.handlers.model_select ?? []) {
+		await handler({}, { cwd: process.cwd(), model });
+	}
+	const provider = harness.providers.custom;
+	assert.ok(provider);
+	let requestUrl = "";
+	let requestBody: any;
+	globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+		requestUrl = String(url);
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	const stream = provider.streamSimple(
+		model,
+		{
+			systemPrompt: "",
+			messages: [{ role: "user", content: "hello" }],
+			tools: [{
+				name: "apply_patch",
+				description: "Apply a patch",
+				parameters: {
+					type: "object",
+					properties: { input: { type: "string" } },
+					required: ["input"],
+					additionalProperties: false,
+				},
+			}],
+		},
+		{ apiKey: "plain-api-key" },
+	);
+	const result = await stream.result();
+
+	assert.equal(result.stopReason, "stop");
+	assert.equal(result.provider, "custom");
+	assert.equal(requestUrl, "https://custom.example/v1/responses");
+	assert.equal(requestBody.model, "my-codex-model");
+	assert.equal(requestBody.tools[0]?.type, "custom");
+	assert.equal(requestBody.tools[0]?.name, "apply_patch");
 });
 
 test("normal OpenAI requests do not compact inline inside a tool turn", async () => {

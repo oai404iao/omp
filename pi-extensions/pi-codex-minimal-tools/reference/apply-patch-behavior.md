@@ -6,6 +6,12 @@ of the analyzed Codex checkout at commit
 separate concern: both the JSON function fallback and the Codex freeform custom
 tool bridge the patch text into the same local executor.
 
+The broader protocol reference was revalidated at
+`eb9dceba1a2e658142a456c5898836774835616b`. Codex's apply-patch executor was
+substantially refactored between those snapshots, so this document deliberately
+describes the extension's implemented compatibility baseline rather than
+claiming byte-for-byte parity with the newer executor.
+
 ## Canonical patch structure
 
 A patch contains one or more Add, Update, or Delete sections between

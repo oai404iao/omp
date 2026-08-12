@@ -5,8 +5,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { glyphs, treeGlyph } from "./glyphs.js";
 import { loadSettings } from "./settings.js";
+import { loadModelSettings, type ResolvedCodexModelSettings } from "./model-catalog/runtime.js";
 import { resolveCodexRequestProfile, type CodexRequestProfile } from "./codex-request-profile.js";
-import { isOpenAiGpt5Model } from "./capabilities.js";
 import { saveBase64Image } from "./utils/images.js";
 import { Container, getCapabilities, getImageDimensions, Image, Spacer, Text } from "@earendil-works/pi-tui";
 import {
@@ -15,6 +15,8 @@ import {
 	clampThinkingLevel,
 	createAssistantMessageDiagnostic,
 	getEnvApiKey,
+	streamSimpleOpenAICodexResponses,
+	streamSimpleOpenAIResponses,
 	type Api,
 	type AssistantMessage,
 	type AssistantMessageEventStream,
@@ -39,9 +41,12 @@ import {
 import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 import { applyFastModeServiceTier } from "./fast-mode.js";
+import {
+	hasCodexRequestAuth,
+	resolveCodexRequestAccountId,
+} from "./codex-http.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
-const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 export const IMAGE_SAVE_DISPLAY_MESSAGE_TYPE = "codex-image-generation-display";
 export const WEB_SEARCH_ACTIVITY_MESSAGE_TYPE = "codex-web-search-activity";
 const OPENAI_CODEX_IMAGE_DIR = ".pi/openai-codex-images";
@@ -88,7 +93,7 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
 		});
 }
 
-interface SavedGeneratedImage {
+export interface SavedGeneratedImage {
 	absolutePath: string;
 	relativePath: string;
 	latestAbsolutePath: string;
@@ -511,19 +516,6 @@ export async function saveOpenAICodexGeneratedImage(
 	};
 }
 
-function extractAccountId(token: string): string {
-	try {
-		const parts = token.split(".");
-		if (parts.length !== 3) throw new Error("Invalid token");
-		const payload = JSON.parse(Buffer.from(parts[1] ?? "", "base64").toString("utf8"));
-		const accountId = payload?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
-		if (!accountId) throw new Error("No account ID in token");
-		return accountId;
-	} catch {
-		throw new Error("Failed to extract accountId from token");
-	}
-}
-
 export function resolveCodexUrl(baseUrl: string | undefined, options?: { apiKeyMode?: boolean }): string {
 	const raw = baseUrl && baseUrl.trim().length > 0 ? baseUrl : DEFAULT_CODEX_BASE_URL;
 	const normalized = raw.replace(/\/+$/, "");
@@ -616,10 +608,10 @@ function appendCommaSeparatedHeader(headers: Headers, name: string, value: strin
 
 function applyConfiguredResponsesFeatureHeaders(
 	headers: Headers,
-	settings: ReturnType<typeof loadSettings>,
-	model: Model<Api>,
+	settings: ResolvedCodexModelSettings,
+	_model: Model<Api>,
 ): Headers {
-	if (model.provider === "openai" && settings.compactionMode === "responses") {
+	if (settings.compactionMode === "responses") {
 		appendCommaSeparatedHeader(
 			headers,
 			X_CODEX_BETA_FEATURES,
@@ -665,19 +657,25 @@ function thinkingLevelFromUnknown(value: unknown): ThinkingLevel | undefined {
 		: undefined;
 }
 
-function getServiceTierCostMultiplier(model: Model<Api>, serviceTier: ServiceTier): number {
-	switch (serviceTier) {
-		case "flex":
-			return 0.5;
-		case "priority":
-			return model.id === "gpt-5.5" ? 2.5 : 2;
-		default:
-			return 1;
-	}
+function getServiceTierCostMultiplier(
+	model: Model<Api>,
+	serviceTier: ServiceTier,
+	cwd: string,
+): number {
+	if (serviceTier === "flex") return 0.5;
+	const settings = loadModelSettings(model, cwd);
+	return serviceTier && serviceTier === settings.fastServiceTier
+		? settings.fastCostMultiplier ?? 1
+		: 1;
 }
 
-function applyServiceTierPricing(usage: AssistantMessage["usage"], serviceTier: ServiceTier, model: Model<Api>): void {
-	const multiplier = getServiceTierCostMultiplier(model, serviceTier);
+function applyServiceTierPricing(
+	usage: AssistantMessage["usage"],
+	serviceTier: ServiceTier,
+	model: Model<Api>,
+	cwd: string,
+): void {
+	const multiplier = getServiceTierCostMultiplier(model, serviceTier, cwd);
 	if (multiplier === 1) return;
 	usage.cost.input *= multiplier;
 	usage.cost.output *= multiplier;
@@ -759,7 +757,7 @@ function withWebSocketRequestMetadata(body: ResponsesBody, metadata: WebSocketRe
 }
 
 export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, profile: CodexRequestProfile, options?: SimpleStreamOptions): ResponsesBody {
-	const messages = convertResponsesMessages(model, context, CODEX_TOOL_CALL_PROVIDERS, {
+	const messages = convertResponsesMessages(model, context, new Set([...CODEX_TOOL_CALL_PROVIDERS, model.provider]), {
 		includeSystemPrompt: false,
 	});
 	const tools = context.tools && context.tools.length > 0
@@ -767,6 +765,41 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 			profile.patchTransport === "custom" && tool.type === "function" && tool.name === "apply_patch" ? createCodexApplyPatchCustomTool() : tool)
 		: [];
 	const lite = profile.responsesMode === "lite";
+	const liteTools = (): unknown[] => {
+		const namespaces = new Map<string, {
+			type: "namespace";
+			name: string;
+			description: string;
+			tools: unknown[];
+		}>();
+		const namespaceFor = (name: string): { namespace: string; toolName: string } => {
+			if (name === "web_search") return { namespace: "web", toolName: "run" };
+			if (name === "image_generation") return { namespace: "image_gen", toolName: "imagegen" };
+			return { namespace: "functions", toolName: name };
+		};
+		for (const tool of tools as Array<Record<string, unknown>>) {
+			if (typeof tool.name !== "string") continue;
+			const identity = namespaceFor(tool.name);
+			let namespace = namespaces.get(identity.namespace);
+			if (!namespace) {
+				namespace = {
+					type: "namespace",
+					name: identity.namespace,
+					description: identity.namespace === "functions"
+						? ""
+						: `Tools in the ${identity.namespace} namespace.`,
+					tools: [],
+				};
+				namespaces.set(identity.namespace, namespace);
+			}
+			const nestedTool: Record<string, unknown> = { ...tool, name: identity.toolName };
+			if (nestedTool.type === "function" && typeof nestedTool.strict !== "boolean") {
+				nestedTool.strict = false;
+			}
+			namespace.tools.push(nestedTool);
+		}
+		return [...namespaces.values()].filter((namespace) => namespace.tools.length > 0);
+	};
 
 	const body: ResponsesBody = {
 		model: model.id,
@@ -782,7 +815,7 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 	if (lite) {
 		stripResponsesLiteImageDetails(messages);
 		body.input = [
-			{ type: "additional_tools", role: "developer", tools },
+			{ type: "additional_tools", role: "developer", tools: liteTools() },
 			...(context.systemPrompt
 				? [{ type: "message", role: "developer", content: [{ type: "input_text", text: context.systemPrompt }] }]
 				: []),
@@ -1903,9 +1936,10 @@ function webSocketCacheKey(
 	model: Model<Api>,
 	url: string,
 	headers: Headers,
+	profileHash?: string,
 ): string | undefined {
 	return sessionId
-		? `${sessionId}\n${model.provider}\n${model.api}\n${url}\n${webSocketHeaderIdentity(headers)}`
+		? `${sessionId}\n${model.provider}\n${model.api}\n${model.id}\n${url}\n${profileHash ?? "no-profile"}\n${webSocketHeaderIdentity(headers)}`
 		: undefined;
 }
 
@@ -1913,8 +1947,11 @@ function webSocketFallbackKey(
 	sessionId: string | undefined,
 	model: Model<Api>,
 	url: string,
+	profileHash?: string,
 ): string | undefined {
-	return sessionId ? `${sessionId}\n${model.provider}\n${model.api}\n${url}` : undefined;
+	return sessionId
+		? `${sessionId}\n${model.provider}\n${model.api}\n${model.id}\n${url}\n${profileHash ?? "no-profile"}`
+		: undefined;
 }
 
 function friendlyUsageLimitMessage(error: StreamEventShape["error"], status: number | undefined): string | undefined {
@@ -2269,24 +2306,26 @@ async function processCapturedResponsesStream<TApi extends Api>(
 	await processResponsesStream(tappedEvents as AsyncIterable<never>, output, stream, model, {
 		serviceTier: (options as { serviceTier?: ServiceTier } | undefined)?.serviceTier,
 		resolveServiceTier: resolveCodexServiceTier,
-		applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model as Model<Api>),
+		applyServiceTierPricing: (usage, serviceTier) =>
+			applyServiceTierPricing(usage, serviceTier, model as Model<Api>, cwd),
 		webSearchCitationSources,
 		historicalCitationSources,
 	});
 	return { responseId: responseId ?? output.responseId, responseItems };
 }
 
-function compactUrl(baseUrl: string | undefined): string {
-	return `${resolveCodexUrl(baseUrl, { apiKeyMode: true }).replace(/\/+$/, "")}/compact`;
+function compactUrl(baseUrl: string | undefined, apiKeyMode: boolean): string {
+	return `${resolveCodexUrl(baseUrl, { apiKeyMode }).replace(/\/+$/, "")}/compact`;
 }
 
 function buildJsonHeaders(
 	modelHeaders: Record<string, string> | undefined,
 	additionalHeaders: Record<string, string> | undefined,
+	accountId: string | undefined,
 	apiKey: string,
 	sessionId?: string,
 ): Headers {
-	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, undefined, apiKey);
+	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, apiKey);
 	headers.set("accept", "application/json");
 	headers.set("content-type", "application/json");
 	if (sessionId) {
@@ -2571,13 +2610,20 @@ async function requestCodexCompactionTriggerWebSocket(
 	transport: ProviderTransport,
 	requestMetadata: WebSocketRequestMetadata,
 	signal: AbortSignal | undefined,
+	profileHash?: string,
 ): Promise<unknown> {
 	let disableCachedContext = false;
 	let staleSocketRetried = false;
 	let missingPreviousResponseRetried = false;
 
 	while (true) {
-		const cacheKey = webSocketCacheKey(requestMetadata.sessionId, model, url, headers);
+		const cacheKey = webSocketCacheKey(
+			requestMetadata.sessionId,
+			model,
+			url,
+			headers,
+			profileHash,
+		);
 		const { socket, entry, release, reused } = await acquireWebSocket(
 			url,
 			headers,
@@ -2674,19 +2720,25 @@ async function requestCodexCompactionTriggerWithTransport(
 		sessionId?: string;
 		turnId?: string;
 		signal?: AbortSignal;
-		settings: ReturnType<typeof loadSettings>;
+		settings: ResolvedCodexModelSettings;
 		maxRetries?: number;
 		maxRetryDelayMs?: number;
 	},
 ): Promise<unknown> {
 	const transport = options.settings.openaiTransport;
-	const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: true });
+	const responsesMode = resolveCodexRequestProfile(options.settings.requestProfile).responsesMode;
+	const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
 	if (transport === "sse") {
 		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
 	}
 
-	const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: true });
-	const fallbackKey = webSocketFallbackKey(options.sessionId, model, websocketUrl);
+	const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
+	const fallbackKey = webSocketFallbackKey(
+		options.sessionId,
+		model,
+		websocketUrl,
+		options.settings.modelProfileHash,
+	);
 	if (
 		transport === "auto"
 		&& fallbackKey
@@ -2714,11 +2766,12 @@ async function requestCodexCompactionTriggerWithTransport(
 			return await requestCodexCompactionTriggerWebSocket(
 				websocketUrl,
 				headers.websocket,
-				body,
+				withResponsesLiteWebSocketMetadata(body, responsesMode),
 				model,
 				transport,
 				requestMetadata,
 				options.signal,
+				options.settings.modelProfileHash,
 			);
 		} catch (error) {
 			if (options.signal?.aborted) throw new Error("Request was aborted");
@@ -2783,27 +2836,44 @@ export async function requestOpenAINativeCompaction(
 		turnId?: string;
 		maxRetries?: number;
 		maxRetryDelayMs?: number;
-		settings: ReturnType<typeof loadSettings>;
+		settings: ResolvedCodexModelSettings;
 	},
 ): Promise<unknown[]> {
-	if (!isOpenAiGpt5Model(model)) {
-		throw new Error("OpenAI native compaction is limited to openai/GPT-5-series models");
+	const settings = options.settings.modelProfile
+		? options.settings
+		: loadModelSettings(model, undefined, options.settings);
+	const auth = { apiKey: options.apiKey || undefined, headers: options.headers };
+	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
+		throw new Error(`No request authentication for provider: ${model.provider}`);
 	}
-	const profile = resolveCodexRequestProfile(options.settings.requestProfile);
-	if (profile.responsesMode !== "standard") {
-		throw new Error("OpenAI native compaction requires Standard Responses mode");
+	if (settings.compactionMode === "pi") {
+		throw new Error("native compaction is disabled by the current model profile");
 	}
+	const profile = resolveCodexRequestProfile(settings.requestProfile);
+	const accountId = resolveCodexRequestAccountId({
+		modelHeaders: model.headers,
+		auth,
+		apiKeyMode: settings.apiKeyMode,
+	});
 	let body = applyFastModeServiceTier(buildRequestBody(model, context, profile, {
 		apiKey: options.apiKey,
 		headers: options.headers,
 		signal: options.signal,
 		reasoning: options.reasoning,
 		sessionId: options.sessionId,
-	}), options.settings, model);
-	if (options.settings.nativeProviderTools && profile.supportsHostedTools) {
+	}), settings, model);
+	if (settings.nativeProviderTools) {
+		const webSearch = settings.modelProfile?.effective.tools.webSearch;
 		body = rewriteNativeOpenAiTools(body, {
-			imageModel: options.settings.imageModel,
-			webSearch: options.settings.webSearchEnabled,
+			imageModel: settings.imageModel,
+			imageGeneration: settings.imageGenerationImplementation ?? false,
+			webSearch: settings.webSearchEnabled
+				&& webSearch
+				? {
+						implementation: webSearch.implementation,
+						contentTypes: webSearch.contentTypes,
+					}
+				: false,
 		}).payload;
 	}
 	ensureWebSearchDetailsIncluded(body);
@@ -2814,20 +2884,20 @@ export async function requestOpenAINativeCompaction(
 		const sseHeaders = applyConfiguredResponsesFeatureHeaders(buildSSEHeaders(
 			model.headers,
 			options.headers,
-			undefined,
+			accountId,
 			options.apiKey,
 			options.sessionId,
 			profile,
-		), options.settings, model);
+		), settings, model);
 		const requestId = options.sessionId || createCodexRequestId();
 		const websocketHeaders = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
 			model.headers,
 			options.headers,
-			undefined,
+			accountId,
 			options.apiKey,
 			requestId,
 			requestId,
-		), options.settings, model);
+		), settings, model);
 		const item = await requestCodexCompactionTriggerWithTransport(
 			model,
 			{ sse: sseHeaders, websocket: websocketHeaders },
@@ -2836,7 +2906,7 @@ export async function requestOpenAINativeCompaction(
 				sessionId: options.sessionId,
 				turnId: options.turnId,
 				signal: options.signal,
-				settings: options.settings,
+				settings,
 				maxRetries: options.maxRetries,
 				maxRetryDelayMs: options.maxRetryDelayMs,
 			},
@@ -2844,7 +2914,16 @@ export async function requestOpenAINativeCompaction(
 		return buildCodexCompactionCheckpoint(retainedInput, item);
 	}
 
-	const headers = buildJsonHeaders(model.headers, options.headers, options.apiKey, options.sessionId);
+	const headers = buildJsonHeaders(
+		model.headers,
+		options.headers,
+		accountId,
+		options.apiKey,
+		options.sessionId,
+	);
+	if (profile.responsesMode === "lite") {
+		headers.set(X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
+	}
 	const compactBody: Record<string, unknown> = {
 		model: body.model,
 		input: body.input,
@@ -2853,7 +2932,12 @@ export async function requestOpenAINativeCompaction(
 	for (const key of ["instructions", "tools", "reasoning", "service_tier", "prompt_cache_key", "text"] as const) {
 		if (body[key] !== undefined) compactBody[key] = body[key];
 	}
-	const response = await postJsonWithRetries(compactUrl(model.baseUrl), headers, compactBody, options.signal);
+	const response = await postJsonWithRetries(
+		compactUrl(model.baseUrl, settings.apiKeyMode),
+		headers,
+		compactBody,
+		options.signal,
+	);
 	const output = response.output;
 	if (!Array.isArray(output) || output.length === 0) {
 		throw new Error("OpenAI /responses/compact returned no replacement output");
@@ -2883,6 +2967,7 @@ async function processWebSocketStream<TApi extends Api>(
 	webSearchCitationSources: ReadonlyArray<WebSearchCitationSource>,
 	historicalCitationSources: ReadonlyArray<CitationSource>,
 	requestMetadata: WebSocketRequestMetadata,
+	profileHash?: string,
 ): Promise<void> {
 	let streamStarted = false;
 	let disableCachedContext = false;
@@ -2890,7 +2975,13 @@ async function processWebSocketStream<TApi extends Api>(
 	let missingPreviousResponseRetried = false;
 
 	while (true) {
-		const cacheKey = webSocketCacheKey(options?.sessionId, model as Model<Api>, url, headers);
+		const cacheKey = webSocketCacheKey(
+			options?.sessionId,
+			model as Model<Api>,
+			url,
+			headers,
+			profileHash,
+		);
 		const { socket, entry, release, reused } = await acquireWebSocket(
 			url,
 			headers,
@@ -3325,17 +3416,26 @@ function createCodexStream<TApi extends Api>(
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			const hasExplicitAuthorization = Object.entries(options?.headers ?? {}).some(
-				([key, value]) => key.toLowerCase() === "authorization" && value.trim().length > 0,
-			);
-			if (!apiKey && !hasExplicitAuthorization) {
-				throw new Error(`No API key for provider: ${model.provider}`);
+			const auth = { apiKey: apiKey || undefined, headers: options?.headers };
+			if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
+				throw new Error(`No request authentication for provider: ${model.provider}`);
 			}
 
-			const settings = loadSettings(requestCwd);
+			const settings = loadModelSettings(model, requestCwd);
 			const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
-			const apiKeyTransport = settings.apiKeyMode || model.provider === "openai";
-			const accountId = apiKeyTransport ? undefined : extractAccountId(apiKey);
+			if (
+				!settings.enabled
+				|| !settings.modelProfile?.effective.enabled
+				|| !settings.providerShimActive
+			) {
+				throw new Error(`No enabled Codex model profile for ${model.provider}/${model.id}`);
+			}
+			const apiKeyTransport = settings.apiKeyMode;
+			const accountId = resolveCodexRequestAccountId({
+				modelHeaders: model.headers,
+				auth,
+				apiKeyMode: apiKeyTransport,
+			});
 			let body = applyFastModeServiceTier(
 				buildRequestBody(model, context, requestProfile, options),
 				settings,
@@ -3344,6 +3444,19 @@ function createCodexStream<TApi extends Api>(
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
 				body = nextBody as ResponsesBody;
+			}
+			if (settings.nativeProviderTools) {
+				const webSearch = settings.modelProfile.effective.tools.webSearch;
+				body = rewriteNativeOpenAiTools(body, {
+					imageModel: settings.imageModel,
+					imageGeneration: settings.imageGenerationImplementation ?? false,
+					webSearch: settings.webSearchEnabled && webSearch
+						? {
+								implementation: webSearch.implementation,
+								contentTypes: webSearch.contentTypes,
+							}
+						: false,
+				}).payload;
 			}
 			options = withRequestServiceTier(options, body.service_tier);
 			ensureWebSearchDetailsIncluded(body);
@@ -3379,14 +3492,15 @@ function createCodexStream<TApi extends Api>(
 			), settings, model as Model<Api>);
 			const bodyJson = JSON.stringify(body);
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
-			const transport: ProviderTransport = model.provider === "openai"
-				? settings.openaiTransport
-				: apiKeyTransport
-					? "sse"
-					: options?.transport || "auto";
+			const transport: ProviderTransport = settings.openaiTransport;
 
 			const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport });
-			const fallbackKey = webSocketFallbackKey(options?.sessionId, model as Model<Api>, websocketUrl);
+			const fallbackKey = webSocketFallbackKey(
+				options?.sessionId,
+				model as Model<Api>,
+				websocketUrl,
+				settings.modelProfileHash,
+			);
 			const sessionFellBackToHttp = transport === "auto"
 				&& fallbackKey !== undefined
 				&& websocketHttpFallbackSessions.has(fallbackKey);
@@ -3417,6 +3531,7 @@ function createCodexStream<TApi extends Api>(
 							webSearchCitationSources,
 							historicalCitationSources,
 							websocketRequestMetadata,
+							settings.modelProfileHash,
 						);
 						if (options?.signal?.aborted) {
 							throw new Error("Request was aborted");
@@ -3635,27 +3750,63 @@ export function registerOpenAIResponsesProviders(
 		imagePreviewCache.clear();
 	};
 
-	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: Context, streamOptions?: SimpleStreamOptions) =>
-		createCodexStream(model, context, streamOptions, {
+	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: Context, streamOptions?: SimpleStreamOptions) => {
+		const settings = loadModelSettings(model, options.getCurrentCwd());
+		if (
+			!settings.enabled
+			|| !settings.modelProfile?.effective.enabled
+			|| !settings.providerShimActive
+		) {
+			return model.api === "openai-codex-responses"
+				? streamSimpleOpenAICodexResponses(model as Model<"openai-codex-responses">, context, streamOptions)
+				: streamSimpleOpenAIResponses(model as Model<"openai-responses">, context, streamOptions);
+		}
+		return createCodexStream(model, context, streamOptions, {
 			getCurrentCwd: options.getCurrentCwd,
 			getCurrentTurnId: (sessionId) => sessionId ? activeTurnIds.get(sessionId) : undefined,
 			onImageSaved: (savedImage, imageData) => {
 				pendingActivities.push({ kind: "image", savedImage, imageData });
 			},
 		});
+	};
 
-	pi.registerProvider("openai-codex", {
-		api: "openai-codex-responses",
-		streamSimple,
-	});
-	pi.registerProvider("openai", {
-		api: "openai-responses",
-		streamSimple,
-	});
+	type CodexResponsesApi = "openai-responses" | "openai-codex-responses";
+	const registeredProviderApis = new Map<string, CodexResponsesApi>();
+	const registerProviderShim = (provider: string, api: CodexResponsesApi): void => {
+		if (!provider || registeredProviderApis.get(provider) === api) return;
+		pi.registerProvider(provider, { api, streamSimple });
+		registeredProviderApis.set(provider, api);
+	};
+	const ensureProviderShimForModel = (model: Model<Api> | undefined, cwd?: string): void => {
+		if (!model) return;
+		const settings = loadModelSettings(model, cwd);
+		if (
+			!settings.enabled
+			|| !settings.modelProfile?.effective.enabled
+			|| !settings.providerShimActive
+		) {
+			return;
+		}
+		if (model.api === "openai-responses" || model.api === "openai-codex-responses") {
+			registerProviderShim(model.provider, model.api as CodexResponsesApi);
+		}
+	};
 
-	pi.on("session_start", async () => {
+	// Pi 0.75 dispatches extension streams by API type, while newer Pi versions
+	// compose them per provider. Register both built-ins first. A user-defined
+	// provider is registered only after Pi supplies an actual selected model, so
+	// this extension never creates or overwrites its URL, auth, or model list.
+	registerProviderShim("openai-codex", "openai-codex-responses");
+	registerProviderShim("openai", "openai-responses");
+
+	pi.on("session_start", async (_event, ctx) => {
+		ensureProviderShimForModel(ctx?.model as Model<Api> | undefined, ctx?.cwd);
 		activeTurnIds.clear();
 		clearPendingMessages();
+	});
+
+	pi.on("model_select", async (_event, ctx) => {
+		ensureProviderShimForModel(ctx?.model as Model<Api> | undefined, ctx?.cwd);
 	});
 
 	pi.on("session_shutdown", async () => {
@@ -3668,27 +3819,32 @@ export function registerOpenAIResponsesProviders(
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
+		ensureProviderShimForModel(ctx.model as Model<Api> | undefined, ctx.cwd);
 		const sessionId = ctx?.sessionManager?.getSessionId();
 		if (!sessionId) return;
 		const turnId = createPiTurnId();
 		activeTurnIds.set(sessionId, turnId);
 
-		const settings = loadSettings(ctx.cwd);
 		const model = ctx.model;
+		const settings = loadModelSettings(model, ctx.cwd);
 		if (
-			!settings.openaiWebSocketPrewarm
+			!settings.enabled
+			|| !settings.openaiWebSocketPrewarm
 			|| settings.openaiTransport === "sse"
 			|| !model
-			|| model.provider !== "openai"
+			|| !settings.providerShimActive
 		) {
 			return;
 		}
 
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		const hasAuthorizationHeader = Object.entries(auth.ok ? auth.headers ?? {} : {}).some(
-			([name, value]) => name.toLowerCase() === "authorization" && value.trim().length > 0,
-		);
-		if (!auth.ok || (!auth.apiKey && !hasAuthorizationHeader)) {
+		if (
+			!auth.ok
+			|| !hasCodexRequestAuth({
+				modelHeaders: model.headers,
+				auth: { apiKey: auth.apiKey, headers: auth.headers },
+			})
+		) {
 			return;
 		}
 
@@ -3726,29 +3882,52 @@ export function registerOpenAIResponsesProviders(
 			settings,
 			model,
 		);
-		if (settings.nativeProviderTools && profile.supportsHostedTools) {
+		if (settings.nativeProviderTools) {
+			const webSearch = settings.modelProfile?.effective.tools.webSearch;
 			const rewritten = rewriteNativeOpenAiTools(body, {
 				imageModel: settings.imageModel,
-				webSearch: settings.webSearchEnabled,
+				imageGeneration: settings.imageGenerationImplementation ?? false,
+				webSearch: settings.webSearchEnabled
+					&& webSearch
+					? {
+							implementation: webSearch.implementation,
+							contentTypes: webSearch.contentTypes,
+						}
+					: false,
 			});
 			body = rewritten.payload;
 		}
 		ensureWebSearchDetailsIncluded(body);
 		body = withResponsesLiteWebSocketMetadata(body, profile.responsesMode);
-		const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: true });
-		const fallbackKey = webSocketFallbackKey(sessionId, model, websocketUrl);
+		const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode });
+		const fallbackKey = webSocketFallbackKey(
+			sessionId,
+			model,
+			websocketUrl,
+			settings.modelProfileHash,
+		);
 		if (settings.openaiTransport === "auto" && fallbackKey && websocketHttpFallbackSessions.has(fallbackKey)) {
 			return;
 		}
 		const headers = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
 			model.headers,
 			auth.headers,
-			undefined,
+			resolveCodexRequestAccountId({
+				modelHeaders: model.headers,
+				auth: { apiKey: auth.apiKey, headers: auth.headers },
+				apiKeyMode: settings.apiKeyMode,
+			}),
 			auth.apiKey ?? "",
 			sessionId,
 			sessionId,
 		), settings, model);
-		const cacheKey = webSocketCacheKey(sessionId, model, websocketUrl, headers);
+		const cacheKey = webSocketCacheKey(
+			sessionId,
+			model,
+			websocketUrl,
+			headers,
+			settings.modelProfileHash,
+		);
 		if (!cacheKey) return;
 		const requestMetadata: WebSocketRequestMetadata = {
 			sessionId,

@@ -99,6 +99,39 @@ function sanitizeSurrogates(text: string): string {
 	return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
 }
 
+function localToolName(namespace: unknown, name: string): string {
+	if (typeof namespace !== "string" || namespace === "" || namespace === "functions") return name;
+	if (namespace === "web" && name === "run") return "web_search";
+	if (namespace === "image_gen" && name === "imagegen") return "image_generation";
+	return name;
+}
+
+const TOOL_NAMESPACE_SIGNATURE_PREFIX = "pi:codex-tool-namespace:";
+
+function encodeToolNamespaceSignature(namespace: unknown, name: string): string | undefined {
+	if (typeof namespace !== "string" || !namespace) return undefined;
+	return `${TOOL_NAMESPACE_SIGNATURE_PREFIX}${JSON.stringify({ namespace, name })}`;
+}
+
+function wireToolIdentity(
+	name: string,
+	thoughtSignature: string | undefined,
+): { name: string; namespace?: string } {
+	if (!thoughtSignature?.startsWith(TOOL_NAMESPACE_SIGNATURE_PREFIX)) return { name };
+	try {
+		const value = JSON.parse(thoughtSignature.slice(TOOL_NAMESPACE_SIGNATURE_PREFIX.length)) as {
+			namespace?: unknown;
+			name?: unknown;
+		};
+		if (typeof value.namespace === "string" && value.namespace && typeof value.name === "string" && value.name) {
+			return { namespace: value.namespace, name: value.name };
+		}
+	} catch {
+		// Ignore malformed local metadata and replay the Pi-visible tool name.
+	}
+	return { name };
+}
+
 function cloneJsonRecord(value: unknown): Record<string, unknown> | undefined {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
 	try {
@@ -608,12 +641,14 @@ export function convertResponsesMessages<TApi extends Api>(
 					const custom = itemIdRaw?.startsWith("ctc_") === true;
 					let itemId: string | undefined = itemIdRaw;
 					if (isDifferentModel && (itemId?.startsWith("fc_") || itemId?.startsWith("ctc_"))) itemId = undefined;
+					const wireIdentity = wireToolIdentity(block.name, block.thoughtSignature);
 					if (custom) {
 						output.push({
 							type: "custom_tool_call",
 							...(itemId ? { id: itemId } : {}),
 							call_id: callId,
-							name: block.name,
+							name: wireIdentity.name,
+							...(wireIdentity.namespace ? { namespace: wireIdentity.namespace } : {}),
 							input: typeof block.arguments.input === "string" ? block.arguments.input : "",
 						} as ResponseInput[number]);
 					} else {
@@ -621,7 +656,8 @@ export function convertResponsesMessages<TApi extends Api>(
 							type: "function_call",
 							...(itemId ? { id: itemId } : {}),
 							call_id: callId,
-							name: block.name,
+							name: wireIdentity.name,
+							...(wireIdentity.namespace ? { namespace: wireIdentity.namespace } : {}),
 							arguments: JSON.stringify(block.arguments),
 						} as ResponseInput[number]);
 					}
@@ -1025,7 +1061,7 @@ export async function processResponsesStream<TApi extends Api>(
 			output.responseId = event.response.id;
 		} else if (event.type === "response.output_item.added") {
 			const item = event.item;
-			const customItem = item as unknown as { type?: string; id?: string; call_id?: string; name?: string; input?: string };
+			const customItem = item as unknown as { type?: string; id?: string; call_id?: string; name?: string; namespace?: string; input?: string };
 			if (item.type === "reasoning") {
 				const currentBlock: ThinkingBlock = pushResponseBlock(
 					{ type: "thinking", thinking: "" },
@@ -1051,11 +1087,14 @@ export async function processResponsesStream<TApi extends Api>(
 				});
 				stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
 			} else if (item.type === "function_call") {
+				const namespace = (item as { namespace?: unknown }).namespace;
+				const thoughtSignature = encodeToolNamespaceSignature(namespace, item.name);
 				const currentBlock: ToolCallBlock = {
 					type: "toolCall",
 					id: `${item.call_id}|${item.id}`,
-					name: item.name,
+					name: localToolName(namespace, item.name),
 					arguments: {},
+					...(thoughtSignature ? { thoughtSignature } : {}),
 					partialJson: item.arguments || "",
 				};
 				pushResponseBlock(currentBlock, event.output_index);
@@ -1068,11 +1107,13 @@ export async function processResponsesStream<TApi extends Api>(
 			} else if (customItem.type === "custom_tool_call" && customItem.call_id && customItem.name) {
 				const itemId = customItemId(customItem.id, customItem.call_id);
 				const input = customItem.input ?? "";
+				const thoughtSignature = encodeToolNamespaceSignature(customItem.namespace, customItem.name);
 				const currentBlock: ToolCallBlock = {
 					type: "toolCall",
 					id: `${customItem.call_id}|${itemId}`,
-					name: customItem.name,
+					name: localToolName(customItem.namespace, customItem.name),
 					arguments: { input },
+					...(thoughtSignature ? { thoughtSignature } : {}),
 					partialInput: input,
 				};
 				pushResponseBlock(currentBlock, event.output_index);
@@ -1194,7 +1235,7 @@ export async function processResponsesStream<TApi extends Api>(
 			}
 		} else if (event.type === "response.output_item.done") {
 			const item = event.item;
-			const customItem = item as unknown as { type?: string; id?: string; call_id?: string; name?: string; input?: string };
+			const customItem = item as unknown as { type?: string; id?: string; call_id?: string; name?: string; namespace?: string; input?: string };
 			if (item.type === "reasoning") {
 				let state = outputStates.get(event.output_index);
 				if (!state || state.kind !== "reasoning") {
@@ -1246,12 +1287,16 @@ export async function processResponsesStream<TApi extends Api>(
 				outputStates.delete(event.output_index);
 			} else if (item.type === "function_call") {
 				const state = outputStates.get(event.output_index);
+				const namespace = (item as { namespace?: unknown }).namespace;
+				const thoughtSignature = encodeToolNamespaceSignature(namespace, item.name);
 				const args = state?.kind === "function_call" && state.block.partialJson
 					? parseStreamingJson(state.block.partialJson)
 					: parseStreamingJson(item.arguments || "{}");
 				const toolCall = state?.kind === "function_call"
 					? (() => {
 						state.block.arguments = args;
+						state.block.name = localToolName(namespace, item.name);
+						if (thoughtSignature) state.block.thoughtSignature = thoughtSignature;
 						delete state.block.partialJson;
 						return state.block;
 					})()
@@ -1259,8 +1304,9 @@ export async function processResponsesStream<TApi extends Api>(
 						const fallbackToolCall: ToolCallBlock = {
 							type: "toolCall",
 							id: `${item.call_id}|${item.id}`,
-							name: item.name,
+							name: localToolName((item as { namespace?: unknown }).namespace, item.name),
 							arguments: args,
+							...(thoughtSignature ? { thoughtSignature } : {}),
 						};
 						pushResponseBlock(fallbackToolCall, event.output_index);
 						return fallbackToolCall;
@@ -1275,10 +1321,13 @@ export async function processResponsesStream<TApi extends Api>(
 					call_id: customItem.call_id,
 				});
 				const input = typeof customItem.input === "string" ? customItem.input : state?.input ?? "";
+				const thoughtSignature = encodeToolNamespaceSignature(customItem.namespace, customItem.name);
 				const toolCall = state
 					? (() => {
 						state.input = input;
+						state.block.name = localToolName(customItem.namespace, customItem.name);
 						state.block.arguments = { input };
+						if (thoughtSignature) state.block.thoughtSignature = thoughtSignature;
 						delete state.block.partialInput;
 						return state.block;
 					})()
@@ -1286,8 +1335,9 @@ export async function processResponsesStream<TApi extends Api>(
 						const fallbackToolCall: ToolCallBlock = {
 							type: "toolCall",
 							id: `${customItem.call_id}|${customItemId(customItem.id, customItem.call_id)}`,
-							name: customItem.name,
+							name: localToolName(customItem.namespace, customItem.name),
 							arguments: { input },
+							...(thoughtSignature ? { thoughtSignature } : {}),
 						};
 						pushResponseBlock(fallbackToolCall, event.output_index);
 						return fallbackToolCall;

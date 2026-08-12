@@ -1,11 +1,10 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getCapabilities, Image, Text, type Component } from "@earendil-works/pi-tui";
-import { hasAdditionalToolModelsLoaded, hasOpenAiModelsLoaded } from "./activation.js";
+import { hasConfiguredModelsLoaded } from "./activation.js";
 import { registerBackgroundImageGenerationCommand } from "./background-image-generation.js";
 import {
 	computeNextActiveTools,
 	computeToolCapabilities,
-	isNativeOpenAiProviderModel,
 	modelKey,
 	NATIVE_MUTATION_TOOL_NAMES,
 	PACKAGE_TOOL_NAMES,
@@ -15,6 +14,12 @@ import {
 import { registerOpenAIResponsesProviders } from "./provider-shim.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 import { configPath, loadSettings, settingsDiagnostics } from "./settings.js";
+import {
+	modelCatalogDiagnostics,
+	modelsPath,
+	resolveModelProfile,
+} from "./model-catalog/catalog.js";
+import { loadModelSettings } from "./model-catalog/runtime.js";
 import { createApplyPatchToolDefinition } from "./tools/apply-patch.js";
 import { createImageGenerationToolDefinition } from "./tools/image-generation.js";
 import { createWebSearchToolDefinition } from "./tools/web-search.js";
@@ -116,8 +121,7 @@ function syncActiveTools(
 ): void {
 	const active = pi.getActiveTools?.() ?? [];
 	const settings = loadSettings(ctx.cwd);
-	const supportedModelsLoaded = hasOpenAiModelsLoaded(ctx)
-		|| hasAdditionalToolModelsLoaded(ctx, settings.additionalModelIds);
+	const supportedModelsLoaded = hasConfiguredModelsLoaded(ctx, settings);
 	if (!toolsRegistered || !supportedModelsLoaded) {
 		const next = restoreSuppressedMutationTools(
 			active.filter((name) => !PACKAGE_TOOL_NAMES.includes(name as never)),
@@ -137,26 +141,32 @@ function syncActiveTools(
 function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 	const settings = loadSettings(ctx.cwd);
 	const model = contextModel(ctx);
+	const modelSettings = loadModelSettings(model, ctx.cwd, settings);
 	const capabilities = computeToolCapabilities(model, settings);
-	const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
+	const requestProfile = resolveCodexRequestProfile(modelSettings.requestProfile);
+	const modelProfile = modelSettings.modelProfile;
 	const active = new Set(pi.getActiveTools?.() ?? []);
-	const fastModeTier = resolveFastModeServiceTier(settings, model);
+	const fastModeTier = resolveFastModeServiceTier(modelSettings, model);
 	return [
 		"Codex Minimal Tools",
 		`model: ${modelKey(model)}`,
 		`config: ${configPath()}`,
-		`openai models loaded: ${hasOpenAiModelsLoaded(ctx)}`,
+		`models: ${modelsPath()}`,
+		`model profile: ${modelProfile ? `${modelProfile.sources.join("+")} #${modelProfile.profileHash}` : "(none)"}`,
+		`configured models loaded: ${hasConfiguredModelsLoaded(ctx, settings)}`,
 		`enabled: ${settings.enabled}`,
 		`autoEnable: ${settings.autoEnable}`,
-		`nativeProviderTools: ${settings.nativeProviderTools}`,
-		`openai transport: ${settings.openaiTransport}`,
-		`openai WebSocket prewarm: ${settings.openaiWebSocketPrewarm}`,
-		`fast mode: ${settings.fastMode ? "priority" : "off"}${fastModeTier ? ", active" : ""}`,
-		`compaction: ${settings.compactionMode}`,
+		`provider shim: ${modelSettings.providerShimActive ? "active" : "inactive"}`,
+		`responses endpoint: ${modelSettings.apiKeyMode ? "openai" : "codex"}`,
+		`responses transport: ${modelSettings.openaiTransport}`,
+		`Responses WebSocket prewarm: ${modelSettings.openaiWebSocketPrewarm}`,
+		`fast mode: ${settings.fastMode ? modelSettings.fastServiceTier ?? "on (unsupported)" : "off"}${fastModeTier ? ", active" : ""}`,
+		`compaction: ${modelSettings.compactionMode}`,
 		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, system=${requestProfile.systemPromptPlacement}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
-		`webSearchEnabled: ${settings.webSearchEnabled}`,
-		`additionalModelIds: ${settings.additionalModelIds.length > 0 ? settings.additionalModelIds.join(", ") : "(none)"}`,
-		`apiKeyMode: ${settings.apiKeyMode}`,
+		`web search: ${modelSettings.webSearchImplementation ?? "off"}`,
+		`image generation: ${modelSettings.imageGenerationImplementation ?? "off"}`,
+		`legacy additionalModelIds: ${settings.additionalModelIds.length > 0 ? settings.additionalModelIds.join(", ") : "(none)"}`,
+		`apiKeyMode: ${modelSettings.apiKeyMode}`,
 		`native provider shim: ${settings.enabled ? "registered" : "disabled"}`,
 		"tools:",
 		...Object.entries(capabilities).map(([name, capability]) => `- ${name}: ${capability.enabled ? "supported" : "disabled"}${active.has(name) ? ", active" : ""} — ${capability.reason}`),
@@ -171,6 +181,14 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 		lines.push(`OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? "present" : "not set"}`);
 		const diagnostics = settingsDiagnostics();
 		if (diagnostics.length > 0) lines.push("settings diagnostics:", ...diagnostics.map((line) => `- ${line}`));
+		const catalogDiagnostics = modelCatalogDiagnostics();
+		if (catalogDiagnostics.length > 0) lines.push("model catalog diagnostics:", ...catalogDiagnostics.map((line) => `- ${line}`));
+		const profileDiagnostics = loadModelSettings(contextModel(ctx), ctx.cwd, settings)
+			.modelProfile?.diagnostics
+			.filter((line) => !catalogDiagnostics.includes(line)) ?? [];
+		if (profileDiagnostics.length > 0) {
+			lines.push("active model profile diagnostics:", ...profileDiagnostics.map((line) => `- ${line}`));
+		}
 		ctx.ui.notify(lines.join("\n"), "info");
 	};
 	pi.registerCommand("codex-minimal-tools", {
@@ -195,7 +213,9 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 }
 
 function registerTools(pi: ExtensionAPI): void {
-	pi.registerTool(createImageGenerationToolDefinition({ loadSettings }) as never);
+	pi.registerTool(createImageGenerationToolDefinition({
+		loadSettings: (cwd, model) => loadModelSettings(model, cwd),
+	}) as never);
 	pi.registerTool(createWebSearchToolDefinition() as never);
 	pi.registerTool({
 		renderShell: "self",
@@ -234,8 +254,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 		currentCwd = ctx.cwd;
 		if (toolsRegistered) return true;
 		const settings = loadSettings(ctx.cwd);
-		const supportedModelsLoaded = hasOpenAiModelsLoaded(ctx)
-			|| hasAdditionalToolModelsLoaded(ctx, settings.additionalModelIds);
+		const supportedModelsLoaded = hasConfiguredModelsLoaded(ctx, settings);
 		if (!settings.enabled || !supportedModelsLoaded) return false;
 		registerTools(pi);
 		toolsRegistered = true;
@@ -270,11 +289,28 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 	pi.on("before_provider_request", (event, ctx) => {
 		currentCwd = ctx.cwd;
 		const settings = loadSettings(ctx.cwd);
-		if (!settings.enabled || !settings.nativeProviderTools || !hasOpenAiModelsLoaded(ctx) || !isNativeOpenAiProviderModel(contextModel(ctx))) return undefined;
-		const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
-		if (!requestProfile.supportsHostedTools) return undefined;
+		const model = contextModel(ctx);
+		const modelSettings = loadModelSettings(model, ctx.cwd, settings);
+		const profile = resolveModelProfile(model, { settings });
+		if (
+			!settings.enabled
+			|| !profile?.effective.enabled
+			|| !modelSettings.providerShimActive
+			|| !modelSettings.nativeProviderTools
+		) return undefined;
 		const capabilities = computeToolCapabilities(contextModel(ctx), settings);
-		const result = rewriteNativeOpenAiTools(event.payload, { imageModel: settings.imageModel, webSearch: capabilities.web_search.enabled });
+		const webSearch = profile.effective.tools.webSearch;
+		const result = rewriteNativeOpenAiTools(event.payload, {
+			imageModel: settings.imageModel,
+			imageGeneration: modelSettings.imageGenerationImplementation ?? false,
+			webSearch: capabilities.web_search.enabled
+				&& webSearch
+				? {
+						implementation: webSearch.implementation,
+						contentTypes: webSearch.contentTypes,
+					}
+				: false,
+		});
 		return result.rewritten.length > 0 ? result.payload : undefined;
 	});
 }

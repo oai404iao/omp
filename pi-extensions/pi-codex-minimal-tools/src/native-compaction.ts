@@ -8,30 +8,33 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 import type { Api, AssistantMessage, Context, Model, ThinkingLevel, Tool } from "@earendil-works/pi-ai";
-import { isOpenAiGpt5Model, type ModelLike } from "./capabilities.js";
+import type { ModelLike } from "./capabilities.js";
+import { loadModelSettings } from "./model-catalog/runtime.js";
+import { resolveModelProfile } from "./model-catalog/catalog.js";
+import { hasCodexRequestAuth } from "./codex-http.js";
 import {
 	requestOpenAINativeCompaction,
 	sanitizeNativeCompactionOutput,
 	type OpenAIResponsesProviderController,
 } from "./provider-shim.js";
 import {
-	loadSettings,
 	type CodexMinimalToolsSettings,
 } from "./settings.js";
 
 export const NATIVE_COMPACTION_DETAILS_KIND = "openai-native-compaction";
-export const NATIVE_COMPACTION_DETAILS_VERSION = 2;
+export const NATIVE_COMPACTION_DETAILS_VERSION = 3;
 
 export type NativeCompactionMode = Exclude<CodexMinimalToolsSettings["compactionMode"], "pi">;
 type StoredNativeCompactionMode = NativeCompactionMode | "responses-context-management";
 
 export interface NativeCompactionDetails {
 	kind: typeof NATIVE_COMPACTION_DETAILS_KIND;
-	version: 1 | typeof NATIVE_COMPACTION_DETAILS_VERSION;
+	version: 1 | 2 | typeof NATIVE_COMPACTION_DETAILS_VERSION;
 	mode: StoredNativeCompactionMode;
 	provider: string;
 	model: string;
 	api: string;
+	profileHash?: string;
 	output: unknown[];
 	/** Legacy context-management checkpoint source. New Responses compactions omit this. */
 	sourceEntryId?: string;
@@ -56,7 +59,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 export function isNativeCompactionDetails(value: unknown): value is NativeCompactionDetails {
 	const details = asRecord(value);
 	return details?.kind === NATIVE_COMPACTION_DETAILS_KIND
-		&& (details.version === 1 || details.version === NATIVE_COMPACTION_DETAILS_VERSION)
+		&& (details.version === 1 || details.version === 2 || details.version === NATIVE_COMPACTION_DETAILS_VERSION)
 		&& (
 			details.mode === "responses"
 			|| details.mode === "responses-compact"
@@ -113,10 +116,12 @@ function latestNativeCompactionEntry(entries: readonly SessionEntry[]): IndexedN
 }
 
 function matchesModelIdentity(
-	value: { provider: string; model: string; api: string },
+	value: { provider: string; model: string; api: string; profileHash?: string },
 	model: Model<Api>,
 ): boolean {
-	return value.provider === model.provider && value.model === model.id && value.api === model.api;
+	if (value.provider !== model.provider || value.model !== model.id || value.api !== model.api) return false;
+	if (!value.profileHash) return true;
+	return resolveModelProfile(model as ModelLike)?.profileHash === value.profileHash;
 }
 
 function syntheticNativeAssistant(
@@ -246,14 +251,14 @@ export function normalizeNativeCompactionToolPairs(messages: PiMessages): PiMess
 /**
  * Replace Pi's textual compaction summary with the opaque native Responses
  * items saved in CompactionEntry.details. The opaque payload is replayed only
- * to the same openai/GPT-5 model family.
+ * to the same provider, model, API, and current model-profile hash.
  */
 export function applyNativeCompactionContext(
 	messages: PiMessages,
 	branchEntries: readonly SessionEntry[],
 	model: Model<Api> | undefined,
 ): PiMessages {
-	if (!model || !isOpenAiGpt5Model(model as ModelLike)) return messages;
+	if (!model || !resolveModelProfile(model as ModelLike)?.effective.enabled) return messages;
 
 	const installed = latestNativeCompactionEntry(branchEntries);
 	if (installed) {
@@ -321,8 +326,8 @@ export function registerNativeCompaction(
 	providerController?: OpenAIResponsesProviderController,
 ): void {
 	pi.on("context", (event, ctx) => {
-		const settings = loadSettings(ctx.cwd);
-		if (settings.compactionMode === "pi") return undefined;
+		const settings = loadModelSettings(ctx.model as ModelLike | undefined, ctx.cwd);
+		if (!settings.enabled || settings.compactionMode === "pi") return undefined;
 		const messages = applyNativeCompactionContext(
 			event.messages as PiMessages,
 			ctx.sessionManager.getBranch(),
@@ -332,22 +337,21 @@ export function registerNativeCompaction(
 	});
 
 	pi.on("session_before_compact", async (event, ctx) => {
-		const settings = loadSettings(ctx.cwd);
-		const mode = settings.compactionMode;
 		const model = ctx.model as Model<Api> | undefined;
-		if (mode === "pi" || !model || !isOpenAiGpt5Model(model as ModelLike)) return undefined;
+		const settings = loadModelSettings(model as ModelLike | undefined, ctx.cwd);
+		const mode = settings.compactionMode;
+		if (!settings.enabled || mode === "pi" || !model || !settings.modelProfile?.effective.enabled) return undefined;
 
 		try {
-			if (settings.requestProfile.responsesMode === "lite") {
-				throw new Error("native compaction requires the Standard Responses request profile");
-			}
-
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-			const hasAuthorizationHeader = Object.entries(auth.ok ? auth.headers ?? {} : {}).some(
-				([name, value]) => name.toLowerCase() === "authorization" && value.trim().length > 0,
-			);
-			if (!auth.ok || (!auth.apiKey && !hasAuthorizationHeader)) {
-				throw new Error(auth.ok ? "OpenAI API key is unavailable" : auth.error);
+			if (
+				!auth.ok
+				|| !hasCodexRequestAuth({
+					modelHeaders: model.headers,
+					auth: { apiKey: auth.apiKey, headers: auth.headers },
+				})
+			) {
+				throw new Error(auth.ok ? "OpenAI request authentication is unavailable" : auth.error);
 			}
 			const sessionId = ctx.sessionManager.getSessionId();
 			const context = await buildNativeCompactionContext(pi, event, ctx, model);
@@ -373,6 +377,7 @@ export function registerNativeCompaction(
 						provider: model.provider,
 						model: model.id,
 						api: model.api,
+						profileHash: settings.modelProfileHash,
 						output,
 					} satisfies NativeCompactionDetails,
 				},

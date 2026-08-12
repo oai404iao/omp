@@ -40,6 +40,21 @@ Codex maps this item to an internal custom payload:
 ToolPayload::Custom { input: raw_patch_text }
 ```
 
+In current Responses Lite, this custom spec is a child of the default
+`functions` namespace. Calls may therefore carry:
+
+```json
+{
+  "type": "custom_tool_call",
+  "namespace": "functions",
+  "name": "apply_patch",
+  "input": "*** Begin Patch\n..."
+}
+```
+
+The namespace must be retained for full-context replay even if the host maps
+the call to a flat local tool name.
+
 The apply-patch handler only accepts that payload type. It parses the raw text,
 verifies the resulting file changes against the selected filesystem and
 sandbox, obtains any required approval, and dispatches the verified changes to

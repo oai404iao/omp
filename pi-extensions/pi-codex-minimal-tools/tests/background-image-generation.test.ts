@@ -1,6 +1,22 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { buildBackgroundImageRequest, parseImageGenCommandArgs, selectCodexImageModel, summarizeNonImageResponse } from "../src/background-image-generation.js";
+
+function withAgentDir<T>(fn: () => T): T {
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-codex-background-image-"));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		return fn();
+	} finally {
+		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previous;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+}
 
 test("parseImageGenCommandArgs separates @reference images from prompt", () => {
 	assert.deepEqual(parseImageGenCommandArgs("make it green @icon.png 'with soft shadows' @refs/logo.webp"), {
@@ -41,7 +57,7 @@ test("buildBackgroundImageRequest requests edit with reference images", () => {
 	assert.equal(input[0].content[1].image_url, "data:image/png;base64,abc");
 });
 
-test("selectCodexImageModel prefers current image-capable Codex model and registry fallback", () => {
+test("selectCodexImageModel prefers current catalog-capable model and registry fallback", () => withAgentDir(() => {
 	const current = { provider: "openai-codex", id: "gpt-5.4", input: ["text", "image"] };
 	assert.equal(selectCodexImageModel(current, undefined), current);
 	const fallback = { provider: "openai-codex", id: "gpt-5.5", input: ["text", "image"] };
@@ -49,7 +65,7 @@ test("selectCodexImageModel prefers current image-capable Codex model and regist
 	assert.equal(selectCodexImageModel({ provider: "anthropic", id: "claude", input: ["text", "image"] }, { getAvailable: () => [fallback] }), fallback);
 	assert.equal(selectCodexImageModel({ provider: "openai-codex", id: "text-only", input: ["text"] }, { find: (_provider, _id) => fallback }), fallback);
 	assert.equal(selectCodexImageModel({ provider: "openai-codex", id: "text-only", input: ["text"] }, { getAll: () => [{ provider: "openai-codex", id: "also-text-only", input: ["text"] }] }), undefined);
-});
+}));
 
 test("summarizeNonImageResponse includes status, error, and text output", () => {
 	const summary = summarizeNonImageResponse({

@@ -101,7 +101,7 @@ the hosted `type:"web_search"` or `type:"image_generation"` declarations.
 
 ## Analyzed model snapshot
 
-The bundled catalog at commit `03bb3b1236` includes the following relevant
+The bundled catalog at commit `eb9dceba1a` includes the following relevant
 combinations:
 
 | Models | Apply patch | Responses | Tool mode |
@@ -130,6 +130,10 @@ interface ResponsesCapabilityProfile {
 Resolution should use explicit configuration and provider/model metadata. A
 model-name heuristic may be a fallback hint, but it cannot prove that an
 endpoint supports an internal transport.
+
+This extension resolves those axes from exact `provider/model` entries. It
+does not implement `toolExposure:"code-mode-only"`; Lite models receive direct
+custom/namespace tools instead of Codex's JavaScript `exec` runtime.
 
 ## Codex sources
 

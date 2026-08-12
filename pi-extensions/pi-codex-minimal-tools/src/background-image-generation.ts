@@ -1,19 +1,27 @@
 import { readFile } from "node:fs/promises";
-import { extname, isAbsolute, resolve } from "node:path";
+import { extname, isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { supportsImageInput, type ModelLike } from "./capabilities.js";
 import { frameGlyphs, glyphs, treeGlyph } from "./glyphs.js";
+import { listResolvedModelProfiles } from "./model-catalog/catalog.js";
 import { loadSettings } from "./settings.js";
+import { loadModelSettings } from "./model-catalog/runtime.js";
+import { standaloneImageGeneration } from "./tools/image-generation.js";
 import {
 	buildGeneratedImageDisplayText,
 	IMAGE_SAVE_DISPLAY_MESSAGE_TYPE,
 	saveOpenAICodexGeneratedImage,
+	type SavedGeneratedImage,
 } from "./provider-shim.js";
+import { projectRoot } from "./utils/images.js";
+import {
+	buildCodexJsonHeaders,
+	hasCodexRequestAuth,
+} from "./codex-http.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
-const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 const BACKGROUND_IMAGE_INSTRUCTIONS = "Generate or edit images with the hosted image_generation tool. Use the user's prompt and any provided reference images. Return the image_generation_call result.";
 const IMAGE_GEN_STATUS_KEY = "codex-image-gen";
 const IMAGE_GEN_ERROR_MESSAGE_TYPE = "codex-image-generation-error";
@@ -21,8 +29,6 @@ const PANEL_BAR_COLOR = "borderAccent";
 const PANEL_TITLE_COLOR = "customMessageLabel";
 const PANEL_RULE_COLOR = "muted";
 const PANEL_CARD_PADDING_X = 1;
-const OPENAI_CODEX_PROVIDER = "openai-codex";
-const OPENAI_CODEX_MODEL_PROBE_IDS = ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "o4-mini"];
 
 interface ActiveImageJob {
 	id: string;
@@ -90,17 +96,27 @@ function registryModels(registry: ModelRegistryLike | undefined): ModelLike[] {
 	return [];
 }
 
-function isOpenAiCodexImageModel(model: ModelLike | undefined): boolean {
-	return model?.provider === OPENAI_CODEX_PROVIDER && supportsImageInput(model);
+function isConfiguredImageModel(model: ModelLike | undefined): boolean {
+	if (!model || !supportsImageInput(model)) return false;
+	const settings = loadModelSettings(model);
+	return Boolean(
+		settings.modelProfile?.effective.enabled
+		&& settings.imageGenerationImplementation,
+	);
 }
 
 export function selectCodexImageModel(currentModel: ModelLike | undefined, registry: ModelRegistryLike | undefined): ModelLike | undefined {
-	if (isOpenAiCodexImageModel(currentModel)) return currentModel;
-	const discovered = registryModels(registry).find(isOpenAiCodexImageModel);
+	if (isConfiguredImageModel(currentModel)) return currentModel;
+	const discovered = registryModels(registry).find(isConfiguredImageModel);
 	if (discovered) return discovered;
-	for (const id of OPENAI_CODEX_MODEL_PROBE_IDS) {
-		const candidate = registry?.find?.(OPENAI_CODEX_PROVIDER, id);
-		if (isModelLike(candidate) && isOpenAiCodexImageModel(candidate)) return candidate;
+	for (const profile of listResolvedModelProfiles()) {
+		if (!profile.effective.enabled || !profile.effective.tools.imageGeneration) continue;
+		const slash = profile.id.indexOf("/");
+		const candidate = registry?.find?.(
+			profile.id.slice(0, slash),
+			profile.id.slice(slash + 1),
+		);
+		if (isModelLike(candidate) && isConfiguredImageModel(candidate)) return candidate;
 	}
 	return undefined;
 }
@@ -286,28 +302,18 @@ function resolveCodexUrl(baseUrl: string | undefined, options?: { apiKeyMode?: b
 	return `${normalized}/codex/responses`;
 }
 
-function extractAccountId(token: string): string {
-	try {
-		const parts = token.split(".");
-		if (parts.length !== 3) throw new Error("Invalid token");
-		const payload = JSON.parse(Buffer.from(parts[1] ?? "", "base64").toString("utf8"));
-		const accountId = payload?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
-		if (!accountId) throw new Error("No account ID in token");
-		return accountId;
-	} catch {
-		throw new Error("Failed to extract accountId from Codex OAuth token");
-	}
-}
-
-function buildHeaders(model: Model<Api>, apiKey: string, extraHeaders?: Record<string, string>, options?: { apiKeyMode?: boolean }): Headers {
-	const headers = new Headers(model.headers);
-	for (const [key, value] of Object.entries(extraHeaders ?? {})) headers.set(key, value);
-	headers.set("Authorization", `Bearer ${apiKey}`);
-	if (!options?.apiKeyMode) headers.set("chatgpt-account-id", extractAccountId(apiKey));
-	headers.set("originator", "pi");
+function buildHeaders(
+	model: Model<Api>,
+	auth: { apiKey?: string; headers?: Record<string, string> },
+	options?: { apiKeyMode?: boolean },
+): Headers {
+	const headers = buildCodexJsonHeaders({
+		modelHeaders: model.headers,
+		auth,
+		apiKeyMode: options?.apiKeyMode ?? false,
+	});
 	headers.set("OpenAI-Beta", "responses=experimental");
 	headers.set("accept", "text/event-stream");
-	headers.set("content-type", "application/json");
 	return headers;
 }
 
@@ -424,12 +430,53 @@ function renderImageGenError(details: ImageGenerationErrorDetails, theme: Theme)
 }
 
 async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionCommandContext, parsed: ParsedImageGenCommand): Promise<void> {
-	const settings = loadSettings(ctx.cwd);
 	const model = selectCodexImageModel(ctx.model as ModelLike | undefined, ctx.modelRegistry as ModelRegistryLike | undefined) as Model<Api> | undefined;
-	if (!model) throw new Error("No image-capable openai-codex model is available. Update Pi's model registry or select an openai-codex image-capable model.");
+	if (!model) throw new Error("No image-capable model with an enabled model catalog profile is available.");
+	const settings = loadModelSettings(model as ModelLike, ctx.cwd);
+	if (!settings.enabled) throw new Error("pi-codex-minimal-tools is disabled.");
+	if (settings.imageGenerationImplementation === "standalone") {
+		const result = await standaloneImageGeneration({
+			prompt: parsed.prompt,
+			referenced_image_paths: parsed.imagePaths,
+		}, {
+			cwd: ctx.cwd,
+			model,
+			modelRegistry: ctx.modelRegistry,
+		}, settings);
+		const saved = result.details.saved;
+		const workspaceRoot = projectRoot(ctx.cwd);
+		const relativePath = relative(workspaceRoot, saved.path);
+		const latestAbsolutePath = saved.latestPath ?? saved.path;
+		const latestRelativePath = relative(workspaceRoot, latestAbsolutePath);
+		const savedImage: SavedGeneratedImage = {
+			absolutePath: saved.path,
+			relativePath: relativePath && !relativePath.startsWith("..") ? relativePath : saved.path,
+			latestAbsolutePath,
+			latestRelativePath: latestRelativePath && !latestRelativePath.startsWith("..")
+				? latestRelativePath
+				: latestAbsolutePath,
+			responseId: undefined,
+			callId: "standalone",
+			outputFormat: saved.format,
+			imageModel: settings.imageModel,
+			revisedPrompt: parsed.prompt,
+		};
+		pi.sendMessage({
+			customType: IMAGE_SAVE_DISPLAY_MESSAGE_TYPE,
+			content: [{ type: "text", text: buildGeneratedImageDisplayText(savedImage, { expanded: false }) }],
+			display: true,
+			details: { savedImages: [savedImage] },
+		}, { triggerTurn: false });
+		return;
+	}
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	if (!auth.ok) throw new Error(auth.error);
-	if (!auth.apiKey) throw new Error(settings.apiKeyMode ? "No openai-codex API key is configured." : "No Codex OAuth token is configured. Run /login openai-codex.");
+	if (!hasCodexRequestAuth({
+		modelHeaders: model.headers,
+		auth: { apiKey: auth.apiKey, headers: auth.headers },
+	})) {
+		throw new Error(`No request authentication is configured for ${model.provider}.`);
+	}
 	const referenceImages = await Promise.all(parsed.imagePaths.map((path) => loadReferenceImage(ctx.cwd, path)));
 	const body = buildBackgroundImageRequest({
 		prompt: parsed.prompt,
@@ -439,7 +486,10 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 	});
 	const response = await fetch(resolveCodexUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode }), {
 		method: "POST",
-		headers: buildHeaders(model, auth.apiKey, auth.headers, { apiKeyMode: settings.apiKeyMode }),
+		headers: buildHeaders(model, {
+			apiKey: auth.apiKey,
+			headers: auth.headers,
+		}, { apiKeyMode: settings.apiKeyMode }),
 		body: JSON.stringify(body),
 	});
 	if (!response.ok) throw new Error(`Codex image generation failed: ${response.status} ${await response.text()}`);
@@ -497,7 +547,7 @@ export function registerBackgroundImageGenerationCommand(pi: ExtensionAPI): void
 	});
 
 	pi.registerCommand("image-gen", {
-		description: "Generate or edit an image in the background with Codex OAuth. Usage: /image-gen prompt text [@reference.png]",
+		description: "Generate or edit an image in the background with the current model catalog. Usage: /image-gen prompt text [@reference.png]",
 		handler: async (args, ctx) => {
 			const parsed = parseImageGenCommandArgs(args);
 			if (!parsed.prompt) {

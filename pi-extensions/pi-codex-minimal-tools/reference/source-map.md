@@ -2,7 +2,10 @@
 
 This map points from protocol conclusions to the source files used to verify
 them. Paths are relative to the analyzed `openai/codex` checkout at commit
-`03bb3b12367397e14a8facc2e018d645ff4d8e83`.
+`eb9dceba1a2e658142a456c5898836774835616b` dated August 12, 2026.
+
+The local executor behavior in [apply-patch behavior](apply-patch-behavior.md)
+retains an explicitly documented earlier execution baseline.
 
 ## Apply-patch declaration and grammar
 
@@ -12,7 +15,7 @@ them. Paths are relative to the analyzed `openai/codex` checkout at commit
 | `codex-rs/core/src/tools/handlers/apply_patch.lark` | Canonical patch syntax accepted by the custom tool grammar. |
 | `codex-rs/core/src/tools/handlers/apply_patch_spec_tests.rs` | Verifies normal and multi-environment custom specs. |
 | `codex-rs/tools/src/responses_api.rs` | Defines `FreeformTool` and its grammar format. |
-| `codex-rs/tools/src/tool_spec.rs` | Serializes `ToolSpec::Freeform` as Responses `type:"custom"`. |
+| `codex-rs/tools/src/tool_spec.rs` | Serializes `ToolSpec::Freeform` as Responses `type:"custom"` and coalesces Lite function/custom tools into the `functions` namespace. |
 | `codex-rs/protocol/src/openai_models.rs` | Defines `ApplyPatchToolType`; only `Freeform` exists at this snapshot. |
 
 ## Response item and router types
@@ -20,6 +23,7 @@ them. Paths are relative to the analyzed `openai/codex` checkout at commit
 | Source | Evidence |
 | --- | --- |
 | `codex-rs/protocol/src/models.rs` | Defines `AdditionalTools`, `CustomToolCall`, `CustomToolCallOutput`, and function/custom response input items. |
+| `codex-rs/tools/src/responses_api.rs` | Defines namespace containers and function/custom namespace children. |
 | `codex-rs/core/src/tools/router.rs` | Maps `CustomToolCall.input` to `ToolPayload::Custom`; function calls remain distinct. |
 | `codex-rs/core/src/tools/context.rs` | Selects `custom_tool_call_output` when the original payload is custom. |
 | `codex-rs/core/src/tools/handlers/apply_patch.rs` | Rejects non-custom payloads, parses/verifies input, and dispatches execution. |
@@ -52,9 +56,6 @@ them. Paths are relative to the analyzed `openai/codex` checkout at commit
 
 ## Request construction
 
-The WebSocket rows in this section were revalidated against local Codex commit
-`eb9dceba1a2e658142a456c5898836774835616b` on August 12, 2026.
-
 | Source | Evidence |
 | --- | --- |
 | `codex-rs/codex-api/src/common.rs` | Defines Standard and WebSocket request fields including instructions, tools, reasoning, cache key, text, and metadata. |
@@ -67,9 +68,6 @@ The WebSocket rows in this section were revalidated against local Codex commit
 
 ## Remote compaction transport
 
-These rows were revalidated against local Codex commit
-`eb9dceba1a2e658142a456c5898836774835616b` on August 12, 2026.
-
 | Source | Evidence |
 | --- | --- |
 | `codex-rs/core/src/compact_remote_v2_attempt.rs` | Appends `ResponseItem::CompactionTrigger` to the current Responses prompt. |
@@ -77,6 +75,7 @@ These rows were revalidated against local Codex commit
 | `codex-rs/core/src/client.rs` | Routes `ModelClientSession::stream` through Responses WebSocket when enabled and computes `previous_response_id` input deltas from the same session continuation state. |
 | `codex-rs/core/src/responses_retry.rs` | Applies the compact stream retry budget and session-level HTTP fallback. |
 | `codex-rs/core/src/compact_remote_request.rs` | Keeps legacy `/responses/compact` as a separate unary HTTP request. |
+| `codex-rs/core/src/client.rs` | Builds the active Standard/Lite envelope before both normal streaming and remote compaction dispatch. |
 
 ## Responses Lite
 
@@ -84,9 +83,32 @@ These rows were revalidated against local Codex commit
 | --- | --- |
 | `codex-rs/core/src/client.rs` | Moves tools into `AdditionalTools`, moves base instructions into a developer input item, disables parallel calls, and adds Lite transport metadata. |
 | `codex-rs/protocol/src/models.rs` | Defines the internal `AdditionalTools` response item. |
+| `codex-rs/tools/src/tool_spec.rs` | Groups top-level function/freeform tools into `functions`, preserves explicit namespaces, and omits an empty default namespace. |
+| `codex-rs/tools/src/responses_api.rs` | Allows function and custom child tools inside a namespace and defines the empty default `functions` description. |
 | `codex-rs/core/src/tools/spec_plan.rs` | Omits hosted Responses tools in Lite. |
 | `codex-rs/core/tests/suite/responses_lite.rs` | Verifies request shape, headers, tool placement, reasoning context, image detail removal, and hosted-tool exclusion. |
 | `codex-rs/models-manager/models.json` | Marks model entries with `use_responses_lite` and other capabilities. |
+
+## Standalone web search
+
+| Source | Evidence |
+| --- | --- |
+| `codex-rs/ext/web-search/src/tool.rs` | Exposes `web.run`, parses `SearchCommands`, builds recent input, calls the search client, and returns plaintext function output. |
+| `codex-rs/ext/web-search/src/history.rs` | Builds the bounded recent visible conversation tail. |
+| `codex-rs/ext/web-search/src/extension.rs` | Configures direct caller and external-web settings and gates provider availability. |
+| `codex-rs/codex-api/src/search.rs` | Defines the request, command union, settings, response length, and opaque structured results. |
+| `codex-rs/codex-api/src/endpoint/search.rs` | Targets `alpha/search`. |
+| `codex-rs/core/src/tools/spec_plan.rs` | Selects standalone `web.run` versus hosted `web_search` and forces client tools in Lite. |
+
+## Standalone image generation
+
+| Source | Evidence |
+| --- | --- |
+| `codex-rs/ext/image-generation/src/tool.rs` | Exposes `image_gen.imagegen`, defines prompt/path/recent-image input, selects generate/edit, and uses current image defaults. |
+| `codex-rs/ext/image-generation/src/backend.rs` | Calls the Images client and adds `x-codex-image-turn-id`. |
+| `codex-rs/codex-api/src/endpoint/images.rs` | Targets `images/generations` and `images/edits`. |
+| `codex-rs/core/src/tools/spec_plan.rs` | Applies feature, provider, auth/plan, namespace, and image-modality gates. |
+| `codex-rs/app-server/tests/suite/v2/imagegen_extension.rs` | Verifies generation/edit endpoints, reference/recent images, and turn headers. |
 
 ## Code Mode and tool exposure
 

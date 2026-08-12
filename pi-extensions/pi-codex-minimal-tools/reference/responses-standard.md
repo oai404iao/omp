@@ -1,7 +1,7 @@
 # Standard Codex Responses mode
 
 This document describes the non-Lite request envelope built by the analyzed
-Codex CLI. It is distinct from the extension's current provider payload.
+Codex CLI and used as the baseline for configured Standard profiles.
 
 ## Request shape
 
@@ -70,6 +70,18 @@ specifications. The router's model-visible specs and registered executors are
 related but not identical: Code Mode may register tools locally while hiding
 them from the top-level model tool list.
 
+Current Codex standalone extensions use namespace specs:
+
+```text
+web.run
+image_gen.imagegen
+```
+
+Standalone web search is feature-gated in Codex Standard mode; when it is not
+selected, compatible models use hosted `type:"web_search"`. Standalone image
+generation is a stable namespace extension subject to provider, auth, plan,
+and image-input gates. The extension makes this choice explicit per model.
+
 ## Parallel calls
 
 The request value is derived from `prompt.parallel_tool_calls`. Model metadata
@@ -92,8 +104,7 @@ Codex builds reasoning controls from model metadata and session options:
 
 ## Storage, caching, and continuation
 
-- Codex sets `store` according to the provider; the analyzed code enables it
-  for Azure Responses endpoints and otherwise leaves it false.
+- The current Codex request builder sets `store:false`.
 - `prompt_cache_key` is included in the logical request.
 - WebSocket requests can use `previous_response_id` only when the new logical
   input extends the exact previous input prefix and all context-affecting

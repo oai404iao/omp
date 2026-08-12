@@ -1,148 +1,139 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { computeNextActiveTools, computeToolCapabilities, isDefaultExtendedToolModel, isGpt5SeriesModel, isOpenAiGpt5Model } from "../src/capabilities.js";
+import { computeNextActiveTools, computeToolCapabilities } from "../src/capabilities.js";
+import { loadModelSettings } from "../src/model-catalog/runtime.js";
 import { DEFAULT_SETTINGS } from "../src/settings.js";
 
+function withAgentDir<T>(fn: () => T): T {
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-codex-capabilities-"));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		return fn();
+	} finally {
+		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previous;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+}
+
 const codex55 = { provider: "openai-codex", id: "gpt-5.5", input: ["text", "image"] };
-const textOnlyCodex = { provider: "openai-codex", id: "text-only-codex", input: ["text"] };
-const openai = { provider: "openai", id: "gpt-5.5", input: ["text", "image"] };
+const openai55 = { provider: "openai", id: "gpt-5.5", input: ["text", "image"] };
 
-test("capability gating follows provider and image support", () => {
-	const withViewImage = { ...DEFAULT_SETTINGS, viewImage: true };
-
-	const codex = computeToolCapabilities(codex55, withViewImage);
+test("tool capabilities come from the exact model profile and input modalities", () => withAgentDir(() => {
+	const codex = computeToolCapabilities(codex55, DEFAULT_SETTINGS);
 	assert.equal(codex.image_generation.enabled, true);
-	assert.equal(codex.view_image.enabled, true);
-	assert.equal(codex.apply_patch.enabled, false);
-	assert.equal(codex.web_search.enabled, false);
+	assert.equal(codex.view_image.enabled, false);
+	assert.equal(codex.apply_patch.enabled, true);
+	assert.equal(codex.web_search.enabled, true);
 
-	const textOnlyCodexCaps = computeToolCapabilities(textOnlyCodex, withViewImage);
-	assert.equal(textOnlyCodexCaps.image_generation.enabled, false);
-	assert.equal(textOnlyCodexCaps.view_image.enabled, false);
-	assert.equal(textOnlyCodexCaps.apply_patch.enabled, false);
+	const textOnly = computeToolCapabilities(
+		{ ...codex55, input: ["text"] },
+		DEFAULT_SETTINGS,
+	);
+	assert.equal(textOnly.image_generation.enabled, false);
+	assert.equal(textOnly.apply_patch.enabled, true);
+	assert.equal(textOnly.web_search.enabled, true);
 
-	const openaiCaps = computeToolCapabilities(openai, withViewImage);
-	assert.equal(openaiCaps.image_generation.enabled, true);
-	assert.equal(openaiCaps.view_image.enabled, true);
-	assert.equal(openaiCaps.apply_patch.enabled, true);
-	assert.equal(openaiCaps.web_search.enabled, false);
+	const gpt41 = computeToolCapabilities(
+		{ provider: "openai", id: "gpt-4.1", input: ["text", "image"] },
+		DEFAULT_SETTINGS,
+	);
+	assert.equal(gpt41.image_generation.enabled, true);
+	assert.equal(gpt41.apply_patch.enabled, false);
+	assert.equal(gpt41.web_search.enabled, false);
 
-	const nonOpenAiVision = computeToolCapabilities({ provider: "claude-bridge", id: "claude-opus-4-7", input: ["text", "image"] }, withViewImage);
-	assert.equal(nonOpenAiVision.image_generation.enabled, false);
-	assert.equal(nonOpenAiVision.view_image.enabled, false);
-	assert.equal(nonOpenAiVision.apply_patch.enabled, false);
+	const unknown = computeToolCapabilities(
+		{ provider: "openrouter", id: "gpt-5.5", input: ["text", "image"] },
+		DEFAULT_SETTINGS,
+	);
+	assert.ok(Object.values(unknown).every((capability) => !capability.enabled));
+}));
 
-	const defaults = computeToolCapabilities(codex55, DEFAULT_SETTINGS);
-	assert.equal(defaults.view_image.enabled, false, "view_image is gated off by default");
-	assert.equal(defaults.web_search.enabled, false, "web_search is gated off by default");
-});
+test("Responses Lite profiles keep standalone tools and custom apply_patch", () => withAgentDir(() => {
+	const model = { provider: "openai", id: "gpt-5.6-sol", input: ["text", "image"] };
+	const capabilities = computeToolCapabilities(model, DEFAULT_SETTINGS);
+	const settings = loadModelSettings(model, undefined, DEFAULT_SETTINGS);
 
-test("apply_patch is limited to GPT-5-series models on the openai provider", () => {
-	assert.equal(computeToolCapabilities({ provider: "openai", id: "gpt-5", input: ["text"] }, DEFAULT_SETTINGS).apply_patch.enabled, true);
-	assert.equal(computeToolCapabilities({ provider: "openai", id: "gpt-5.5", input: ["text"] }, DEFAULT_SETTINGS).apply_patch.enabled, true);
-	assert.equal(computeToolCapabilities({ provider: "openai", id: "gpt-4.1", input: ["text"] }, DEFAULT_SETTINGS).apply_patch.enabled, false);
-	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-5.5", input: ["text"] }, DEFAULT_SETTINGS).apply_patch.enabled, false);
-	assert.equal(computeToolCapabilities({ provider: "openrouter", id: "gpt-5.5", input: ["text"] }, DEFAULT_SETTINGS).apply_patch.enabled, false);
-	assert.equal(computeToolCapabilities({ provider: "openai", id: "gpt-5.5", input: ["text"] }, { ...DEFAULT_SETTINGS, applyPatchEnabled: false }).apply_patch.enabled, false);
-	assert.equal(isOpenAiGpt5Model({ provider: "OpenAI", id: "gpt-5-mini" }), true);
-	assert.equal(isOpenAiGpt5Model({ provider: "openai-codex", id: "gpt-5-mini" }), false);
-	assert.equal(isDefaultExtendedToolModel({ provider: "openai", id: "gpt-5-mini" }), true);
-	assert.equal(isDefaultExtendedToolModel({ provider: "openai", id: "gpt-50" }), false);
-	assert.equal(isDefaultExtendedToolModel({ provider: "openai-codex", id: "gpt-5-mini" }), false);
-});
+	assert.equal(settings.requestProfile.responsesMode, "lite");
+	assert.equal(settings.requestProfile.patchTransport, "custom");
+	assert.equal(settings.requestProfile.supportsHostedTools, false);
+	assert.equal(settings.requestProfile.supportsParallelTools, false);
+	assert.equal(settings.webSearchImplementation, "standalone");
+	assert.equal(settings.imageGenerationImplementation, "standalone");
+	assert.equal(capabilities.apply_patch.enabled, true);
+	assert.equal(capabilities.web_search.enabled, true);
+	assert.equal(capabilities.image_generation.enabled, true);
+}));
 
-test("web_search defaults to openai/gpt-5 models and is off by default", () => {
-	const enabledSettings = { ...DEFAULT_SETTINGS, webSearchEnabled: true };
-	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-5", input: ["text"] }, enabledSettings).web_search.enabled, false);
-	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-5.5", input: ["text"] }, enabledSettings).web_search.enabled, false);
-	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-5-mini", input: ["text"] }, enabledSettings).web_search.enabled, false);
-	assert.equal(computeToolCapabilities({ provider: "openai", id: "gpt-5", input: ["text"] }, enabledSettings).web_search.enabled, true);
-	assert.equal(computeToolCapabilities({ provider: "openai", id: "gpt-5.5", input: ["text"] }, enabledSettings).web_search.enabled, true);
-	assert.equal(computeToolCapabilities({ provider: "openai", id: "gpt-5-mini", input: ["text"] }, enabledSettings).web_search.enabled, true);
-	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-4.1", input: ["text"] }, enabledSettings).web_search.enabled, false);
-	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "o4-mini", input: ["text"] }, enabledSettings).web_search.enabled, false);
-	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-50", input: ["text"] }, enabledSettings).web_search.enabled, false);
-	assert.equal(computeToolCapabilities({ provider: "openai-codex", id: "gpt-5", input: ["text"] }, { ...enabledSettings, nativeProviderTools: false }).web_search.enabled, false);
-	assert.equal(isGpt5SeriesModel({ id: "gpt-5" }), true);
-	assert.equal(isGpt5SeriesModel({ id: "gpt-50" }), false);
-});
+test("legacy model settings remain a one-version compatibility override", () => withAgentDir(() => {
+	const disabledPatch = computeToolCapabilities(openai55, {
+		...DEFAULT_SETTINGS,
+		applyPatchEnabled: false,
+	});
+	assert.equal(disabledPatch.apply_patch.enabled, false);
+	assert.equal(disabledPatch.web_search.enabled, false);
 
-test("additionalModelIds extends web_search and apply_patch support by exact provider/model id", () => {
+	const oldCodexDefaults = computeToolCapabilities(codex55, {
+		...DEFAULT_SETTINGS,
+		webSearchEnabled: true,
+	});
+	assert.equal(oldCodexDefaults.apply_patch.enabled, false);
+	assert.equal(oldCodexDefaults.web_search.enabled, false);
+}));
+
+test("additionalModelIds remains compatible for exact custom model ids", () => withAgentDir(() => {
 	const settings = {
 		...DEFAULT_SETTINGS,
 		webSearchEnabled: true,
 		additionalModelIds: [
 			"openai/deepseek-v4-flash",
-			"openai-codex/gpt-5.5",
 			"custom/deepseek-v4-flash",
 		],
 	};
-	const openAiCustom = computeToolCapabilities({ provider: "openai", id: "deepseek-v4-flash", input: ["text"] }, settings);
+	const openAiCustom = computeToolCapabilities(
+		{ provider: "openai", id: "deepseek-v4-flash", input: ["text"] },
+		settings,
+	);
 	assert.equal(openAiCustom.apply_patch.enabled, true);
 	assert.equal(openAiCustom.web_search.enabled, true);
 
-	const codexAlias = computeToolCapabilities({ provider: "openai-codex", id: "gpt-5.5", input: ["text"] }, settings);
-	assert.equal(codexAlias.apply_patch.enabled, true);
-	assert.equal(codexAlias.web_search.enabled, true);
-
-	const customProvider = computeToolCapabilities({ provider: "custom", id: "deepseek-v4-flash", input: ["text"] }, settings);
+	const customProvider = computeToolCapabilities(
+		{ provider: "custom", id: "deepseek-v4-flash", input: ["text"] },
+		settings,
+	);
 	assert.equal(customProvider.apply_patch.enabled, true);
-	assert.equal(customProvider.web_search.enabled, false, "hosted web_search still requires an OpenAI native provider");
+	assert.equal(customProvider.web_search.enabled, false);
 
-	const unlisted = computeToolCapabilities({ provider: "openai", id: "deepseek-v4", input: ["text"] }, settings);
-	assert.equal(unlisted.apply_patch.enabled, false);
-	assert.equal(unlisted.web_search.enabled, false);
-});
+	const unlisted = computeToolCapabilities(
+		{ provider: "openai", id: "deepseek-v4", input: ["text"] },
+		settings,
+	);
+	assert.ok(Object.values(unlisted).every((capability) => !capability.enabled));
+}));
 
-test("active tool sync preserves native tools and only manages package tools", () => {
-	const current = ["read", "grep", "find", "ls", "bash", "edit", "write", "old_custom"];
-	const next = computeNextActiveTools(current, codex55, { ...DEFAULT_SETTINGS, viewImage: true });
-	for (const nativeTool of ["read", "grep", "find", "ls", "bash", "edit", "write"]) assert.ok(next.activeTools.includes(nativeTool));
-	assert.ok(next.activeTools.includes("old_custom"));
-	assert.ok(next.activeTools.includes("image_generation"));
-	assert.ok(next.activeTools.includes("view_image"));
-	assert.equal(next.activeTools.includes("apply_patch"), false);
-});
+test("active tool sync follows the model profile and preserves unrelated tools", () => withAgentDir(() => {
+	const current = ["read", "bash", "edit", "write", "old_custom"];
+	const next = computeNextActiveTools(
+		current,
+		{ provider: "openai", id: "gpt-5.5", input: ["text"] },
+		DEFAULT_SETTINGS,
+	);
+	assert.deepEqual(next.activeTools, ["read", "bash", "old_custom", "apply_patch", "web_search"]);
+	assert.deepEqual(next.added, ["apply_patch", "web_search"]);
+	assert.deepEqual(next.removed.sort(), ["edit", "write"].sort());
+}));
 
-test("unsupported package tools are removed without touching native tools", () => {
+test("unsupported models remove only package tools", () => withAgentDir(() => {
 	const current = ["read", "edit", "write", "image_generation", "view_image", "apply_patch", "web_search"];
-	const next = computeNextActiveTools(current, { provider: "anthropic", id: "claude", input: ["text"] }, { ...DEFAULT_SETTINGS, viewImage: true, webSearchEnabled: true });
+	const next = computeNextActiveTools(
+		current,
+		{ provider: "anthropic", id: "claude", input: ["text"] },
+		DEFAULT_SETTINGS,
+	);
 	assert.deepEqual(next.activeTools, ["read", "edit", "write"]);
 	assert.deepEqual(next.removed.sort(), ["apply_patch", "image_generation", "view_image", "web_search"].sort());
-});
-
-test("active tool sync auto-adds web_search only when desired", () => {
-	const next = computeNextActiveTools(["read"], { provider: "openai-codex", id: "gpt-5", input: ["text"] }, { ...DEFAULT_SETTINGS, webSearchEnabled: true });
-	assert.equal(next.activeTools.includes("web_search"), false);
-	const openaiNext = computeNextActiveTools(["read"], { provider: "openai", id: "gpt-5", input: ["text"] }, { ...DEFAULT_SETTINGS, webSearchEnabled: true });
-	assert.ok(openaiNext.activeTools.includes("web_search"));
-
-	const defaultSettings = computeNextActiveTools(["read"], { provider: "openai-codex", id: "gpt-5", input: ["text"] }, DEFAULT_SETTINGS);
-	assert.equal(defaultSettings.activeTools.includes("web_search"), false);
-});
-
-test("apply_patch automatically replaces native mutation tools on supported models", () => {
-	const current = ["read", "edit", "write"];
-	const next = computeNextActiveTools(current, { provider: "openai", id: "gpt-5.5", input: ["text"] }, DEFAULT_SETTINGS);
-	assert.deepEqual(next.activeTools, ["read", "apply_patch"]);
-	assert.deepEqual(next.added, ["apply_patch"]);
-	assert.deepEqual(next.removed.sort(), ["edit", "write"].sort());
-});
-
-test("Responses Lite disables hosted tools without disabling supported apply_patch", () => {
-	const capabilities = computeToolCapabilities(codex55, {
-		...DEFAULT_SETTINGS,
-		webSearchEnabled: true,
-		requestProfile: { responsesMode: "lite", supportsHostedTools: true },
-	});
-	assert.equal(capabilities.image_generation.enabled, false);
-	assert.equal(capabilities.web_search.enabled, false);
-	assert.equal(capabilities.apply_patch.enabled, false);
-
-	const openAiCapabilities = computeToolCapabilities(openai, {
-		...DEFAULT_SETTINGS,
-		webSearchEnabled: true,
-		requestProfile: { responsesMode: "lite", supportsHostedTools: true },
-	});
-	assert.equal(openAiCapabilities.apply_patch.enabled, true);
-});
+}));

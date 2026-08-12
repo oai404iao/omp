@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -86,11 +86,32 @@ test("fallback output remains readable without a custom renderer", async () => {
 	assert.doesNotMatch(tool.promptSnippet, /input argument/i);
 });
 
-test("web_search definition is a strict native-provider placeholder", async () => {
-	const tool = createWebSearchToolDefinition() as Record<string, any>;
-	assert.equal(tool.name, "web_search");
-	assert.deepEqual(tool.parameters, { type: "object", additionalProperties: false, properties: {} });
-	const result = await tool.execute();
-	assert.match(result.content[0].text, /native-provider-first/);
-	assert.equal(result.details.nativeTool, "web_search");
+test("web_search definition exposes Codex commands and preserves hosted execution", async () => {
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-web-search-renderer-"));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const tool = createWebSearchToolDefinition() as Record<string, any>;
+		assert.equal(tool.name, "web_search");
+		assert.equal(tool.parameters.type, "object");
+		assert.equal(tool.parameters.additionalProperties, false);
+		assert.ok(tool.parameters.properties.search_query);
+		assert.ok(tool.parameters.properties.image_query);
+		assert.ok(tool.parameters.properties.open);
+		const result = await tool.execute("", {}, undefined, undefined, {
+			cwd: process.cwd(),
+			model: {
+				provider: "openai",
+				api: "openai-responses",
+				id: "gpt-5.5",
+				input: ["text"],
+			},
+		});
+		assert.match(result.content[0].text, /hosted-provider-first/);
+		assert.equal(result.details.nativeTool, "web_search");
+	} finally {
+		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previous;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
 });
