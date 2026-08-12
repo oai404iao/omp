@@ -16,6 +16,10 @@ Source paths in these documents are relative to that Codex checkout unless a
 different repository is named. Model availability and internal protocol fields
 can change after the analyzed commit.
 
+The Responses WebSocket implementation was separately revalidated against
+local Codex commit `eb9dceba1a2e658142a456c5898836774835616b` on
+August 12, 2026.
+
 ## Reading order
 
 1. [Apply-patch wire protocols](apply-patch-protocols.md) separates the public

@@ -19,6 +19,8 @@ import {
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import type { ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
+import { ProxyAgent, WebSocket as UndiciWebSocket } from "undici";
+import type { Dispatcher } from "undici";
 import {
 	collectHistoricalCitationSources,
 	collectWebSearchCitationSources,
@@ -41,8 +43,11 @@ const OPENAI_CODEX_LATEST_IMAGE_NAME = "latest.png";
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 const SSE_RESPONSE_HEADER_TIMEOUT_MS = 20_000;
+const WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
+const WEBSOCKET_IDLE_TIMEOUT_MS = 300_000;
 const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
+const PREVIOUS_RESPONSE_NOT_FOUND_CODE = "previous_response_not_found";
 const CODEX_RESPONSE_STATUSES = new Set(["completed", "incomplete", "failed", "cancelled", "queued", "in_progress"]);
 const OPENAI_BETA_RESPONSES_WEBSOCKETS = "responses_websockets=2026-02-06";
 const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE = "x-openai-internal-codex-responses-lite";
@@ -126,10 +131,6 @@ interface WebSocketLike {
 	removeEventListener(type: string, listener: (event: unknown) => void): void;
 }
 
-interface WebSocketConstructorLike {
-	new (url: string, options?: { headers?: Record<string, string>; dispatcher?: unknown } | string | string[]): WebSocketLike;
-}
-
 interface SessionWebSocketCacheEntry {
 	socket: WebSocketLike;
 	busy: boolean;
@@ -194,20 +195,31 @@ interface ResponseEnvelope {
 }
 
 type ServiceTier = ResponseCreateParamsStreaming["service_tier"];
+type ProviderTransport = NonNullable<SimpleStreamOptions["transport"]>;
 
 const websocketSessionCache = new Map<string, SessionWebSocketCacheEntry>();
 
 class NonRetryableProviderError extends Error {}
+class ProviderResponseError extends Error {
+	code?: string;
+	errorType?: string;
+	status?: number;
+}
+class ProviderProtocolError extends Error {}
 
 const HTTP_STATUS_MESSAGE_PREFIX = /^HTTP\s+\d{3}(?::|\b)/i;
 
 interface StreamEventShape {
 	type?: string;
+	status?: number;
+	status_code?: number;
 	sequence_number?: number;
 	error?: {
 		type?: string;
 		message?: string;
 		code?: string;
+		plan_type?: string;
+		resets_at?: number;
 		[key: string]: unknown;
 	};
 	response?: ResponseEnvelope;
@@ -453,7 +465,7 @@ export function resolveCodexUrl(baseUrl: string | undefined, options?: { apiKeyM
 	return `${normalized}/codex/responses`;
 }
 
-function resolveCodexWebSocketUrl(baseUrl: string | undefined, options?: { apiKeyMode?: boolean }): string {
+export function resolveResponsesWebSocketUrl(baseUrl: string | undefined, options?: { apiKeyMode?: boolean }): string {
 	const url = new URL(resolveCodexUrl(baseUrl, options));
 	if (url.protocol === "https:") url.protocol = "wss:";
 	if (url.protocol === "http:") url.protocol = "ws:";
@@ -478,14 +490,19 @@ function buildBaseCodexHeaders(
 	token: string,
 ): Headers {
 	const headers = new Headers(modelHeaders);
+	const explicitAuthorization = Object.entries(additionalHeaders ?? {}).some(
+		([key, value]) => key.toLowerCase() === "authorization" && value.trim().length > 0,
+	);
 	for (const [key, value] of Object.entries(additionalHeaders ?? {})) {
 		headers.set(key, value);
 	}
 
-	headers.set("Authorization", `Bearer ${token}`);
-	if (accountId) headers.set("chatgpt-account-id", accountId);
-	headers.set("originator", "pi");
-	headers.set("User-Agent", _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "pi (browser)");
+	if (!explicitAuthorization && token) headers.set("Authorization", `Bearer ${token}`);
+	if (accountId && !headers.has("chatgpt-account-id")) headers.set("chatgpt-account-id", accountId);
+	if (!headers.has("originator")) headers.set("originator", "pi");
+	if (!headers.has("User-Agent")) {
+		headers.set("User-Agent", _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "pi (browser)");
+	}
 	return headers;
 }
 
@@ -519,7 +536,7 @@ function appendCommaSeparatedHeader(headers: Headers, name: string, value: strin
 	if (!values.includes(value)) headers.set(name, [...values, value].join(","));
 }
 
-function buildWebSocketHeaders(
+export function buildWebSocketHeaders(
 	modelHeaders: Record<string, string> | undefined,
 	additionalHeaders: Record<string, string> | undefined,
 	accountId: string | undefined,
@@ -533,7 +550,7 @@ function buildWebSocketHeaders(
 	headers.delete("openai-beta");
 	headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
 	headers.set("x-client-request-id", requestId);
-	headers.set("session_id", requestId);
+	headers.set("session-id", requestId);
 	return headers;
 }
 
@@ -824,11 +841,6 @@ async function* parseSSE(response: Response): AsyncIterable<StreamEventShape> {
 	}
 }
 
-function getWebSocketConstructor(): WebSocketConstructorLike | null {
-	const ctor = (globalThis as typeof globalThis & { WebSocket?: WebSocketConstructorLike }).WebSocket;
-	return typeof ctor === "function" ? ctor : null;
-}
-
 function envFirst(names: string[]): string | undefined {
 	if (typeof process === "undefined") return undefined;
 	for (const name of names) {
@@ -860,19 +872,25 @@ export function proxyForWebSocketUrl(rawUrl: string): string | undefined {
 	}
 	const noProxy = envFirst(["NO_PROXY", "no_proxy"]);
 	if (noProxyMatches(url.hostname, noProxy)) return undefined;
-	if (url.protocol === "wss:" || url.protocol === "https:") return envFirst(["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]);
-	if (url.protocol === "ws:" || url.protocol === "http:") return envFirst(["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"]);
+	if (url.protocol === "wss:" || url.protocol === "https:") {
+		return envFirst(["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"]);
+	}
+	if (url.protocol === "ws:" || url.protocol === "http:") {
+		return envFirst(["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]);
+	}
 	return undefined;
 }
 
-async function proxyDispatcherForUrl(rawUrl: string): Promise<unknown | undefined> {
+async function proxyDispatcherForUrl(rawUrl: string): Promise<Dispatcher | undefined> {
 	const proxy = proxyForWebSocketUrl(rawUrl);
 	if (!proxy) return undefined;
-	const { ProxyAgent } = await import("undici");
 	return new ProxyAgent(proxy);
 }
 
-export async function webSocketOptionsForUrl(url: string, headers: Record<string, string>): Promise<{ headers: Record<string, string>; dispatcher?: unknown }> {
+export async function webSocketOptionsForUrl(url: string, headers: Record<string, string>): Promise<{
+	headers: Record<string, string>;
+	dispatcher?: Dispatcher;
+}> {
 	const dispatcher = await proxyDispatcherForUrl(url);
 	return dispatcher ? { headers, dispatcher } : { headers };
 }
@@ -894,6 +912,15 @@ function closeWebSocketSilently(socket: WebSocketLike, code = 1000, reason = "do
 	}
 }
 
+export function closeProviderWebSocketSessions(sessionId?: string): void {
+	for (const [cacheKey, entry] of websocketSessionCache) {
+		if (sessionId && !cacheKey.startsWith(`${sessionId}\n`)) continue;
+		if (entry.idleTimer) clearTimeout(entry.idleTimer);
+		closeWebSocketSilently(entry.socket, 1000, "session_shutdown");
+		websocketSessionCache.delete(cacheKey);
+	}
+}
+
 
 function scheduleSessionWebSocketExpiry(cacheKey: string, entry: SessionWebSocketCacheEntry): void {
 	if (entry.idleTimer) {
@@ -907,10 +934,20 @@ function scheduleSessionWebSocketExpiry(cacheKey: string, entry: SessionWebSocke
 }
 
 function extractWebSocketError(event: unknown): Error {
-	if (event && typeof event === "object" && "message" in event) {
-		const message = (event as { message?: unknown }).message;
+	if (event && typeof event === "object") {
+		const message = "message" in event ? (event as { message?: unknown }).message : undefined;
 		if (typeof message === "string" && message.length > 0) {
 			return new Error(message);
+		}
+		const nestedError = "error" in event ? (event as { error?: unknown }).error : undefined;
+		if (nestedError instanceof Error && nestedError.message.length > 0) {
+			return nestedError;
+		}
+		if (nestedError && typeof nestedError === "object" && "message" in nestedError) {
+			const nestedMessage = (nestedError as { message?: unknown }).message;
+			if (typeof nestedMessage === "string" && nestedMessage.length > 0) {
+				return new Error(nestedMessage);
+			}
 		}
 	}
 	return new Error("WebSocket error");
@@ -927,22 +964,23 @@ function extractWebSocketCloseError(event: unknown): Error {
 	return new Error("WebSocket closed");
 }
 
-async function connectWebSocket(url: string, headers: Headers, signal: AbortSignal | undefined): Promise<WebSocketLike> {
-	const WebSocketCtor = getWebSocketConstructor();
-	if (!WebSocketCtor) {
-		throw new Error("WebSocket transport is not available in this runtime");
-	}
-
+async function connectWebSocket(
+	url: string,
+	headers: Headers,
+	signal: AbortSignal | undefined,
+	timeoutMs = WEBSOCKET_CONNECT_TIMEOUT_MS,
+): Promise<WebSocketLike> {
+	if (signal?.aborted) throw new Error("Request was aborted");
 	const wsHeaders = headersToRecord(headers);
-	delete wsHeaders["OpenAI-Beta"];
 	const options = await webSocketOptionsForUrl(url, wsHeaders);
 
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		let socket: WebSocketLike;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
 
 		try {
-			socket = new WebSocketCtor(url, options);
+			socket = new UndiciWebSocket(url, options) as WebSocketLike;
 		} catch (error) {
 			reject(error instanceof Error ? error : new Error(String(error)));
 			return;
@@ -970,11 +1008,19 @@ async function connectWebSocket(url: string, headers: Headers, signal: AbortSign
 			if (settled) return;
 			settled = true;
 			cleanup();
-			socket.close(1000, "aborted");
+			closeWebSocketSilently(socket, 1000, "aborted");
 			reject(new Error("Request was aborted"));
+		};
+		const onTimeout = () => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			closeWebSocketSilently(socket, 1000, "connect_timeout");
+			reject(new Error(`OpenAI Responses WebSocket connection timed out after ${timeoutMs}ms`));
 		};
 
 		const cleanup = () => {
+			if (timeout) clearTimeout(timeout);
 			socket.removeEventListener("open", onOpen);
 			socket.removeEventListener("error", onError);
 			socket.removeEventListener("close", onClose);
@@ -984,18 +1030,21 @@ async function connectWebSocket(url: string, headers: Headers, signal: AbortSign
 		socket.addEventListener("open", onOpen);
 		socket.addEventListener("error", onError);
 		socket.addEventListener("close", onClose);
-		signal?.addEventListener("abort", onAbort);
+		signal?.addEventListener("abort", onAbort, { once: true });
+		timeout = setTimeout(onTimeout, Math.max(1, timeoutMs));
 	});
 }
 
 async function acquireWebSocket(
 	url: string,
 	headers: Headers,
+	cacheKey: string | undefined,
 	sessionId: string | undefined,
 	signal: AbortSignal | undefined,
+	connectTimeoutMs: number,
 ): Promise<AcquiredWebSocket> {
-	if (!sessionId) {
-		const socket = await connectWebSocket(url, headers, signal);
+	if (!cacheKey || !sessionId) {
+		const socket = await connectWebSocket(url, headers, signal, connectTimeoutMs);
 		return {
 			socket,
 			reused: false,
@@ -1009,7 +1058,7 @@ async function acquireWebSocket(
 		};
 	}
 
-	const cached = websocketSessionCache.get(sessionId);
+	const cached = websocketSessionCache.get(cacheKey);
 	if (cached) {
 		if (cached.idleTimer) {
 			clearTimeout(cached.idleTimer);
@@ -1025,17 +1074,17 @@ async function acquireWebSocket(
 				release: ({ keep } = {}) => {
 					if (!keep || !isWebSocketReusable(cached.socket)) {
 						closeWebSocketSilently(cached.socket);
-						websocketSessionCache.delete(sessionId);
+						websocketSessionCache.delete(cacheKey);
 						return;
 					}
 					cached.busy = false;
-					scheduleSessionWebSocketExpiry(sessionId, cached);
+					scheduleSessionWebSocketExpiry(cacheKey, cached);
 				},
 			};
 		}
 
 		if (cached.busy) {
-			const socket = await connectWebSocket(url, headers, signal);
+			const socket = await connectWebSocket(url, headers, signal, connectTimeoutMs);
 			return {
 				socket,
 				reused: false,
@@ -1047,13 +1096,13 @@ async function acquireWebSocket(
 
 		if (!isWebSocketReusable(cached.socket)) {
 			closeWebSocketSilently(cached.socket);
-			websocketSessionCache.delete(sessionId);
+			websocketSessionCache.delete(cacheKey);
 		}
 	}
 
-	const socket = await connectWebSocket(url, headers, signal);
+	const socket = await connectWebSocket(url, headers, signal, connectTimeoutMs);
 	const entry: SessionWebSocketCacheEntry = { socket, busy: true };
-	websocketSessionCache.set(sessionId, entry);
+	websocketSessionCache.set(cacheKey, entry);
 	return {
 		socket,
 		entry,
@@ -1062,13 +1111,13 @@ async function acquireWebSocket(
 			if (!keep || !isWebSocketReusable(entry.socket)) {
 				closeWebSocketSilently(entry.socket);
 				if (entry.idleTimer) clearTimeout(entry.idleTimer);
-				if (websocketSessionCache.get(sessionId) === entry) {
-					websocketSessionCache.delete(sessionId);
+				if (websocketSessionCache.get(cacheKey) === entry) {
+					websocketSessionCache.delete(cacheKey);
 				}
 				return;
 			}
 			entry.busy = false;
-			scheduleSessionWebSocketExpiry(sessionId, entry);
+			scheduleSessionWebSocketExpiry(cacheKey, entry);
 		},
 	};
 }
@@ -1172,8 +1221,11 @@ async function* parseWebSocket(socket: WebSocketLike, signal: AbortSignal | unde
 						done = true;
 					}
 					queue.push(parsed);
-				} catch {
-					// ignore malformed websocket messages
+				} catch (error) {
+					failed = new ProviderProtocolError(
+						`Invalid OpenAI Responses WebSocket JSON: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					done = true;
 				}
 			})
 			.catch((error: unknown) => {
@@ -1226,8 +1278,15 @@ async function* parseWebSocket(socket: WebSocketLike, signal: AbortSignal | unde
 				continue;
 			}
 			if (done && pendingMessages === 0) break;
-			await new Promise<void>((resolve) => {
-				pending = resolve;
+			await new Promise<void>((resolve, reject) => {
+				const timeout = setTimeout(() => {
+					pending = null;
+					reject(new Error(`OpenAI Responses WebSocket idle timeout after ${WEBSOCKET_IDLE_TIMEOUT_MS}ms`));
+				}, WEBSOCKET_IDLE_TIMEOUT_MS);
+				pending = () => {
+					clearTimeout(timeout);
+					resolve();
+				};
 			});
 		}
 
@@ -1241,6 +1300,20 @@ async function* parseWebSocket(socket: WebSocketLike, signal: AbortSignal | unde
 		socket.removeEventListener("error", onError);
 		socket.removeEventListener("close", onClose);
 		signal?.removeEventListener("abort", onAbort);
+	}
+}
+
+async function* startWebSocketOutputOnFirstEvent(
+	events: AsyncIterable<StreamEventShape>,
+	onStart: () => void,
+): AsyncIterable<StreamEventShape> {
+	let started = false;
+	for await (const event of events) {
+		if (!started && event.type !== "error" && event.type !== "response.failed") {
+			started = true;
+			onStart();
+		}
+		yield event;
 	}
 }
 
@@ -1259,10 +1332,42 @@ function isRetryableEarlyWebSocketError(error: unknown): boolean {
 	return /^WebSocket (error|closed)(?:\s|$)/.test(message);
 }
 
+function isProviderNonTransportError(error: unknown): error is ProviderResponseError | ProviderProtocolError {
+	return error instanceof ProviderResponseError || error instanceof ProviderProtocolError;
+}
+
 function isWebSocketConnectionLimitReachedError(error: unknown): boolean {
 	const candidate = error as { code?: unknown; message?: unknown };
 	if (candidate?.code === WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE) return true;
 	return typeof candidate?.message === "string" && candidate.message.includes(WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE);
+}
+
+function isPreviousResponseNotFoundError(error: unknown): boolean {
+	const candidate = error as { code?: unknown; message?: unknown };
+	if (candidate?.code === PREVIOUS_RESPONSE_NOT_FOUND_CODE) return true;
+	return typeof candidate?.message === "string" && candidate.message.includes(PREVIOUS_RESPONSE_NOT_FOUND_CODE);
+}
+
+function webSocketHeaderIdentity(headers: Headers): string {
+	return shortHash(
+		[...headers.entries()]
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([name, value]) => `${name}:${value}`)
+			.join("\n"),
+	);
+}
+
+function friendlyUsageLimitMessage(error: StreamEventShape["error"], status: number | undefined): string | undefined {
+	const code = error?.code ?? error?.type ?? "";
+	if (status !== 429 && !/usage_limit_reached|usage_not_included|rate_limit_exceeded/i.test(code)) {
+		return undefined;
+	}
+	const plan = error?.plan_type ? ` (${error.plan_type.toLowerCase()} plan)` : "";
+	const mins = error?.resets_at
+		? Math.max(0, Math.round((error.resets_at * 1000 - Date.now()) / 60_000))
+		: undefined;
+	const when = mins !== undefined ? ` Try again in ~${mins} min.` : "";
+	return `You have hit your OpenAI usage limit${plan}.${when}`.trim();
 }
 
 async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIterable<StreamEventShape> {
@@ -1280,6 +1385,11 @@ async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIt
 
 		if (type === "error") {
 			const nestedError = event.error;
+			const status = typeof event.status === "number"
+				? event.status
+				: typeof event.status_code === "number"
+					? event.status_code
+					: undefined;
 			const code = typeof nestedError?.code === "string"
 				? nestedError.code
 				: typeof event.code === "string"
@@ -1290,20 +1400,23 @@ async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIt
 				: typeof event.message === "string"
 					? event.message
 					: undefined;
-			const error = new Error(`Codex error: ${message || code || JSON.stringify(event)}`) as Error & {
-				code?: string;
-				errorType?: string;
+			const displayMessage = friendlyUsageLimitMessage(nestedError, status)
+				?? `Codex error: ${message || code || JSON.stringify(event)}`;
+			const error = new ProviderResponseError(displayMessage) as ProviderResponseError & {
 				sequenceNumber?: number;
 			};
 			if (code) error.code = code;
 			if (typeof nestedError?.type === "string") error.errorType = nestedError.type;
+			if (status !== undefined) error.status = status;
 			if (typeof event.sequence_number === "number") error.sequenceNumber = event.sequence_number;
 			throw error;
 		}
 
 		if (type === "response.failed") {
 			const responseError = event.response?.error as { code?: unknown; message?: unknown } | undefined;
-			const error = new Error(typeof responseError?.message === "string" ? responseError.message : "Codex response failed") as Error & { code?: string };
+			const error = new ProviderResponseError(
+				typeof responseError?.message === "string" ? responseError.message : "OpenAI Responses request failed",
+			);
 			if (typeof responseError?.code === "string") error.code = responseError.code;
 			throw error;
 		}
@@ -1863,6 +1976,7 @@ async function processWebSocketStream<TApi extends Api>(
 	stream: AssistantMessageEventStream,
 	model: Model<TApi>,
 	onStart: () => void,
+	transport: ProviderTransport,
 	options: SimpleStreamOptions | undefined,
 	deps: {
 		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
@@ -1873,18 +1987,30 @@ async function processWebSocketStream<TApi extends Api>(
 	historicalCitationSources: ReadonlyArray<CitationSource>,
 ): Promise<void> {
 	let streamStarted = false;
+	let disableCachedContext = false;
 
 	for (let attempt = 0; attempt < 2; attempt++) {
-		const { socket, entry, release, reused } = await acquireWebSocket(url, headers, options?.sessionId, options?.signal);
+		const cacheKey = options?.sessionId
+			? `${options.sessionId}\n${model.provider}\n${model.api}\n${url}\n${webSocketHeaderIdentity(headers)}`
+			: undefined;
+		const { socket, entry, release, reused } = await acquireWebSocket(
+			url,
+			headers,
+			cacheKey,
+			options?.sessionId,
+			options?.signal,
+			WEBSOCKET_CONNECT_TIMEOUT_MS,
+		);
 		let keepConnection = true;
 		let released = false;
 		let eventCount = 0;
-		const transport = (options as { transport?: string } | undefined)?.transport ?? "auto";
 		const useCachedContext = transport === "websocket-cached" || transport === "auto";
 		// ChatGPT Codex Responses rejects `store: true` ("Store must be set to false").
 		// WebSocket continuation still works via connection-scoped previous_response_id state.
 		const fullBody = body;
-		const requestBody = useCachedContext && entry ? buildCachedWebSocketRequestBody(entry, fullBody) : fullBody;
+		const requestBody = useCachedContext && !disableCachedContext && entry
+			? buildCachedWebSocketRequestBody(entry, fullBody)
+			: fullBody;
 
 		const releaseOnce = (releaseOptions?: { keep?: boolean }) => {
 			if (released) return;
@@ -1894,15 +2020,19 @@ async function processWebSocketStream<TApi extends Api>(
 
 		try {
 			socket.send(JSON.stringify({ type: "response.create", ...requestBody }));
-			if (!streamStarted) {
+			const startOutput = () => {
+				if (streamStarted) return;
 				onStart();
 				stream.push({ type: "start", partial: output });
 				streamStarted = true;
-			}
+			};
 			await processCapturedResponsesStream(
-				countWebSocketEvents(parseWebSocket(socket, options?.signal), () => {
-					eventCount++;
-				}),
+				startWebSocketOutputOnFirstEvent(
+					countWebSocketEvents(parseWebSocket(socket, options?.signal), () => {
+						eventCount++;
+					}),
+					startOutput,
+				),
 				output,
 				stream,
 				model,
@@ -1938,6 +2068,16 @@ async function processWebSocketStream<TApi extends Api>(
 			// if that stale socket fails before any response event, retry once on a
 			// fresh WebSocket without changing request shape or falling back transports.
 			if (attempt === 0 && reused && eventCount === 0 && !options?.signal?.aborted && isRetryableEarlyWebSocketError(error)) {
+				continue;
+			}
+			if (
+				attempt === 0
+				&& requestBody.previous_response_id
+				&& !streamStarted
+				&& !options?.signal?.aborted
+				&& isPreviousResponseNotFoundError(error)
+			) {
+				disableCachedContext = true;
 				continue;
 			}
 			throw error;
@@ -2208,7 +2348,7 @@ function createErrorMessage(message: AssistantMessage, error: unknown, aborted: 
 
 export function buildProviderErrorMessage(error: unknown): string {
 	const message = error instanceof Error ? error.message : String(error);
-	const candidate = error as { code?: unknown; errorType?: unknown };
+	const candidate = error as { code?: unknown; errorType?: unknown; status?: unknown };
 	if (
 		candidate?.code === "stream_read_error"
 		&& candidate.errorType === "upstream_error"
@@ -2221,6 +2361,9 @@ export function buildProviderErrorMessage(error: unknown): string {
 	}
 	if (/^(?:WebSocket (?:error|closed)|WebSocket stream closed before response\.completed|Stream closed before response\.completed)/.test(message)) {
 		return `Connection error: ${message}`;
+	}
+	if (typeof candidate?.status === "number") {
+		return withHttpStatusPrefix(candidate.status, message);
 	}
 	return message;
 }
@@ -2274,7 +2417,10 @@ function createCodexStream<TApi extends Api>(
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			if (!apiKey) {
+			const hasExplicitAuthorization = Object.entries(options?.headers ?? {}).some(
+				([key, value]) => key.toLowerCase() === "authorization" && value.trim().length > 0,
+			);
+			if (!apiKey && !hasExplicitAuthorization) {
 				throw new Error(`No API key for provider: ${model.provider}`);
 			}
 
@@ -2299,7 +2445,11 @@ function createCodexStream<TApi extends Api>(
 			const websocketHeaders = buildWebSocketHeaders(model.headers, options?.headers, accountId, apiKey, websocketRequestId);
 			const bodyJson = JSON.stringify(body);
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
-			const transport = apiKeyTransport ? "sse" : options?.transport || "auto";
+			const transport: ProviderTransport = model.provider === "openai"
+				? settings.openaiTransport
+				: apiKeyTransport
+					? "sse"
+					: options?.transport || "auto";
 
 			if (transport !== "sse") {
 				const websocketBody = withResponsesLiteWebSocketMetadata(body, requestProfile.responsesMode);
@@ -2309,7 +2459,7 @@ function createCodexStream<TApi extends Api>(
 					websocketStarted = false;
 					try {
 						await processWebSocketStream(
-							resolveCodexWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport }),
+							resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport }),
 							websocketBody,
 							websocketHeaders,
 							output,
@@ -2318,6 +2468,7 @@ function createCodexStream<TApi extends Api>(
 							() => {
 								websocketStarted = true;
 							},
+							transport,
 							options,
 							deps,
 							requestCwd,
@@ -2338,6 +2489,9 @@ function createCodexStream<TApi extends Api>(
 						if (!aborted && connectionLimitBeforeStart && !retriedWebSocketConnectionLimit) {
 							retriedWebSocketConnectionLimit = true;
 							continue;
+						}
+						if (aborted || isProviderNonTransportError(error)) {
+							throw error;
 						}
 						appendAssistantMessageDiagnostic(
 							output,
@@ -2516,6 +2670,7 @@ export function registerOpenAIResponsesProviders(pi: ExtensionAPI, options: { ge
 		if (pendingActivities.length > 0) {
 			flushPendingMessages();
 		}
+		closeProviderWebSocketSessions();
 		clearPendingMessages();
 	});
 

@@ -11,6 +11,7 @@ export interface CodexMinimalToolsSettings {
 	glyphStyle: "unicode" | "ascii";
 	autoEnable: boolean;
 	nativeProviderTools: boolean;
+	openaiTransport: "sse" | "websocket" | "websocket-cached" | "auto";
 	fastMode: boolean;
 	compactionMode: "pi" | "responses" | "responses-compact";
 	requestProfile: CodexRequestProfileOverride;
@@ -32,6 +33,7 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	glyphStyle: "unicode",
 	autoEnable: true,
 	nativeProviderTools: true,
+	openaiTransport: "sse",
 	fastMode: false,
 	compactionMode: "pi",
 	requestProfile: {},
@@ -142,6 +144,13 @@ function glyphStyleSetting(raw: SettingsRecord): CodexMinimalToolsSettings["glyp
 	return value === "ascii" || value === "unicode" ? value : DEFAULT_SETTINGS.glyphStyle;
 }
 
+function openaiTransportSetting(raw: SettingsRecord): CodexMinimalToolsSettings["openaiTransport"] {
+	const value = raw.openaiTransport;
+	return value === "sse" || value === "websocket" || value === "websocket-cached" || value === "auto"
+		? value
+		: DEFAULT_SETTINGS.openaiTransport;
+}
+
 function compactionModeSetting(raw: SettingsRecord): CodexMinimalToolsSettings["compactionMode"] {
 	const value = raw.compactionMode;
 	if (value === "responses-context-management") return "responses";
@@ -169,6 +178,7 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		glyphStyle: glyphStyleSetting(raw),
 		autoEnable: boolSetting(raw, "autoEnable"),
 		nativeProviderTools: boolSetting(raw, "nativeProviderTools"),
+		openaiTransport: openaiTransportSetting(raw),
 		fastMode: boolSetting(raw, "fastMode"),
 		compactionMode: compactionModeSetting(raw),
 		requestProfile: requestProfileSetting(raw),

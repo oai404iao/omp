@@ -745,6 +745,7 @@ test("native compaction supports Codex Responses compaction and legacy /response
 		glyphStyle: "unicode",
 		autoEnable: true,
 		nativeProviderTools: true,
+		openaiTransport: "sse",
 		fastMode: true,
 		compactionMode: "responses",
 		requestProfile: {},

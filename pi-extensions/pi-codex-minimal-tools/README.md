@@ -20,6 +20,8 @@ models whose full id starts with `openai/gpt-5` use `apply_patch` instead of
   `/responses`, with the legacy `/responses/compact` endpoint still available.
 - Optional GPT-5 Fast processing with a persistent `/fast` toggle using
   `service_tier: "priority"`.
+- Configurable `openai` Responses transport with SSE, WebSocket, cached
+  WebSocket continuation, and safe pre-stream fallback.
 
 ## Protocol reference
 
@@ -69,6 +71,7 @@ JSON Schema-aware editors. `requestProfile` is the only nested section:
   "glyphStyle": "unicode",
   "autoEnable": true,
   "nativeProviderTools": true,
+  "openaiTransport": "sse",
   "fastMode": false,
   "compactionMode": "pi",
   "requestProfile": {
@@ -110,6 +113,7 @@ For offline completion, replace the URL with a local path your editor can resolv
 | Setting | What it does |
 | --- | --- |
 | `nativeProviderTools` | Rewrite this package's hosted-tool placeholders into OpenAI Responses native tools on `openai` and `openai-codex` (`image_generation`, and `web_search` when enabled). |
+| `openaiTransport` | Select the native `openai` Responses request path: `sse` (default), `websocket`, `websocket-cached`, or `auto`. WebSocket modes reuse a Pi-session connection; cached/auto modes send only the incremental input with `previous_response_id` when the request remains a strict extension of the preceding turn. `auto` falls back to SSE only if WebSocket fails before response streaming begins. |
 | `fastMode` | Add `service_tier: "priority"` to GPT-5-series requests on the native `openai` and `openai-codex` provider paths. The setting is off by default. An explicit `service_tier` supplied by another request hook takes precedence. |
 | `compactionMode` | GPT-5-series `openai` compaction: `pi` (default), `responses` (Codex remote compaction v2 through `/responses` + `compaction_trigger`), or `responses-compact` (legacy `/responses/compact`). The old `responses-context-management` config value is read as `responses` for migration only. |
 | `requestProfile` | Explicit Responses capability overrides. `responsesMode` accepts `standard` or `lite`; `systemPromptPlacement` chooses top-level `instructions` or an input `developer` message in Standard mode; `patchTransport` accepts `function` or `custom` and defaults to `function`. `supportsHostedTools` controls hosted-tool activation/rewriting and `supportsParallelTools` controls the request's parallel-call flag. Lite always uses a developer message and forces hosted and parallel tools off. |
@@ -147,6 +151,12 @@ Native modes ignore `/compact` custom summary instructions.
 survives Pi restarts. When enabled, the extension sends
 `service_tier: "priority"`. Fast mode applies only to GPT-5-series models on
 `openai` or `openai-codex`.
+
+`openaiTransport` overrides Pi's global transport preference only for this
+extension's `openai` provider shim. Authentication still comes from Pi's
+resolved provider credentials and headers. The WebSocket handshake targets
+the provider's normal `/responses` endpoint with `http(s)` rewritten to
+`ws(s)` and includes the Responses WebSocket beta header.
 
 Set `requestProfile.patchTransport: "custom"` to send `apply_patch` as the
 Codex freeform custom tool with the packaged Lark grammar. Other tools remain

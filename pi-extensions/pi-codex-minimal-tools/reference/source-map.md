@@ -52,14 +52,18 @@ them. Paths are relative to the analyzed `openai/codex` checkout at commit
 
 ## Request construction
 
+The WebSocket rows in this section were revalidated against local Codex commit
+`eb9dceba1a2e658142a456c5898836774835616b` on August 12, 2026.
+
 | Source | Evidence |
 | --- | --- |
 | `codex-rs/codex-api/src/common.rs` | Defines Standard and WebSocket request fields including instructions, tools, reasoning, cache key, text, and metadata. |
 | `codex-rs/core/src/client.rs` | Builds Standard/Lite requests, reasoning controls, headers, WebSocket metadata, and continuation state. |
 | `codex-rs/core/src/client_common.rs` | Formats request input and strips image details in Lite. |
 | `codex-rs/codex-api/src/endpoint/responses_websocket.rs` | Serializes Responses WebSocket requests and previous-response continuation. |
-| `codex-rs/core/tests/suite/client.rs` | Request snapshots and client behavior. |
-| `codex-rs/core/tests/suite/agent_websocket.rs` | WebSocket request, reconnect, and model-change behavior. |
+| `codex-rs/websocket-client/src/dialer.rs` | Connects directly or through configured proxies and performs target TLS/WebSocket upgrades. |
+| `codex-rs/core/tests/suite/client.rs` | Request snapshots and HTTP client behavior. |
+| `codex-rs/core/tests/suite/client_websockets.rs` | WebSocket handshake headers, request frames, connection reuse, incremental continuation, and reconnect behavior. |
 
 ## Responses Lite
 

@@ -32,6 +32,12 @@
       "description": "Rewrite hosted-tool placeholders into native OpenAI Responses tools on openai and openai-codex.",
       "default": true
     },
+    "openaiTransport": {
+      "type": "string",
+      "description": "Transport for native openai provider Responses requests. sse always uses HTTP streaming; websocket uses a reusable WebSocket with full request context; websocket-cached also uses previous_response_id input deltas; auto tries cached WebSocket and falls back to SSE only before response streaming starts.",
+      "enum": ["sse", "websocket", "websocket-cached", "auto"],
+      "default": "sse"
+    },
     "fastMode": {
       "type": "boolean",
       "description": "Request OpenAI GPT-5 Fast processing by adding service_tier: priority to native openai and openai-codex Responses requests.",
