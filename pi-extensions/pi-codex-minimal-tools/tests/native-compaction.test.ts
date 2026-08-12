@@ -346,6 +346,92 @@ test("responses compaction is requested through Pi's session compaction hook", a
 	}
 });
 
+test("session compaction resolves the active Pi turn id for provider transport", async () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-native-compaction-turn-"));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const configDir = join(agentDir, "extensions", "pi-codex-minimal-tools");
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(join(configDir, "config.json"), JSON.stringify({
+			compactionMode: "responses",
+			openaiTransport: "sse",
+		}));
+
+		const previousFetch = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			const event = {
+				type: "response.completed",
+				response: {
+					id: "resp_compact",
+					status: "completed",
+					output: [item],
+					usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+				},
+			};
+			return new Response(`data: ${JSON.stringify(event)}\n\n`, {
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			});
+		}) as typeof fetch;
+		try {
+			const handlers: Record<string, Function[]> = {};
+			const pi = {
+				on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },
+				getActiveTools() { return []; },
+				getAllTools() { return []; },
+				getThinkingLevel() { return "off"; },
+			};
+			const turnLookups: Array<string | undefined> = [];
+			registerNativeCompaction(pi as any, {
+				getCurrentTurnId(sessionId) {
+					turnLookups.push(sessionId);
+					return "turn-active";
+				},
+			});
+
+			await handlers.session_before_compact?.[0]?.({
+				type: "session_before_compact",
+				branchEntries: [messageEntry("user1", null, {
+					role: "user",
+					content: "compact me",
+					timestamp: 1,
+				})],
+				preparation: {
+					firstKeptEntryId: "user1",
+					messagesToSummarize: [],
+					turnPrefixMessages: [],
+					isSplitTurn: false,
+					tokensBefore: 100,
+					fileOps: { read: new Set(), modified: new Set() },
+					settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 },
+				},
+				signal: new AbortController().signal,
+			}, {
+				cwd: process.cwd(),
+				model: { ...model, baseUrl: "https://example.test/v1" },
+				getSystemPrompt: () => "system",
+				modelRegistry: {
+					getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "key", headers: {} }),
+				},
+				sessionManager: {
+					getLeafId: () => "user1",
+					getSessionId: () => "session-1",
+				},
+				ui: { notify() {} },
+			});
+
+			assert.deepEqual(turnLookups, ["session-1"]);
+		} finally {
+			globalThis.fetch = previousFetch;
+		}
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
 test("native opaque state is not replayed to unsupported providers", () => {
 	const messages = [
 		{ role: "compactionSummary", summary: "placeholder", tokensBefore: 100, timestamp: 5 },

@@ -10,9 +10,11 @@ import {
 	buildWebSocketHeaders,
 	closeProviderWebSocketSessions,
 	registerOpenAIResponsesProviders,
+	requestOpenAINativeCompaction,
 	resolveResponsesWebSocketUrl,
 	sendWebSocketRequest,
 } from "../src/provider-shim.js";
+import { loadSettings } from "../src/settings.js";
 
 const originalPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
 
@@ -572,6 +574,437 @@ test("openai websocket-cached reuses the connection and sends an incremental inp
 		assert.equal(server.requests[1]?.input.length, 1);
 		assert.equal(server.requests[1]?.input[0]?.role, "user");
 		assert.equal(server.requests[1]?.input[0]?.content[0]?.text, "again");
+	} finally {
+		await server.close();
+	}
+});
+
+test("OpenAI Responses compaction reuses the cached WebSocket continuation", async () => {
+	writeSettings({ openaiTransport: "websocket-cached", compactionMode: "responses" });
+	const compactionItem = {
+		type: "compaction",
+		id: "cmp_1",
+		encrypted_content: "opaque-compaction-state",
+	};
+	const server = await startWebSocketServer([
+		() => successEvents("resp_1", "first"),
+		() => [
+			{ type: "response.created", response: { id: "resp_compact" } },
+			{ type: "response.output_item.done", output_index: 0, item: compactionItem },
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_compact",
+					status: "completed",
+					output: [compactionItem],
+					usage: {
+						input_tokens: 0,
+						output_tokens: 0,
+						total_tokens: 0,
+						input_tokens_details: { cached_tokens: 0 },
+					},
+				},
+			},
+		],
+		() => successEvents("resp_after", "after compaction"),
+	]);
+	const model = {
+		provider: "openai",
+		api: "openai-responses",
+		id: "gpt-5.5",
+		baseUrl: server.url,
+		headers: {},
+		input: ["text"],
+		reasoning: false,
+		contextWindow: 400_000,
+		maxTokens: 16_384,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	} as any;
+	try {
+		const provider = createProviderHarness().openai;
+		const first = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
+		const output = await requestOpenAINativeCompaction(model, {
+			systemPrompt: "",
+			messages: [
+				{ role: "user", content: "hello", timestamp: 1 },
+				first,
+			],
+			tools: [],
+		}, {
+			mode: "responses",
+			apiKey: "pi-resolved-api-key",
+			sessionId: "pi-session",
+			turnId: "pi-turn",
+			settings: loadSettings(),
+		});
+
+		assert.deepEqual(output, [
+			{ type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] },
+			compactionItem,
+		]);
+		assert.equal(server.connections, 1);
+		assert.equal(server.requests.length, 2);
+		assert.equal(server.requests[1]?.type, "response.create");
+		assert.equal(server.requests[1]?.previous_response_id, "resp_1");
+		assert.deepEqual(server.requests[1]?.input, [{ type: "compaction_trigger" }]);
+		assert.equal(server.requests[1]?.client_metadata?.turn_id, "pi-turn");
+		assert.equal(server.handshakes[0]?.headers["x-codex-beta-features"], "remote_compaction_v2");
+
+		const checkpointMessage = {
+			role: "assistant",
+			content: output.map((checkpointItem) => ({
+				type: "thinking",
+				thinking: "",
+				thinkingSignature: JSON.stringify(checkpointItem),
+				redacted: true,
+			})),
+			api: "openai-responses",
+			provider: "openai",
+			model: "gpt-5.5",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+		const after = await runOpenAIProvider(provider, server.url, [
+			checkpointMessage,
+			{ role: "user", content: "continue after compaction" },
+		]);
+		assert.equal(after.content[0]?.text, "after compaction");
+		assert.equal(server.connections, 1);
+		assert.equal(server.requests[2]?.previous_response_id, undefined);
+		assert.equal(server.requests[2]?.input.at(-1)?.content[0]?.text, "continue after compaction");
+	} finally {
+		await server.close();
+	}
+});
+
+test("OpenAI Responses WebSocket compaction retries a missing continuation with full context", async () => {
+	writeSettings({ openaiTransport: "websocket-cached", compactionMode: "responses" });
+	const compactionItem = { type: "compaction", encrypted_content: "recovered-state" };
+	const server = await startWebSocketServer([
+		() => successEvents("resp_1", "first"),
+		() => [{
+			type: "error",
+			status: 400,
+			error: {
+				type: "invalid_request_error",
+				code: "previous_response_not_found",
+				message: "Previous response was not found.",
+			},
+		}],
+		() => [
+			{ type: "response.created", response: { id: "resp_compact" } },
+			{ type: "response.output_item.done", output_index: 0, item: compactionItem },
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_compact",
+					status: "completed",
+					output: [compactionItem],
+					usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+				},
+			},
+		],
+	]);
+	const model = {
+		provider: "openai",
+		api: "openai-responses",
+		id: "gpt-5.5",
+		baseUrl: server.url,
+		headers: {},
+		input: ["text"],
+		reasoning: false,
+		contextWindow: 400_000,
+		maxTokens: 16_384,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	} as any;
+	try {
+		const provider = createProviderHarness().openai;
+		const first = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
+		await requestOpenAINativeCompaction(model, {
+			systemPrompt: "",
+			messages: [
+				{ role: "user", content: "hello", timestamp: 1 },
+				first,
+			],
+			tools: [],
+		}, {
+			mode: "responses",
+			apiKey: "pi-resolved-api-key",
+			sessionId: "pi-session",
+			settings: loadSettings(),
+		});
+
+		assert.equal(server.connections, 2);
+		assert.equal(server.requests[1]?.previous_response_id, "resp_1");
+		assert.equal(server.requests[2]?.previous_response_id, undefined);
+		assert.equal(server.requests[2]?.input.at(-1)?.type, "compaction_trigger");
+		assert.equal(server.requests[2]?.input.length, 3);
+	} finally {
+		await server.close();
+	}
+});
+
+test("strict OpenAI Responses WebSocket compaction sends full context without continuation", async () => {
+	writeSettings({ openaiTransport: "websocket", compactionMode: "responses" });
+	const compactionItem = { type: "compaction", encrypted_content: "strict-state" };
+	const server = await startWebSocketServer([
+		() => successEvents("resp_1", "first"),
+		() => [
+			{ type: "response.created", response: { id: "resp_compact" } },
+			{ type: "response.output_item.done", output_index: 0, item: compactionItem },
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_compact",
+					status: "completed",
+					output: [compactionItem],
+					usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+				},
+			},
+		],
+	]);
+	const model = {
+		provider: "openai",
+		api: "openai-responses",
+		id: "gpt-5.5",
+		baseUrl: server.url,
+		headers: {},
+		input: ["text"],
+		reasoning: false,
+		contextWindow: 400_000,
+		maxTokens: 16_384,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	} as any;
+	try {
+		const first = await runOpenAIProvider(
+			createProviderHarness().openai,
+			server.url,
+			[{ role: "user", content: "hello" }],
+		);
+		await requestOpenAINativeCompaction(model, {
+			systemPrompt: "",
+			messages: [
+				{ role: "user", content: "hello", timestamp: 1 },
+				first,
+			],
+			tools: [],
+		}, {
+			mode: "responses",
+			apiKey: "pi-resolved-api-key",
+			sessionId: "pi-session",
+			settings: loadSettings(),
+		});
+
+		assert.equal(server.connections, 1);
+		assert.equal(server.requests[1]?.previous_response_id, undefined);
+		assert.equal(server.requests[1]?.input.length, 3);
+		assert.equal(server.requests[1]?.input.at(-1)?.type, "compaction_trigger");
+	} finally {
+		await server.close();
+	}
+});
+
+test("strict OpenAI Responses WebSocket compaction can consume a prewarm continuation", async () => {
+	writeSettings({
+		openaiTransport: "websocket",
+		openaiWebSocketPrewarm: true,
+		compactionMode: "responses",
+	});
+	const compactionItem = { type: "compaction", encrypted_content: "prewarm-state" };
+	const server = await startWebSocketServer([
+		() => successEvents("warm_1"),
+		() => [
+			{ type: "response.created", response: { id: "resp_compact" } },
+			{ type: "response.output_item.done", output_index: 0, item: compactionItem },
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_compact",
+					status: "completed",
+					output: [compactionItem],
+					usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+				},
+			},
+		],
+	]);
+	const model = {
+		provider: "openai",
+		api: "openai-responses",
+		id: "gpt-5.5",
+		baseUrl: server.url,
+		headers: {},
+		input: ["text"],
+		reasoning: false,
+		contextWindow: 400_000,
+		maxTokens: 16_384,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	} as any;
+	try {
+		const harness = createProviderHarnessWithEvents();
+		for (const handler of harness.handlers.before_agent_start ?? []) {
+			await handler({
+				type: "before_agent_start",
+				prompt: "hello",
+				systemPrompt: "",
+				images: undefined,
+			}, {
+				cwd: process.cwd(),
+				model,
+				signal: undefined,
+				sessionManager: {
+					getSessionId: () => "pi-session",
+					getBranch: () => [],
+				},
+				modelRegistry: {
+					async getApiKeyAndHeaders() {
+						return { ok: true, apiKey: "pi-resolved-api-key", headers: {} };
+					},
+				},
+			});
+		}
+		await requestOpenAINativeCompaction(model, {
+			systemPrompt: "",
+			messages: [{ role: "user", content: "hello", timestamp: 1 }],
+			tools: [],
+		}, {
+			mode: "responses",
+			apiKey: "pi-resolved-api-key",
+			sessionId: "pi-session",
+			settings: loadSettings(),
+		});
+
+		assert.equal(server.connections, 1);
+		assert.equal(server.requests[0]?.generate, false);
+		assert.equal(server.requests[1]?.previous_response_id, "warm_1");
+		assert.deepEqual(server.requests[1]?.input, [{ type: "compaction_trigger" }]);
+	} finally {
+		await server.close();
+	}
+});
+
+test("OpenAI Responses WebSocket compaction accepts Pi-resolved Authorization without an API key", async () => {
+	writeSettings({ openaiTransport: "websocket", compactionMode: "responses" });
+	const compactionItem = { type: "compaction", encrypted_content: "header-auth-state" };
+	const server = await startWebSocketServer([
+		() => [
+			{ type: "response.created", response: { id: "resp_compact" } },
+			{ type: "response.output_item.done", output_index: 0, item: compactionItem },
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_compact",
+					status: "completed",
+					output: [compactionItem],
+					usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+				},
+			},
+		],
+	]);
+	try {
+		await requestOpenAINativeCompaction({
+			provider: "openai",
+			api: "openai-responses",
+			id: "gpt-5.5",
+			baseUrl: server.url,
+			headers: {},
+			input: ["text"],
+			reasoning: false,
+			contextWindow: 400_000,
+			maxTokens: 16_384,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		} as any, {
+			systemPrompt: "",
+			messages: [{ role: "user", content: "compact me", timestamp: 1 }],
+			tools: [],
+		}, {
+			mode: "responses",
+			apiKey: "",
+			headers: { Authorization: "Bearer pi-header-token" },
+			sessionId: "pi-session",
+			settings: loadSettings(),
+		});
+
+		assert.equal(server.handshakes[0]?.headers.authorization, "Bearer pi-header-token");
+		assert.equal(server.requests[0]?.input.at(-1)?.type, "compaction_trigger");
+	} finally {
+		await server.close();
+	}
+});
+
+test("OpenAI Responses compaction auto fallback is sticky for later provider requests", async () => {
+	writeSettings({ openaiTransport: "auto", compactionMode: "responses" });
+	let sseRequests = 0;
+	const compactionItem = { type: "compaction", encrypted_content: "fallback-state" };
+	const server = await startWebSocketServer([
+		() => ({ handshakeStatus: 426 }),
+	], (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/responses") {
+			response.writeHead(404).end();
+			return;
+		}
+		void (async () => {
+			const body = await readJsonRequest(request, response);
+			sseRequests++;
+			const isCompaction = body.input?.at(-1)?.type === "compaction_trigger";
+			const events = isCompaction
+				? [
+						{ type: "response.created", response: { id: "resp_compact" } },
+						{ type: "response.output_item.done", output_index: 0, item: compactionItem },
+						{
+							type: "response.completed",
+							response: {
+								id: "resp_compact",
+								status: "completed",
+								output: [compactionItem],
+								usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+							},
+						},
+					]
+				: successEvents("resp_sse", "continued over sse");
+			for (const event of events) response.write(`data: ${JSON.stringify(event)}\n\n`);
+			response.end();
+		})();
+	});
+	const model = {
+		provider: "openai",
+		api: "openai-responses",
+		id: "gpt-5.5",
+		baseUrl: server.url,
+		headers: {},
+		input: ["text"],
+		reasoning: false,
+		contextWindow: 400_000,
+		maxTokens: 16_384,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	} as any;
+	try {
+		await requestOpenAINativeCompaction(model, {
+			systemPrompt: "",
+			messages: [{ role: "user", content: "compact me", timestamp: 1 }],
+			tools: [],
+		}, {
+			mode: "responses",
+			apiKey: "pi-resolved-api-key",
+			sessionId: "pi-session",
+			settings: loadSettings(),
+		});
+		const result = await runOpenAIProvider(
+			createProviderHarness().openai,
+			server.url,
+			[{ role: "user", content: "after compact" }],
+		);
+
+		assert.equal(result.content[0]?.text, "continued over sse");
+		assert.equal(server.connections, 1);
+		assert.equal(sseRequests, 2);
 	} finally {
 		await server.close();
 	}

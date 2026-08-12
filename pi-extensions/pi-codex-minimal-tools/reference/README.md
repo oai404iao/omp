@@ -39,6 +39,12 @@ August 12, 2026.
    records the Responses item lifecycle and Codex begin/end TUI behavior.
 8. [Source map](source-map.md) maps each conclusion to Codex source and tests.
 
+Remote compaction v2 was also revalidated against the August 12, 2026 Codex
+snapshot. It appends `compaction_trigger` and dispatches through the ordinary
+Responses streaming client, so an enabled Responses WebSocket transport can
+reuse the same connection and `previous_response_id`. The legacy
+`/responses/compact` endpoint remains a separate unary HTTP request.
+
 The exact freeform patch grammar from the analyzed commit is also preserved as
 the packaged provider resource
 [`src/providers/codex-apply-patch.lark`](../src/providers/codex-apply-patch.lark).
