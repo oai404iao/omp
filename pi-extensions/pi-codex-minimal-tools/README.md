@@ -5,8 +5,8 @@ catalog instead of model-name heuristics.
 
 The extension adds:
 
-- Responses SSE, WebSocket, cached continuation, automatic retry/fallback, and
-  WebSocket prewarm.
+- Responses SSE, WebSocket, cached continuation, WebSocket retry, upgrade-only
+  SSE fallback, and WebSocket prewarm.
 - Standard Responses and the internal Codex Responses Lite envelope.
 - Codex freeform `apply_patch`, including streaming preview and exact replay.
 - Hosted Responses web search or standalone Codex `web.run`.
@@ -306,8 +306,10 @@ loaded image-capable model with an enabled catalog profile.
 - `sse`: HTTP streaming only.
 - `websocket`: reusable WebSocket with full logical requests.
 - `websocket-cached`: reuse plus `previous_response_id` input deltas.
-- `auto`: retry WebSocket failures and use sticky per-session SSE fallback;
-  HTTP 426 switches immediately.
+- `auto`: retry transient WebSocket failures, but use sticky per-session SSE
+  fallback only when the WebSocket upgrade is rejected with HTTP 426. Model,
+  request, output-limit, context-limit, and post-upgrade connection errors do
+  not change transports.
 
 Prewarm sends a best-effort `response.create` with `generate:false`.
 Continuation reuse requires the new request to extend the previous logical
