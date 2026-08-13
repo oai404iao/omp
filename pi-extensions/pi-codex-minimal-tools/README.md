@@ -276,8 +276,10 @@ actually in use.
   open/click/find, PDF screenshots, finance, weather, sports, and time.
 
 Standalone search sends a bounded recent visible conversation tail, resolved
-Pi authentication, direct-caller/live-web settings, and a response-length
-token budget.
+Pi authentication, direct-caller/live-web settings, the active turn metadata,
+and the model's 10,000-token truncation budget. Search rows stay compact by
+default and show deduplicated source hosts; expand the tool row to inspect the
+raw result text.
 
 ## Image Generation
 

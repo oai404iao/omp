@@ -710,11 +710,17 @@ test("web search special events merge with output items into one rendered activi
 				completed: true,
 				query: "latest docs",
 				queries: [],
-				sources: [],
+				sources: [
+					{ title: "Docs", url: "https://www.example.com/docs" },
+					{ title: "Other", url: "https://openai.com/codex" },
+					{ title: "Duplicate", url: "https://example.com/other" },
+				],
 			}],
 		},
 	}, { expanded: false }, theme);
-	assert.match(component.render(120).join("\n"), /Searched the web for latest docs/);
+	const renderedActivity = component.render(120).join("\n");
+	assert.match(renderedActivity, /Searched the web for latest docs/);
+	assert.match(renderedActivity, /example\.com.*openai\.com/);
 });
 
 test("web search special events render even when no output item is returned", async () => {

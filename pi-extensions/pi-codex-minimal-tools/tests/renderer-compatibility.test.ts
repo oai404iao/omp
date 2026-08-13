@@ -98,6 +98,38 @@ test("web_search definition exposes Codex commands and preserves hosted executio
 		assert.ok(tool.parameters.properties.search_query);
 		assert.ok(tool.parameters.properties.image_query);
 		assert.ok(tool.parameters.properties.open);
+		assert.equal(typeof tool.renderCall, "function");
+		assert.equal(typeof tool.renderResult, "function");
+		const theme = {
+			fg(_color: string, text: string) { return text; },
+			bold(text: string) { return text; },
+		};
+		const call = tool.renderCall(
+			{ search_query: [{ q: "codex tools" }] },
+			theme,
+			{ cwd: process.cwd() },
+		).render(120).join("\n");
+		assert.match(call, /Web Search codex tools/);
+		const rendered = tool.renderResult({
+			content: [{ type: "text", text: "raw search payload" }],
+			details: {
+				mode: "standalone",
+				results: [
+					{ domain: "www.github.com", url: "https://github.com/openai/codex" },
+					{ url: "https://openai.com/codex" },
+					{ domain: "github.com", url: "https://github.com/openai" },
+				],
+			},
+		}, { expanded: false }, theme, { cwd: process.cwd(), isError: false }).render(120).join("\n");
+		assert.match(rendered, /\(3\)/);
+		assert.match(rendered, /github\.com/);
+		assert.match(rendered, /openai\.com/);
+		assert.doesNotMatch(rendered, /raw search payload/);
+		const expanded = tool.renderResult({
+			content: [{ type: "text", text: "raw search payload" }],
+			details: { mode: "standalone", results: [] },
+		}, { expanded: true }, theme, { cwd: process.cwd(), isError: false }).render(120).join("\n");
+		assert.match(expanded, /raw search payload/);
 		const result = await tool.execute("", {}, undefined, undefined, {
 			cwd: process.cwd(),
 			model: {

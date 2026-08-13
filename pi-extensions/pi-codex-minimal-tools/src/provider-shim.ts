@@ -3198,6 +3198,23 @@ export function webSearchActivityDetail(search: SurfacedWebSearch): string {
 	return search.queries.length > 1 && first ? `${first} ...` : first;
 }
 
+export function webSearchActivityHosts(search: SurfacedWebSearch): string[] {
+	const seen = new Set<string>();
+	const hosts: string[] = [];
+	for (const source of search.sources) {
+		try {
+			const host = new URL(source.url).hostname.replace(/^www\./i, "");
+			const key = host.toLowerCase();
+			if (!host || seen.has(key)) continue;
+			seen.add(key);
+			hosts.push(host);
+		} catch {
+			// Sources without a valid URL do not produce a host tag.
+		}
+	}
+	return hosts;
+}
+
 export function buildWebSearchStatusText(search: SurfacedWebSearch): string {
 	const completed = search.completed ?? search.status === "completed";
 	const detail = webSearchActivityDetail(search);
@@ -3993,17 +4010,30 @@ export function registerOpenAIResponsesProviders(
 	pi.registerMessageRenderer<{ searches?: SurfacedWebSearch[] }>(WEB_SEARCH_ACTIVITY_MESSAGE_TYPE, (message, options, theme) => {
 		const searches = message.details?.searches ?? [];
 		const container = new Container();
-		const summaryLines = searches.length > 0
-			? searches.map((search) => {
+		if (searches.length > 0) {
+			searches.forEach((search, index) => {
 					const completed = search.completed ?? search.status === "completed";
 					const header = completed ? "Searched the web" : "Searching the web";
 					const detail = webSearchActivityDetail(search);
 					const separator = detail ? (completed ? " for " : " ") : "";
 					const bullet = themeFg(theme, completed ? "muted" : "accent", glyphs().bullet);
-					return `${bullet}${themeFg(theme, "text", themeBold(theme, header))}${themeFg(theme, "dim", `${separator}${detail}`)}`;
-				})
-			: [themeFg(theme, "text", themeBold(theme, buildWebSearchSummaryText(searches)))];
-		container.addChild(new Text(summaryLines.join("\n"), 0, 0));
+					const lines = [
+						`${bullet}${themeFg(theme, "text", themeBold(theme, header))}${themeFg(theme, "dim", `${separator}${detail}`)}`,
+					];
+					const hosts = webSearchActivityHosts(search);
+					if (hosts.length > 0) {
+						const shown = hosts.slice(0, 8);
+						const hostLine = shown.map((host) => themeFg(theme, "accent", host));
+						if (hosts.length > shown.length) {
+							hostLine.push(themeFg(theme, "dim", `+${hosts.length - shown.length}`));
+						}
+						lines.push(`  ${hostLine.join(themeFg(theme, "dim", glyphs().dot))}`);
+					}
+					container.addChild(new Text(`${index > 0 ? "\n" : ""}${lines.join("\n")}`, 0, 0));
+				});
+		} else {
+			container.addChild(new Text(themeFg(theme, "text", themeBold(theme, buildWebSearchSummaryText(searches))), 0, 0));
+		}
 		if (options.expanded) {
 			const content = typeof message.content === "string"
 				? message.content

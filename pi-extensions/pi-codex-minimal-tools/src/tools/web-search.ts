@@ -1,10 +1,12 @@
 import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import {
 	buildCodexJsonHeaders,
 	hasCodexRequestAuth,
 	resolveCodexApiEndpoint,
 } from "../codex-http.js";
+import { glyphs, truncateText } from "../glyphs.js";
 import { loadModelSettings } from "../model-catalog/runtime.js";
 
 export interface SearchQuery {
@@ -60,6 +62,20 @@ interface StandaloneSearchResponse {
 	encrypted_output?: string | null;
 	output?: string;
 	results?: unknown[];
+}
+
+export interface StandaloneWebSearchResult {
+	type?: string;
+	domain?: string;
+	ref_id?: string;
+	snippet?: string;
+	title?: string;
+	url?: string;
+}
+
+export interface StandaloneWebSearchDetails {
+	mode: "standalone";
+	results: StandaloneWebSearchResult[];
 }
 
 export interface StandaloneWebSearchInvocation {
@@ -293,6 +309,96 @@ function assertStandaloneSearchOutput(output: string, input: WebSearchInput): vo
 	}
 }
 
+function searchInputSummary(input: WebSearchInput): string {
+	const queries = [
+		...(input.search_query ?? []).map((query) => query.q),
+		...(input.image_query ?? []).map((query) => query.q),
+	].map((query) => query.trim()).filter(Boolean);
+	if (queries.length > 0) {
+		return queries.length > 1 ? `${queries[0]} +${queries.length - 1}` : queries[0]!;
+	}
+	const open = input.open?.[0]?.ref_id?.trim();
+	if (open) return open;
+	const find = input.find?.[0];
+	if (find?.pattern?.trim()) return find.pattern.trim();
+	const weather = input.weather?.[0]?.location?.trim();
+	if (weather) return weather;
+	const finance = input.finance?.[0]?.ticker?.trim();
+	if (finance) return finance;
+	const sports = input.sports?.[0];
+	if (sports) return [sports.league, sports.team, sports.fn].filter(Boolean).join(" ");
+	const time = input.time?.[0]?.utc_offset?.trim();
+	if (time) return time;
+	return searchOperationLabel(input);
+}
+
+function resultHost(result: StandaloneWebSearchResult): string | undefined {
+	const domain = result.domain?.trim().replace(/^www\./i, "");
+	if (domain) return domain;
+	if (!result.url) return undefined;
+	try {
+		return new URL(result.url).hostname.replace(/^www\./i, "") || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function standaloneWebSearchHosts(results: readonly StandaloneWebSearchResult[]): string[] {
+	const seen = new Set<string>();
+	const hosts: string[] = [];
+	for (const result of results) {
+		const host = resultHost(result);
+		const key = host?.toLowerCase();
+		if (!host || !key || seen.has(key)) continue;
+		seen.add(key);
+		hosts.push(host);
+	}
+	return hosts;
+}
+
+function renderHostTags(
+	results: readonly StandaloneWebSearchResult[],
+	theme: any,
+	cwd?: string,
+): string {
+	const hosts = standaloneWebSearchHosts(results);
+	if (hosts.length === 0) return "";
+	const shown = hosts.slice(0, 8);
+	const separator = theme.fg("dim", glyphs(cwd).dot);
+	const tags = shown.map((host) => theme.fg("accent", host));
+	if (hosts.length > shown.length) tags.push(theme.fg("dim", `+${hosts.length - shown.length}`));
+	return tags.join(separator);
+}
+
+function renderStandaloneWebSearchCall(input: WebSearchInput, theme: any, cwd?: string): Text {
+	const summary = truncateText(searchInputSummary(input), 96, cwd);
+	const text = `${theme.fg("accent", glyphs(cwd).bullet)}`
+		+ theme.fg("text", theme.bold("Web Search"))
+		+ (summary ? theme.fg("dim", ` ${summary}`) : "");
+	return new Text(text, 0, 0);
+}
+
+function renderStandaloneWebSearchResult(
+	result: { content?: Array<{ type?: string; text?: string }>; details?: StandaloneWebSearchDetails },
+	options: { expanded?: boolean; isPartial?: boolean },
+	theme: any,
+	context: { cwd?: string; isError?: boolean },
+): Text {
+	if (options.isPartial) return new Text("", 0, 0);
+	const text = result.content
+		?.filter((part) => part.type === "text" && typeof part.text === "string")
+		.map((part) => part.text)
+		.join("\n") ?? "";
+	if (context.isError) return new Text(theme.fg("error", text || "Web search failed"), 0, 0);
+
+	const results = result.details?.mode === "standalone" ? result.details.results : [];
+	const hosts = renderHostTags(results, theme, context.cwd);
+	const count = results.length;
+	let rendered = count > 0 ? `${hosts ? `${hosts} ` : ""}${theme.fg("dim", `(${count})`)}` : theme.fg("muted", "Search complete");
+	if (options.expanded && text) rendered += `\n\n${theme.fg("toolOutput", text)}`;
+	return new Text(rendered, 0, 0);
+}
+
 export async function standaloneWebSearch(
 	input: WebSearchInput,
 	ctx: WebSearchToolContext,
@@ -369,8 +475,8 @@ export async function standaloneWebSearch(
 		content: [{ type: "text", text: result.output }],
 		details: {
 			mode: "standalone",
-			results: result.results ?? [],
-		},
+			results: (result.results ?? []) as StandaloneWebSearchResult[],
+		} satisfies StandaloneWebSearchDetails,
 	};
 }
 
@@ -384,6 +490,17 @@ export function createWebSearchToolDefinition(options: {
 		promptSnippet: "Search the web when current information or citations are needed.",
 		promptGuidelines: ["Use web_search when current web information or cited sources are needed."],
 		parameters: webSearchToolSchema,
+		renderCall(input: WebSearchInput, theme: any, context: { cwd?: string }) {
+			return renderStandaloneWebSearchCall(input ?? {}, theme, context?.cwd);
+		},
+		renderResult(
+			result: { content?: Array<{ type?: string; text?: string }>; details?: StandaloneWebSearchDetails },
+			renderOptions: { expanded?: boolean; isPartial?: boolean },
+			theme: any,
+			context: { cwd?: string; isError?: boolean },
+		) {
+			return renderStandaloneWebSearchResult(result, renderOptions, theme, context);
+		},
 		async execute(
 			_toolCallId: string,
 			input: WebSearchInput,
