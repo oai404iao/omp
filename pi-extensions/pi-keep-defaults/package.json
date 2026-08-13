@@ -1,0 +1,48 @@
+{
+  "name": "pi-keep-defaults",
+  "version": "0.1.0",
+  "description": "Freeze default model/thinking in settings.json so switching models or toggling thinking never rewrites the defaults.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "settings",
+    "default-model",
+    "thinking"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types test/smoke.mjs && PI_CODING_AGENT_DIR=/tmp/pi-kd-guard node --experimental-strip-types test/guard.mjs",
+    "check": "npm run typecheck && npm test"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "package.json",
+    "tsconfig.json"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  }
+}
