@@ -1908,6 +1908,14 @@ function isProviderNonTransportError(error: unknown): error is ProviderResponseE
 	return error instanceof ProviderResponseError || error instanceof ProviderProtocolError;
 }
 
+function isWebSocketUpgradeRejectedError(error: unknown): error is WebSocketHandshakeError {
+	// `auto` is capability negotiation, not a generic recovery path. HTTP 426
+	// explicitly tells the client that the WebSocket upgrade cannot be used.
+	// Model/request failures and transient connection errors must stay on the
+	// WebSocket path so an agent-level retry does not silently change transport.
+	return error instanceof WebSocketHandshakeError && error.status === 426;
+}
+
 function isWebSocketConnectionLimitReachedError(error: unknown): boolean {
 	const candidate = error as { code?: unknown; message?: unknown };
 	if (candidate?.code === WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE) return true;
@@ -2773,18 +2781,18 @@ async function requestCodexCompactionTriggerWithTransport(
 			);
 		} catch (error) {
 			if (options.signal?.aborted) throw new Error("Request was aborted");
-			const upgradeRequired = error instanceof WebSocketHandshakeError && error.status === 426;
+			const upgradeRejected = isWebSocketUpgradeRejectedError(error);
+			if (transport === "auto" && upgradeRejected) {
+				if (fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
+				break;
+			}
 			const retryable = isWebSocketConnectionLimitReachedError(error) || isRetryableWebSocketError(error);
-			if (!upgradeRequired && retryable && retries < maxRetries) {
+			if (retryable && retries < maxRetries) {
 				retries++;
 				await sleep(webSocketCompactionRetryDelayMs(error, retries, retryOptions), options.signal);
 				continue;
 			}
-			if (transport !== "auto" || (!upgradeRequired && !retryable)) {
-				throw error;
-			}
-			if (fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
-			break;
+			throw error;
 		}
 	}
 
@@ -3507,7 +3515,12 @@ function createCodexStream<TApi extends Api>(
 			), settings, model as Model<Api>);
 			const bodyJson = JSON.stringify(body);
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
-			const transport: ProviderTransport = settings.openaiTransport;
+			const configuredTransport: ProviderTransport = settings.openaiTransport;
+			// Pi exposes a session transport setting through stream options. Treat
+			// explicit non-auto values as overrides; otherwise use the model profile.
+			const transport: ProviderTransport = options?.transport && options.transport !== "auto"
+				? options.transport
+				: configuredTransport;
 
 			const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport });
 			const fallbackKey = webSocketFallbackKey(
@@ -3557,7 +3570,26 @@ function createCodexStream<TApi extends Api>(
 						return;
 					} catch (error) {
 						const aborted = options?.signal?.aborted;
-						const upgradeRequired = error instanceof WebSocketHandshakeError && error.status === 426;
+						const upgradeRejected = isWebSocketUpgradeRejectedError(error);
+						if (
+							transport === "auto"
+							&& !websocketStarted
+							&& upgradeRejected
+						) {
+							if (fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
+							appendAssistantMessageDiagnostic(
+								output,
+								createAssistantMessageDiagnostic("provider_transport_failure", error, {
+									configuredTransport,
+									fallbackTransport: "sse",
+									eventsEmitted: false,
+									phase: "websocket_upgrade_rejected",
+									retries: websocketRetries,
+									requestBytes: new TextEncoder().encode(bodyJson).byteLength,
+								}),
+							);
+							break;
+						}
 						const retryableTransport = !aborted
 							&& (isWebSocketConnectionLimitReachedError(error) || isRetryableWebSocketError(error));
 						const retryableBeforeStart = !websocketStarted && retryableTransport;
@@ -3566,63 +3598,20 @@ function createCodexStream<TApi extends Api>(
 							await sleep(webSocketRetryDelayMs(error, websocketRetries, options), options?.signal);
 							continue;
 						}
-						if (
-							transport === "auto"
-							&& fallbackKey
-							&& websocketStarted
-							&& retryableTransport
-						) {
-							websocketHttpFallbackSessions.add(fallbackKey);
-							appendAssistantMessageDiagnostic(
-								output,
-								createAssistantMessageDiagnostic("provider_transport_failure", error, {
-									configuredTransport: transport,
-									fallbackTransport: "sse",
-									eventsEmitted: true,
-									phase: "fallback_on_next_agent_retry",
-									retries: websocketRetries,
-									requestBytes: new TextEncoder().encode(bodyJson).byteLength,
-								}),
-							);
-							throw error;
-						}
-						if (
-							transport === "auto"
-							&& fallbackKey
-							&& !websocketStarted
-							&& (upgradeRequired || retryableBeforeStart)
-						) {
-							websocketHttpFallbackSessions.add(fallbackKey);
-							appendAssistantMessageDiagnostic(
-								output,
-								createAssistantMessageDiagnostic("provider_transport_failure", error, {
-									configuredTransport: transport,
-									fallbackTransport: "sse",
-									eventsEmitted: false,
-									phase: upgradeRequired ? "websocket_upgrade_rejected" : "websocket_retries_exhausted",
-									retries: websocketRetries,
-									requestBytes: new TextEncoder().encode(bodyJson).byteLength,
-								}),
-							);
-							break;
-						}
 						if (aborted || (isProviderNonTransportError(error) && !isWebSocketConnectionLimitReachedError(error))) {
 							throw error;
 						}
 						appendAssistantMessageDiagnostic(
 							output,
 							createAssistantMessageDiagnostic("provider_transport_failure", error, {
-								configuredTransport: transport,
-								fallbackTransport: websocketStarted ? undefined : "sse",
+								configuredTransport,
 								eventsEmitted: websocketStarted,
 								phase: websocketStarted ? "after_message_stream_start" : "before_message_stream_start",
+								retries: websocketRetries,
 								requestBytes: new TextEncoder().encode(bodyJson).byteLength,
 							}),
 						);
-						if (transport === "websocket" || transport === "websocket-cached" || websocketStarted) {
-							throw error;
-						}
-						break;
+						throw error;
 					}
 				}
 			}
@@ -3969,8 +3958,7 @@ export function registerOpenAIResponsesProviders(
 			if (
 				settings.openaiTransport === "auto"
 				&& fallbackKey
-				&& error instanceof WebSocketHandshakeError
-				&& error.status === 426
+				&& isWebSocketUpgradeRejectedError(error)
 			) {
 				websocketHttpFallbackSessions.add(fallbackKey);
 			}

@@ -1118,7 +1118,122 @@ test("openai auto does not fall back after the WebSocket stream has started", as
 	}
 });
 
-test("openai auto remembers a retryable post-start failure for Pi's next agent retry", async () => {
+test("openai auto keeps context-limit model errors on WebSocket", async () => {
+	writeSettings({ openaiTransport: "auto" });
+	let sseRequests = 0;
+	const server = await startWebSocketServer([
+		() => [{
+			type: "response.failed",
+			response: {
+				error: {
+					code: "context_length_exceeded",
+					message: "maximum context length exceeded",
+				},
+			},
+		}],
+		() => successEvents("resp_ws", "continued over websocket"),
+	], (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/responses") {
+			response.writeHead(404).end();
+			return;
+		}
+		sseRequests++;
+		response.writeHead(500).end();
+	});
+	try {
+		const provider = createProviderHarness().openai;
+		const failed = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "too much context" }]);
+		const next = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "shorter context" }]);
+
+		assert.equal(failed.stopReason, "error");
+		assert.equal(failed.errorMessage, "maximum context length exceeded");
+		assert.equal(next.content[0]?.text, "continued over websocket");
+		assert.equal(server.connections, 2);
+		assert.equal(sseRequests, 0);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai auto keeps output-limit completions on WebSocket", async () => {
+	writeSettings({ openaiTransport: "auto" });
+	let sseRequests = 0;
+	const server = await startWebSocketServer([
+		() => [{
+			type: "response.incomplete",
+			response: {
+				id: "resp_incomplete",
+				status: "incomplete",
+				incomplete_details: { reason: "max_output_tokens" },
+				output: [],
+				usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+			},
+		}],
+		() => successEvents("resp_ws", "continued over websocket"),
+	], (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/responses") {
+			response.writeHead(404).end();
+			return;
+		}
+		sseRequests++;
+		response.writeHead(500).end();
+	});
+	try {
+		const provider = createProviderHarness().openai;
+		const incomplete = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "long answer" }]);
+		const next = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "continue" }]);
+
+		assert.equal(incomplete.stopReason, "length");
+		assert.equal(next.content[0]?.text, "continued over websocket");
+		assert.equal(server.connections, 1);
+		assert.equal(sseRequests, 0);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai auto keeps retryable pre-start model errors on WebSocket", async () => {
+	writeSettings({ openaiTransport: "auto" });
+	let sseRequests = 0;
+	const server = await startWebSocketServer([
+		() => [{
+			type: "error",
+			status: 503,
+			error: {
+				type: "server_error",
+				code: "service_unavailable",
+				message: "transient model failure",
+			},
+		}],
+		() => successEvents("resp_ws", "retried over websocket"),
+	], (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/responses") {
+			response.writeHead(404).end();
+			return;
+		}
+		sseRequests++;
+		response.writeHead(500).end();
+	});
+	try {
+		const provider = createProviderHarness().openai;
+		const failed = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }], {
+			maxRetries: 0,
+		});
+		const retried = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }], {
+			maxRetries: 0,
+		});
+
+		assert.equal(failed.stopReason, "error");
+		assert.equal(failed.errorMessage, "HTTP 503: Codex error: transient model failure");
+		assert.equal(retried.content[0]?.text, "retried over websocket");
+		assert.equal(server.connections, 2);
+		assert.equal(sseRequests, 0);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai auto keeps retryable post-start failures on WebSocket for Pi's next agent retry", async () => {
 	writeSettings({ openaiTransport: "auto" });
 	let sseRequests = 0;
 	const server = await startWebSocketServer([
@@ -1134,6 +1249,7 @@ test("openai auto remembers a retryable post-start failure for Pi's next agent r
 				message: "retry this request",
 			},
 		}],
+		() => successEvents("resp_ws", "retried over websocket"),
 	], (request, response) => {
 		if (request.method !== "POST" || request.url !== "/v1/responses") {
 			response.writeHead(404).end();
@@ -1154,9 +1270,9 @@ test("openai auto remembers a retryable post-start failure for Pi's next agent r
 		const failed = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
 		const retried = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
 		assert.equal(failed.stopReason, "error");
-		assert.equal(retried.content[0]?.text, "retried over sse");
-		assert.equal(server.connections, 1);
-		assert.equal(sseRequests, 1);
+		assert.equal(retried.content[0]?.text, "retried over websocket");
+		assert.equal(server.connections, 2);
+		assert.equal(sseRequests, 0);
 	} finally {
 		await server.close();
 	}
@@ -1196,15 +1312,10 @@ test("openai websocket-cached retries a missing previous response with full cont
 	}
 });
 
-test("openai auto retries WebSocket failures and keeps session-level SSE fallback sticky", async () => {
+test("openai auto does not fall back after transient WebSocket handshake failures", async () => {
 	writeSettings({ openaiTransport: "auto" });
-	const sseEvents = [
-		successEvents("resp_sse_1", "first over sse"),
-		successEvents("resp_sse_2", "second over sse"),
-	];
 	let sseRequests = 0;
 	const server = await startWebSocketServer([
-		() => ({ handshakeStatus: 503, handshakeBody: { error: { message: "temporarily unavailable" } } }),
 		() => ({ handshakeStatus: 503, handshakeBody: { error: { message: "temporarily unavailable" } } }),
 	], (request, response) => {
 		if (request.method !== "POST" || request.url !== "/v1/responses") {
@@ -1213,11 +1324,8 @@ test("openai auto retries WebSocket failures and keeps session-level SSE fallbac
 		}
 		request.resume();
 		request.on("end", () => {
-			const events = sseEvents[sseRequests++];
-			assert.ok(events);
-			response.writeHead(200, { "content-type": "text/event-stream" });
-			for (const item of events) response.write(`data: ${JSON.stringify(item)}\n\n`);
-			response.end();
+			sseRequests++;
+			response.writeHead(500).end();
 		});
 	});
 	try {
@@ -1231,10 +1339,47 @@ test("openai auto retries WebSocket failures and keeps session-level SSE fallbac
 			maxRetryDelayMs: 1_000,
 		});
 
-		assert.equal(first.content[0]?.text, "first over sse");
-		assert.equal(second.content[0]?.text, "second over sse");
-		assert.equal(server.connections, 2);
-		assert.equal(sseRequests, 2);
+		assert.equal(first.stopReason, "error");
+		assert.equal(first.errorMessage, "HTTP 503: temporarily unavailable");
+		assert.equal(second.stopReason, "error");
+		assert.equal(second.errorMessage, "HTTP 503: temporarily unavailable");
+		assert.equal(server.connections, 4);
+		assert.equal(sseRequests, 0);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai auto honors an explicit per-request SSE override", async () => {
+	writeSettings({ openaiTransport: "auto" });
+	let sseRequests = 0;
+	const server = await startWebSocketServer([], (request, response) => {
+		if (request.method !== "POST" || request.url !== "/v1/responses") {
+			response.writeHead(404).end();
+			return;
+		}
+		request.resume();
+		request.on("end", () => {
+			sseRequests++;
+			response.writeHead(200, { "content-type": "text/event-stream" });
+			for (const item of successEvents("resp_sse", "explicit sse")) {
+				response.write(`data: ${JSON.stringify(item)}\n\n`);
+			}
+			response.end();
+		});
+	});
+	try {
+		const provider = createProviderHarness().openai;
+		const result = await runOpenAIProvider(
+			provider,
+			server.url,
+			[{ role: "user", content: "hello" }],
+			{ transport: "sse" },
+		);
+
+		assert.equal(result.content[0]?.text, "explicit sse");
+		assert.equal(server.connections, 0);
+		assert.equal(sseRequests, 1);
 	} finally {
 		await server.close();
 	}
