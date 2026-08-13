@@ -80,6 +80,12 @@ A user-added profile that does not inherit anything starts with:
 This prevents an incomplete profile from silently enabling an internal wire
 contract.
 
+When `responses.websocketPrewarm` is enabled, the extension schedules one
+best-effort `generate:false` request at session startup. It snapshots the stable
+system prompt, active tools, reasoning, and service tier, while omitting
+conversation history and the pending user message. It is not repeated for each
+agent turn.
+
 ## Provider shim binding
 
 `responses.providerShim:true` is active only when Pi's resolved model uses:

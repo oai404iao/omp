@@ -304,16 +304,25 @@ loaded image-capable model with an enabled catalog profile.
 `transport` values:
 
 - `sse`: HTTP streaming only.
-- `websocket`: reusable WebSocket with full logical requests.
-- `websocket-cached`: reuse plus `previous_response_id` input deltas.
+- `websocket`: reusable WebSocket; exact logical prefixes opportunistically use
+  `previous_response_id` input deltas.
+- `websocket-cached`: compatibility alias with the same safe continuation
+  behavior.
 - `auto`: retry transient WebSocket failures, but use sticky per-session SSE
   fallback only when the WebSocket upgrade is rejected with HTTP 426. Model,
   request, output-limit, context-limit, and post-upgrade connection errors do
   not change transports.
 
-Prewarm sends a best-effort `response.create` with `generate:false`.
-Continuation reuse requires the new request to extend the previous logical
-request exactly.
+Prewarm is scheduled once per session startup (including resume/fork), in the
+background without delaying session initialization. If the first WebSocket
+request starts while prewarm is pending, it consumes that one startup handle
+before sending. Prewarm sends a best-effort `response.create` with
+`generate:false` containing only the startup system/tool/request
+envelope—never conversation history or the pending user message. The first real
+request appends its full conversation input, and later turns continue from real
+response IDs. A failed or timed-out prewarm is not retried on every user
+message. Continuation reuse always requires the new request to extend the
+previous logical request exactly.
 
 Native compaction stores opaque encrypted state in the Pi session. New
 checkpoints replay only to the same provider, model, API, and effective

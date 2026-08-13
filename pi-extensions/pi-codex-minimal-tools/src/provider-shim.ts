@@ -1,8 +1,4 @@
-import {
-	buildSessionContext,
-	convertToLlm,
-	type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { glyphs, treeGlyph } from "./glyphs.js";
 import { loadSettings } from "./settings.js";
 import { loadModelSettings, type ResolvedCodexModelSettings } from "./model-catalog/runtime.js";
@@ -12,7 +8,6 @@ import { Container, getCapabilities, getImageDimensions, Image, Spacer, Text } f
 import {
 	createAssistantMessageEventStream,
 	appendAssistantMessageDiagnostic,
-	clampThinkingLevel,
 	createAssistantMessageDiagnostic,
 	getEnvApiKey,
 	streamSimpleOpenAICodexResponses,
@@ -24,7 +19,7 @@ import {
 	type Model,
 	type SimpleStreamOptions,
 	type ThinkingLevel,
-} from "@earendil-works/pi-ai";
+} from "@earendil-works/pi-ai/compat";
 import type { ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
 import { ProxyAgent } from "undici";
 import type { Dispatcher } from "undici";
@@ -56,6 +51,7 @@ const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 const SSE_RESPONSE_HEADER_TIMEOUT_MS = 20_000;
 const WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
+const WEBSOCKET_PREWARM_TIMEOUT_MS = 15_000;
 const WEBSOCKET_IDLE_TIMEOUT_MS = 300_000;
 const WEBSOCKET_SEND_TIMEOUT_MS = 300_000;
 const WEBSOCKET_EVENT_QUEUE_CAPACITY = 1600;
@@ -187,6 +183,21 @@ interface WebSocketPrewarmRequest {
 	requestMetadata: WebSocketRequestMetadata;
 	signal?: AbortSignal;
 	connectTimeoutMs?: number;
+}
+
+type StartupPrewarmStatus = "pending" | "ready" | "failed";
+
+interface StartupPrewarmState {
+	status: StartupPrewarmStatus;
+	promise: Promise<void>;
+	abortController: AbortController;
+}
+
+interface SessionStartupPrewarmTask {
+	generation: number;
+	modelIdentity: string;
+	promise: Promise<void>;
+	abortController: AbortController;
 }
 
 interface WebSocketRequestMetadata {
@@ -540,6 +551,16 @@ function headersToRecord(headers: Headers): Record<string, string> {
 	return Object.fromEntries(headers.entries());
 }
 
+function definedHeaders(
+	headers: Record<string, string | null> | undefined,
+): Record<string, string> | undefined {
+	if (!headers) return undefined;
+	const result = Object.fromEntries(
+		Object.entries(headers).filter((entry): entry is [string, string] => entry[1] !== null),
+	);
+	return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function createCodexRequestId(): string {
 	if (typeof globalThis.crypto?.randomUUID === "function") {
 		return globalThis.crypto.randomUUID();
@@ -652,10 +673,70 @@ function clampReasoningEffort(modelId: string, effort: string): string {
 	return effort;
 }
 
+const CODEX_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+type CodexThinkingLevel = (typeof CODEX_THINKING_LEVELS)[number];
+
+/**
+ * Keep this local instead of delegating to older Pi releases: Pi added `max`
+ * after this extension's original minimum version, and an old clamp silently
+ * turns it into `off`.
+ */
+function clampCodexThinkingLevel(model: Model<Api>, level: ThinkingLevel): CodexThinkingLevel {
+	if (!model.reasoning) return "off";
+	const available = CODEX_THINKING_LEVELS.filter((candidate) => {
+		if (candidate === "off") return true;
+		const mapped = (model.thinkingLevelMap as Record<string, string | null | undefined> | undefined)?.[candidate];
+		if (mapped === null) return false;
+		if (candidate === "xhigh" || candidate === "max") return mapped !== undefined;
+		return true;
+	});
+	if (available.includes(level as CodexThinkingLevel)) return level as CodexThinkingLevel;
+	const requestedIndex = CODEX_THINKING_LEVELS.indexOf(level as CodexThinkingLevel);
+	if (requestedIndex < 0) return available[0] ?? "off";
+	for (let index = requestedIndex; index < CODEX_THINKING_LEVELS.length; index++) {
+		const candidate = CODEX_THINKING_LEVELS[index]!;
+		if (available.includes(candidate)) return candidate;
+	}
+	for (let index = requestedIndex - 1; index >= 0; index--) {
+		const candidate = CODEX_THINKING_LEVELS[index]!;
+		if (available.includes(candidate)) return candidate;
+	}
+	return available[0] ?? "off";
+}
+
 function thinkingLevelFromUnknown(value: unknown): ThinkingLevel | undefined {
-	return value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh"
+	return value === "minimal"
+		|| value === "low"
+		|| value === "medium"
+		|| value === "high"
+		|| value === "xhigh"
+		|| value === "max"
 		? value
 		: undefined;
+}
+
+interface StartupPrewarmSnapshot {
+	systemPrompt: string;
+	tools: Context["tools"];
+	reasoning?: ThinkingLevel;
+}
+
+function startupPrewarmSnapshot(pi: ExtensionAPI, ctx: any): StartupPrewarmSnapshot {
+	const activeToolNames = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+	return {
+		systemPrompt: ctx.getSystemPrompt?.() ?? "",
+		tools: (typeof pi.getAllTools === "function" ? pi.getAllTools() : [])
+			.filter((tool) => activeToolNames.includes(tool.name))
+			.map((tool) => ({
+				name: tool.name,
+				description: tool.description,
+				parameters: tool.parameters,
+			})),
+		reasoning: thinkingLevelFromUnknown(
+			(ctx as { thinkingLevel?: unknown }).thinkingLevel
+			?? (typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : undefined),
+		),
+	};
 }
 
 function getServiceTierCostMultiplier(
@@ -849,7 +930,9 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 		body.service_tier = serviceTier;
 	}
 
-	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
+	const clampedReasoning = options?.reasoning
+		? clampCodexThinkingLevel(model as Model<Api>, options.reasoning)
+		: undefined;
 	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
 	if (reasoningEffort !== undefined) {
 		const effort = model.thinkingLevelMap?.[reasoningEffort] ?? reasoningEffort;
@@ -1974,6 +2057,9 @@ function friendlyUsageLimitMessage(error: StreamEventShape["error"], status: num
 }
 
 async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promise<void> {
+	if ((request.body.input?.length ?? 0) > 0) {
+		throw new Error("Startup WebSocket prewarm must not include conversation input");
+	}
 	const acquired = await acquireWebSocket(
 		request.url,
 		request.headers,
@@ -1997,8 +2083,12 @@ async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promise<void>
 			...fullBody,
 			generate: false,
 		};
-		const requestBody = entry ? buildCachedWebSocketRequestBody(entry, prewarmBody) : prewarmBody;
+		// A startup prewarm is the root of a new session continuation. Never
+		// chain another generate:false request from an existing response.
+		if (entry?.continuation) entry.continuation = undefined;
+		const requestBody = prewarmBody;
 		const wireBody = prepareWebSocketRequestBodyForWire(requestBody);
+		if (request.signal?.aborted) throw new Error("Request was aborted");
 		await sendWebSocketRequest(
 			socket,
 			JSON.stringify({ type: "response.create", ...wireBody }),
@@ -2033,24 +2123,6 @@ async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promise<void>
 	} finally {
 		releaseOnce({ keep: keepConnection });
 	}
-}
-
-async function preconnectWebSocket(
-	url: string,
-	headers: Headers,
-	cacheKey: string,
-	sessionId: string,
-	signal: AbortSignal | undefined,
-): Promise<void> {
-	const acquired = await acquireWebSocket(
-		url,
-		headers,
-		cacheKey,
-		sessionId,
-		signal,
-		WEBSOCKET_CONNECT_TIMEOUT_MS,
-	);
-	acquired.release({ keep: true });
 }
 
 async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIterable<StreamEventShape> {
@@ -2613,7 +2685,6 @@ async function requestCodexCompactionTriggerWebSocket(
 	headers: Headers,
 	body: ResponsesBody,
 	model: Model<Api>,
-	transport: ProviderTransport,
 	requestMetadata: WebSocketRequestMetadata,
 	signal: AbortSignal | undefined,
 	profileHash?: string,
@@ -2641,9 +2712,10 @@ async function requestCodexCompactionTriggerWebSocket(
 		let keepConnection = true;
 		let released = false;
 		let eventCount = 0;
-		const cachedTransport = transport === "websocket-cached" || transport === "auto";
-		const warmupContinuation = entry?.continuation?.lastRequestBody.generate === false;
-		const useCachedContext = cachedTransport || warmupContinuation;
+		// All reusable WebSocket transports opportunistically continue an exact
+		// logical request prefix. `websocket` still sends a full request whenever
+		// the stable fields or input prefix do not match.
+		const useCachedContext = true;
 		const fullBody = withWebSocketRequestMetadata(body, requestMetadata);
 		const requestBody = useCachedContext && !disableCachedContext && entry
 			? buildCachedWebSocketRequestBody(entry, fullBody)
@@ -2673,7 +2745,7 @@ async function requestCodexCompactionTriggerWebSocket(
 				keepConnection = false;
 				throw new Error("Request was aborted");
 			}
-			if (cachedTransport && entry && result.responseId) {
+			if (entry && result.responseId) {
 				entry.continuation = {
 					lastRequestBody: fullBody,
 					lastResponseId: result.responseId,
@@ -2774,7 +2846,6 @@ async function requestCodexCompactionTriggerWithTransport(
 				headers.websocket,
 				withResponsesLiteWebSocketMetadata(body, responsesMode),
 				model,
-				transport,
 				requestMetadata,
 				options.signal,
 				options.settings.modelProfileHash,
@@ -2963,7 +3034,6 @@ async function processWebSocketStream<TApi extends Api>(
 	stream: AssistantMessageEventStream,
 	model: Model<TApi>,
 	onStart: () => void,
-	transport: ProviderTransport,
 	options: SimpleStreamOptions | undefined,
 	deps: {
 		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
@@ -2974,6 +3044,7 @@ async function processWebSocketStream<TApi extends Api>(
 	historicalCitationSources: ReadonlyArray<CitationSource>,
 	requestMetadata: WebSocketRequestMetadata,
 	profileHash?: string,
+	startupPrewarm?: Promise<void>,
 ): Promise<void> {
 	let streamStarted = false;
 	let disableCachedContext = false;
@@ -2981,6 +3052,10 @@ async function processWebSocketStream<TApi extends Api>(
 	let missingPreviousResponseRetried = false;
 
 	while (true) {
+		if (startupPrewarm) {
+			await startupPrewarm;
+			startupPrewarm = undefined;
+		}
 		const cacheKey = webSocketCacheKey(
 			options?.sessionId,
 			model as Model<Api>,
@@ -2999,9 +3074,9 @@ async function processWebSocketStream<TApi extends Api>(
 		let keepConnection = true;
 		let released = false;
 		let eventCount = 0;
-		const cachedTransport = transport === "websocket-cached" || transport === "auto";
-		const warmupContinuation = entry?.continuation?.lastRequestBody.generate === false;
-		const useCachedContext = cachedTransport || warmupContinuation;
+		// Continuation is safe only when buildCachedWebSocketRequestBody proves
+		// that this request exactly extends the cached logical request.
+		const useCachedContext = true;
 		// ChatGPT Codex Responses rejects `store: true` ("Store must be set to false").
 		// WebSocket continuation still works via connection-scoped previous_response_id state.
 		const fullBody = withWebSocketRequestMetadata(body, requestMetadata);
@@ -3048,7 +3123,7 @@ async function processWebSocketStream<TApi extends Api>(
 			);
 			if (options?.signal?.aborted) {
 				keepConnection = false;
-			} else if (cachedTransport && entry && continuationResult.responseId) {
+			} else if (entry && continuationResult.responseId) {
 				entry.continuation = {
 					lastRequestBody: fullBody,
 					lastResponseId: continuationResult.responseId,
@@ -3425,6 +3500,7 @@ function createCodexStream<TApi extends Api>(
 	deps: {
 		getCurrentCwd: () => string;
 		getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
+		getStartupPrewarm?: (sessionId: string, model: Model<Api>) => Promise<void> | undefined;
 		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
 	},
 ): AssistantMessageEventStream {
@@ -3439,7 +3515,8 @@ function createCodexStream<TApi extends Api>(
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			const auth = { apiKey: apiKey || undefined, headers: options?.headers };
+			const requestHeaders = definedHeaders(options?.headers);
+			const auth = { apiKey: apiKey || undefined, headers: requestHeaders };
 			if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
 				throw new Error(`No request authentication for provider: ${model.provider}`);
 			}
@@ -3501,13 +3578,13 @@ function createCodexStream<TApi extends Api>(
 				turnId: websocketTurnId,
 			};
 			const sseHeaders = applyConfiguredResponsesFeatureHeaders(
-				buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId, requestProfile),
+				buildSSEHeaders(model.headers, requestHeaders, accountId, apiKey, options?.sessionId, requestProfile),
 				settings,
 				model as Model<Api>,
 			);
 			const websocketHeaders = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
 				model.headers,
-				options?.headers,
+				requestHeaders,
 				accountId,
 				apiKey,
 				websocketSessionId || websocketRequestId,
@@ -3534,6 +3611,9 @@ function createCodexStream<TApi extends Api>(
 				&& websocketHttpFallbackSessions.has(fallbackKey);
 
 			if (transport !== "sse" && !sessionFellBackToHttp) {
+				const startupPrewarmTask = options?.sessionId
+					? deps.getStartupPrewarm?.(options.sessionId, model as Model<Api>)
+					: undefined;
 				const websocketBody = withResponsesLiteWebSocketMetadata(body, requestProfile.responsesMode);
 				let websocketStarted = false;
 				let websocketRetries = 0;
@@ -3551,7 +3631,6 @@ function createCodexStream<TApi extends Api>(
 							() => {
 								websocketStarted = true;
 							},
-							transport,
 							options,
 							deps,
 							requestCwd,
@@ -3560,6 +3639,7 @@ function createCodexStream<TApi extends Api>(
 							historicalCitationSources,
 							websocketRequestMetadata,
 							settings.modelProfileHash,
+							startupPrewarmTask,
 						);
 						if (options?.signal?.aborted) {
 							throw new Error("Request was aborted");
@@ -3718,7 +3798,171 @@ export function registerOpenAIResponsesProviders(
 	const pendingActivities: PendingActivity[] = [];
 	const imagePreviewCache = new Map<string, CachedImagePreview>();
 	const activeTurnIds = new Map<string, string>();
+	const startupPrewarms = new Map<string, StartupPrewarmState>();
+	const sessionStartupPrewarmTasks = new Map<string, SessionStartupPrewarmTask>();
+	let sessionGeneration = 0;
 	let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const abortStartupPrewarms = () => {
+		for (const state of startupPrewarms.values()) state.abortController.abort();
+		for (const task of sessionStartupPrewarmTasks.values()) task.abortController.abort();
+		startupPrewarms.clear();
+		sessionStartupPrewarmTasks.clear();
+	};
+
+	const modelIdentity = (model: Model<Api>): string =>
+		`${model.provider}\n${model.api}\n${model.id}\n${model.baseUrl}`;
+
+	const scheduleStartupPrewarm = (
+		ctx: any,
+		generation: number,
+		startupSignal: AbortSignal,
+		snapshot: StartupPrewarmSnapshot,
+	): Promise<void> => (async () => {
+		if (startupSignal.aborted) return;
+		const model = ctx.model as Model<Api> | undefined;
+		const sessionId = ctx?.sessionManager?.getSessionId?.();
+		if (!model || !sessionId || generation !== sessionGeneration) return;
+		const settings = loadModelSettings(model, ctx.cwd);
+		if (
+			!settings.enabled
+			|| !settings.modelProfile?.effective.enabled
+			|| !settings.providerShimActive
+			|| !settings.openaiWebSocketPrewarm
+			|| settings.openaiTransport === "sse"
+		) {
+			return;
+		}
+
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+		if (
+			startupSignal.aborted
+			|| generation !== sessionGeneration
+			|| !auth.ok
+			|| !hasCodexRequestAuth({
+				modelHeaders: model.headers,
+				auth: { apiKey: auth.apiKey, headers: auth.headers },
+			})
+		) {
+			return;
+		}
+
+		const profile = resolveCodexRequestProfile(settings.requestProfile);
+		// Match Codex startup prewarm: snapshot only stable request context.
+		// Conversation history and the first user message are sent by the first
+		// real request as an incremental continuation from this response.
+		let body = applyFastModeServiceTier(
+			buildRequestBody(model, {
+				systemPrompt: snapshot.systemPrompt,
+				messages: [],
+				tools: snapshot.tools,
+			}, profile, {
+				apiKey: auth.apiKey,
+				headers: auth.headers,
+				sessionId,
+				reasoning: snapshot.reasoning ?? (model.reasoning ? "medium" : undefined),
+			}),
+			settings,
+			model,
+		);
+		if (settings.nativeProviderTools) {
+			const webSearch = settings.modelProfile.effective.tools.webSearch;
+			body = rewriteNativeOpenAiTools(body, {
+				imageModel: settings.imageModel,
+				imageGeneration: settings.imageGenerationImplementation ?? false,
+				webSearch: settings.webSearchEnabled && webSearch
+					? {
+							implementation: webSearch.implementation,
+							contentTypes: webSearch.contentTypes,
+						}
+					: false,
+			}).payload;
+		}
+		ensureWebSearchDetailsIncluded(body);
+		body = withResponsesLiteWebSocketMetadata(body, profile.responsesMode);
+
+		const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode });
+		const fallbackKey = webSocketFallbackKey(
+			sessionId,
+			model,
+			websocketUrl,
+			settings.modelProfileHash,
+		);
+		if (settings.openaiTransport === "auto" && fallbackKey && websocketHttpFallbackSessions.has(fallbackKey)) {
+			return;
+		}
+		if (startupSignal.aborted || generation !== sessionGeneration) return;
+		const headers = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
+			model.headers,
+			auth.headers,
+			resolveCodexRequestAccountId({
+				modelHeaders: model.headers,
+				auth: { apiKey: auth.apiKey, headers: auth.headers },
+				apiKeyMode: settings.apiKeyMode,
+			}),
+			auth.apiKey ?? "",
+			sessionId,
+			sessionId,
+		), settings, model);
+		const cacheKey = webSocketCacheKey(
+			sessionId,
+			model,
+			websocketUrl,
+			headers,
+			settings.modelProfileHash,
+		);
+		if (
+			!cacheKey
+			|| startupSignal.aborted
+			|| generation !== sessionGeneration
+			|| startupPrewarms.has(cacheKey)
+		) {
+			return;
+		}
+		if (websocketSessionCache.get(cacheKey)?.continuation) return;
+
+		const abortController = new AbortController();
+		const abortFromSession = () => abortController.abort();
+		startupSignal.addEventListener("abort", abortFromSession, { once: true });
+		const state: StartupPrewarmState = {
+			status: "pending",
+			abortController,
+			promise: Promise.resolve(),
+		};
+		startupPrewarms.set(cacheKey, state);
+		const timeout = setTimeout(() => abortController.abort(), WEBSOCKET_PREWARM_TIMEOUT_MS);
+		state.promise = prewarmWebSocket({
+			url: websocketUrl,
+			headers,
+			cacheKey,
+			body,
+			requestMetadata: {
+				sessionId,
+				threadId: sessionId,
+				turnId: createPiTurnId(),
+			},
+			signal: abortController.signal,
+			connectTimeoutMs: WEBSOCKET_PREWARM_TIMEOUT_MS,
+		})
+			.then(() => {
+				state.status = "ready";
+			})
+			.catch((error) => {
+				state.status = "failed";
+				if (
+					settings.openaiTransport === "auto"
+					&& fallbackKey
+					&& isWebSocketUpgradeRejectedError(error)
+				) {
+					websocketHttpFallbackSessions.add(fallbackKey);
+				}
+			})
+			.finally(() => {
+				clearTimeout(timeout);
+				startupSignal.removeEventListener("abort", abortFromSession);
+			});
+		await state.promise;
+	})();
 
 	const flushPendingMessages = () => {
 		pendingFlushTimer = undefined;
@@ -3768,6 +4012,14 @@ export function registerOpenAIResponsesProviders(
 		return createCodexStream(model, context, streamOptions, {
 			getCurrentCwd: options.getCurrentCwd,
 			getCurrentTurnId: (sessionId) => sessionId ? activeTurnIds.get(sessionId) : undefined,
+			getStartupPrewarm: (sessionId, requestModel) => {
+				const task = sessionStartupPrewarmTasks.get(sessionId);
+				return task
+					&& task.generation === sessionGeneration
+					&& task.modelIdentity === modelIdentity(requestModel)
+					? task.promise
+					: undefined;
+			},
 			onImageSaved: (savedImage, imageData) => {
 				pendingActivities.push({ kind: "image", savedImage, imageData });
 			},
@@ -3804,9 +4056,28 @@ export function registerOpenAIResponsesProviders(
 	registerProviderShim("openai", "openai-responses");
 
 	pi.on("session_start", async (_event, ctx) => {
+		sessionGeneration++;
+		abortStartupPrewarms();
 		ensureProviderShimForModel(ctx?.model as Model<Api> | undefined, ctx?.cwd);
 		activeTurnIds.clear();
 		clearPendingMessages();
+		const generation = sessionGeneration;
+		// Do not block session startup. The first provider request naturally
+		// serializes behind this socket operation if it is still pending.
+		const model = ctx?.model as Model<Api> | undefined;
+		const sessionId = ctx?.sessionManager?.getSessionId?.();
+		if (model && sessionId) {
+			const abortController = new AbortController();
+			const snapshot = startupPrewarmSnapshot(pi, ctx);
+			const promise = scheduleStartupPrewarm(ctx, generation, abortController.signal, snapshot);
+			sessionStartupPrewarmTasks.set(sessionId, {
+				generation,
+				modelIdentity: modelIdentity(model),
+				promise,
+				abortController,
+			});
+			void promise;
+		}
 	});
 
 	pi.on("model_select", async (_event, ctx) => {
@@ -3814,6 +4085,8 @@ export function registerOpenAIResponsesProviders(
 	});
 
 	pi.on("session_shutdown", async () => {
+		sessionGeneration++;
+		abortStartupPrewarms();
 		if (pendingActivities.length > 0) {
 			flushPendingMessages();
 		}
@@ -3822,167 +4095,22 @@ export function registerOpenAIResponsesProviders(
 		clearPendingMessages();
 	});
 
-	pi.on("before_agent_start", async (event, ctx) => {
+	pi.on("before_agent_start", async (_event, ctx) => {
 		ensureProviderShimForModel(ctx.model as Model<Api> | undefined, ctx.cwd);
 		const sessionId = ctx?.sessionManager?.getSessionId();
 		if (!sessionId) return;
 		const turnId = createPiTurnId();
 		activeTurnIds.set(sessionId, turnId);
-
-		const model = ctx.model;
-		const settings = loadModelSettings(model, ctx.cwd);
-		if (
-			!settings.enabled
-			|| !settings.openaiWebSocketPrewarm
-			|| settings.openaiTransport === "sse"
-			|| !model
-			|| !settings.providerShimActive
-		) {
-			return;
-		}
-
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		if (
-			!auth.ok
-			|| !hasCodexRequestAuth({
-				modelHeaders: model.headers,
-				auth: { apiKey: auth.apiKey, headers: auth.headers },
-			})
-		) {
-			return;
-		}
-
-		const profile = resolveCodexRequestProfile(settings.requestProfile);
-		const branch = typeof ctx.sessionManager.getBranch === "function" ? ctx.sessionManager.getBranch() : [];
-		const sessionContext = convertToLlm(buildSessionContext(branch).messages);
-		const activeToolNames = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
-		let body = applyFastModeServiceTier(
-			buildRequestBody(model, {
-				systemPrompt: event.systemPrompt,
-				messages: [...sessionContext, {
-					role: "user",
-					content: [
-						{ type: "text", text: event.prompt },
-						...(event.images ?? []),
-					],
-					timestamp: Date.now(),
-				}],
-				tools: (typeof pi.getAllTools === "function" ? pi.getAllTools() : [])
-					.filter((tool) => activeToolNames.includes(tool.name))
-					.map((tool) => ({
-						name: tool.name,
-						description: tool.description,
-						parameters: tool.parameters,
-					})),
-			}, profile, {
-				apiKey: auth.apiKey,
-				headers: auth.headers,
-				sessionId,
-				reasoning: thinkingLevelFromUnknown(
-					(ctx as { thinkingLevel?: unknown }).thinkingLevel
-					?? (typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : undefined),
-				),
-			}),
-			settings,
-			model,
-		);
-		if (settings.nativeProviderTools) {
-			const webSearch = settings.modelProfile?.effective.tools.webSearch;
-			const rewritten = rewriteNativeOpenAiTools(body, {
-				imageModel: settings.imageModel,
-				imageGeneration: settings.imageGenerationImplementation ?? false,
-				webSearch: settings.webSearchEnabled
-					&& webSearch
-					? {
-							implementation: webSearch.implementation,
-							contentTypes: webSearch.contentTypes,
-						}
-					: false,
-			});
-			body = rewritten.payload;
-		}
-		ensureWebSearchDetailsIncluded(body);
-		body = withResponsesLiteWebSocketMetadata(body, profile.responsesMode);
-		const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode });
-		const fallbackKey = webSocketFallbackKey(
-			sessionId,
-			model,
-			websocketUrl,
-			settings.modelProfileHash,
-		);
-		if (settings.openaiTransport === "auto" && fallbackKey && websocketHttpFallbackSessions.has(fallbackKey)) {
-			return;
-		}
-		const headers = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
-			model.headers,
-			auth.headers,
-			resolveCodexRequestAccountId({
-				modelHeaders: model.headers,
-				auth: { apiKey: auth.apiKey, headers: auth.headers },
-				apiKeyMode: settings.apiKeyMode,
-			}),
-			auth.apiKey ?? "",
-			sessionId,
-			sessionId,
-		), settings, model);
-		const cacheKey = webSocketCacheKey(
-			sessionId,
-			model,
-			websocketUrl,
-			headers,
-			settings.modelProfileHash,
-		);
-		if (!cacheKey) return;
-		const requestMetadata: WebSocketRequestMetadata = {
-			sessionId,
-			threadId: sessionId,
-			turnId,
-		};
-		try {
-			await preconnectWebSocket(
-				websocketUrl,
-				headers,
-				cacheKey,
-				sessionId,
-				ctx.signal,
-			);
-			await prewarmWebSocket({
-				url: websocketUrl,
-				headers,
-				cacheKey,
-				body,
-				requestMetadata,
-				signal: ctx.signal,
-			});
-		} catch (error) {
-			if (
-				settings.openaiTransport === "auto"
-				&& fallbackKey
-				&& isWebSocketUpgradeRejectedError(error)
-			) {
-				websocketHttpFallbackSessions.add(fallbackKey);
-			}
-		}
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
 		schedulePendingMessageFlush();
 	});
 
-	const maybeRegisterAgentSettled = pi as ExtensionAPI & {
-		on(event: "agent_settled", handler: (event: { type: "agent_settled" }, ctx: any) => void | Promise<void>): void;
-	};
-	try {
-		maybeRegisterAgentSettled.on("agent_settled", async (_event, ctx) => {
-			const sessionId = ctx?.sessionManager?.getSessionId();
-			if (sessionId) {
-				activeTurnIds.delete(sessionId);
-			}
-		});
-	} catch {
-		// Pi versions before agent_settled keep the id until the next
-		// before_agent_start overwrites it or the session shuts down.
-	}
+	pi.on("agent_settled", async (_event, ctx) => {
+		const sessionId = ctx?.sessionManager?.getSessionId();
+		if (sessionId) activeTurnIds.delete(sessionId);
+	});
 
 	pi.registerMessageRenderer<ImageDisplayMessageDetails>(IMAGE_SAVE_DISPLAY_MESSAGE_TYPE, (message, options, theme) => {
 		const savedImage = message.details?.savedImages?.[0];

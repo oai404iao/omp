@@ -42,7 +42,7 @@
     },
     "openaiWebSocketPrewarm": {
       "type": "boolean",
-      "description": "Deprecated compatibility override. Move per-model WebSocket prewarm behavior to extension models.json.",
+      "description": "Deprecated compatibility override. Move per-model one-shot session-startup WebSocket prewarm behavior to extension models.json.",
       "deprecated": true,
       "default": true
     },

@@ -60,11 +60,72 @@ function createProviderHarnessWithEvents(): {
 		on(name: string, handler: (event: any, ctx: any) => Promise<void> | void) {
 			(handlers[name] ??= []).push(handler);
 		},
+		getActiveTools() {
+			return [];
+		},
+		getAllTools() {
+			return [];
+		},
+		getThinkingLevel() {
+			return "medium";
+		},
 		registerMessageRenderer() {},
 		sendMessage() {},
 	};
 	registerOpenAIResponsesProviders(pi as any, { getCurrentCwd: () => process.cwd() });
 	return { providers, handlers };
+}
+
+async function emitHandlers(
+	harness: ReturnType<typeof createProviderHarnessWithEvents>,
+	name: string,
+	event: Record<string, unknown>,
+	ctx: Record<string, any>,
+): Promise<void> {
+	for (const handler of harness.handlers[name] ?? []) await handler(event, ctx);
+}
+
+async function assertEventually(
+	predicate: () => boolean,
+	timeoutMs = 1_000,
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() >= deadline) assert.fail(`Condition was not met within ${timeoutMs}ms`);
+		await new Promise((resolve) => setTimeout(resolve, 1));
+	}
+}
+
+function providerEventContext(
+	model: Record<string, any>,
+	options: {
+		sessionId?: string;
+		systemPrompt?: string;
+		thinkingLevel?: string;
+		apiKey?: string;
+		headers?: Record<string, string>;
+	} = {},
+): Record<string, any> {
+	return {
+		cwd: process.cwd(),
+		model,
+		signal: undefined,
+		thinkingLevel: options.thinkingLevel,
+		getSystemPrompt: () => options.systemPrompt ?? "",
+		sessionManager: {
+			getSessionId: () => options.sessionId ?? "pi-session",
+			getBranch: () => [],
+		},
+		modelRegistry: {
+			async getApiKeyAndHeaders() {
+				return {
+					ok: true,
+					apiKey: options.apiKey ?? "pi-resolved-api-key",
+					headers: options.headers,
+				};
+			},
+		},
+	};
 }
 
 function successEvents(responseId: string, text?: string): unknown[] {
@@ -752,7 +813,7 @@ test("OpenAI Responses WebSocket compaction retries a missing continuation with 
 	}
 });
 
-test("strict OpenAI Responses WebSocket compaction sends full context without continuation", async () => {
+test("strict OpenAI Responses WebSocket compaction opportunistically reuses exact continuation", async () => {
 	writeSettings({ openaiTransport: "websocket", compactionMode: "responses" });
 	const compactionItem = { type: "compaction", encrypted_content: "strict-state" };
 	const server = await startWebSocketServer([
@@ -804,8 +865,8 @@ test("strict OpenAI Responses WebSocket compaction sends full context without co
 		});
 
 		assert.equal(server.connections, 1);
-		assert.equal(server.requests[1]?.previous_response_id, undefined);
-		assert.equal(server.requests[1]?.input.length, 3);
+		assert.equal(server.requests[1]?.previous_response_id, "resp_1");
+		assert.deepEqual(server.requests[1]?.input, [{ type: "compaction_trigger" }]);
 		assert.equal(server.requests[1]?.input.at(-1)?.type, "compaction_trigger");
 	} finally {
 		await server.close();
@@ -849,27 +910,9 @@ test("strict OpenAI Responses WebSocket compaction can consume a prewarm continu
 	} as any;
 	try {
 		const harness = createProviderHarnessWithEvents();
-		for (const handler of harness.handlers.before_agent_start ?? []) {
-			await handler({
-				type: "before_agent_start",
-				prompt: "hello",
-				systemPrompt: "",
-				images: undefined,
-			}, {
-				cwd: process.cwd(),
-				model,
-				signal: undefined,
-				sessionManager: {
-					getSessionId: () => "pi-session",
-					getBranch: () => [],
-				},
-				modelRegistry: {
-					async getApiKeyAndHeaders() {
-						return { ok: true, apiKey: "pi-resolved-api-key", headers: {} };
-					},
-				},
-			});
-		}
+		const ctx = providerEventContext(model, { headers: {} });
+		await emitHandlers(harness, "session_start", { type: "session_start", reason: "startup" }, ctx);
+		await assertEventually(() => server.requests.length === 1);
 		await requestOpenAINativeCompaction(model, {
 			systemPrompt: "",
 			messages: [{ role: "user", content: "hello", timestamp: 1 }],
@@ -884,7 +927,8 @@ test("strict OpenAI Responses WebSocket compaction can consume a prewarm continu
 		assert.equal(server.connections, 1);
 		assert.equal(server.requests[0]?.generate, false);
 		assert.equal(server.requests[1]?.previous_response_id, "warm_1");
-		assert.deepEqual(server.requests[1]?.input, [{ type: "compaction_trigger" }]);
+		assert.equal(server.requests[1]?.input[0]?.content[0]?.text, "hello");
+		assert.equal(server.requests[1]?.input[1]?.type, "compaction_trigger");
 	} finally {
 		await server.close();
 	}
@@ -1569,11 +1613,12 @@ test("openai websocket serializes concurrent requests on one session connection"
 	}
 });
 
-test("openai WebSocket prewarm sends generate:false and the first request reuses it", async () => {
+test("startup WebSocket prewarm is one-shot and real turns append input deltas", async () => {
 	writeSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true });
 	const server = await startWebSocketServer([
 		() => successEvents("warm_1"),
-		() => successEvents("resp_1", "real response"),
+		() => successEvents("resp_1", "first response"),
+		() => successEvents("resp_2", "second response"),
 	]);
 	try {
 		const harness = createProviderHarnessWithEvents();
@@ -1587,32 +1632,189 @@ test("openai WebSocket prewarm sends generate:false and the first request reuses
 			reasoning: false,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		};
-		const ctx = {
-			cwd: process.cwd(),
-			model,
-			signal: undefined,
-			sessionManager: { getSessionId: () => "pi-session" },
-			modelRegistry: {
-				async getApiKeyAndHeaders() {
-					return { ok: true, apiKey: "pi-resolved-api-key" };
-				},
-			},
-		};
-		for (const handler of harness.handlers.before_agent_start ?? []) {
-			await handler({
-				type: "before_agent_start",
-				prompt: "hello",
-				systemPrompt: "",
-				images: undefined,
-			}, ctx);
-		}
-		const result = await runOpenAIProvider(harness.providers.openai, server.url, [{ role: "user", content: "hello" }]);
+		const ctx = providerEventContext(model);
+		await emitHandlers(harness, "session_start", { type: "session_start", reason: "startup" }, ctx);
+		await emitHandlers(harness, "before_agent_start", {
+			type: "before_agent_start",
+			prompt: "hello",
+			systemPrompt: "",
+		}, ctx);
+		const first = await runOpenAIProvider(
+			harness.providers.openai,
+			server.url,
+			[{ role: "user", content: "hello" }],
+		);
+		await emitHandlers(harness, "before_agent_start", {
+			type: "before_agent_start",
+			prompt: "again",
+			systemPrompt: "",
+		}, ctx);
+		const second = await runOpenAIProvider(harness.providers.openai, server.url, [
+			{ role: "user", content: "hello" },
+			first,
+			{ role: "user", content: "again" },
+		]);
 
-		assert.equal(result.content[0]?.text, "real response");
+		assert.equal(first.content[0]?.text, "first response");
+		assert.equal(second.content[0]?.text, "second response");
 		assert.equal(server.connections, 1);
+		assert.equal(server.requests.length, 3);
 		assert.equal(server.requests[0]?.generate, false);
+		assert.deepEqual(server.requests[0]?.input, []);
 		assert.equal(server.requests[1]?.previous_response_id, "warm_1");
-		assert.deepEqual(server.requests[1]?.input, []);
+		assert.equal(server.requests[1]?.input[0]?.content[0]?.text, "hello");
+		assert.equal(server.requests[2]?.previous_response_id, "resp_1");
+		assert.equal(server.requests[2]?.input.length, 1);
+		assert.equal(server.requests[2]?.input[0]?.content[0]?.text, "again");
+		assert.equal(server.requests.filter((request) => request.generate === false).length, 1);
+	} finally {
+		await server.close();
+	}
+});
+
+test("resumed sessions prewarm once without replaying restored history", async () => {
+	writeSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true });
+	const server = await startWebSocketServer([
+		() => successEvents("warm_resume"),
+		() => successEvents("resp_resume", "resumed response"),
+	]);
+	try {
+		const harness = createProviderHarnessWithEvents();
+		const model = {
+			provider: "openai",
+			api: "openai-responses",
+			id: "gpt-5.5",
+			baseUrl: server.url,
+			headers: {},
+			input: ["text"],
+			reasoning: false,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		};
+		const ctx = providerEventContext(model, { systemPrompt: "stable system" });
+		await emitHandlers(harness, "session_start", { type: "session_start", reason: "resume" }, ctx);
+		await emitHandlers(harness, "before_agent_start", {
+			type: "before_agent_start",
+			prompt: "new message",
+			systemPrompt: "stable system",
+		}, ctx);
+		const result = await harness.providers.openai.streamSimple(
+			model,
+			{
+				systemPrompt: "stable system",
+				messages: [
+					{ role: "user", content: "restored user" },
+					{
+						role: "assistant",
+						api: "openai-responses",
+						provider: "openai",
+						model: "gpt-5.5",
+						content: [{ type: "text", text: "restored assistant" }],
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 0,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+						},
+						stopReason: "stop",
+						timestamp: 1,
+					},
+					{ role: "user", content: "new message" },
+				],
+				tools: [],
+			},
+			{ apiKey: "pi-resolved-api-key", sessionId: "pi-session" },
+		).result();
+
+		assert.equal(result.content[0]?.text, "resumed response");
+		assert.equal(server.requests.length, 2);
+		assert.equal(server.requests[0]?.generate, false);
+		assert.deepEqual(server.requests[0]?.input, []);
+		assert.equal(server.requests[0]?.instructions, "stable system");
+		assert.equal(server.requests[1]?.previous_response_id, "warm_resume");
+		assert.equal(server.requests[1]?.input.length, 3);
+		assert.equal(server.requests.filter((request) => request.generate === false).length, 1);
+	} finally {
+		await server.close();
+	}
+});
+
+test("session shutdown cancels a pending startup prewarm before replacement", async () => {
+	writeSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true });
+	let releaseWarmup: (() => void) | undefined;
+	const server = await startWebSocketServer([
+		() => ({
+			async before() {
+				await new Promise<void>((resolve) => {
+					releaseWarmup = resolve;
+				});
+			},
+			events: successEvents("warm_cancelled"),
+		}),
+	]);
+	try {
+		const harness = createProviderHarnessWithEvents();
+		const model = {
+			provider: "openai",
+			api: "openai-responses",
+			id: "gpt-5.5",
+			baseUrl: server.url,
+			headers: {},
+			input: ["text"],
+			reasoning: false,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		};
+		const ctx = providerEventContext(model);
+		await emitHandlers(harness, "session_start", { type: "session_start", reason: "startup" }, ctx);
+		await assertEventually(() => server.requests.length === 1);
+		await emitHandlers(harness, "session_shutdown", { type: "session_shutdown", reason: "new" }, ctx);
+		assert.equal(server.connections, 1);
+		releaseWarmup?.();
+	} finally {
+		releaseWarmup?.();
+		await server.close();
+	}
+});
+
+test("max reasoning stays identical between startup prewarm and first request", async () => {
+	writeSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true });
+	const server = await startWebSocketServer([
+		() => successEvents("warm_max"),
+		() => successEvents("resp_max", "ok"),
+	]);
+	try {
+		const harness = createProviderHarnessWithEvents();
+		const model = {
+			provider: "openai",
+			api: "openai-responses",
+			id: "gpt-5.6-sol",
+			baseUrl: server.url,
+			headers: {},
+			input: ["text"],
+			reasoning: true,
+			thinkingLevelMap: { max: "max" },
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		};
+		const ctx = providerEventContext(model, { thinkingLevel: "max" });
+		await emitHandlers(harness, "session_start", { type: "session_start", reason: "startup" }, ctx);
+		await harness.providers.openai.streamSimple(
+			model,
+			{
+				systemPrompt: "",
+				messages: [{ role: "user", content: "hello" }],
+				tools: [],
+			},
+			{
+				apiKey: "pi-resolved-api-key",
+				sessionId: "pi-session",
+				reasoning: "max",
+			},
+		).result();
+
+		assert.equal(server.requests[0]?.reasoning?.effort, "max");
+		assert.equal(server.requests[1]?.reasoning?.effort, "max");
+		assert.equal(server.requests[1]?.previous_response_id, "warm_max");
 	} finally {
 		await server.close();
 	}

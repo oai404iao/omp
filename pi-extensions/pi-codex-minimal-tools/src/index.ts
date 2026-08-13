@@ -271,16 +271,6 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 		return true;
 	};
 
-	const initialSettings = loadSettings(currentCwd);
-	if (initialSettings.enabled) {
-		providerController = registerOpenAIResponsesProviders(pi, { getCurrentCwd: () => currentCwd });
-		registerNativeCompaction(pi, providerController);
-		registerBackgroundImageGenerationCommand(pi);
-	}
-
-	registerDiagnosticCommand(pi);
-	registerFastMode(pi);
-
 	pi.on("session_start", async (_event, ctx) => {
 		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx), suppressedMutationTools);
 	});
@@ -295,6 +285,16 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 		const restored = restoreSuppressedMutationTools(active, suppressedMutationTools);
 		if (restored.join("\0") !== active.join("\0")) pi.setActiveTools(restored);
 	});
+
+	const initialSettings = loadSettings(currentCwd);
+	if (initialSettings.enabled) {
+		providerController = registerOpenAIResponsesProviders(pi, { getCurrentCwd: () => currentCwd });
+		registerNativeCompaction(pi, providerController);
+		registerBackgroundImageGenerationCommand(pi);
+	}
+
+	registerDiagnosticCommand(pi);
+	registerFastMode(pi);
 
 	pi.on("before_provider_request", (event, ctx) => {
 		currentCwd = ctx.cwd;
