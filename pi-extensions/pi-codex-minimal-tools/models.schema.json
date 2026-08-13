@@ -74,7 +74,7 @@
             },
             "websocketPrewarm": {
               "type": "boolean",
-              "description": "Send a best-effort generate:false prewarm request for WebSocket transports."
+              "description": "At session startup, schedule one best-effort generate:false prewarm request containing only the stable system/tool envelope."
             }
           }
         },
