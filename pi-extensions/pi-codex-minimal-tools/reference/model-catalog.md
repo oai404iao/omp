@@ -143,7 +143,9 @@ The request includes:
 - a bounded recent visible conversation tail;
 - commands;
 - direct-caller and live-web settings;
-- a response token budget derived from `response_length`.
+- active turn metadata when the tool runs inside an agent turn;
+- the model truncation budget (10,000 tokens for the bundled 5.6 standalone
+  profiles), independent of `response_length`.
 
 ## Image implementations
 
@@ -163,7 +165,8 @@ current Codex defaults:
 
 Edit images are sent as data URLs. Sources can be explicit local paths or the
 latest one through five conversation images. Requests carry
-`x-codex-image-turn-id`.
+`x-codex-image-turn-id` with the active agent turn ID; out-of-band `/image-gen`
+requests use a fresh UUID.
 
 ## Endpoint and authentication shape
 

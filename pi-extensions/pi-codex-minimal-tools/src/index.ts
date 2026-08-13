@@ -11,7 +11,10 @@ import {
 	type ModelLike,
 	type NativeMutationToolName,
 } from "./capabilities.js";
-import { registerOpenAIResponsesProviders } from "./provider-shim.js";
+import {
+	registerOpenAIResponsesProviders,
+	type OpenAIResponsesProviderController,
+} from "./provider-shim.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 import { configPath, loadSettings, settingsDiagnostics } from "./settings.js";
 import {
@@ -212,11 +215,17 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 	});
 }
 
-function registerTools(pi: ExtensionAPI): void {
+function registerTools(
+	pi: ExtensionAPI,
+	providerController?: OpenAIResponsesProviderController,
+): void {
 	pi.registerTool(createImageGenerationToolDefinition({
 		loadSettings: (cwd, model) => loadModelSettings(model, cwd),
+		getCurrentTurnId: (sessionId) => providerController?.getCurrentTurnId(sessionId),
 	}) as never);
-	pi.registerTool(createWebSearchToolDefinition() as never);
+	pi.registerTool(createWebSearchToolDefinition({
+		getCurrentTurnId: (sessionId) => providerController?.getCurrentTurnId(sessionId),
+	}) as never);
 	pi.registerTool({
 		renderShell: "self",
 		name: "view_image",
@@ -249,6 +258,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 
 	let currentCwd = process.cwd();
 	let toolsRegistered = false;
+	let providerController: OpenAIResponsesProviderController | undefined;
 	const suppressedMutationTools: SuppressedMutationTools = new Map();
 	const ensureToolsRegistered = (ctx: ExtensionContext): boolean => {
 		currentCwd = ctx.cwd;
@@ -256,14 +266,14 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 		const settings = loadSettings(ctx.cwd);
 		const supportedModelsLoaded = hasConfiguredModelsLoaded(ctx, settings);
 		if (!settings.enabled || !supportedModelsLoaded) return false;
-		registerTools(pi);
+		registerTools(pi, providerController);
 		toolsRegistered = true;
 		return true;
 	};
 
 	const initialSettings = loadSettings(currentCwd);
 	if (initialSettings.enabled) {
-		const providerController = registerOpenAIResponsesProviders(pi, { getCurrentCwd: () => currentCwd });
+		providerController = registerOpenAIResponsesProviders(pi, { getCurrentCwd: () => currentCwd });
 		registerNativeCompaction(pi, providerController);
 		registerBackgroundImageGenerationCommand(pi);
 	}

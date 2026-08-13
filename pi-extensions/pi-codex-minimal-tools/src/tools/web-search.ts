@@ -62,6 +62,24 @@ interface StandaloneSearchResponse {
 	results?: unknown[];
 }
 
+export interface StandaloneWebSearchInvocation {
+	turnId?: string;
+}
+
+const CODEX_STANDALONE_SEARCH_OUTPUT_TOKEN_LIMIT = 10_000;
+const SEARCH_OPERATION_KEYS = [
+	"search_query",
+	"image_query",
+	"open",
+	"click",
+	"find",
+	"screenshot",
+	"finance",
+	"weather",
+	"sports",
+	"time",
+] as const;
+
 const searchQuerySchema = {
 	type: "object",
 	additionalProperties: false,
@@ -200,12 +218,6 @@ export const webSearchToolSchema = {
 	},
 };
 
-function maxOutputTokens(responseLength: WebSearchInput["response_length"]): number {
-	if (responseLength === "short") return 2_000;
-	if (responseLength === "long") return 10_000;
-	return 5_000;
-}
-
 function visibleMessageText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
@@ -220,7 +232,7 @@ function visibleMessageText(content: unknown): string {
 		.trim();
 }
 
-function recentSearchInput(ctx: WebSearchToolContext): unknown[] | undefined {
+function recentSearchInput(ctx: WebSearchToolContext, turnId?: string): unknown[] | undefined {
 	if (!ctx.sessionManager?.getBranch) return undefined;
 	const visible: Array<{ role: "user" | "assistant"; text: string }> = [];
 	for (const message of buildSessionContext(ctx.sessionManager.getBranch()).messages) {
@@ -236,8 +248,12 @@ function recentSearchInput(ctx: WebSearchToolContext): unknown[] | undefined {
 		.filter((index) => index >= 0);
 	const start = userIndexes.length > 1 ? userIndexes[userIndexes.length - 2]! : userIndexes[0] ?? 0;
 	const tail = visible.slice(start);
+	let currentUserIndex = -1;
+	for (let index = 0; index < tail.length; index++) {
+		if (tail[index]?.role === "user") currentUserIndex = index;
+	}
 	let assistantBudget = 4_000;
-	return tail.map((message) => {
+	return tail.map((message, index) => {
 		let text = message.text;
 		if (message.role === "assistant") {
 			text = text.slice(0, Math.max(0, assistantBudget));
@@ -250,14 +266,38 @@ function recentSearchInput(ctx: WebSearchToolContext): unknown[] | undefined {
 				type: message.role === "assistant" ? "output_text" : "input_text",
 				text,
 			}],
+			...(turnId && index === currentUserIndex
+				? { internal_chat_message_metadata_passthrough: { turn_id: turnId } }
+				: {}),
 		};
 	}).filter((message) => message.content[0]!.text.length > 0);
+}
+
+function searchOperationLabel(input: WebSearchInput): string {
+	const operations = SEARCH_OPERATION_KEYS.filter((key) => (input[key]?.length ?? 0) > 0);
+	return operations.length > 0 ? operations.join(", ") : "commands";
+}
+
+function assertStandaloneSearchOutput(output: string, input: WebSearchInput): void {
+	const normalized = output.trim();
+	if (/^Found no tool response\b[\s\S]*arguments you provided were not valid\.?$/i.test(normalized)) {
+		throw new Error(
+			`Standalone web search backend returned no tool response for ${searchOperationLabel(input)}. `
+			+ "The endpoint accepted the request but could not execute it; retry with search_query or another supported operation.",
+		);
+	}
+	if (/^Error parsing function call\b/i.test(normalized)) {
+		throw new Error(
+			`Standalone web search backend rejected ${searchOperationLabel(input)}: ${normalized}`,
+		);
+	}
 }
 
 export async function standaloneWebSearch(
 	input: WebSearchInput,
 	ctx: WebSearchToolContext,
 	signal?: AbortSignal,
+	invocation: StandaloneWebSearchInvocation = {},
 ) {
 	const model = ctx.model;
 	if (!model || !ctx.modelRegistry) throw new Error("No active model is available for standalone web search.");
@@ -285,16 +325,27 @@ export async function standaloneWebSearch(
 	}
 
 	const url = resolveCodexApiEndpoint(model.baseUrl, settings.apiKeyMode, "alpha/search");
-	const searchInput = recentSearchInput(ctx);
+	const sessionId = ctx.sessionManager?.getSessionId();
+	const searchInput = recentSearchInput(ctx, invocation.turnId);
+	const turnMetadata = invocation.turnId
+		? JSON.stringify({
+				...(sessionId ? { session_id: sessionId, thread_id: sessionId } : {}),
+				turn_id: invocation.turnId,
+				model: model.id,
+			})
+		: undefined;
 	const response = await fetch(url, {
 		method: "POST",
 		headers: buildCodexJsonHeaders({
 			modelHeaders: model.headers,
 			auth: { apiKey: auth.apiKey, headers: auth.headers },
 			apiKeyMode: settings.apiKeyMode,
+			...(turnMetadata
+				? { extraHeaders: { "x-codex-turn-metadata": turnMetadata } }
+				: {}),
 		}),
 		body: JSON.stringify({
-			id: ctx.sessionManager?.getSessionId() ?? `pi-search-${Date.now()}`,
+			id: sessionId ?? `pi-search-${Date.now()}`,
 			model: model.id,
 			...(searchInput ? { input: searchInput } : {}),
 			commands: input,
@@ -302,7 +353,7 @@ export async function standaloneWebSearch(
 				allowed_callers: ["direct"],
 				external_web_access: true,
 			},
-			max_output_tokens: maxOutputTokens(input.response_length),
+			max_output_tokens: CODEX_STANDALONE_SEARCH_OUTPUT_TOKEN_LIMIT,
 		}),
 		signal,
 	});
@@ -313,6 +364,7 @@ export async function standaloneWebSearch(
 	if (typeof result.output !== "string" || !result.output.trim()) {
 		throw new Error("Standalone web search returned no output.");
 	}
+	assertStandaloneSearchOutput(result.output, input);
 	return {
 		content: [{ type: "text", text: result.output }],
 		details: {
@@ -322,7 +374,9 @@ export async function standaloneWebSearch(
 	};
 }
 
-export function createWebSearchToolDefinition() {
+export function createWebSearchToolDefinition(options: {
+	getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
+} = {}) {
 	return {
 		name: "web_search",
 		label: "Web Search",
@@ -339,7 +393,10 @@ export function createWebSearchToolDefinition() {
 		) {
 			const settings = loadModelSettings(ctx.model, ctx.cwd);
 			if (settings.webSearchImplementation === "standalone") {
-				return standaloneWebSearch(input, ctx, signal);
+				const sessionId = ctx.sessionManager?.getSessionId();
+				return standaloneWebSearch(input, ctx, signal, {
+					turnId: options.getCurrentTurnId?.(sessionId),
+				});
 			}
 			return {
 				content: [{ type: "text", text: "web_search is hosted-provider-first for this model profile and should be rewritten before execution." }],

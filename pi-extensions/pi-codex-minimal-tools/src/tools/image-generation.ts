@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, resolve } from "node:path";
 import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -90,8 +91,14 @@ interface ImageGenerationToolContext {
 		>;
 	};
 	sessionManager?: {
+		getSessionId?(): string;
 		getBranch(): SessionEntry[];
 	};
+}
+
+export interface StandaloneImageGenerationInvocation {
+	callId?: string;
+	turnId?: string;
 }
 
 async function referencedImageUrls(cwd: string, paths: readonly string[]): Promise<Array<{ image_url: string }>> {
@@ -159,8 +166,10 @@ export async function standaloneImageGeneration(
 	ctx: ImageGenerationToolContext,
 	settings: ResolvedCodexModelSettings,
 	signal?: AbortSignal,
-	callId = "standalone",
+	invocation: StandaloneImageGenerationInvocation = {},
 ) {
+	const callId = invocation.callId ?? "standalone";
+	const turnId = invocation.turnId ?? randomUUID();
 	const model = ctx.model;
 	if (!model || !ctx.modelRegistry) throw new Error("No active model is available for standalone image generation.");
 	if (!settings.enabled) throw new Error("pi-codex-minimal-tools is disabled.");
@@ -193,7 +202,7 @@ export async function standaloneImageGeneration(
 				auth: { apiKey: auth.apiKey, headers: auth.headers },
 				apiKeyMode: settings.apiKeyMode,
 				extraHeaders: {
-					"x-codex-image-turn-id": callId,
+					"x-codex-image-turn-id": turnId,
 				},
 			}),
 			body: JSON.stringify({
@@ -234,6 +243,7 @@ export async function standaloneImageGeneration(
 
 export function createImageGenerationToolDefinition(options: {
 	loadSettings?: (cwd: string, model?: Model<Api>) => CodexMinimalToolsSettings | ResolvedCodexModelSettings;
+	getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
 } = {}) {
 	return {
 		name: "image_generation",
@@ -248,7 +258,11 @@ export function createImageGenerationToolDefinition(options: {
 				? settings as ResolvedCodexModelSettings
 				: loadModelSettings(ctx.model, cwd, settings);
 			if (resolvedSettings.imageGenerationImplementation === "standalone") {
-				return standaloneImageGeneration(params, ctx, resolvedSettings, signal, toolCallId);
+				const sessionId = ctx.sessionManager?.getSessionId?.();
+				return standaloneImageGeneration(params, ctx, resolvedSettings, signal, {
+					callId: toolCallId,
+					turnId: options.getCurrentTurnId?.(sessionId),
+				});
 			}
 			if (settings?.directImageApiFallback) return directImageGeneration(params, cwd, settings, signal);
 			return {

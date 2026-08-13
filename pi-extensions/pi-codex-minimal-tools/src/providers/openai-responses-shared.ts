@@ -669,16 +669,37 @@ export function convertResponsesMessages<TApi extends Api>(
 			const hasImages = msg.content.some((c) => c.type === "image");
 			const hasText = textResult.length > 0;
 			const [callId, itemId] = msg.toolCallId.split("|");
-			const output = hasImages && model.input.includes("image")
+			const supportsToolResultImages = hasImages && model.input.includes("image");
+			let originalCallUsesContentItems = false;
+			for (let index = msgIndex - 1; index >= 0; index--) {
+				const previous = context.messages[index];
+				if (previous?.role !== "assistant") continue;
+				const originalCall = previous.content.find((block) =>
+					block.type === "toolCall" && block.id.split("|")[0] === callId);
+				if (originalCall?.type === "toolCall") {
+					originalCallUsesContentItems = wireToolIdentity(
+						originalCall.name,
+						originalCall.thoughtSignature,
+					).namespace === "web";
+					break;
+				}
+			}
+			const usesContentItems = supportsToolResultImages || originalCallUsesContentItems;
+			const output = usesContentItems
 				? [
 						...(hasText ? [{ type: "input_text" as const, text: sanitizeSurrogates(textResult) }] : []),
-						...msg.content
-							.filter((block) => block.type === "image")
-							.map((block) => ({
-								type: "input_image" as const,
-								detail: "auto" as const,
-								image_url: `data:${block.mimeType};base64,${block.data}`,
-							})),
+						...(supportsToolResultImages
+							? msg.content
+									.filter((block) => block.type === "image")
+									.map((block) => ({
+										type: "input_image" as const,
+										detail: "auto" as const,
+										image_url: `data:${block.mimeType};base64,${block.data}`,
+									}))
+							: []),
+						...(!hasText && !supportsToolResultImages
+							? [{ type: "input_text" as const, text: "(see attached image)" }]
+							: []),
 					]
 				: sanitizeSurrogates(hasText ? textResult : "(see attached image)");
 			messages.push({

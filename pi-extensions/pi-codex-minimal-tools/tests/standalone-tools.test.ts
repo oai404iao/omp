@@ -76,21 +76,55 @@ test("standalone web search uses the Codex alpha/search endpoint and auth", asyn
 			},
 		},
 		sessionManager: { getSessionId: () => "session-1" },
-	});
+	}, undefined, { turnId: "turn-1" });
 
 	assert.equal(requestUrl, "https://chatgpt.example/backend-api/codex/alpha/search");
 	assert.equal(requestHeaders?.get("chatgpt-account-id"), "acct_test");
 	assert.equal(requestHeaders?.get("authorization"), `Bearer ${jwt()}`);
 	assert.equal(requestBody.id, "session-1");
 	assert.equal(requestBody.model, "gpt-5.6-sol");
+	assert.deepEqual(JSON.parse(requestHeaders?.get("x-codex-turn-metadata") ?? ""), {
+		session_id: "session-1",
+		thread_id: "session-1",
+		turn_id: "turn-1",
+		model: "gpt-5.6-sol",
+	});
 	assert.equal("input" in requestBody, false);
 	assert.deepEqual(requestBody.commands.search_query, [{
 		q: "latest docs",
 		recency: 7,
 		domains: ["example.com"],
 	}]);
-	assert.equal(requestBody.max_output_tokens, 2_000);
+	assert.equal(requestBody.max_output_tokens, 10_000);
 	assert.equal((result.content[0] as any).text, "citeturn0search0 Search result");
+}));
+
+test("standalone web search surfaces a backend no-tool-response sentinel as an error", async () => withAgentDir(async () => {
+	const model = {
+		provider: "openai-codex",
+		api: "openai-codex-responses",
+		id: "gpt-5.6-sol",
+		baseUrl: "https://chatgpt.example/backend-api",
+		headers: {},
+		input: ["text", "image"],
+	} as any;
+	globalThis.fetch = (async () => Response.json({
+		output: "Found no tool response. This likely means the arguments you provided were not valid.",
+		results: [],
+	})) as typeof fetch;
+
+	await assert.rejects(
+		standaloneWebSearch({ weather: [{ location: "Beijing, China" }] }, {
+			cwd: process.cwd(),
+			model,
+			modelRegistry: {
+				async getApiKeyAndHeaders() {
+					return { ok: true as const, apiKey: jwt(), headers: {} };
+				},
+			},
+		}),
+		/backend returned no tool response for weather[\s\S]*retry with search_query/i,
+	);
 }));
 
 test("standalone web search supports API-key endpoints for user-added profiles", async () => withAgentDir(async (agentDir) => {
@@ -142,9 +176,11 @@ test("standalone image generation uses the active provider Images endpoint and s
 	const base64 = Buffer.from("png-bytes").toString("base64");
 	let requestUrl = "";
 	let requestBody: any;
+	let requestHeaders: Headers | undefined;
 	globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
 		requestUrl = String(url);
 		requestBody = JSON.parse(String(init?.body));
+		requestHeaders = new Headers(init?.headers as HeadersInit);
 		return Response.json({ created: 1, data: [{ b64_json: base64 }] });
 	}) as typeof fetch;
 	try {
@@ -160,9 +196,13 @@ test("standalone image generation uses the active provider Images endpoint and s
 					return { ok: true as const, apiKey: jwt(), headers: {} };
 				},
 			},
-		}, settings);
+		}, settings, undefined, {
+			callId: "call-image",
+			turnId: "turn-image",
+		});
 
 		assert.equal(requestUrl, "https://chatgpt.example/backend-api/codex/images/generations");
+		assert.equal(requestHeaders?.get("x-codex-image-turn-id"), "turn-image");
 		assert.deepEqual(requestBody, {
 			model: "gpt-image-2",
 			prompt: "A tiny diagram",
@@ -262,7 +302,7 @@ test("standalone web search sends the recent visible conversation tail", async (
 			getSessionId: () => "session-1",
 			getBranch: () => branch,
 		},
-	});
+	}, undefined, { turnId: "turn-current" });
 
 	assert.deepEqual(requestBody.input, [
 		{
@@ -279,6 +319,9 @@ test("standalone web search sends the recent visible conversation tail", async (
 			type: "message",
 			role: "user",
 			content: [{ type: "input_text", text: "current user" }],
+			internal_chat_message_metadata_passthrough: {
+				turn_id: "turn-current",
+			},
 		},
 	]);
 }));
@@ -344,13 +387,16 @@ test("standalone image editing can use recent conversation images", async () => 
 				},
 			},
 			sessionManager: { getBranch: () => branch },
-		}, loadModelSettings(model, cwd), undefined, "call-image");
+		}, loadModelSettings(model, cwd), undefined, {
+			callId: "call-image",
+			turnId: "turn-image",
+		});
 
 		assert.deepEqual(requestBody.images, [
 			{ image_url: `data:image/png;base64,${imageOne}` },
 			{ image_url: `data:image/webp;base64,${imageTwo}` },
 		]);
-		assert.equal(requestHeaders?.get("x-codex-image-turn-id"), "call-image");
+		assert.equal(requestHeaders?.get("x-codex-image-turn-id"), "turn-image");
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

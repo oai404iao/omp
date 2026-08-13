@@ -231,6 +231,9 @@ test("namespaced function calls map to Pi tool names and replay their wire ident
 	});
 	assert.equal(replay[1].type, "function_call_output");
 	assert.equal(replay[1].call_id, "call_web");
+	assert.deepEqual(replay[1].output, [
+		{ type: "input_text", text: "search result" },
+	]);
 });
 
 test("namespaced custom calls retain the functions namespace across replay", async () => {

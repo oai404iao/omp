@@ -442,7 +442,7 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 			cwd: ctx.cwd,
 			model,
 			modelRegistry: ctx.modelRegistry,
-		}, settings);
+		}, settings, undefined, { callId: "standalone" });
 		const saved = result.details.saved;
 		const workspaceRoot = projectRoot(ctx.cwd);
 		const relativePath = relative(workspaceRoot, saved.path);
