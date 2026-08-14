@@ -88,42 +88,73 @@
             },
             "applyPatch": {
               "description": "Disable apply_patch, expose a JSON function tool, or use the Codex freeform custom tool.",
-              "oneOf": [
-                { "const": false },
-                { "enum": ["function", "custom"] }
+              "enum": [false, "function", "custom"],
+              "enumDescriptions": [
+                "Do not expose an apply_patch tool.",
+                "Expose apply_patch as a regular JSON function tool.",
+                "Expose apply_patch as the Codex freeform custom tool."
               ]
             },
             "webSearch": {
               "description": "Disable web search or choose hosted Responses search versus standalone Codex web.run.",
-              "oneOf": [
-                { "const": false },
+              "if": {
+                "type": "boolean"
+              },
+              "then": {
+                "const": false
+              },
+              "else": {
+                "type": "object"
+              },
+              "defaultSnippets": [
                 {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["implementation"],
-                  "properties": {
-                    "implementation": {
-                      "enum": ["hosted", "standalone"],
-                      "description": "hosted is server-executed; standalone calls the Codex alpha/search endpoint."
-                    },
-                    "contentTypes": {
-                      "type": "array",
-                      "description": "Search modalities advertised or accepted by this model.",
-                      "minItems": 1,
-                      "items": {
-                        "enum": ["text", "image"]
-                      },
-                      "uniqueItems": true
-                    }
+                  "label": "Disable web search",
+                  "description": "Do not expose web search for this model.",
+                  "body": false
+                },
+                {
+                  "label": "Hosted web search",
+                  "description": "Use the server-executed Responses web_search tool.",
+                  "body": {
+                    "implementation": "hosted"
+                  }
+                },
+                {
+                  "label": "Standalone web search",
+                  "description": "Expose web.run and call the Codex alpha/search endpoint.",
+                  "body": {
+                    "implementation": "standalone"
                   }
                 }
-              ]
+              ],
+              "additionalProperties": false,
+              "required": ["implementation"],
+              "properties": {
+                "implementation": {
+                  "enum": ["hosted", "standalone"],
+                  "enumDescriptions": [
+                    "Use the server-executed Responses web_search tool.",
+                    "Expose web.run and call the Codex alpha/search endpoint."
+                  ]
+                },
+                "contentTypes": {
+                  "type": "array",
+                  "description": "Search modalities advertised or accepted by this model.",
+                  "minItems": 1,
+                  "items": {
+                    "enum": ["text", "image"]
+                  },
+                  "uniqueItems": true
+                }
+              }
             },
             "imageGeneration": {
               "description": "Disable image generation, use hosted Responses image_generation, or use standalone Codex Images endpoints.",
-              "oneOf": [
-                { "const": false },
-                { "enum": ["hosted", "standalone"] }
+              "enum": [false, "hosted", "standalone"],
+              "enumDescriptions": [
+                "Do not expose an image-generation tool.",
+                "Use the hosted Responses image_generation tool.",
+                "Expose image_gen.imagegen and call the standalone Codex Images endpoints."
               ]
             },
             "viewImage": {
@@ -138,26 +169,43 @@
         },
         "fast": {
           "description": "Disable Fast mode for this model or configure its service tier and optional usage-cost multiplier.",
-          "oneOf": [
-            { "const": false },
+          "if": {
+            "type": "boolean"
+          },
+          "then": {
+            "const": false
+          },
+          "else": {
+            "type": "object"
+          },
+          "defaultSnippets": [
             {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["serviceTier"],
-              "properties": {
-                "serviceTier": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Responses service_tier value sent when the global Fast toggle is enabled."
-                },
-                "costMultiplier": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "description": "Optional multiplier applied to Pi's reported request cost for this tier."
-                }
+              "label": "Disable Fast mode",
+              "description": "Do not enable a Fast service tier for this model.",
+              "body": false
+            },
+            {
+              "label": "Configure Fast mode",
+              "description": "Configure the Responses service tier used by the global Fast toggle.",
+              "body": {
+                "serviceTier": "priority"
               }
             }
-          ]
+          ],
+          "additionalProperties": false,
+          "required": ["serviceTier"],
+          "properties": {
+            "serviceTier": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Responses service_tier value sent when the global Fast toggle is enabled."
+            },
+            "costMultiplier": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Optional multiplier applied to Pi's reported request cost for this tier."
+            }
+          }
         }
       }
     }
