@@ -374,6 +374,115 @@ test("Standard Responses can place the system prompt in a developer message", as
 	assert.equal(requestBody.input[1].role, "user");
 });
 
+test("reasoningSummary preserves the Standard auto and Lite omission wire defaults", async () => {
+	writeSettings({});
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	writeModels({
+		version: 1,
+		models: [{
+			id: "openai-codex/gpt-5.5",
+			responses: { transport: "sse" },
+		}],
+	});
+	let result = await runCodexProvider(
+		{ reasoning: "high" },
+		{ reasoning: true, thinkingLevelMap: { high: "high" } },
+	);
+	assert.equal(result.stopReason, "stop");
+	assert.deepEqual(requestBody.reasoning, {
+		effort: "high",
+		summary: "auto",
+	});
+
+	writeModels({
+		version: 1,
+		models: [{
+			id: "openai-codex/gpt-5.6-sol",
+			responses: { transport: "sse" },
+		}],
+	});
+	result = await runCodexProvider(
+		{ reasoning: "max" },
+		{
+			id: "gpt-5.6-sol",
+			reasoning: true,
+			thinkingLevelMap: { max: "max" },
+		},
+	);
+	assert.equal(result.stopReason, "stop");
+	assert.deepEqual(requestBody.reasoning, {
+		context: "all_turns",
+		effort: "max",
+	});
+});
+
+test("per-model reasoningSummary none omits the Standard Responses summary field", async () => {
+	writeSettings({});
+	writeModels({
+		version: 1,
+		models: [{
+			id: "openai-codex/gpt-5.5",
+			responses: {
+				reasoningSummary: "none",
+				transport: "sse",
+			},
+		}],
+	});
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	const result = await runCodexProvider(
+		{ reasoning: "high" },
+		{ reasoning: true, thinkingLevelMap: { high: "high" } },
+	);
+
+	assert.equal(result.stopReason, "stop");
+	assert.deepEqual(requestBody.reasoning, { effort: "high" });
+});
+
+test("per-model reasoningSummary can explicitly enable detailed summaries in Responses Lite", async () => {
+	writeSettings({});
+	writeModels({
+		version: 1,
+		models: [{
+			id: "openai-codex/gpt-5.6-sol",
+			responses: {
+				reasoningSummary: "detailed",
+				transport: "sse",
+			},
+		}],
+	});
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return successSseResponse();
+	}) as typeof fetch;
+
+	const result = await runCodexProvider(
+		{ reasoning: "max" },
+		{
+			id: "gpt-5.6-sol",
+			reasoning: true,
+			thinkingLevelMap: { max: "max" },
+		},
+	);
+
+	assert.equal(result.stopReason, "stop");
+	assert.deepEqual(requestBody.reasoning, {
+		context: "all_turns",
+		effort: "max",
+		summary: "detailed",
+	});
+});
+
 test("custom patch transport replaces only apply_patch with the canonical freeform tool", async () => {
 	writeSettings({ requestProfile: { patchTransport: "custom" } });
 	let requestBody: any;

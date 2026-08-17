@@ -113,6 +113,11 @@ This table describes the bundled snapshot, not every OpenAI deployment. The
 catalog also gives each model separate defaults for reasoning effort, summary,
 verbosity, context window, modalities, and parallel calls.
 
+This extension exposes the summary axis as
+`responses.reasoningSummary:"auto" | "concise" | "detailed" | "none"` in its
+per-model catalog. `"none"` omits the wire field; absent values preserve the
+extension's mode defaults (Standard `auto`, Lite `none`).
+
 ## Capability-resolution consequence
 
 A compatible host needs a resolved profile with separate fields, for example:

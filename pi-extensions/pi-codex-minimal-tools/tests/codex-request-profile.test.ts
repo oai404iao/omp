@@ -14,12 +14,14 @@ test("Codex request profile defaults to Standard Responses function tools", () =
 test("Codex request profile applies supported explicit overrides", () => {
 	assert.deepEqual(resolveCodexRequestProfile({
 		responsesMode: "standard",
+		reasoningSummary: "detailed",
 		systemPromptPlacement: "developer",
 		patchTransport: "function",
 		supportsHostedTools: false,
 		supportsParallelTools: false,
 	}), {
 		responsesMode: "standard",
+		reasoningSummary: "detailed",
 		systemPromptPlacement: "developer",
 		patchTransport: "function",
 		supportsHostedTools: false,
@@ -34,11 +36,22 @@ test("Responses Lite forces hosted and parallel tools off", () => {
 		supportsParallelTools: true,
 	}), {
 		responsesMode: "lite",
+		reasoningSummary: "none",
 		systemPromptPlacement: "developer",
 		patchTransport: "function",
 		supportsHostedTools: false,
 		supportsParallelTools: false,
 	});
+});
+
+test("reasoning summary uses mode defaults and preserves explicit overrides", () => {
+	assert.equal(resolveCodexRequestProfile().reasoningSummary, "auto");
+	assert.equal(resolveCodexRequestProfile({ responsesMode: "lite" }).reasoningSummary, "none");
+	assert.equal(
+		resolveCodexRequestProfile({ responsesMode: "lite", reasoningSummary: "detailed" }).reasoningSummary,
+		"detailed",
+	);
+	assert.equal(resolveCodexRequestProfile({ reasoningSummary: "none" }).reasoningSummary, "none");
 });
 
 test("custom patch transport is opt-in while function remains the default", () => {

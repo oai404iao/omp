@@ -96,7 +96,8 @@ Codex builds reasoning controls from model metadata and session options:
 
 - `effort` uses an explicit option or the model default.
 - `summary` is included only when the model supports the parameter and the
-  configured summary mode is not `none`.
+  configured `responses.reasoningSummary` mode is not `none`. The extension's
+  Standard default is `auto`.
 - `reasoning.context` is omitted in Standard mode, leaving the Responses
   default, documented in source comments as `current_turn`.
 - `text.verbosity` is included only for models that support verbosity.

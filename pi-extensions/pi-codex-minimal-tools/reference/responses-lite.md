@@ -23,7 +23,10 @@ tool specifications. When `model_info.use_responses_lite` is true it then:
 5. Sets top-level `tools` to `None`, which omits the field.
 6. Forces `parallel_tool_calls` to `false`.
 7. Sets `reasoning.context` to `all_turns`.
-8. Removes `detail` from input images, including images in structured tool
+8. Omits `reasoning.summary` by default. An explicit per-model
+   `responses.reasoningSummary` value of `auto`, `concise`, or `detailed`
+   includes it; `none` keeps it omitted.
+9. Removes `detail` from input images, including images in structured tool
    outputs.
 
 Representative wire shape:
@@ -202,6 +205,7 @@ behavior.
 | Top-level tools | Present | Omitted |
 | Parallel tool calls | Prompt-controlled | Forced `false` |
 | Reasoning context | Omitted/default `current_turn` | `all_turns` |
+| Reasoning summary default | `auto` | Omitted (`none`) |
 | Image `detail` | Preserved | Removed |
 | Hosted Responses tools | May be present | Skipped |
 | Transport signal | Normal Responses headers | Internal Lite header/WS metadata |

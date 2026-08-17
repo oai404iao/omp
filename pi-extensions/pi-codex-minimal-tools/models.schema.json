@@ -64,6 +64,10 @@
               "enum": ["standard", "lite"],
               "description": "Standard Responses or the internal Codex Responses Lite envelope."
             },
+            "reasoningSummary": {
+              "enum": ["auto", "concise", "detailed", "none"],
+              "description": "Reasoning summary mode. none omits reasoning.summary; absent defaults to auto in Standard mode and none in Lite mode."
+            },
             "systemPromptPlacement": {
               "enum": ["instructions", "developer"],
               "description": "Standard-mode prompt placement. Lite always uses a developer message."

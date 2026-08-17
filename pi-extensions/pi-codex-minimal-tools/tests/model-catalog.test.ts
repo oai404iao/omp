@@ -38,6 +38,7 @@ test("bundled profiles expose independent Standard and Lite Codex capabilities",
 	assert.ok(standard);
 	assert.deepEqual(standard.sources, ["bundled"]);
 	assert.equal(standard.effective.responses.mode, "standard");
+	assert.equal(standard.effective.responses.reasoningSummary, "auto");
 	assert.equal(standard.effective.responses.transport, "auto");
 	assert.equal(standard.effective.tools.applyPatch, "custom");
 	assert.deepEqual(standard.effective.tools.webSearch, {
@@ -55,6 +56,7 @@ test("bundled profiles expose independent Standard and Lite Codex capabilities",
 	assert.ok(lite);
 	assert.equal(lite.effective.responses.endpoint, "codex");
 	assert.equal(lite.effective.responses.mode, "lite");
+	assert.equal(lite.effective.responses.reasoningSummary, "none");
 	assert.equal(lite.effective.responses.systemPromptPlacement, "developer");
 	assert.equal(lite.effective.tools.parallelCalls, false);
 	assert.equal(lite.effective.tools.applyPatch, "custom");
@@ -69,6 +71,7 @@ test("user entries deep-override bundled profiles by exact provider/model id", (
 		models: [{
 			id: "openai/gpt-5.5",
 			responses: {
+				reasoningSummary: "detailed",
 				transport: "sse",
 				websocketPrewarm: false,
 			},
@@ -86,6 +89,7 @@ test("user entries deep-override bundled profiles by exact provider/model id", (
 	assert.ok(profile);
 	assert.deepEqual(profile.sources, ["bundled", "user"]);
 	assert.equal(profile.effective.responses.mode, "standard");
+	assert.equal(profile.effective.responses.reasoningSummary, "detailed");
 	assert.equal(profile.effective.responses.transport, "sse");
 	assert.equal(profile.effective.responses.websocketPrewarm, false);
 	assert.equal(profile.effective.tools.applyPatch, "custom");
@@ -116,6 +120,7 @@ test("users can add an exact custom model profile with extends", () => withAgent
 	);
 	assert.equal(settings.modelProfile?.sources.join("+"), "user");
 	assert.equal(settings.openaiTransport, "websocket-cached");
+	assert.equal(settings.requestProfile.reasoningSummary, "auto");
 	assert.equal(settings.requestProfile.patchTransport, "custom");
 	assert.equal(settings.webSearchImplementation, "hosted");
 	assert.equal(settings.imageGenerationImplementation, undefined);
@@ -199,7 +204,7 @@ test("Lite normalization rejects hosted tools but preserves remote compaction", 
 		models: [{
 			id: "custom/lite",
 			extends: "openai/gpt-5.5",
-			responses: { mode: "lite" },
+			responses: { mode: "lite", reasoningSummary: "concise" },
 			tools: {
 				parallelCalls: true,
 				webSearch: { implementation: "hosted" },
@@ -213,6 +218,7 @@ test("Lite normalization rejects hosted tools but preserves remote compaction", 
 		{ settings: DEFAULT_SETTINGS },
 	);
 	assert.ok(profile);
+	assert.equal(profile.effective.responses.reasoningSummary, "concise");
 	assert.equal(profile.effective.responses.systemPromptPlacement, "developer");
 	assert.equal(profile.effective.tools.parallelCalls, false);
 	assert.equal(profile.effective.tools.webSearch, false);
@@ -248,6 +254,23 @@ test("modelsPath points to the extension models.json", () => withAgentDir((agent
 	);
 }));
 
+test("invalid reasoning summary values are diagnosed and fall back to the mode default", () => withAgentDir((agentDir) => {
+	writeModels(agentDir, {
+		version: 1,
+		models: [{
+			id: "custom/invalid-summary",
+			responses: { reasoningSummary: "verbose" },
+		}],
+	});
+	const profile = resolveModelProfile(
+		{ provider: "custom", id: "invalid-summary" },
+		{ settings: DEFAULT_SETTINGS },
+	);
+	assert.ok(profile);
+	assert.equal(profile.effective.responses.reasoningSummary, "auto");
+	assert.ok(profile.diagnostics.some((line) => line.includes("invalid responses.reasoningSummary")));
+}));
+
 test("profile hashes change when effective request behavior changes", () => withAgentDir((agentDir) => {
 	const before = resolveModelProfile(
 		{ provider: "openai", id: "gpt-5.5" },
@@ -258,7 +281,7 @@ test("profile hashes change when effective request behavior changes", () => with
 		version: 1,
 		models: [{
 			id: "openai/gpt-5.5",
-			responses: { transport: "sse" },
+			responses: { reasoningSummary: "detailed" },
 		}],
 	});
 	const after = resolveModelProfile(
@@ -266,5 +289,6 @@ test("profile hashes change when effective request behavior changes", () => with
 		{ settings: DEFAULT_SETTINGS },
 	);
 	assert.ok(after);
+	assert.equal(after.effective.responses.reasoningSummary, "detailed");
 	assert.notEqual(after.profileHash, before.profileHash);
 }));

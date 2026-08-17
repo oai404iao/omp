@@ -40,6 +40,10 @@ test("model schema avoids oneOf so JSON LSPs can offer every value completion", 
 		propertySchema([...tools, "imageGeneration"]).enum,
 		[false, "hosted", "standalone"],
 	);
+	assert.deepEqual(
+		propertySchema(["$defs", "model", "properties", "responses", "properties", "reasoningSummary"]).enum,
+		["auto", "concise", "detailed", "none"],
+	);
 
 	const webSearch = propertySchema([...tools, "webSearch"]);
 	assert.deepEqual(webSearch.if, { type: "boolean" });

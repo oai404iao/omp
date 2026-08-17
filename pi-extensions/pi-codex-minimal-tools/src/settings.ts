@@ -167,6 +167,14 @@ function requestProfileSetting(raw: SettingsRecord): CodexRequestProfileOverride
 	if (!value) return {};
 	const profile: CodexRequestProfileOverride = {};
 	if (value.responsesMode === "standard" || value.responsesMode === "lite") profile.responsesMode = value.responsesMode;
+	if (
+		value.reasoningSummary === "auto"
+		|| value.reasoningSummary === "concise"
+		|| value.reasoningSummary === "detailed"
+		|| value.reasoningSummary === "none"
+	) {
+		profile.reasoningSummary = value.reasoningSummary;
+	}
 	if (value.systemPromptPlacement === "instructions" || value.systemPromptPlacement === "developer") profile.systemPromptPlacement = value.systemPromptPlacement;
 	if (value.patchTransport === "function" || value.patchTransport === "custom") profile.patchTransport = value.patchTransport;
 	if (typeof value.supportsHostedTools === "boolean") profile.supportsHostedTools = value.supportsHostedTools;

@@ -1,5 +1,6 @@
 export type ResponsesEndpoint = "auto" | "openai" | "codex";
 export type ResponsesMode = "standard" | "lite";
+export type ReasoningSummary = "auto" | "concise" | "detailed" | "none";
 export type ResponsesTransport = "sse" | "websocket" | "websocket-cached" | "auto";
 export type SystemPromptPlacement = "instructions" | "developer";
 export type PatchTransport = "function" | "custom";
@@ -17,6 +18,7 @@ export interface ResponsesProfilePatch {
 	providerShim?: boolean;
 	endpoint?: ResponsesEndpoint;
 	mode?: ResponsesMode;
+	reasoningSummary?: ReasoningSummary;
 	systemPromptPlacement?: SystemPromptPlacement;
 	transport?: ResponsesTransport;
 	websocketPrewarm?: boolean;
@@ -60,6 +62,7 @@ export interface EffectiveResponsesProfile {
 	providerShim: boolean;
 	endpoint: ResponsesEndpoint;
 	mode: ResponsesMode;
+	reasoningSummary: ReasoningSummary;
 	systemPromptPlacement: SystemPromptPlacement;
 	transport: ResponsesTransport;
 	websocketPrewarm: boolean;

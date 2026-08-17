@@ -92,6 +92,7 @@ test("loadSettings reads package config and nested request profile", () => {
 			compactionMode: "responses",
 			requestProfile: {
 				responsesMode: "standard",
+				reasoningSummary: "detailed",
 				systemPromptPlacement: "developer",
 				patchTransport: "function",
 				supportsHostedTools: false,
@@ -112,6 +113,7 @@ test("loadSettings reads package config and nested request profile", () => {
 		assert.equal(settings.compactionMode, "responses");
 		assert.deepEqual(settings.requestProfile, {
 			responsesMode: "standard",
+			reasoningSummary: "detailed",
 			systemPromptPlacement: "developer",
 			patchTransport: "function",
 			supportsHostedTools: false,
@@ -161,12 +163,20 @@ test("loadSettings accepts Lite with custom patch transport", () => {
 			imageModel: "bad-model",
 			glyphStyle: "bad-style",
 			openaiTransport: "bad-transport",
-			requestProfile: { responsesMode: "lite", patchTransport: "custom" },
+			requestProfile: {
+				responsesMode: "lite",
+				reasoningSummary: "concise",
+				patchTransport: "custom",
+			},
 		});
 		const settings = loadSettings();
 		assert.equal(settings.imageModel, DEFAULT_SETTINGS.imageModel);
 		assert.equal(settings.glyphStyle, DEFAULT_SETTINGS.glyphStyle);
 		assert.equal(settings.openaiTransport, DEFAULT_SETTINGS.openaiTransport);
-		assert.deepEqual(settings.requestProfile, { responsesMode: "lite", patchTransport: "custom" });
+		assert.deepEqual(settings.requestProfile, {
+			responsesMode: "lite",
+			reasoningSummary: "concise",
+			patchTransport: "custom",
+		});
 	});
 });

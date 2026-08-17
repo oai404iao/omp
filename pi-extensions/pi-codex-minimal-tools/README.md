@@ -42,7 +42,8 @@ There are two separate model-related files:
 1. Pi's agent `models.json` defines providers and actual models: API type,
    base URL, authentication, headers, modalities, context window, and cost.
 2. This extension's `models.json` defines Codex behavior for an exact
-   `provider/model` ID: Responses mode, transport, tools, compaction, and Fast.
+   `provider/model` ID: Responses mode, reasoning summary, transport, tools,
+   compaction, and Fast.
 
 Typical paths:
 
@@ -107,6 +108,7 @@ Example overriding a bundled model and adding a custom provider/model:
     {
       "id": "openai/gpt-5.5",
       "responses": {
+        "reasoningSummary": "none",
         "transport": "sse",
         "websocketPrewarm": false
       },
@@ -204,6 +206,7 @@ the profile enables them.
     "providerShim": true,
     "endpoint": "auto",
     "mode": "standard",
+    "reasoningSummary": "auto",
     "systemPromptPlacement": "instructions",
     "transport": "auto",
     "websocketPrewarm": true
@@ -228,6 +231,9 @@ the profile enables them.
 
 Important constraints:
 
+- `responses.reasoningSummary` accepts `"auto"`, `"concise"`, `"detailed"`,
+  or `"none"`. `"none"` omits `reasoning.summary`; when absent, Standard
+  defaults to `"auto"` and Lite defaults to `"none"`.
 - `responses.mode:"lite"` always uses a developer message, namespace tools in
   `additional_tools`, `parallel_tool_calls:false`,
   `reasoning.context:"all_turns"`, and strips input-image `detail`.
@@ -351,6 +357,7 @@ model override for compatibility:
 | `openaiWebSocketPrewarm` | `responses.websocketPrewarm` |
 | `compactionMode` | `compaction` |
 | `requestProfile.responsesMode` | `responses.mode` |
+| `requestProfile.reasoningSummary` | `responses.reasoningSummary` |
 | `requestProfile.systemPromptPlacement` | `responses.systemPromptPlacement` |
 | `requestProfile.patchTransport` | `tools.applyPatch` |
 | `apiKeyMode` | `responses.endpoint` |

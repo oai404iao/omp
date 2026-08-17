@@ -61,6 +61,7 @@ A user-added profile that does not inherit anything starts with:
     "providerShim": false,
     "endpoint": "auto",
     "mode": "standard",
+    "reasoningSummary": "auto",
     "systemPromptPlacement": "instructions",
     "transport": "sse",
     "websocketPrewarm": false
@@ -118,12 +119,21 @@ Lite mode:
 - omits top-level `instructions` and `tools`;
 - forces `parallel_tool_calls:false`;
 - sets `reasoning.context:"all_turns"`;
+- defaults `responses.reasoningSummary` to `"none"` while preserving an
+  explicit `"auto"`, `"concise"`, or `"detailed"` override;
 - removes input-image `detail`;
 - adds the Lite HTTP header or WebSocket metadata signal.
 
 The stream parser maps namespaced calls back to Pi tool names and stores the
 wire namespace/name in `thoughtSignature` so later full-context requests replay
 the original provider item.
+
+`responses.reasoningSummary` accepts `"auto"`, `"concise"`, `"detailed"`, and
+`"none"`. The first three values are sent as `reasoning.summary`; `"none"`
+omits that wire field. Standard profiles default to `"auto"` and Lite profiles
+default to `"none"`. The resolved value participates in the effective profile
+hash, so changing it cannot reuse incompatible WebSocket continuations or
+native-compaction checkpoints.
 
 ## Web search implementations
 

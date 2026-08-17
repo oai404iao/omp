@@ -60,7 +60,7 @@
     },
     "requestProfile": {
       "type": "object",
-      "description": "Deprecated compatibility override. Move Responses mode, prompt placement, patch transport, and tool capabilities to extension models.json.",
+      "description": "Deprecated compatibility override. Move Responses mode, reasoning summary, prompt placement, patch transport, and tool capabilities to extension models.json.",
       "deprecated": true,
       "default": {},
       "additionalProperties": false,
@@ -70,6 +70,12 @@
           "description": "Responses protocol mode. Lite requires an endpoint that implements the Codex Responses Lite contract.",
           "enum": ["standard", "lite"],
           "default": "standard"
+        },
+        "reasoningSummary": {
+          "type": "string",
+          "description": "Deprecated compatibility override for the reasoning summary mode. Move this to responses.reasoningSummary in the per-model catalog.",
+          "enum": ["auto", "concise", "detailed", "none"],
+          "default": "auto"
         },
         "systemPromptPlacement": {
           "type": "string",

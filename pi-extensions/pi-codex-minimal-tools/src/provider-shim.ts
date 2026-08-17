@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { glyphs, treeGlyph } from "./glyphs.js";
 import { loadSettings } from "./settings.js";
 import { loadModelSettings, type ResolvedCodexModelSettings } from "./model-catalog/runtime.js";
+import type { ReasoningSummary } from "./model-catalog/types.js";
 import { resolveCodexRequestProfile, type CodexRequestProfile } from "./codex-request-profile.js";
 import { saveBase64Image } from "./utils/images.js";
 import { Container, getCapabilities, getImageDimensions, Image, Spacer, Text } from "@earendil-works/pi-tui";
@@ -939,7 +940,8 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 		if (effort === null) return body;
 		const reasoning = body.reasoning ?? {};
 		reasoning.effort = clampReasoningEffort(model.id, effort);
-		const summary = (options as { reasoningSummary?: string } | undefined)?.reasoningSummary ?? (lite ? undefined : "auto");
+		const summary = (options as { reasoningSummary?: ReasoningSummary | null } | undefined)?.reasoningSummary
+			?? profile.reasoningSummary;
 		if (summary && summary !== "none") reasoning.summary = summary;
 		body.reasoning = reasoning;
 	}

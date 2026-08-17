@@ -17,6 +17,7 @@ import type {
 	ModelProfilePatch,
 	ModelProfileSource,
 	NativeCompactionMode,
+	ReasoningSummary,
 	ResolvedModelProfile,
 	ResponsesEndpoint,
 	ResponsesMode,
@@ -48,6 +49,7 @@ const SAFE_PROFILE: EffectiveModelProfile = {
 		providerShim: false,
 		endpoint: "auto",
 		mode: "standard",
+		reasoningSummary: "auto",
 		systemPromptPlacement: "instructions",
 		transport: "sse",
 		websocketPrewarm: false,
@@ -154,7 +156,7 @@ function sanitizeResponses(
 	}
 	diagnoseUnknownKeys(
 		value,
-		["providerShim", "endpoint", "mode", "systemPromptPlacement", "transport", "websocketPrewarm"],
+		["providerShim", "endpoint", "mode", "reasoningSummary", "systemPromptPlacement", "transport", "websocketPrewarm"],
 		`${path}.responses`,
 		diagnostics,
 	);
@@ -167,6 +169,12 @@ function sanitizeResponses(
 	const mode = stringEnum<ResponsesMode>(value.mode, ["standard", "lite"]);
 	if (mode) result.mode = mode;
 	else if (value.mode !== undefined) diagnostics.push(`${path}: invalid responses.mode`);
+	const reasoningSummary = stringEnum<ReasoningSummary>(
+		value.reasoningSummary,
+		["auto", "concise", "detailed", "none"],
+	);
+	if (reasoningSummary) result.reasoningSummary = reasoningSummary;
+	else if (value.reasoningSummary !== undefined) diagnostics.push(`${path}: invalid responses.reasoningSummary`);
 	const placement = stringEnum<SystemPromptPlacement>(value.systemPromptPlacement, ["instructions", "developer"]);
 	if (placement) result.systemPromptPlacement = placement;
 	else if (value.systemPromptPlacement !== undefined) diagnostics.push(`${path}: invalid responses.systemPromptPlacement`);
@@ -419,6 +427,10 @@ function normalizeProfile(
 		compaction: patch.compaction ?? SAFE_PROFILE.compaction,
 		fast: patch.fast ?? SAFE_PROFILE.fast,
 	};
+	effective.responses.reasoningSummary = resolveCodexRequestProfile({
+		responsesMode: effective.responses.mode,
+		reasoningSummary: patch.responses?.reasoningSummary,
+	}).reasoningSummary;
 
 	if (effective.responses.mode === "lite") {
 		effective.responses.systemPromptPlacement = "developer";
@@ -543,6 +555,7 @@ function legacyProfilePatch(
 			providerShim: nativeProvider(model) || existing?.responses?.providerShim === true,
 			endpoint: model.provider === "openai" || settings.apiKeyMode ? "openai" : "codex",
 			mode: requestProfile.responsesMode,
+			reasoningSummary: requestProfile.reasoningSummary,
 			systemPromptPlacement: requestProfile.systemPromptPlacement,
 			transport: settings.openaiTransport,
 			websocketPrewarm: settings.openaiWebSocketPrewarm,

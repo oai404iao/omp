@@ -48,6 +48,7 @@ export function loadModelSettings(
 			compactionMode: "pi",
 			requestProfile: {
 				responsesMode: "standard",
+				reasoningSummary: "auto",
 				systemPromptPlacement: "instructions",
 				patchTransport: "function",
 				supportsHostedTools: false,
@@ -83,6 +84,7 @@ export function loadModelSettings(
 	const usesProviderToolRewrite = Boolean(webSearchImplementation || imageGenerationImplementation);
 	const requestProfile: CodexRequestProfileOverride = {
 		responsesMode: effective.responses.mode,
+		reasoningSummary: effective.responses.reasoningSummary,
 		systemPromptPlacement: effective.responses.systemPromptPlacement,
 		patchTransport: effective.tools.applyPatch === "custom" ? "custom" : "function",
 		supportsHostedTools,

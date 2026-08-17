@@ -1,5 +1,8 @@
+import type { ReasoningSummary } from "./model-catalog/types.js";
+
 export interface CodexRequestProfile {
 	responsesMode: "standard" | "lite";
+	reasoningSummary: ReasoningSummary;
 	systemPromptPlacement: "instructions" | "developer";
 	patchTransport: "function" | "custom";
 	supportsHostedTools: boolean;
@@ -12,6 +15,7 @@ export interface CodexRequestProfile {
  */
 export interface CodexRequestProfileOverride {
 	responsesMode?: "standard" | "lite";
+	reasoningSummary?: ReasoningSummary;
 	systemPromptPlacement?: "instructions" | "developer";
 	patchTransport?: "function" | "custom";
 	supportsHostedTools?: boolean;
@@ -20,6 +24,7 @@ export interface CodexRequestProfileOverride {
 
 export const DEFAULT_CODEX_REQUEST_PROFILE: CodexRequestProfile = {
 	responsesMode: "standard",
+	reasoningSummary: "auto",
 	systemPromptPlacement: "instructions",
 	patchTransport: "function",
 	supportsHostedTools: true,
@@ -30,6 +35,8 @@ export function resolveCodexRequestProfile(override: CodexRequestProfileOverride
 	const responsesMode = override.responsesMode ?? DEFAULT_CODEX_REQUEST_PROFILE.responsesMode;
 	return {
 		responsesMode,
+		reasoningSummary: override.reasoningSummary
+			?? (responsesMode === "lite" ? "none" : DEFAULT_CODEX_REQUEST_PROFILE.reasoningSummary),
 		systemPromptPlacement: responsesMode === "lite" ? "developer" : override.systemPromptPlacement ?? DEFAULT_CODEX_REQUEST_PROFILE.systemPromptPlacement,
 		patchTransport: override.patchTransport ?? DEFAULT_CODEX_REQUEST_PROFILE.patchTransport,
 		supportsHostedTools: responsesMode === "lite" ? false : override.supportsHostedTools ?? DEFAULT_CODEX_REQUEST_PROFILE.supportsHostedTools,
