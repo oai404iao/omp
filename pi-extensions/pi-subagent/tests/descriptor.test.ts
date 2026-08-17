@@ -28,6 +28,7 @@ function descriptor(label = "inspect auth"): SubagentDescriptor {
 		runtime: {
 			agentScope: "user",
 			maxDepth: 3,
+			enableRunInBackground: true,
 			defaultBackground: true,
 			reportDelivery: "wakeup",
 			inheritExtensions: false,
@@ -52,6 +53,15 @@ test("descriptor parser returns a detached validated value", () => {
 	const parsed = parseDescriptor(input);
 	assert.deepEqual(parsed, input);
 	assert.notEqual(parsed.agent.tools, input.agent.tools);
+});
+
+test("legacy descriptors default to background-enabled behavior", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		runtime: Omit<SubagentDescriptor["runtime"], "enableRunInBackground">;
+	};
+	delete (input.runtime as Partial<SubagentDescriptor["runtime"]>).enableRunInBackground;
+	const parsed = parseDescriptor(input);
+	assert.equal(parsed.runtime.enableRunInBackground, true);
 });
 
 test("descriptor folding is last-wins for fork seeds", () => {

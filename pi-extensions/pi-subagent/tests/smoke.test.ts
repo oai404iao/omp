@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, test } from "node:test";
@@ -55,6 +55,49 @@ test("extension loads and registers its model-facing surface", async () => {
 		]) {
 			assert.equal(names.has(expected), true, `${expected} should be registered`);
 		}
+	} finally {
+		session.dispose();
+	}
+});
+
+test("trusted foreground-only configuration removes the background parameter", async () => {
+	const extensionRoot = resolve(import.meta.dirname, "..");
+	const cwd = join(root, "foreground-project");
+	const agentDir = join(root, "foreground-agent");
+	mkdirSync(join(cwd, ".pi"), { recursive: true });
+	writeFileSync(
+		join(cwd, ".pi", "subagent.json"),
+		JSON.stringify({ enableRunInBackground: false }),
+	);
+	const settingsManager = SettingsManager.inMemory({}, { projectTrusted: true });
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir,
+		settingsManager,
+		noExtensions: true,
+		additionalExtensionPaths: [join(extensionRoot, "src", "index.ts")],
+		noSkills: true,
+		noPromptTemplates: true,
+		noThemes: true,
+		noContextFiles: true,
+	});
+	await loader.reload();
+	assert.deepEqual(loader.getExtensions().errors, []);
+
+	const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null });
+	const { session } = await createAgentSession({
+		cwd,
+		resourceLoader: loader,
+		modelRuntime,
+		settingsManager,
+		sessionManager: SessionManager.inMemory(cwd),
+	});
+	try {
+		await session.bindExtensions({ mode: "print" });
+		const subagent = session.getAllTools().find((tool) => tool.name === "subagent");
+		assert.ok(subagent);
+		const properties = (subagent.parameters as { properties: Record<string, unknown> }).properties;
+		assert.equal("run_in_background" in properties, false);
 	} finally {
 		session.dispose();
 	}

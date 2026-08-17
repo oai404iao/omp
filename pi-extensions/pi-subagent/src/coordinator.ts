@@ -24,12 +24,12 @@ import { discoverAgents, formatAgentCatalog } from "./agents.ts";
 import { readPersistedCatalog } from "./catalog.ts";
 import { DESCRIPTOR_CUSTOM_TYPE, foldDescriptor } from "./descriptor.ts";
 import {
-	DelegationParameters,
 	ForkDelegationParameters,
 	InterruptParameters,
 	ListAgentsParameters,
 	ReportParameters,
 	SendMessageParameters,
+	delegationParameters,
 } from "./schemas.ts";
 import {
 	addUsage,
@@ -194,6 +194,7 @@ function makeRuntimeSettings(descriptor: SubagentDescriptor): SubagentSettings {
 	return {
 		agentScope: descriptor.runtime.agentScope,
 		maxDepth: descriptor.runtime.maxDepth,
+		enableRunInBackground: descriptor.runtime.enableRunInBackground,
 		defaultBackground: descriptor.runtime.defaultBackground,
 		reportDelivery: descriptor.runtime.reportDelivery,
 		inheritExtensions: descriptor.runtime.inheritExtensions,
@@ -256,8 +257,19 @@ export class SubagentCoordinator {
 	): Promise<DelegationOutcome> {
 		if (this.draining) throw new Error("pi-subagent is shutting down; no new delegation was accepted");
 		const provider = this.providers.get(providerName);
+		if (
+			providerName === "spawn" &&
+			!settings.enableRunInBackground &&
+			input.run_in_background === true
+		) {
+			throw new Error(
+				"run_in_background is disabled by pi-subagent foreground-only mode (enableRunInBackground: false)",
+			);
+		}
 		const runInBackground =
-			providerName === "spawn" ? (input.run_in_background ?? settings.defaultBackground) : false;
+			providerName === "spawn" && settings.enableRunInBackground
+				? (input.run_in_background ?? settings.defaultBackground)
+				: false;
 		const mode: SubagentMode = runInBackground ? "continuable" : "one-shot";
 		if (mode === "continuable" && !provider.supportsContinuable) {
 			throw new Error(`subagent provider "${provider.name}" does not support continuable children`);
@@ -316,6 +328,7 @@ export class SubagentCoordinator {
 			runtime: {
 				agentScope: settings.agentScope,
 				maxDepth: settings.maxDepth,
+				enableRunInBackground: settings.enableRunInBackground,
 				defaultBackground: settings.defaultBackground,
 				reportDelivery: settings.reportDelivery,
 				inheritExtensions: settings.inheritExtensions,
@@ -498,7 +511,11 @@ export class SubagentCoordinator {
 		}
 	}
 
-	createChildToolDefinitions(getActivation: () => Activation): ToolDefinition[] {
+	createChildToolDefinitions(
+		getActivation: () => Activation,
+		enableRunInBackground = true,
+		defaultBackground = true,
+	): ToolDefinition[] {
 		const update =
 			(onUpdate: AgentToolUpdateCallback<DelegationDetails> | undefined) => (details: DelegationDetails) => {
 				onUpdate?.({
@@ -511,8 +528,13 @@ export class SubagentCoordinator {
 			name: "subagent",
 			label: "Subagent",
 			description:
-				"Delegate a standalone task to a fresh child in an isolated session. Background mode returns a durable id.",
-			parameters: DelegationParameters,
+				"Delegate a standalone task to a fresh child in an isolated session. " +
+				(!enableRunInBackground
+					? "This foreground-only instance always waits for the result."
+					: defaultBackground
+						? "It runs in the background by default and returns a durable id."
+						: "It waits for the result by default; background mode returns a durable id."),
+			parameters: delegationParameters(enableRunInBackground),
 			execute: async (_id, params, signal, onUpdate) => {
 				const activation = getActivation();
 				const outcome = await this.delegate(
@@ -688,10 +710,14 @@ export class SubagentCoordinator {
 
 	private async createActivation(options: CreateActivationOptions): Promise<Activation> {
 		let activation: Activation | undefined;
-		const customTools = this.createChildToolDefinitions(() => {
-			if (!activation) throw new Error("subagent activation is not published yet");
-			return activation;
-		});
+		const customTools = this.createChildToolDefinitions(
+			() => {
+				if (!activation) throw new Error("subagent activation is not published yet");
+				return activation;
+			},
+			options.descriptor.runtime.enableRunInBackground,
+			options.descriptor.runtime.defaultBackground,
+		);
 		const descriptor = options.descriptor;
 		const model =
 			options.parent.modelRuntime.getModel(descriptor.model.provider, descriptor.model.id) ??

@@ -1,22 +1,31 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
+const DELEGATION_FIELDS = {
+	agent: Type.String({
+		description: "Agent definition name, such as scout, planner, reviewer, or worker",
+		minLength: 1,
+		maxLength: 64,
+	}),
+	description: Type.String({
+		description: "Short 3-5 word display label for the delegated task",
+		minLength: 1,
+		maxLength: 200,
+	}),
+	prompt: Type.String({
+		description: "Complete task for the child agent",
+		minLength: 1,
+	}),
+};
+
+export const ForegroundDelegationParameters = Type.Object(
+	DELEGATION_FIELDS,
+	{ additionalProperties: false },
+);
+
 export const DelegationParameters = Type.Object(
 	{
-		agent: Type.String({
-			description: "Agent definition name, such as scout, planner, reviewer, or worker",
-			minLength: 1,
-			maxLength: 64,
-		}),
-		description: Type.String({
-			description: "Short 3-5 word display label for the delegated task",
-			minLength: 1,
-			maxLength: 200,
-		}),
-		prompt: Type.String({
-			description: "Complete task for the child agent",
-			minLength: 1,
-		}),
+		...DELEGATION_FIELDS,
 		run_in_background: Type.Optional(
 			Type.Boolean({
 				description:
@@ -26,6 +35,10 @@ export const DelegationParameters = Type.Object(
 	},
 	{ additionalProperties: false },
 );
+
+export function delegationParameters(enableRunInBackground: boolean) {
+	return enableRunInBackground ? DelegationParameters : ForegroundDelegationParameters;
+}
 
 export const ForkDelegationParameters = Type.Object(
 	{

@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadSettings } from "./config.ts";
+import { DEFAULT_SETTINGS, loadSettings } from "./config.ts";
 import {
 	REPORT_CUSTOM_TYPE,
 	SETTLED_CUSTOM_TYPE,
@@ -10,14 +10,19 @@ import {
 } from "./coordinator.ts";
 import { discoverAgents, formatAgentCatalog } from "./agents.ts";
 import {
-	DelegationParameters,
 	ForkDelegationParameters,
 	InterruptParameters,
 	ListAgentsParameters,
 	SendMessageParameters,
+	delegationParameters,
 } from "./schemas.ts";
 import { renderDelegationCall, renderDelegationResult, renderParentMessage } from "./render.ts";
-import type { ControlDetails, DelegationDetails, ParentMessageDetails } from "./types.ts";
+import type {
+	ControlDetails,
+	DelegationDetails,
+	ParentMessageDetails,
+	SubagentSettings,
+} from "./types.ts";
 
 const SOURCE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = dirname(SOURCE_DIR);
@@ -27,24 +32,49 @@ function textContent(content: Array<{ type: string; text?: string }>): string {
 	return content.find((item) => item.type === "text")?.text ?? "";
 }
 
-export default function subagentExtension(pi: ExtensionAPI): void {
-	const coordinator = new SubagentCoordinator(pi, BUNDLED_AGENTS_DIR, PACKAGE_ROOT);
-
+function registerDelegationTool(
+	pi: ExtensionAPI,
+	coordinator: SubagentCoordinator,
+	settings: Pick<SubagentSettings, "enableRunInBackground" | "defaultBackground">,
+): void {
+	const { enableRunInBackground, defaultBackground } = settings;
+	const description = !enableRunInBackground
+		? "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
+			"This foreground-only tool waits for the child and returns its final answer. " +
+			"Independent sibling calls may still execute in parallel."
+		: defaultBackground
+			? "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
+				"Background mode is continuable and returns a durable child id; use send_message for later FIFO turns. " +
+				"Start independent children together in one assistant message."
+			: "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
+				"This tool waits for the result by default; set run_in_background to true to return a durable child id.";
+	const promptGuidelines = !enableRunInBackground
+		? [
+				"Use subagent for focused independent work and give it a complete standalone prompt.",
+				"This subagent tool is foreground-only: every call waits for and returns the child's final answer.",
+				"Independent subagent calls can still be issued together in one assistant message and execute in parallel.",
+			]
+		: defaultBackground
+			? [
+					"Use subagent for focused independent work and give it a complete standalone prompt.",
+					"Call subagent multiple times in one assistant message when delegations are independent.",
+					"Keep useful parent work moving after a background subagent starts; use foreground only when the next action needs its result.",
+				]
+			: [
+					"Use subagent for focused independent work and give it a complete standalone prompt.",
+					"Subagent calls wait for the result by default; request background mode only when work can continue independently.",
+					"Independent subagent calls can still be issued together in one assistant message and execute in parallel.",
+				];
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
-		description:
-			"Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
-			"Background mode is continuable and returns a durable child id; use send_message for later FIFO turns. " +
-			"Start independent children together in one assistant message.",
-		promptSnippet: "Delegate focused independent work to fresh child agents",
-		promptGuidelines: [
-			"Use subagent for focused independent work and give it a complete standalone prompt.",
-			"Call subagent multiple times in one assistant message when delegations are independent.",
-			"Keep useful parent work moving after a background subagent starts; use foreground only when the next action needs its result.",
-		],
+		description,
+		promptSnippet: enableRunInBackground
+			? "Delegate focused independent work to fresh child agents"
+			: "Run focused independent work in foreground child agents",
+		promptGuidelines,
 		executionMode: "parallel",
-		parameters: DelegationParameters,
+		parameters: delegationParameters(enableRunInBackground),
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
 			const parent = await coordinator.parentFromContext(ctx);
@@ -74,6 +104,12 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			);
 		},
 	});
+}
+
+export default function subagentExtension(pi: ExtensionAPI): void {
+	const coordinator = new SubagentCoordinator(pi, BUNDLED_AGENTS_DIR, PACKAGE_ROOT);
+
+	registerDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
 
 	pi.registerTool({
 		name: "subagent_fork",
@@ -204,7 +240,13 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			});
 			const parent = await coordinator.parentFromContext(ctx);
 			const entries = await coordinator.list(parent, "descendants");
+			const schedulingMode = !loaded.settings.enableRunInBackground
+				? "foreground-only"
+				: loaded.settings.defaultBackground
+					? "background-first"
+					: "foreground-first";
 			const sections = [
+				`Mode: ${schedulingMode}`,
 				`Agents:\n${formatAgentCatalog(discovery.agents)}`,
 				`Children:\n${coordinator.formatCatalog(entries, "descendants")}`,
 			];
@@ -213,6 +255,11 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			}
 			ctx.ui.notify(sections.join("\n\n"), "info");
 		},
+	});
+
+	pi.on("session_start", async (_event, ctx) => {
+		const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
+		registerDelegationTool(pi, coordinator, loaded.settings);
 	});
 
 	pi.on("session_shutdown", async () => {

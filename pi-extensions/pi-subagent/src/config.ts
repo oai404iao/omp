@@ -8,6 +8,7 @@ export const CONFIG_FILE_NAME = "subagent.json";
 export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	agentScope: "user",
 	maxDepth: 3,
+	enableRunInBackground: true,
 	defaultBackground: true,
 	reportDelivery: "wakeup",
 	inheritExtensions: false,
@@ -18,6 +19,7 @@ const CONFIG_KEYS = new Set([
 	"$schema",
 	"agentScope",
 	"maxDepth",
+	"enableRunInBackground",
 	"defaultBackground",
 	"reportDelivery",
 	"inheritExtensions",
@@ -115,6 +117,10 @@ function applyConfig(settings: SubagentSettings, config: ConfigRecord, source: s
 						minimum: 0,
 						maximum: Number.MAX_SAFE_INTEGER,
 					}),
+		enableRunInBackground:
+			config.enableRunInBackground === undefined
+				? settings.enableRunInBackground
+				: parseBoolean(config.enableRunInBackground, "enableRunInBackground", source),
 		defaultBackground:
 			config.defaultBackground === undefined
 				? settings.defaultBackground

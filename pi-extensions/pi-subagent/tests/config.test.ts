@@ -26,7 +26,12 @@ test("global and trusted project settings merge", () => {
 	mkdirSync(project, { recursive: true });
 	writeFileSync(
 		join(agentDir, "subagent.json"),
-		JSON.stringify({ maxDepth: 5, reportDelivery: "quiet", inheritExtensions: true }),
+		JSON.stringify({
+			maxDepth: 5,
+			enableRunInBackground: false,
+			reportDelivery: "quiet",
+			inheritExtensions: true,
+		}),
 	);
 	writeFileSync(
 		join(root, "repo", ".pi", "subagent.json"),
@@ -38,6 +43,7 @@ test("global and trusted project settings merge", () => {
 	assert.equal(loaded.settings.agentScope, "both");
 	assert.equal(loaded.settings.reportDelivery, "quiet");
 	assert.equal(loaded.settings.inheritExtensions, true);
+	assert.equal(loaded.settings.enableRunInBackground, false);
 	assert.equal(loaded.sources.length, 2);
 });
 

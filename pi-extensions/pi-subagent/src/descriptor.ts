@@ -151,6 +151,10 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 		runtime: {
 			agentScope,
 			maxDepth: safeNatural(runtime.maxDepth, "runtime.maxDepth"),
+			enableRunInBackground:
+				runtime.enableRunInBackground === undefined
+					? true
+					: boolean(runtime.enableRunInBackground, "runtime.enableRunInBackground"),
 			defaultBackground: boolean(runtime.defaultBackground, "runtime.defaultBackground"),
 			reportDelivery,
 			inheritExtensions: boolean(runtime.inheritExtensions, "runtime.inheritExtensions"),

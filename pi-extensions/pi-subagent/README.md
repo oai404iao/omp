@@ -10,6 +10,7 @@ Durable, continuable subagents for [Pi](https://github.com/earendil-works/pi-mon
 - **Two lifecycles**
   - foreground one-shot runs return the child's final answer
   - background continuable runs return a child session id immediately
+- **Foreground-only policy** that removes background scheduling from the delegation schema
 - **Independent context and session** for every child
 - **Durable descriptors and lineage** stored in child JSONL sessions
 - **Cold resume** through `send_message`
@@ -42,14 +43,15 @@ This implementation targets Pi `0.83.x`.
 
 | Tool | Behavior |
 | --- | --- |
-| `subagent` | Starts a fresh child. Background continuable mode is the default unless configured otherwise. |
+| `subagent` | Starts a fresh child. Background continuable mode is the default unless configured otherwise; foreground-only mode always waits for the answer. |
 | `subagent_fork` | Starts a foreground one-shot child with the parent's completed-turn history. The in-flight tool turn is excluded. |
 | `send_message` | Sends the next FIFO turn to a direct continuable child; cold-resumes a persisted child when needed. |
 | `interrupt_agent` | Requests cancellation of a live descendant's current turn without deleting its session. |
 | `list_agents` | Lists direct children or all descendants as `running`, `idle`, or `ready`. |
 | `report` | Child-only return channel. Installed automatically in continuable children. |
 
-The `/subagents` command shows available agent definitions and the current descendant catalog.
+The `/subagents` command shows the effective scheduling mode, available agent definitions,
+and the current descendant catalog.
 
 ### Typical prompts
 
@@ -150,6 +152,7 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
   "$schema": "/path/to/pi-subagent/config.schema.json",
   "agentScope": "user",
   "maxDepth": 3,
+  "enableRunInBackground": true,
   "defaultBackground": true,
   "reportDelivery": "wakeup",
   "inheritExtensions": false,
@@ -161,12 +164,33 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 | --- | --- | --- |
 | `agentScope` | `user` | Load user, project, or both definition directories in addition to bundled agents. |
 | `maxDepth` | `3` | Absolute delegation depth; a top-level Pi session is depth 0. |
-| `defaultBackground` | `true` | Default scheduling for fresh `subagent` calls. |
+| `enableRunInBackground` | `true` | Allow fresh continuable background children. Set `false` for foreground-only mode. |
+| `defaultBackground` | `true` | Default scheduling for fresh `subagent` calls when background execution is enabled. |
 | `reportDelivery` | `wakeup` | `wakeup` starts/queues a parent turn; `quiet` waits for the parent's next turn. |
 | `inheritExtensions` | `false` | Load other Pi extensions in child runtimes. This package filters itself out; explicit agent tool ceilings still apply. |
 | `maxOutputBytes` | `51200` | Cap for parent-visible foreground output, reports, and settlement notices. Full output remains in the child session. |
 
 Invalid configuration and unknown child tool names fail loud before the child's first model request.
+
+### Foreground-only mode
+
+```json
+{
+  "enableRunInBackground": false
+}
+```
+
+In this mode:
+
+- `subagent` always waits for the child's final answer, even when `defaultBackground` is `true`;
+- `run_in_background` is removed from the model-facing schema at session startup;
+- a forced `run_in_background: true` call is rejected before a child is created;
+- nested subagents inherit the foreground-only policy through the durable runtime snapshot;
+- sibling foreground calls may still execute in parallel in one assistant message.
+
+`subagent_fork` is already foreground-only and is unchanged. Background control tools remain
+available so existing persisted children can still be listed, interrupted, or resumed. Run
+`/reload` or restart Pi after changing this setting so the displayed tool schema is refreshed.
 
 ## Lifecycle
 

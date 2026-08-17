@@ -357,6 +357,58 @@ test("continuable mode fails loud for an ephemeral parent", async () => {
 	}
 });
 
+test("foreground-only mode ignores the background default and waits for the result", async () => {
+	const { coordinator, parent, events } = await fixture();
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "foreground scout",
+				prompt: "Inspect it.",
+			},
+			{
+				...DEFAULT_SETTINGS,
+				enableRunInBackground: false,
+				defaultBackground: true,
+			},
+		);
+		assert.equal(outcome.kind, "foreground");
+		if (outcome.kind === "foreground") assert.equal(outcome.result.output, "child answer 1");
+		assert.deepEqual(events, ["pi-subagent:start", "pi-subagent:end"]);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("foreground-only mode rejects a forced background call before starting a child", async () => {
+	const { coordinator, parent, events } = await fixture();
+	try {
+		await assert.rejects(
+			() =>
+				coordinator.delegate(
+					parent,
+					"spawn",
+					{
+						agent: "scout",
+						description: "forbidden background scout",
+						prompt: "Inspect it.",
+						run_in_background: true,
+					},
+					{
+						...DEFAULT_SETTINGS,
+						enableRunInBackground: false,
+					},
+				),
+			/foreground-only mode/,
+		);
+		assert.deepEqual(events, []);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
 test("worker mutation policy falls back to Pi edit and write tools", async () => {
 	const observedTools: string[][] = [];
 	const { coordinator, parent } = await fixture({

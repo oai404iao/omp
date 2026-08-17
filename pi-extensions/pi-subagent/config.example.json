@@ -2,6 +2,7 @@
   "$schema": "./config.schema.json",
   "agentScope": "user",
   "maxDepth": 3,
+  "enableRunInBackground": true,
   "defaultBackground": true,
   "reportDelivery": "wakeup",
   "inheritExtensions": false,

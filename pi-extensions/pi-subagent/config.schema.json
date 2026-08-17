@@ -24,9 +24,14 @@
       "description": "Absolute delegation depth. A top-level Pi session has depth 0.",
       "default": 3
     },
+    "enableRunInBackground": {
+      "type": "boolean",
+      "description": "Allow fresh subagents to run as continuable background children. Set false for foreground-only mode.",
+      "default": true
+    },
     "defaultBackground": {
       "type": "boolean",
-      "description": "Default run mode for the fresh spawn provider.",
+      "description": "Default run mode for the fresh spawn provider when background execution is enabled. Ignored in foreground-only mode.",
       "default": true
     },
     "reportDelivery": {
