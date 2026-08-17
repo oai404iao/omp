@@ -1,0 +1,9 @@
+{
+  "$schema": "./config.schema.json",
+  "agentScope": "user",
+  "maxDepth": 3,
+  "defaultBackground": true,
+  "reportDelivery": "wakeup",
+  "inheritExtensions": false,
+  "maxOutputBytes": 51200
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pi:pi-subagent:config",
+  "title": "pi-subagent configuration",
+  "description": "Global or project-local configuration for the pi-subagent extension.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL to this schema.",
+      "default": "./config.schema.json"
+    },
+    "agentScope": {
+      "type": "string",
+      "enum": ["user", "project", "both"],
+      "description": "Agent definition directories to load in addition to bundled agents.",
+      "default": "user"
+    },
+    "maxDepth": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Absolute delegation depth. A top-level Pi session has depth 0.",
+      "default": 3
+    },
+    "defaultBackground": {
+      "type": "boolean",
+      "description": "Default run mode for the fresh spawn provider.",
+      "default": true
+    },
+    "reportDelivery": {
+      "type": "string",
+      "enum": ["wakeup", "quiet"],
+      "description": "Whether child reports trigger a parent turn or wait for the parent's next turn.",
+      "default": "wakeup"
+    },
+    "inheritExtensions": {
+      "type": "boolean",
+      "description": "Load the parent's other Pi extensions in child runtimes. pi-subagent itself is filtered out and explicit agent tool ceilings still apply.",
+      "default": false
+    },
+    "maxOutputBytes": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 1048576,
+      "description": "Maximum child output inserted into a parent tool result, report, or settlement notice.",
+      "default": 51200
+    }
+  }
+}
