@@ -291,6 +291,12 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 		providerController = registerOpenAIResponsesProviders(pi, { getCurrentCwd: () => currentCwd });
 		registerNativeCompaction(pi, providerController);
 		registerBackgroundImageGenerationCommand(pi);
+		// Pi renders the target transcript before session_start when switching
+		// sessions. Register definitions during extension load so resumed tool
+		// rows can resolve their custom renderers instead of falling back to raw
+		// argument JSON. syncActiveTools still controls model-specific activation.
+		registerTools(pi, providerController);
+		toolsRegistered = true;
 	}
 
 	registerDiagnosticCommand(pi);

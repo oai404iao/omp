@@ -76,17 +76,38 @@ test("hasConfiguredModelsLoaded detects exact catalog profiles", () => {
 	}, DEFAULT_SETTINGS), true);
 });
 
-test("extension does not register tools until a configured model is loaded", async () => withAgentDir(async () => {
+test("extension registers tool renderers before session_start for resumed transcripts", async () => withAgentDir(async () => {
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
-	assert.equal(pi.tools.length, 0);
+	assert.deepEqual(pi.tools.map((tool) => tool.name).sort(), ["apply_patch", "image_generation", "view_image", "web_search"].sort());
+	const applyPatch = pi.tools.find((tool) => tool.name === "apply_patch");
+	assert.equal(typeof applyPatch?.renderCall, "function");
+	assert.equal(typeof applyPatch?.renderResult, "function");
+	const resumedCall = applyPatch.renderCall({
+		input: "*** Begin Patch\n*** Add File: resumed.txt\n+restored\n*** End Patch",
+	}, {
+		fg(_color: string, text: string) { return text; },
+		bg(_color: string, text: string) { return text; },
+		bold(text: string) { return text; },
+	}, {
+		state: {},
+		lastComponent: undefined,
+		cwd: process.cwd(),
+		executionStarted: true,
+		argsComplete: true,
+		expanded: false,
+		isError: false,
+		invalidate() {},
+	}).render(120).join("\n");
+	assert.match(resumedCall, /apply_patch applying/);
+	assert.doesNotMatch(resumedCall, /\*\*\* Begin Patch/);
 
 	await emit(pi, "session_start", {
 		cwd: process.cwd(),
 		model: { provider: "anthropic", id: "claude", input: ["text"] },
 		modelRegistry: { getAll: () => [{ provider: "anthropic", id: "claude" }] },
 	});
-	assert.equal(pi.tools.length, 0);
+	assert.equal(pi.tools.length, 4);
 	assert.deepEqual(pi.activeTools, ["read", "bash"]);
 
 	await emit(pi, "model_select", {
@@ -95,7 +116,6 @@ test("extension does not register tools until a configured model is loaded", asy
 		modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.5" }] },
 	});
 	assert.equal(pi.tools.length, 4);
-	assert.deepEqual(pi.tools.map((tool) => tool.name).sort(), ["apply_patch", "image_generation", "view_image", "web_search"].sort());
 	assert.ok(pi.activeTools.includes("read"));
 	assert.ok(pi.activeTools.includes("bash"));
 	assert.equal(pi.activeTools.includes("apply_patch"), true);
