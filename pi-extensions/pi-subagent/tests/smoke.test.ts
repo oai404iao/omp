@@ -10,6 +10,11 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import {
+	InterruptParameters,
+	ListAgentsParameters,
+	SendMessageParameters,
+} from "../src/schemas.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pi-subagent-smoke-"));
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -56,6 +61,7 @@ test("extension loads and registers its model-facing surface", async () => {
 	try {
 		await session.bindExtensions({ mode: "print" });
 		const names = new Set(session.getAllTools().map((tool) => tool.name));
+		const active = new Set(session.getActiveToolNames());
 		for (const expected of [
 			"subagent",
 			"subagent_fork",
@@ -64,6 +70,7 @@ test("extension loads and registers its model-facing surface", async () => {
 			"list_agents",
 		]) {
 			assert.equal(names.has(expected), true, `${expected} should be registered`);
+			assert.equal(active.has(expected), true, `${expected} should be active`);
 		}
 		for (const toolName of ["subagent", "subagent_fork"]) {
 			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
@@ -119,14 +126,17 @@ test("an empty effective catalog disables delegation tools", async () => {
 	}
 });
 
-test("an empty catalog does not disable SDK tool overrides", async () => {
+test("foreground-only empty catalog preserves SDK tool overrides", async () => {
 	const extensionRoot = resolve(import.meta.dirname, "..");
 	const cwd = join(root, "override-project");
 	const agentDir = join(root, "override-agent");
 	mkdirSync(join(cwd, ".pi"), { recursive: true });
 	writeFileSync(
 		join(cwd, ".pi", "subagent.json"),
-		JSON.stringify({ agentScope: "project" }),
+		JSON.stringify({
+			agentScope: "project",
+			enableRunInBackground: false,
+		}),
 	);
 	const parameters = {
 		type: "object",
@@ -136,11 +146,24 @@ test("an empty catalog does not disable SDK tool overrides", async () => {
 		required: ["agent"],
 		additionalProperties: false,
 	} as const;
-	const customTools = ["subagent", "subagent_fork"].map((name) => ({
+	const overrideParameters = new Map<string, object>([
+		["subagent", parameters],
+		["subagent_fork", parameters],
+		["send_message", SendMessageParameters],
+		["interrupt_agent", InterruptParameters],
+		["list_agents", ListAgentsParameters],
+	]);
+	const customTools = [
+		"subagent",
+		"subagent_fork",
+		"send_message",
+		"interrupt_agent",
+		"list_agents",
+	].map((name) => ({
 		name,
 		label: name,
 		description: "override",
-		parameters,
+		parameters: overrideParameters.get(name)!,
 		async execute() {
 			return {
 				content: [{ type: "text" as const, text: "override" }],
@@ -175,9 +198,16 @@ test("an empty catalog does not disable SDK tool overrides", async () => {
 	try {
 		await session.bindExtensions({ mode: "print" });
 		const active = new Set(session.getActiveToolNames());
-		for (const toolName of ["subagent", "subagent_fork"]) {
+		for (const toolName of [
+			"subagent",
+			"subagent_fork",
+			"send_message",
+			"interrupt_agent",
+			"list_agents",
+		]) {
 			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
-			assert.deepEqual(agentEnum(tool), ["override"]);
+			assert.ok(tool);
+			assert.equal(tool.parameters, overrideParameters.get(toolName));
 			assert.equal(active.has(toolName), true);
 		}
 	} finally {
@@ -185,7 +215,7 @@ test("an empty catalog does not disable SDK tool overrides", async () => {
 	}
 });
 
-test("trusted foreground-only configuration removes the background parameter", async () => {
+test("trusted foreground-only configuration hides background controls", async () => {
 	const extensionRoot = resolve(import.meta.dirname, "..");
 	const cwd = join(root, "foreground-project");
 	const agentDir = join(root, "foreground-agent");
@@ -223,6 +253,34 @@ test("trusted foreground-only configuration removes the background parameter", a
 		assert.ok(subagent);
 		const properties = (subagent.parameters as { properties: Record<string, unknown> }).properties;
 		assert.equal("run_in_background" in properties, false);
+		const active = new Set(session.getActiveToolNames());
+		assert.equal(active.has("subagent"), true);
+		assert.equal(active.has("subagent_fork"), true);
+		for (const toolName of ["send_message", "interrupt_agent", "list_agents"]) {
+			assert.equal(active.has(toolName), false);
+		}
+		for (const [toolName, args] of [
+			[
+				"send_message",
+				{ subagent_id: "stale-child", message: "follow up" },
+			],
+			["interrupt_agent", { agent_id: "stale-child" }],
+			["list_agents", {}],
+		] as const) {
+			const tool = session.getToolDefinition(toolName);
+			assert.ok(tool);
+			await assert.rejects(
+				() =>
+					tool.execute(
+						`stale-${toolName}`,
+						args,
+						undefined,
+						undefined,
+						{} as never,
+					),
+				/foreground-only mode/,
+			);
+		}
 	} finally {
 		session.dispose();
 	}

@@ -73,6 +73,11 @@ const REPORT_CUSTOM_TYPE = "pi-subagent/report";
 const SETTLED_CUSTOM_TYPE = "pi-subagent/settled";
 const MAX_TRACE_ITEMS = 100;
 const MAX_TRACE_TEXT = 4000;
+const BACKGROUND_CONTROL_TOOLS = new Set([
+	"send_message",
+	"interrupt_agent",
+	"list_agents",
+]);
 
 const DELEGATION_SCOPE_PROMPT = [
 	"You are a delegated Pi subagent. Work only on the task assigned in this session.",
@@ -549,6 +554,11 @@ export class SubagentCoordinator {
 		agentDiscovery?: AgentDiscoveryResult,
 	): ToolDefinition[] {
 		const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
+		const assertBackgroundControlEnabled = (toolName: string): void => {
+			if (!enableRunInBackground) {
+				throw new Error(`tool "${toolName}" is unavailable in foreground-only mode`);
+			}
+		};
 		const update =
 			(onUpdate: AgentToolUpdateCallback<DelegationDetails> | undefined) => (details: DelegationDetails) => {
 				onUpdate?.({
@@ -611,6 +621,7 @@ export class SubagentCoordinator {
 				"Queue a message as a direct continuable child's next FIFO turn. This returns acceptance, not the child's answer.",
 			parameters: SendMessageParameters,
 			execute: async (_id, params, signal) => {
+				assertBackgroundControlEnabled("send_message");
 				const activation = getActivation();
 				await this.sendMessage(
 					this.parentForActivation(activation),
@@ -637,6 +648,7 @@ export class SubagentCoordinator {
 				"Request cancellation of a live descendant's current turn. Its durable session remains available.",
 			parameters: InterruptParameters,
 			execute: async (_id, params) => {
+				assertBackgroundControlEnabled("interrupt_agent");
 				const activation = getActivation();
 				await this.interrupt(this.parentForActivation(activation), params.agent_id);
 				return {
@@ -653,6 +665,7 @@ export class SubagentCoordinator {
 				"List direct continuable children or all descendants as running, idle, or ready (persisted and resumable).",
 			parameters: ListAgentsParameters,
 			execute: async (_id, params) => {
+				assertBackgroundControlEnabled("list_agents");
 				const activation = getActivation();
 				const entries = await this.list(
 					this.parentForActivation(activation),
@@ -855,12 +868,21 @@ export class SubagentCoordinator {
 					registered: runtime.session.getAllTools().map((tool) => tool.name),
 					active: runtime.session.getActiveToolNames(),
 				});
-				const activeTools =
-					agentDiscovery.agents.length > 0
-						? policy.activeTools
-						: policy.activeTools.filter(
-								(tool) => tool !== "subagent" && tool !== "subagent_fork",
-							);
+				const activeTools = policy.activeTools.filter((tool) => {
+					if (
+						agentDiscovery.agents.length === 0 &&
+						(tool === "subagent" || tool === "subagent_fork")
+					) {
+						return false;
+					}
+					if (
+						!descriptor.runtime.enableRunInBackground &&
+						BACKGROUND_CONTROL_TOOLS.has(tool)
+					) {
+						return false;
+					}
+					return true;
+				});
 				runtime.session.setActiveToolsByName(activeTools);
 			} catch (error) {
 				throw new Error(

@@ -411,6 +411,65 @@ test("foreground-only mode rejects a forced background call before starting a ch
 	}
 });
 
+test("foreground-only children hide background lifecycle controls", async () => {
+	const observedTools: string[][] = [];
+	const { coordinator, parent } = await fixture({
+		onRequestTools: (tools) => observedTools.push(tools),
+	});
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "worker",
+				description: "inspect foreground tools",
+				prompt: "Inspect it.",
+			},
+			{
+				...DEFAULT_SETTINGS,
+				enableRunInBackground: false,
+			},
+		);
+		assert.equal(outcome.kind, "foreground");
+		assert.equal(observedTools.length, 1);
+		assert.ok(observedTools[0].includes("subagent"));
+		assert.ok(observedTools[0].includes("subagent_fork"));
+		for (const tool of ["send_message", "interrupt_agent", "list_agents"]) {
+			assert.ok(!observedTools[0].includes(tool));
+		}
+		const staleDefinitions = coordinator.createChildToolDefinitions(
+			() => {
+				throw new Error("activation should not be read");
+			},
+			false,
+		);
+		for (const [toolName, args] of [
+			[
+				"send_message",
+				{ subagent_id: "stale-child", message: "follow up" },
+			],
+			["interrupt_agent", { agent_id: "stale-child" }],
+			["list_agents", {}],
+		] as const) {
+			const tool = staleDefinitions.find((candidate) => candidate.name === toolName);
+			assert.ok(tool);
+			await assert.rejects(
+				() =>
+					tool.execute(
+						`stale-${toolName}`,
+						args,
+						undefined,
+						undefined,
+						{} as ExtensionContext,
+					),
+				/foreground-only mode/,
+			);
+		}
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
 test("nested delegation tools enumerate the available agent definitions", async () => {
 	const observed = new Map<string, unknown>();
 	const { coordinator, parent } = await fixture({

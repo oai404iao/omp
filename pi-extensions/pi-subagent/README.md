@@ -10,7 +10,7 @@ Durable, continuable subagents for [Pi](https://github.com/earendil-works/pi-mon
 - **Two lifecycles**
   - foreground one-shot runs return the child's final answer
   - background continuable runs return a child session id immediately
-- **Foreground-only policy** that removes background scheduling from the delegation schema
+- **Foreground-only policy** that removes background scheduling and lifecycle controls
 - **Independent context and session** for every child
 - **Materialized user presets** with update-time backup and replacement
 - **Durable descriptors and lineage** stored in child JSONL sessions
@@ -47,9 +47,9 @@ This implementation targets Pi `0.83.x`.
 | --- | --- |
 | `subagent` | Starts a fresh child. Background continuable mode is the default unless configured otherwise; foreground-only mode always waits for the answer. |
 | `subagent_fork` | Starts a foreground one-shot child with the parent's completed-turn history. The in-flight tool turn is excluded. |
-| `send_message` | Sends the next FIFO turn to a direct continuable child; cold-resumes a persisted child when needed. |
-| `interrupt_agent` | Requests cancellation of a live descendant's current turn without deleting its session. |
-| `list_agents` | Lists direct children or all descendants as `running`, `idle`, or `ready`. |
+| `send_message` | Sends the next FIFO turn to a direct continuable child; cold-resumes a persisted child when background execution is enabled. |
+| `interrupt_agent` | Requests cancellation of a live descendant's current turn without deleting its session. Active only when background execution is enabled. |
+| `list_agents` | Lists direct children or all descendants as `running`, `idle`, or `ready`. Active only when background execution is enabled. |
 | `report` | Child-only return channel. Installed automatically in continuable children. |
 
 The `/subagents` command shows the effective scheduling mode, available agent definitions,
@@ -164,6 +164,9 @@ blindly activate every registered tool:
 3. The agent allowlist narrows that active set. A registered but extension-disabled explicit
    tool fails loud instead of being re-enabled.
 
+The foreground-only runtime policy is applied after this composition and removes background
+lifecycle controls even when an agent definition names them.
+
 The reserved logical tool `$mutation` lets one definition work with both standard Pi and
 model-specific tool extensions:
 
@@ -213,7 +216,7 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 | --- | --- | --- |
 | `agentScope` | `user` | Select user definitions, project definitions, or user definitions followed by project overrides. |
 | `maxDepth` | `3` | Absolute delegation depth; a top-level Pi session is depth 0. |
-| `enableRunInBackground` | `true` | Allow fresh continuable background children. Set `false` for foreground-only mode. |
+| `enableRunInBackground` | `true` | Enable continuable background children and their model-facing lifecycle controls. Set `false` for strict foreground-only mode. |
 | `defaultBackground` | `true` | Default scheduling for fresh `subagent` calls when background execution is enabled. |
 | `reportDelivery` | `wakeup` | `wakeup` starts/queues a parent turn; `quiet` waits for the parent's next turn. |
 | `inheritExtensions` | `false` | Load other Pi extensions in child runtimes. This package filters itself out; explicit agent tool ceilings still apply. |
@@ -235,11 +238,15 @@ In this mode:
 - `run_in_background` is removed from the model-facing schema at session startup;
 - a forced `run_in_background: true` call is rejected before a child is created;
 - nested subagents inherit the foreground-only policy through the durable runtime snapshot;
+- `send_message`, `interrupt_agent`, and `list_agents` are removed from the active
+  model tool set, including inside nested children;
 - sibling foreground calls may still execute in parallel in one assistant message.
 
-`subagent_fork` is already foreground-only and is unchanged. Background control tools remain
-available so existing persisted children can still be listed, interrupted, or resumed. Run
-`/reload` or restart Pi after changing this setting so the displayed tool schema is refreshed.
+`subagent_fork` is already foreground-only and is unchanged. The `/subagents` command
+remains available for human inspection of historical children, but persisted continuable
+children cannot be resumed until background execution is re-enabled. Run `/reload` or
+restart Pi after changing this setting so the active tool set and displayed schema are
+refreshed.
 
 ## Lifecycle
 

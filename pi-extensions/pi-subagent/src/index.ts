@@ -30,14 +30,12 @@ import type {
 const SOURCE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = dirname(SOURCE_DIR);
 const BUNDLED_AGENTS_DIR = join(PACKAGE_ROOT, "agents");
-const DELEGATION_TOOL_NAMES = ["subagent", "subagent_fork"] as const;
-const DELEGATION_TOOL_NAME_SET = new Set<string>(DELEGATION_TOOL_NAMES);
 
 function textContent(content: Array<{ type: string; text?: string }>): string {
 	return content.find((item) => item.type === "text")?.text ?? "";
 }
 
-function disableEmptyDelegationTools(
+function disableOwnedTools(
 	pi: ExtensionAPI,
 	registeredParameters: ReadonlyMap<string, unknown>,
 ): void {
@@ -46,8 +44,9 @@ function disableEmptyDelegationTools(
 			.getAllTools()
 			.filter(
 				(tool) =>
-					DELEGATION_TOOL_NAME_SET.has(tool.name) &&
-					tool.parameters === registeredParameters.get(tool.name),
+					registeredParameters.has(tool.name) &&
+					tool.parameters === registeredParameters.get(tool.name) &&
+					tool.sourceInfo.source !== "sdk",
 			)
 			.map((tool) => tool.name),
 	);
@@ -55,6 +54,14 @@ function disableEmptyDelegationTools(
 	const activeTools = pi.getActiveTools();
 	const nextActiveTools = activeTools.filter((name) => !ownedNames.has(name));
 	if (nextActiveTools.length !== activeTools.length) pi.setActiveTools(nextActiveTools);
+}
+
+function assertBackgroundControlsEnabled(settings: SubagentSettings, toolName: string): void {
+	if (!settings.enableRunInBackground) {
+		throw new Error(
+			`tool "${toolName}" is unavailable in foreground-only mode (enableRunInBackground: false)`,
+		);
+	}
 }
 
 function registerDelegationTool(
@@ -196,6 +203,11 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
 	registerDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
 	registerForkDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
+	const backgroundControlParameters = new Map<string, unknown>([
+		["send_message", SendMessageParameters],
+		["interrupt_agent", InterruptParameters],
+		["list_agents", ListAgentsParameters],
+	]);
 
 	pi.registerTool({
 		name: "send_message",
@@ -207,6 +219,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		executionMode: "parallel",
 		parameters: SendMessageParameters,
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			assertBackgroundControlsEnabled(sessionSettings, "send_message");
 			const parent = await coordinator.parentFromContext(ctx);
 			await coordinator.sendMessage(parent, params.subagent_id, params.message, signal);
 			return {
@@ -231,6 +244,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		executionMode: "parallel",
 		parameters: InterruptParameters,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			assertBackgroundControlsEnabled(sessionSettings, "interrupt_agent");
 			const parent = await coordinator.parentFromContext(ctx);
 			await coordinator.interrupt(parent, params.agent_id);
 			return {
@@ -249,6 +263,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		promptSnippet: "List continuable child agents and their lifecycle status",
 		parameters: ListAgentsParameters,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			assertBackgroundControlsEnabled(sessionSettings, "list_agents");
 			const parent = await coordinator.parentFromContext(ctx);
 			const scope = params.scope ?? "children";
 			const entries = await coordinator.list(parent, scope);
@@ -321,7 +336,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			],
 		]);
 		if (sessionDiscovery.agents.length === 0) {
-			disableEmptyDelegationTools(pi, registeredParameters);
+			disableOwnedTools(pi, registeredParameters);
+		}
+		if (!sessionSettings.enableRunInBackground) {
+			disableOwnedTools(pi, backgroundControlParameters);
 		}
 		if (!agentSyncNotified) {
 			agentSyncNotified = true;

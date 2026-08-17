@@ -26,7 +26,7 @@
     },
     "enableRunInBackground": {
       "type": "boolean",
-      "description": "Allow fresh subagents to run as continuable background children. Set false for foreground-only mode.",
+      "description": "Enable continuable background children and their model-facing lifecycle controls. Set false for strict foreground-only mode.",
       "default": true
     },
     "defaultBackground": {
