@@ -146,6 +146,7 @@ async function fixture(
 		persistent?: boolean;
 		childExtension?: string;
 		onRequestTools?: (tools: string[]) => void;
+		onRequestContext?: (context: Context) => void;
 	} = {},
 ) {
 	const root = tempRoot();
@@ -177,6 +178,7 @@ async function fixture(
 		],
 		streamSimple: (model, context, streamOptions) => {
 			const currentTurn = ++turn;
+			options.onRequestContext?.(context);
 			options.onRequestTools?.((context.tools ?? []).map((tool) => tool.name));
 			return options.reportFirst
 				? reportThenAnswerStream(model, context, currentTurn)
@@ -404,6 +406,42 @@ test("foreground-only mode rejects a forced background call before starting a ch
 			/foreground-only mode/,
 		);
 		assert.deepEqual(events, []);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("nested delegation tools enumerate the available agent definitions", async () => {
+	const observed = new Map<string, unknown>();
+	const { coordinator, parent } = await fixture({
+		onRequestContext: (context) => {
+			for (const name of ["subagent", "subagent_fork"]) {
+				const tool = context.tools?.find((candidate) => candidate.name === name);
+				const properties = (
+					tool?.parameters as { properties?: Record<string, unknown> } | undefined
+				)?.properties;
+				observed.set(
+					name,
+					(properties?.agent as { enum?: unknown } | undefined)?.enum,
+				);
+			}
+		},
+	});
+	try {
+		await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "worker",
+				description: "inspect nested schema",
+				prompt: "Inspect it.",
+				run_in_background: false,
+			},
+			{ ...DEFAULT_SETTINGS, defaultBackground: false },
+		);
+		for (const name of ["subagent", "subagent_fork"]) {
+			assert.deepEqual(observed.get(name), ["planner", "reviewer", "scout", "worker"]);
+		}
 	} finally {
 		await coordinator.shutdown();
 	}

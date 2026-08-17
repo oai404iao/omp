@@ -21,16 +21,20 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { syncBundledAgents, type AgentSyncResult } from "./agent-sync.ts";
-import { discoverAgents, formatAgentCatalog } from "./agents.ts";
+import {
+	discoverAgents,
+	formatAgentCatalog,
+	type AgentDiscoveryResult,
+} from "./agents.ts";
 import { readPersistedCatalog } from "./catalog.ts";
 import { DESCRIPTOR_CUSTOM_TYPE, foldDescriptor } from "./descriptor.ts";
 import {
-	ForkDelegationParameters,
 	InterruptParameters,
 	ListAgentsParameters,
 	ReportParameters,
 	SendMessageParameters,
 	delegationParameters,
+	forkDelegationParameters,
 } from "./schemas.ts";
 import {
 	addUsage,
@@ -233,6 +237,21 @@ export class SubagentCoordinator {
 		return this.agentSyncResult;
 	}
 
+	discoverAvailableAgents(
+		cwd: string,
+		agentScope: SubagentSettings["agentScope"],
+		projectTrusted: boolean,
+	): AgentDiscoveryResult {
+		return discoverAgents({
+			cwd,
+			scope: agentScope,
+			projectTrusted,
+			bundledDir: this.bundledAgentsDir,
+			agentDir: this.agentDir,
+			includeBundled: false,
+		});
+	}
+
 	async parentFromContext(ctx: ExtensionContext): Promise<ParentRef> {
 		const folded = foldDescriptor(ctx.sessionManager.getEntries());
 		const descriptor = folded.kind === "valid" ? folded.descriptor : undefined;
@@ -265,6 +284,7 @@ export class SubagentCoordinator {
 		settings: SubagentSettings,
 		signal?: AbortSignal,
 		onUpdate?: (details: DelegationDetails) => void,
+		agentDiscovery?: AgentDiscoveryResult,
 	): Promise<DelegationOutcome> {
 		if (this.draining) throw new Error("pi-subagent is shutting down; no new delegation was accepted");
 		const provider = this.providers.get(providerName);
@@ -302,14 +322,13 @@ export class SubagentCoordinator {
 			throw new Error(`subagent depth ${depth} exceeds maxDepth ${settings.maxDepth}`);
 		}
 
-		const discovery = discoverAgents({
-			cwd: parent.cwd,
-			scope: settings.agentScope,
-			projectTrusted: parent.projectTrusted,
-			bundledDir: this.bundledAgentsDir,
-			agentDir: this.agentDir,
-			includeBundled: false,
-		});
+		const discovery =
+			agentDiscovery ??
+			this.discoverAvailableAgents(
+				parent.cwd,
+				settings.agentScope,
+				parent.projectTrusted,
+			);
 		const agent = discovery.agents.find((candidate) => candidate.name === input.agent);
 		if (!agent) {
 			const diagnosticText =
@@ -527,7 +546,9 @@ export class SubagentCoordinator {
 		getActivation: () => Activation,
 		enableRunInBackground = true,
 		defaultBackground = true,
+		agentDiscovery?: AgentDiscoveryResult,
 	): ToolDefinition[] {
+		const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
 		const update =
 			(onUpdate: AgentToolUpdateCallback<DelegationDetails> | undefined) => (details: DelegationDetails) => {
 				onUpdate?.({
@@ -546,7 +567,7 @@ export class SubagentCoordinator {
 					: defaultBackground
 						? "It runs in the background by default and returns a durable id."
 						: "It waits for the result by default; background mode returns a durable id."),
-			parameters: delegationParameters(enableRunInBackground),
+			parameters: delegationParameters(enableRunInBackground, agentNames),
 			execute: async (_id, params, signal, onUpdate) => {
 				const activation = getActivation();
 				const outcome = await this.delegate(
@@ -556,6 +577,7 @@ export class SubagentCoordinator {
 					makeRuntimeSettings(activation.descriptor),
 					signal,
 					update(onUpdate),
+					agentDiscovery,
 				);
 				return this.outcomeToolResult(outcome);
 			},
@@ -566,7 +588,7 @@ export class SubagentCoordinator {
 			label: "Subagent Fork",
 			description:
 				"Delegate a one-shot task to a child seeded with completed turns from this conversation.",
-			parameters: ForkDelegationParameters,
+			parameters: forkDelegationParameters(agentNames),
 			execute: async (_id, params, signal, onUpdate) => {
 				const activation = getActivation();
 				const outcome = await this.delegate(
@@ -576,6 +598,7 @@ export class SubagentCoordinator {
 					makeRuntimeSettings(activation.descriptor),
 					signal,
 					update(onUpdate),
+					agentDiscovery,
 				);
 				return this.outcomeToolResult(outcome);
 			},
@@ -722,15 +745,21 @@ export class SubagentCoordinator {
 
 	private async createActivation(options: CreateActivationOptions): Promise<Activation> {
 		let activation: Activation | undefined;
+		const descriptor = options.descriptor;
+		const agentDiscovery = this.discoverAvailableAgents(
+			descriptor.cwd,
+			descriptor.runtime.agentScope,
+			options.parent.projectTrusted,
+		);
 		const customTools = this.createChildToolDefinitions(
 			() => {
 				if (!activation) throw new Error("subagent activation is not published yet");
 				return activation;
 			},
-			options.descriptor.runtime.enableRunInBackground,
-			options.descriptor.runtime.defaultBackground,
+			descriptor.runtime.enableRunInBackground,
+			descriptor.runtime.defaultBackground,
+			agentDiscovery,
 		);
-		const descriptor = options.descriptor;
 		const model =
 			options.parent.modelRuntime.getModel(descriptor.model.provider, descriptor.model.id) ??
 			(options.parent.model?.provider === descriptor.model.provider &&
@@ -826,7 +855,13 @@ export class SubagentCoordinator {
 					registered: runtime.session.getAllTools().map((tool) => tool.name),
 					active: runtime.session.getActiveToolNames(),
 				});
-				runtime.session.setActiveToolsByName(policy.activeTools);
+				const activeTools =
+					agentDiscovery.agents.length > 0
+						? policy.activeTools
+						: policy.activeTools.filter(
+								(tool) => tool !== "subagent" && tool !== "subagent_fork",
+							);
+				runtime.session.setActiveToolsByName(activeTools);
 			} catch (error) {
 				throw new Error(
 					`agent ${descriptor.agent.name} tool policy could not be satisfied: ${

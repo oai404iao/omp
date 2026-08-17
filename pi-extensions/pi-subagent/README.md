@@ -18,6 +18,7 @@ Durable, continuable subagents for [Pi](https://github.com/earendil-works/pi-mon
 - **Control plane** with listing and interruption
 - **Child-to-parent `report` channel** for continuable children
 - **Nested delegation** with an absolute persisted depth limit
+- **Dynamic agent-name enums** generated from the effective user/project catalog
 - **Parallel-safe delegation**: multiple `subagent` calls in one assistant message may overlap
 - **Composable tool ceilings** that preserve model/extension tool decisions
 - **Usage accounting, streaming progress, output caps, and custom TUI rendering**
@@ -53,6 +54,11 @@ This implementation targets Pi `0.83.x`.
 
 The `/subagents` command shows the effective scheduling mode, available agent definitions,
 and the current descendant catalog.
+
+At session startup, the `agent` parameter on `subagent` and `subagent_fork` is registered
+as an enum of the effective catalog. Nested delegation tools receive an activation-scoped
+enum. If the effective catalog is empty, both delegation tools are inactive. Run `/reload`
+after adding, removing, or renaming an agent definition so the session schema is refreshed.
 
 ### Typical prompts
 

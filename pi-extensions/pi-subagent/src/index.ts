@@ -8,13 +8,16 @@ import {
 	SubagentCoordinator,
 	type DelegationInput,
 } from "./coordinator.ts";
-import { discoverAgents, formatAgentCatalog } from "./agents.ts";
 import {
-	ForkDelegationParameters,
+	formatAgentCatalog,
+	type AgentDiscoveryResult,
+} from "./agents.ts";
+import {
 	InterruptParameters,
 	ListAgentsParameters,
 	SendMessageParameters,
 	delegationParameters,
+	forkDelegationParameters,
 } from "./schemas.ts";
 import { renderDelegationCall, renderDelegationResult, renderParentMessage } from "./render.ts";
 import type {
@@ -27,17 +30,41 @@ import type {
 const SOURCE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = dirname(SOURCE_DIR);
 const BUNDLED_AGENTS_DIR = join(PACKAGE_ROOT, "agents");
+const DELEGATION_TOOL_NAMES = ["subagent", "subagent_fork"] as const;
+const DELEGATION_TOOL_NAME_SET = new Set<string>(DELEGATION_TOOL_NAMES);
 
 function textContent(content: Array<{ type: string; text?: string }>): string {
 	return content.find((item) => item.type === "text")?.text ?? "";
 }
 
+function disableEmptyDelegationTools(
+	pi: ExtensionAPI,
+	registeredParameters: ReadonlyMap<string, unknown>,
+): void {
+	const ownedNames = new Set(
+		pi
+			.getAllTools()
+			.filter(
+				(tool) =>
+					DELEGATION_TOOL_NAME_SET.has(tool.name) &&
+					tool.parameters === registeredParameters.get(tool.name),
+			)
+			.map((tool) => tool.name),
+	);
+	if (ownedNames.size === 0) return;
+	const activeTools = pi.getActiveTools();
+	const nextActiveTools = activeTools.filter((name) => !ownedNames.has(name));
+	if (nextActiveTools.length !== activeTools.length) pi.setActiveTools(nextActiveTools);
+}
+
 function registerDelegationTool(
 	pi: ExtensionAPI,
 	coordinator: SubagentCoordinator,
-	settings: Pick<SubagentSettings, "enableRunInBackground" | "defaultBackground">,
-): void {
+	settings: SubagentSettings,
+	agentDiscovery?: AgentDiscoveryResult,
+): unknown {
 	const { enableRunInBackground, defaultBackground } = settings;
+	const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
 	const description = !enableRunInBackground
 		? "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
 			"This foreground-only tool waits for the child and returns its final answer. " +
@@ -65,6 +92,7 @@ function registerDelegationTool(
 					"Subagent calls wait for the result by default; request background mode only when work can continue independently.",
 					"Independent subagent calls can still be issued together in one assistant message and execute in parallel.",
 				];
+	const parameters = delegationParameters(enableRunInBackground, agentNames);
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
@@ -74,21 +102,21 @@ function registerDelegationTool(
 			: "Run focused independent work in foreground child agents",
 		promptGuidelines,
 		executionMode: "parallel",
-		parameters: delegationParameters(enableRunInBackground),
+		parameters,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
 			const parent = await coordinator.parentFromContext(ctx);
 			const outcome = await coordinator.delegate(
 				parent,
 				"spawn",
 				params,
-				loaded.settings,
+				settings,
 				signal,
 				(details) =>
 					onUpdate?.({
 						content: [{ type: "text", text: details.trace.at(-1)?.text ?? `${details.agent}: ${details.status}` }],
 						details,
 					}),
+				agentDiscovery,
 			);
 			return coordinator.outcomeToolResult(outcome);
 		},
@@ -104,15 +132,17 @@ function registerDelegationTool(
 			);
 		},
 	});
+	return parameters;
 }
 
-export default function subagentExtension(pi: ExtensionAPI): void {
-	const coordinator = new SubagentCoordinator(pi, BUNDLED_AGENTS_DIR, PACKAGE_ROOT);
-	const agentSync = coordinator.getAgentSyncResult();
-	let agentSyncNotified = false;
-
-	registerDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
-
+function registerForkDelegationTool(
+	pi: ExtensionAPI,
+	coordinator: SubagentCoordinator,
+	settings: SubagentSettings,
+	agentDiscovery?: AgentDiscoveryResult,
+): unknown {
+	const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
+	const parameters = forkDelegationParameters(agentNames);
 	pi.registerTool({
 		name: "subagent_fork",
 		label: "Subagent Fork",
@@ -124,21 +154,21 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			"Use subagent_fork only when completed conversation history materially helps the delegated task.",
 		],
 		executionMode: "parallel",
-		parameters: ForkDelegationParameters,
+		parameters,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
 			const parent = await coordinator.parentFromContext(ctx);
 			const outcome = await coordinator.delegate(
 				parent,
 				"fork",
 				params satisfies DelegationInput,
-				loaded.settings,
+				settings,
 				signal,
 				(details) =>
 					onUpdate?.({
 						content: [{ type: "text", text: details.trace.at(-1)?.text ?? `${details.agent}: ${details.status}` }],
 						details,
 					}),
+				agentDiscovery,
 			);
 			return coordinator.outcomeToolResult(outcome);
 		},
@@ -154,6 +184,18 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			);
 		},
 	});
+	return parameters;
+}
+
+export default function subagentExtension(pi: ExtensionAPI): void {
+	const coordinator = new SubagentCoordinator(pi, BUNDLED_AGENTS_DIR, PACKAGE_ROOT);
+	const agentSync = coordinator.getAgentSyncResult();
+	let agentSyncNotified = false;
+	let sessionSettings: SubagentSettings = DEFAULT_SETTINGS;
+	let sessionDiscovery: AgentDiscoveryResult | undefined;
+
+	registerDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
+	registerForkDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
 
 	pi.registerTool({
 		name: "send_message",
@@ -233,20 +275,18 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("subagents", {
 		description: "Show available agent definitions and continuable descendants",
 		handler: async (_args, ctx) => {
-			const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
-			const discovery = discoverAgents({
-				cwd: ctx.cwd,
-				scope: loaded.settings.agentScope,
-				projectTrusted: ctx.isProjectTrusted(),
-				bundledDir: BUNDLED_AGENTS_DIR,
-				agentDir: dirname(agentSync.userAgentsDir),
-				includeBundled: false,
-			});
+			const discovery =
+				sessionDiscovery ??
+				coordinator.discoverAvailableAgents(
+					ctx.cwd,
+					sessionSettings.agentScope,
+					ctx.isProjectTrusted(),
+				);
 			const parent = await coordinator.parentFromContext(ctx);
 			const entries = await coordinator.list(parent, "descendants");
-			const schedulingMode = !loaded.settings.enableRunInBackground
+			const schedulingMode = !sessionSettings.enableRunInBackground
 				? "foreground-only"
-				: loaded.settings.defaultBackground
+				: sessionSettings.defaultBackground
 					? "background-first"
 					: "foreground-first";
 			const sections = [
@@ -264,7 +304,25 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx) => {
 		const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
-		registerDelegationTool(pi, coordinator, loaded.settings);
+		sessionSettings = loaded.settings;
+		sessionDiscovery = coordinator.discoverAvailableAgents(
+			ctx.cwd,
+			sessionSettings.agentScope,
+			ctx.isProjectTrusted(),
+		);
+		const registeredParameters = new Map<string, unknown>([
+			[
+				"subagent",
+				registerDelegationTool(pi, coordinator, sessionSettings, sessionDiscovery),
+			],
+			[
+				"subagent_fork",
+				registerForkDelegationTool(pi, coordinator, sessionSettings, sessionDiscovery),
+			],
+		]);
+		if (sessionDiscovery.agents.length === 0) {
+			disableEmptyDelegationTools(pi, registeredParameters);
+		}
 		if (!agentSyncNotified) {
 			agentSyncNotified = true;
 			const lines = [`pi-subagent agent config: ${agentSync.userAgentsDir}`];
