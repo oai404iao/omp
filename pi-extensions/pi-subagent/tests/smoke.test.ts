@@ -12,8 +12,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const root = mkdtempSync(join(tmpdir(), "pi-subagent-smoke-"));
+const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+process.env.PI_CODING_AGENT_DIR = join(root, "agent");
 
 after(() => {
+	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 	rmSync(root, { recursive: true, force: true });
 });
 

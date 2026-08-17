@@ -14,7 +14,7 @@
     "agentScope": {
       "type": "string",
       "enum": ["user", "project", "both"],
-      "description": "Agent definition directories to load in addition to bundled agents.",
+      "description": "Select user definitions, project definitions, or user definitions followed by project overrides.",
       "default": "user"
     },
     "maxDepth": {

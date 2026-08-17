@@ -100,3 +100,23 @@ test("unsupported logical tool groups are rejected during discovery", () => {
 	assert.deepEqual(result.agents.map((agent) => agent.name), ["valid"]);
 	assert.match(result.diagnostics.join("\n"), /unsupported logical tool "\$unknown"/);
 });
+
+test("managed runtime discovery uses materialized user agents without bundled fallback", () => {
+	const root = tempRoot();
+	const bundled = join(root, "bundled");
+	const agentDir = join(root, "agent");
+	writeAgent(bundled, "scout", "bundled scout");
+	writeAgent(join(agentDir, "agents"), "scout", "materialized user scout");
+
+	const result = discoverAgents({
+		cwd: root,
+		scope: "user",
+		projectTrusted: false,
+		bundledDir: bundled,
+		agentDir,
+		includeBundled: false,
+	});
+	assert.equal(result.agents.length, 1);
+	assert.equal(result.agents[0].source, "user");
+	assert.equal(result.agents[0].description, "materialized user scout");
+});

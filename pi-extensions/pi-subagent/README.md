@@ -12,6 +12,7 @@ Durable, continuable subagents for [Pi](https://github.com/earendil-works/pi-mon
   - background continuable runs return a child session id immediately
 - **Foreground-only policy** that removes background scheduling from the delegation schema
 - **Independent context and session** for every child
+- **Materialized user presets** with update-time backup and replacement
 - **Durable descriptors and lineage** stored in child JSONL sessions
 - **Cold resume** through `send_message`
 - **Control plane** with listing and interruption
@@ -71,7 +72,47 @@ Pi executes sibling tool calls in parallel, so this package deliberately accepts
 
 ## Agent definitions
 
-The package includes `scout`, `planner`, `reviewer`, and `worker`. Add agents as Markdown files with YAML frontmatter:
+The package includes `scout`, `planner`, `reviewer`, and `worker`. On extension startup,
+these bundled definitions are materialized into:
+
+```text
+<Pi agent dir>/agents/*.md
+```
+
+Runtime discovery uses these user files rather than reading the package copies directly.
+`/subagents` therefore reports the built-in presets as `(user)`.
+
+Synchronization behavior:
+
+1. **First startup:** missing presets are installed. A different pre-existing same-name file
+   is backed up before the bundled version replaces it.
+2. **Ordinary restart of the same release:** user edits are preserved.
+3. **Plugin update:** differing user presets are backed up, then replaced with the new
+   bundled versions. A bundled prompt hash change also triggers this refresh even if the
+   package version was not bumped.
+4. **Retired preset:** a formerly bundled name is backed up and removed so an obsolete
+   prompt does not remain silently active.
+5. Files whose names were never managed bundled presets are left untouched.
+
+Synchronization holds a cross-process lock, then preflights and stages the whole update
+before changing agent files. If a commit fails, it rolls back already-applied changes and
+fails extension startup rather than falling back to package prompts. Same-name symbolic
+links are preserved as symbolic links inside the backup directory before the user path is
+replaced. An invalid synchronization manifest is copied to a timestamped `.corrupt-*` file
+and startup fails closed until the manifest is repaired or deliberately removed.
+
+Synchronization state and backups live at:
+
+```text
+<Pi agent dir>/.pi-subagent/agents-manifest.json
+<Pi agent dir>/.pi-subagent/backups/<timestamp>-to-<version>/*.md
+```
+
+The startup notification reports installed/updated files and exact backup paths. To restore
+a customization after an update, copy its backup over the corresponding user agent file;
+later startups of that same plugin release preserve the restored edit.
+
+Add or edit user agents as Markdown files with YAML frontmatter:
 
 ```markdown
 ---
@@ -85,13 +126,15 @@ thinking: high
 Review the delegated change. Report concrete security defects with exact paths.
 ```
 
-Locations and precedence:
+Runtime locations and precedence:
 
-1. bundled `agents/*.md`
-2. `<Pi agent dir>/agents/*.md`
-3. nearest trusted `.pi/agents/*.md`
+1. `<Pi agent dir>/agents/*.md`
+2. nearest trusted `.pi/agents/*.md`
 
-Later definitions replace earlier definitions with the same name. Project agents are disabled by the default `agentScope: "user"`.
+Project definitions replace user definitions with the same name when project scope is
+enabled. Project agents are disabled by the default `agentScope: "user"`. Setting the scope
+to `project` explicitly selects only project definitions; `both` loads user definitions
+followed by project overrides.
 
 Frontmatter:
 
@@ -162,7 +205,7 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `agentScope` | `user` | Load user, project, or both definition directories in addition to bundled agents. |
+| `agentScope` | `user` | Select user definitions, project definitions, or user definitions followed by project overrides. |
 | `maxDepth` | `3` | Absolute delegation depth; a top-level Pi session is depth 0. |
 | `enableRunInBackground` | `true` | Allow fresh continuable background children. Set `false` for foreground-only mode. |
 | `defaultBackground` | `true` | Default scheduling for fresh `subagent` calls when background execution is enabled. |
@@ -226,6 +269,7 @@ The parent is executing a tool when `subagent_fork` starts, so its current assis
 ## Security
 
 - Extensions and subagents run with the user's OS permissions.
+- Startup synchronizes bundled presets into the user agent directory and may create backups under `<Pi agent dir>/.pi-subagent/backups`.
 - Project-local agents are repository-controlled prompts. They are loaded only when the project is trusted and configuration enables project scope.
 - `inheritExtensions` is disabled by default because loading an extension in a child executes its code and may duplicate external side effects.
 - Explicit agent tool lists are enforced as registry ceilings, but this controls model visibility and execution composition rather than providing an OS sandbox.

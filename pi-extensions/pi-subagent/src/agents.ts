@@ -15,6 +15,7 @@ export interface AgentDiscoveryOptions {
 	projectTrusted: boolean;
 	bundledDir: string;
 	agentDir?: string;
+	includeBundled?: boolean;
 }
 
 export interface AgentDiscoveryResult {
@@ -123,9 +124,10 @@ export function discoverAgents(options: AgentDiscoveryOptions): AgentDiscoveryRe
 		options.scope !== "user" && options.projectTrusted
 			? findNearestProjectAgentsDir(options.cwd)
 			: undefined;
-	const sources: Array<{ dir: string; source: AgentSource }> = [
-		{ dir: options.bundledDir, source: "bundled" },
-	];
+	const sources: Array<{ dir: string; source: AgentSource }> = [];
+	if (options.includeBundled !== false) {
+		sources.push({ dir: options.bundledDir, source: "bundled" });
+	}
 	if (options.scope !== "project") {
 		sources.push({ dir: join(options.agentDir ?? getAgentDir(), "agents"), source: "user" });
 	}

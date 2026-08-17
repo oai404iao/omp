@@ -108,6 +108,8 @@ function registerDelegationTool(
 
 export default function subagentExtension(pi: ExtensionAPI): void {
 	const coordinator = new SubagentCoordinator(pi, BUNDLED_AGENTS_DIR, PACKAGE_ROOT);
+	const agentSync = coordinator.getAgentSyncResult();
+	let agentSyncNotified = false;
 
 	registerDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
 
@@ -237,6 +239,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				scope: loaded.settings.agentScope,
 				projectTrusted: ctx.isProjectTrusted(),
 				bundledDir: BUNDLED_AGENTS_DIR,
+				agentDir: dirname(agentSync.userAgentsDir),
+				includeBundled: false,
 			});
 			const parent = await coordinator.parentFromContext(ctx);
 			const entries = await coordinator.list(parent, "descendants");
@@ -247,6 +251,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 					: "foreground-first";
 			const sections = [
 				`Mode: ${schedulingMode}`,
+				`Agent config: ${agentSync.userAgentsDir}`,
 				`Agents:\n${formatAgentCatalog(discovery.agents)}`,
 				`Children:\n${coordinator.formatCatalog(entries, "descendants")}`,
 			];
@@ -260,6 +265,33 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
 		registerDelegationTool(pi, coordinator, loaded.settings);
+		if (!agentSyncNotified) {
+			agentSyncNotified = true;
+			const lines = [`pi-subagent agent config: ${agentSync.userAgentsDir}`];
+			if (agentSync.installed.length > 0) {
+				lines.push(`installed: ${agentSync.installed.join(", ")}`);
+			}
+			if (agentSync.updated.length > 0) {
+				lines.push(`updated: ${agentSync.updated.join(", ")}`);
+			}
+			if (agentSync.removed.length > 0) {
+				lines.push(`retired: ${agentSync.removed.join(", ")}`);
+			}
+			if (agentSync.backups.length > 0) {
+				lines.push("backups:", ...agentSync.backups.map((backup) => `- ${backup.name}: ${backup.path}`));
+			}
+			if (
+				agentSync.installed.length > 0 ||
+				agentSync.updated.length > 0 ||
+				agentSync.removed.length > 0 ||
+				agentSync.backups.length > 0
+			) {
+				ctx.ui.notify(lines.join("\n"), "info");
+			}
+			if (agentSync.diagnostics.length > 0) {
+				ctx.ui.notify(agentSync.diagnostics.join("\n"), "warning");
+			}
+		}
 	});
 
 	pi.on("session_shutdown", async () => {

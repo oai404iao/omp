@@ -20,6 +20,7 @@ import {
 	ModelRuntime,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { syncBundledAgents, type AgentSyncResult } from "./agent-sync.ts";
 import { discoverAgents, formatAgentCatalog } from "./agents.ts";
 import { readPersistedCatalog } from "./catalog.ts";
 import { DESCRIPTOR_CUSTOM_TYPE, foldDescriptor } from "./descriptor.ts";
@@ -210,6 +211,7 @@ function isPathInside(parent: string, child: string): boolean {
 export class SubagentCoordinator {
 	private readonly providers = new ProviderRegistry();
 	private readonly active = new Map<string, Activation>();
+	private readonly agentSyncResult: AgentSyncResult;
 	private draining = false;
 
 	constructor(
@@ -218,8 +220,17 @@ export class SubagentCoordinator {
 		private readonly packageRoot: string,
 		private readonly agentDir: string = getAgentDir(),
 	) {
+		this.agentSyncResult = syncBundledAgents({
+			bundledDir: this.bundledAgentsDir,
+			agentDir: this.agentDir,
+			packageRoot: this.packageRoot,
+		});
 		this.providers.register(new SpawnProvider());
 		this.providers.register(new ForkProvider());
+	}
+
+	getAgentSyncResult(): AgentSyncResult {
+		return this.agentSyncResult;
 	}
 
 	async parentFromContext(ctx: ExtensionContext): Promise<ParentRef> {
@@ -297,6 +308,7 @@ export class SubagentCoordinator {
 			projectTrusted: parent.projectTrusted,
 			bundledDir: this.bundledAgentsDir,
 			agentDir: this.agentDir,
+			includeBundled: false,
 		});
 		const agent = discovery.agents.find((candidate) => candidate.name === input.agent);
 		if (!agent) {
