@@ -13,6 +13,10 @@
     "thinking"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "pi": {
     "extensions": [
       "./src/index.ts"

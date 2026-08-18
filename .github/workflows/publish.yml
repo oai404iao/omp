@@ -1,0 +1,122 @@
+name: Publish npm packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" after reviewing the release PR and npm environment'
+        required: true
+        type: string
+
+# Phase 1 safety lock. Enabling publication requires a separate reviewed PR.
+env:
+  RELEASE_INFRASTRUCTURE_ENABLED: "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the release commit without write credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.x"
+          cache: npm
+
+      - name: Pin npm
+        run: npm install --global npm@11.19.0 --ignore-scripts
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Verify source packages
+        run: npm run ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Require a clean verified checkout
+        shell: bash
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
+      - name: Pack immutable release artifacts
+        run: npm run release:artifacts
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: npm-release-${{ github.sha }}
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-publish
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Check out the verified release commit without persisted credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js for trusted publishing
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.x"
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+
+      - name: Enforce release safety gates
+        run: node scripts/release-preflight.mjs
+        env:
+          NPM_PUBLISH_ENABLED: ${{ vars.NPM_PUBLISH_ENABLED }}
+          PUBLISH_CONFIRMATION: ${{ inputs.confirm }}
+
+      - name: Pin trusted-publishing npm
+        run: npm install --global npm@11.19.0 --ignore-scripts
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: npm-release-${{ github.sha }}
+          path: .release-input
+
+      - name: Publish exact tarballs and reconcile registry state
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+        run: node scripts/publish-release-artifacts.mjs .release-input/manifest.json .release-input/result.json
+
+      - name: Push tags and create idempotent GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          node scripts/finalize-github-releases.mjs .release-input/result.json

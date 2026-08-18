@@ -19,7 +19,7 @@ pi install /absolute/path/to/pi-keep-defaults
 ```json
 {
   "packages": [
-    "/home/u/dev/local/omp/pi-extensions/pi-keep-defaults"
+    "/absolute/path/to/pi-extensions/pi-keep-defaults"
   ]
 }
 ```

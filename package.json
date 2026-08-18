@@ -1,0 +1,33 @@
+{
+  "name": "omp-pi-extensions-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Private release workspace for the OMP Pi extension packages.",
+  "type": "module",
+  "packageManager": "npm@11.19.0",
+  "engines": {
+    "node": ">=22.19.0",
+    "npm": ">=11.5.1"
+  },
+  "workspaces": [
+    "pi-extensions/pi-codex-minimal-tools",
+    "pi-extensions/pi-keep-defaults",
+    "pi-extensions/pi-subagent",
+    "pi-extensions/pi-telegram-notify",
+    "pi-extensions/pi-tree-continue"
+  ],
+  "scripts": {
+    "audit:history": "bash scripts/audit-public-history.sh",
+    "changeset": "changeset",
+    "changeset:status": "changeset status --verbose",
+    "changeset:version": "changeset version && npm install --package-lock-only --ignore-scripts",
+    "check": "npm run check --workspaces --if-present",
+    "ci": "npm run check && npm run pack:check",
+    "pack:check": "node scripts/verify-packages.mjs",
+    "release:artifacts": "node scripts/prepare-release-artifacts.mjs",
+    "release:preflight": "node scripts/release-preflight.mjs"
+  },
+  "devDependencies": {
+    "@changesets/cli": "2.31.1"
+  }
+}
