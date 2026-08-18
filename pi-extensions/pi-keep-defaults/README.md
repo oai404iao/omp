@@ -51,3 +51,7 @@ pi install /absolute/path/to/pi-keep-defaults
 - 想永久修改默认值: `/keep-defaults off` → 用 `/model` 选好 → `/keep-defaults on`;
   或者直接编辑 `settings.json`(建议在 pi 未运行时编辑)。
 - 首次启动时若某个字段原本不存在,第一次出现的值会被自动当作基准并冻结。
+
+## License
+
+MIT © 2026 oai404iao. See [LICENSE](LICENSE).

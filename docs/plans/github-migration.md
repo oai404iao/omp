@@ -25,7 +25,7 @@ that repository exactly.
 - [x] Record the initial full-history and publication audit.
 - [x] Obtain the GitHub owner.
 - [ ] Complete package licensing and third-party source review.
-- [ ] Remove unnecessary test/build files from published tarballs.
+- [x] Remove unnecessary test/build files from published tarballs.
 - [x] Add exact GitHub metadata to each package.
 
 ## Phase 2 — GitHub cutover
@@ -85,7 +85,12 @@ For all five npm workspaces:
 7. Bind trusted publishing to `publish.yml` and `npm-publish`.
 
 `external-thinking` remains incubating until it has its own manifest, tests,
-compatibility handling, and upstream attribution.
+and compatibility handling. Its upstream attribution and license are now
+recorded.
+
+Only `pi-keep-defaults` and `pi-telegram-notify` are currently marked
+publishable by the guarded scripts. The other workspaces set `private: true`
+and require a separate promotion review.
 
 ## Phase 4 — enable releases
 

@@ -1,3 +1,9 @@
+/*
+ * Substantially modified TypeScript adaptation of OpenAI Codex apply-patch
+ * behavior at 03bb3b12367397e14a8facc2e018d645ff4d8e83.
+ * See ../../THIRD_PARTY_NOTICES.md and ../../LICENSES/Apache-2.0.txt.
+ */
+
 import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { actionSummary, parseApplyPatch, parseApplyPatchProgress, type ParsedPatch, type PatchAction, type PatchUpdateChunk } from "./parser.js";

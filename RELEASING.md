@@ -33,8 +33,9 @@ reviewed pull request after every prerequisite below is complete.
    }
    ```
 
-5. Add reviewed package-level license files and all required third-party
-   notices. Do not infer ownership from the existing `license` fields alone.
+5. Keep reviewed package-level license files and all required third-party
+   notices in every tarball. Do not infer ownership from a manifest field
+   alone.
 6. Protect `main`: require pull requests and CI, block force pushes and branch
    deletion, and require review for workflow changes.
 7. Allow GitHub Actions to create release pull requests. PRs created with
@@ -71,6 +72,22 @@ and provenance. It does not read an `NPM_TOKEN`. Verification runs in a
 separate read-only job without OIDC. That job uploads exact, checksummed npm
 tarballs; the protected publish job publishes those tarballs without running
 package lifecycle scripts.
+
+## Package publication eligibility
+
+Release eligibility is explicit in two places:
+
+1. `scripts/workspaces.mjs` must set `releaseStatus: "publishable"`;
+2. the matching package manifest must not set `"private": true`.
+
+CI rejects mismatches. The guarded release scripts currently allow only
+`pi-keep-defaults` and `pi-telegram-notify`. These packages remain blocked by
+the global workflow lock and npm bootstrap requirements.
+
+`pi-codex-minimal-tools`, `pi-subagent`, and `pi-tree-continue` are private.
+Promote one only in a dedicated reviewed change after its documented source,
+compatibility, and release-track gates are complete. A prerelease package must
+also use prerelease SemVer so the workflow selects the `next` dist-tag.
 
 Official references:
 

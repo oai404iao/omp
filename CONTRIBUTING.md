@@ -16,13 +16,13 @@ Do not commit per-package `package-lock.json` files. The root
 Run the complete local verification before opening a pull request:
 
 ```bash
-npm run check
-npm run pack:check
+npm run ci
 ```
 
 Package checks include each extension's typecheck and tests where present.
-`pack:check` inspects the exact npm tarball file list and verifies every Pi
-extension entry point is included.
+`license:check` protects verified source/license snapshots. `pack:check`
+inspects the exact npm tarball file list and verifies every Pi extension entry
+point and runtime asset is included.
 
 ## Changesets
 
@@ -35,6 +35,10 @@ npm run changeset
 
 Infrastructure-only, test-only, and repository documentation changes do not
 need a changeset unless they alter a published package.
+
+Before a package's one-time npm bootstrap, release-preparation metadata may be
+completed without bumping its still-unpublished initial version. After the
+first publish, every tarball-facing change requires a changeset.
 
 ## Pull requests
 

@@ -38,3 +38,10 @@ By default, `/continue` is conservative. It only continues from the current leaf
 Use `/continue --force` when you intentionally want to roll the branch back to the latest `toolResult` even if normal entries exist after it.
 
 Because Pi does not currently expose a public extension API for message-free continuation, this package installs a small runtime hook into `AgentSession` to access the active session's internal `agent.continue()` method.
+
+## License and publication status
+
+MIT © 2026 oai404iao. See [LICENSE](LICENSE).
+
+This experimental package remains private until its internal Pi API dependency
+has tests and a reviewed compatibility policy.

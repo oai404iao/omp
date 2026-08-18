@@ -1,6 +1,7 @@
 {
   "name": "pi-codex-minimal-tools",
   "version": "1.3.0",
+  "private": true,
   "description": "Model-profiled Codex Responses tools for Pi: WebSocket, Lite, web search, images, compaction, and apply_patch",
   "repository": {
     "type": "git",
@@ -22,7 +23,7 @@
     "web-search",
     "apply-patch"
   ],
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -60,13 +61,13 @@
   },
   "files": [
     "src/",
-    "tests/",
-    "reference/",
     "README.md",
+    "LICENSE",
+    "LICENSES/",
+    "THIRD_PARTY_NOTICES.md",
     "config.schema.json",
     "models.schema.json",
-    "package.json",
-    "tsconfig.json"
+    "package.json"
   ],
   "engines": {
     "node": ">=22.19.0"

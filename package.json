@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Private release workspace for the OMP Pi extension packages.",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/oai404iao/omp.git"
@@ -30,7 +31,8 @@
     "changeset:status": "changeset status --verbose",
     "changeset:version": "changeset version && npm install --package-lock-only --ignore-scripts",
     "check": "npm run check --workspaces --if-present",
-    "ci": "npm run check && npm run pack:check",
+    "ci": "npm run check && npm run license:check && npm run pack:check",
+    "license:check": "node scripts/verify-licenses.mjs",
     "pack:check": "node scripts/verify-packages.mjs",
     "release:artifacts": "node scripts/prepare-release-artifacts.mjs",
     "release:preflight": "node scripts/release-preflight.mjs"

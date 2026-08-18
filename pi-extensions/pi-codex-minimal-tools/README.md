@@ -143,7 +143,7 @@ Resolution rules:
   fallback, and native-compaction replay are isolated by that hash.
 
 Full field documentation is in
-[`reference/model-catalog.md`](reference/model-catalog.md), and editor
+[`reference/model-catalog.md`](https://github.com/oai404iao/omp/blob/main/pi-extensions/pi-codex-minimal-tools/reference/model-catalog.md), and editor
 validation is provided by [`models.schema.json`](models.schema.json).
 
 ## Custom Provider Example
@@ -343,7 +343,7 @@ When `apply_patch` activates, the extension temporarily hides Pi's `edit` and
 The executor supports Codex `@@ class/function` contexts, ordered update
 chunks, `*** Move to:`, `*** End of File`, fuzzy matching, CRLF preservation,
 and atomic verification before writes. See
-[`reference/apply-patch-behavior.md`](reference/apply-patch-behavior.md).
+[`reference/apply-patch-behavior.md`](https://github.com/oai404iao/omp/blob/main/pi-extensions/pi-codex-minimal-tools/reference/apply-patch-behavior.md).
 
 ## Legacy Migration
 
@@ -372,7 +372,16 @@ only as a transition path.
 
 ## Protocol Reference
 
-[`reference/`](reference/README.md) documents the Codex snapshot, Responses
+[`reference/`](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-minimal-tools/reference) documents the Codex snapshot, Responses
 Standard/Lite envelopes, namespace tools, WebSocket continuation, custom-tool
 streaming/replay, standalone web/image endpoints, compaction, and apply-patch
 protocol.
+
+## License and publication status
+
+Project-authored portions are MIT-licensed, copyright 2026 oai404iao.
+Third-party material retains its own terms; see
+[LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+This package is currently private and must not be published until the
+provenance review for captured Codex tool metadata is complete.

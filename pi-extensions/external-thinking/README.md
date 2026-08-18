@@ -95,3 +95,9 @@ something this extension hides or works around.
 | `toolChoiceQueue.pushOnce(think)` | `before_provider_request` rewrites `tool_choice` / `toolConfig` on the first request of each turn |
 | `forceReasoningOff: externalThinking` | `pi.setThinkingLevel("off")` on enable + re-asserted on `thinking_level_select` and `model_select` |
 | Think tool renderer (italic `thinkingText` markdown) | `renderCall` → `Markdown` with `getMarkdownTheme()` + `theme.fg("thinkingText", …)` italic |
+
+## License
+
+This modified port is MIT-licensed and preserves the upstream oh-my-pi
+copyright notices. See [LICENSE](LICENSE) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

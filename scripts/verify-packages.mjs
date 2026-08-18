@@ -8,6 +8,28 @@ const lock = JSON.parse(readFileSync(resolve(root, "package-lock.json"), "utf8")
 
 const errors = [];
 const seenNames = new Set();
+const requiredRuntimeFiles = {
+  "pi-codex-minimal-tools": [
+    "LICENSES/Apache-2.0.txt",
+    "LICENSES/OpenAI-Codex-NOTICE.txt",
+    "THIRD_PARTY_NOTICES.md",
+    "config.schema.json",
+    "models.schema.json",
+    "src/model-catalog/default-models.json",
+    "src/providers/codex-apply-patch.lark",
+  ],
+  "pi-keep-defaults": [],
+  "pi-subagent": [
+    "agents/planner.md",
+    "agents/reviewer.md",
+    "agents/scout.md",
+    "agents/worker.md",
+    "config.example.json",
+    "config.schema.json",
+  ],
+  "pi-telegram-notify": ["config.example.json", "config.schema.json"],
+  "pi-tree-continue": [],
+};
 
 function report(message) {
   errors.push(message);
@@ -30,16 +52,24 @@ function parsePackOutput(name, stdout) {
   }
 }
 
-for (const { name: expectedName, directory } of workspaces) {
+for (const { name: expectedName, directory, releaseStatus } of workspaces) {
   const manifest = readManifest(directory);
 
+  if (!["blocked", "publishable"].includes(releaseStatus)) {
+    report(`${expectedName}: unknown releaseStatus ${String(releaseStatus)}`);
+  }
   if (manifest.name !== expectedName) {
     report(`${directory}: expected package name ${expectedName}, found ${String(manifest.name)}`);
   }
   if (seenNames.has(manifest.name)) report(`${directory}: duplicate package name ${manifest.name}`);
   seenNames.add(manifest.name);
 
-  if (manifest.private === true) report(`${manifest.name}: publishable workspace must not be private`);
+  const expectedPrivate = releaseStatus === "blocked";
+  if ((manifest.private === true) !== expectedPrivate) {
+    report(
+      `${manifest.name}: releaseStatus=${releaseStatus} must ${expectedPrivate ? "" : "not "}set private=true`,
+    );
+  }
   if (typeof manifest.version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) {
     report(`${manifest.name}: invalid SemVer version ${String(manifest.version)}`);
   }
@@ -51,6 +81,8 @@ for (const { name: expectedName, directory } of workspaces) {
   }
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
     report(`${manifest.name}: files must be a non-empty allowlist`);
+  } else if (!manifest.files.includes("LICENSE")) {
+    report(`${manifest.name}: files allowlist must explicitly include LICENSE`);
   }
   if (!Array.isArray(manifest.pi?.extensions) || manifest.pi.extensions.length === 0) {
     report(`${manifest.name}: pi.extensions must contain at least one entry`);
@@ -86,7 +118,12 @@ for (const { name: expectedName, directory } of workspaces) {
   if (!packOutput) continue;
 
   const packedPaths = new Set(packOutput.files.map((file) => normalizePackagePath(file.path)));
-  for (const required of ["package.json", "README.md"]) {
+  for (const required of [
+    "package.json",
+    "README.md",
+    "LICENSE",
+    ...(requiredRuntimeFiles[expectedName] ?? []),
+  ]) {
     if (!packedPaths.has(required)) report(`${manifest.name}: tarball is missing ${required}`);
   }
   for (const extension of manifest.pi.extensions ?? []) {
@@ -108,11 +145,17 @@ for (const { name: expectedName, directory } of workspaces) {
     ) {
       report(`${manifest.name}: sensitive or local-only path would be published: ${path}`);
     }
+    if (
+      path === "tsconfig.json"
+      || /^(?:test|tests|reference)\//.test(path)
+    ) {
+      report(`${manifest.name}: development-only path would be published: ${path}`);
+    }
   }
 
   const unpackedSize = Number(packOutput.unpackedSize ?? 0);
   console.log(
-    `✓ ${manifest.name}@${manifest.version}: ${packedPaths.size} files, ${unpackedSize.toLocaleString()} bytes unpacked`,
+    `✓ ${manifest.name}@${manifest.version} [${releaseStatus}]: ${packedPaths.size} files, ${unpackedSize.toLocaleString()} bytes unpacked`,
   );
 }
 

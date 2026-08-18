@@ -47,8 +47,8 @@
   "files": [
     "src/",
     "README.md",
-    "package.json",
-    "tsconfig.json"
+    "LICENSE",
+    "package.json"
   ],
   "engines": {
     "node": ">=22.19.0"

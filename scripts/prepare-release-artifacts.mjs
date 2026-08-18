@@ -10,7 +10,7 @@ import {
   sha512,
   tagFor,
 } from "./release-utils.mjs";
-import { readManifest, registry, root, workspaces } from "./workspaces.mjs";
+import { publishableWorkspaces, readManifest, registry, root } from "./workspaces.mjs";
 
 const outputDirectory = resolve(root, "release-artifacts");
 const stagingDirectory = resolve(outputDirectory, ".staging");
@@ -54,8 +54,11 @@ function verifyPublishedSource(name, version, directory, sourceCommit, tag) {
   }
 }
 
-for (const { name, directory } of workspaces) {
+for (const { name, directory } of publishableWorkspaces) {
   const manifest = readManifest(directory);
+  if (manifest.private === true) {
+    throw new Error(`${name} is approved in workspaces.mjs but remains private in package.json`);
+  }
   const published = lookupPublishedVersion(name, manifest.version);
   const tag = tagFor(name, manifest.version);
   const localTagCommit = existingTagCommit(tag);

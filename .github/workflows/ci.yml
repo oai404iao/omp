@@ -47,6 +47,9 @@ jobs:
       - name: Run package checks
         run: npm run check
 
+      - name: Verify license and source snapshots
+        run: npm run license:check
+
       - name: Inspect npm tarballs
         run: npm run pack:check
 
