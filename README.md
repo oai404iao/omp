@@ -13,16 +13,16 @@ Gitea remote is retained as a migration backup.
 
 | Package | Version | Release track |
 | --- | ---: | --- |
-| `pi-codex-minimal-tools` | `1.3.0` | blocked pending third-party source review |
+| `pi-codex-minimal-tools` | `1.3.0` | private; blocked pending third-party source review |
 | `pi-keep-defaults` | `0.1.0` | candidate |
-| `pi-subagent` | `0.2.0` | beta candidate |
+| `pi-subagent` | `0.2.0` | private; beta candidate after provenance review |
 | `pi-telegram-notify` | `0.1.0` | candidate |
-| `pi-tree-continue` | `0.1.0` | experimental |
-| `external-thinking` | unpublished | incubating; not an npm workspace |
+| `pi-tree-continue` | `0.1.0` | private; experimental |
+| `external-thinking` | unpublished | incubating; attribution complete, packaging/tests pending |
 
 The five npm packages use independent versions. `external-thinking` remains
-outside the workspace until it has an audited manifest, tests, and upstream
-attribution.
+outside the workspace until it has an audited manifest, tests, and
+compatibility handling; its upstream attribution is recorded.
 
 ## Local development
 
@@ -62,8 +62,16 @@ GitHub migration plan.
 - npm tarballs are inspected from their `files` allowlists in CI.
 - npm publication is designed for OIDC trusted publishing, without a
   long-lived npm token.
-- Existing license declarations and upstream-derived code still require a
-  separate rights review before publication is enabled.
+- Project-authored material is MIT-licensed. Upstream-derived material is
+  mapped in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); unresolved
+  provenance keeps the affected packages private.
 
 See [SECURITY.md](SECURITY.md) and the
 [publication readiness audit](docs/audits/publication-readiness.md).
+
+## License
+
+Project-authored material is available under the [MIT License](LICENSE),
+copyright 2026 oai404iao. Third-party components retain their respective
+terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+[`LICENSES/`](LICENSES/).

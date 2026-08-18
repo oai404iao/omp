@@ -1,6 +1,7 @@
 {
   "name": "pi-subagent",
   "version": "0.2.0",
+  "private": true,
   "description": "Durable, continuable subagents for Pi with spawn/fork providers and lifecycle controls.",
   "repository": {
     "type": "git",
@@ -55,12 +56,11 @@
   "files": [
     "agents/",
     "src/",
-    "tests/",
     "README.md",
+    "LICENSE",
     "config.example.json",
     "config.schema.json",
-    "package.json",
-    "tsconfig.json"
+    "package.json"
   ],
   "engines": {
     "node": ">=22.19.0"

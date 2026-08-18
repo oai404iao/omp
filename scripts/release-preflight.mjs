@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { readManifest, root, workspaces } from "./workspaces.mjs";
+import { publishableWorkspaces, readManifest, root, workspaces } from "./workspaces.mjs";
 
 const repository = process.env.GITHUB_REPOSITORY;
 const expectedRepositoryUrl = repository
@@ -61,12 +61,18 @@ for (const { name, directory } of workspaces) {
 }
 
 const codexNotice = resolve(root, "pi-extensions/pi-codex-minimal-tools/THIRD_PARTY_NOTICES.md");
-if (!existsSync(codexNotice)) {
-  fail("pi-codex-minimal-tools has no THIRD_PARTY_NOTICES.md; complete its source audit before publishing");
-}
 const codexManifest = readManifest("pi-extensions/pi-codex-minimal-tools");
-if (!codexManifest.files?.includes("THIRD_PARTY_NOTICES.md")) {
-  fail("pi-codex-minimal-tools must include THIRD_PARTY_NOTICES.md in its npm files allowlist");
+if (publishableWorkspaces.some(({ name }) => name === "pi-codex-minimal-tools")) {
+  if (!existsSync(codexNotice)) {
+    fail("pi-codex-minimal-tools has no THIRD_PARTY_NOTICES.md; complete its source audit before publishing");
+  }
+  if (!codexManifest.files?.includes("THIRD_PARTY_NOTICES.md")) {
+    fail("pi-codex-minimal-tools must include THIRD_PARTY_NOTICES.md in its npm files allowlist");
+  }
 }
 
-console.log(`release preflight passed for ${repository} at ${head}`);
+if (publishableWorkspaces.length === 0) fail("no npm workspace is approved for publication");
+
+console.log(
+  `release preflight passed for ${publishableWorkspaces.map(({ name }) => name).join(", ")} at ${head}`,
+);

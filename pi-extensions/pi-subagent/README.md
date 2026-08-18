@@ -308,3 +308,10 @@ npm run check
 ```
 
 The test suite includes provider-boundary, descriptor, configuration, discovery, extension-load, foreground-run, background-settlement, and cold-resume coverage with a scripted local model.
+
+## License and publication status
+
+MIT © 2026 oai404iao. See [LICENSE](LICENSE).
+
+This package remains private until the README's DeepSeek Harness design
+reference is mapped to an exact public source and revision.

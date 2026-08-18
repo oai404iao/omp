@@ -80,3 +80,7 @@ pi install /absolute/path/to/pi-telegram-notify
 npm install
 npm run check
 ```
+
+## License
+
+MIT © 2026 oai404iao. See [LICENSE](LICENSE).

@@ -50,12 +50,12 @@ silently accepted as a permanent exception.
 
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
-| `pi-codex-minimal-tools` | yes | typecheck and 202 tests | source/license audit |
-| `pi-keep-defaults` | yes | typecheck and smoke/guard tests | package LICENSE |
-| `pi-subagent` | yes | typecheck and 51 tests | package LICENSE, global preset side-effect review |
-| `pi-telegram-notify` | yes | typecheck and 8 tests | package LICENSE, privacy/internal-hook review |
-| `pi-tree-continue` | yes | typecheck and pack check; no test suite | private Pi API dependency, tests, package LICENSE |
-| `external-thinking` | no | not covered by npm workspace CI | manifest, tests, compatibility fix, upstream attribution |
+| `pi-codex-minimal-tools` | private | typecheck and 202 tests | captured tool-metadata provenance |
+| `pi-keep-defaults` | publishable candidate | typecheck and smoke/guard tests | watcher lifecycle/release approval |
+| `pi-subagent` | private | typecheck and 51 tests | DeepSeek Harness provenance, global preset side-effect review |
+| `pi-telegram-notify` | publishable candidate | typecheck and 8 tests | privacy/internal-hook release approval |
+| `pi-tree-continue` | private | typecheck and pack check; no test suite | private Pi API dependency, tests |
+| `external-thinking` | no | not covered by npm workspace CI | manifest, tests, compatibility fix |
 
 The exact six current unscoped names returned npm E404 during the phase-1
 audit. E404 is not a reservation or ownership guarantee; availability must be
@@ -63,9 +63,10 @@ checked again immediately before bootstrap publishing.
 
 ## License and source review
 
-All five manifests currently declare `MIT`, but the repository has no tracked
-license text. Phase 1 deliberately does not invent a copyright holder or treat
-the manifest field as a completed rights audit.
+Project-authored material now carries an MIT license with the user-confirmed
+copyright `2026 oai404iao`. Each npm workspace includes a package-level
+license. Third-party license texts and notices are preserved separately rather
+than being relicensed under the project MIT grant.
 
 ### `external-thinking`
 
@@ -73,19 +74,23 @@ the manifest field as a completed rights audit.
   [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi).
 - The upstream repository is MIT-licensed and contains named copyright
   notices.
-- Record the exact source revision, preserve applicable notices, and describe
-  local modifications before creating the npm package.
+- The feature-introduction and reference revisions, applicable upstream
+  notices, and local modification scope are recorded in its
+  `THIRD_PARTY_NOTICES.md`.
 
 ### `pi-codex-minimal-tools`
 
 - Reference documents identify an analyzed OpenAI Codex revision.
 - `src/providers/codex-apply-patch.lark` is described as an exact grammar
-  snapshot.
+  snapshot and was verified byte-for-byte against upstream revision
+  `eb9dceba1a2e658142a456c5898836774835616b`.
 - `src/codex-reserved-tools.ts` contains captured tool definitions that need a
   source and redistribution review.
-- OpenAI Codex is Apache-2.0. Map copied/adapted files to public upstream
-  sources, preserve required attribution and license material, and add a
-  reviewed `THIRD_PARTY_NOTICES.md` before publication.
+- OpenAI Codex is Apache-2.0. Its license and NOTICE are preserved, and the
+  exact grammar source is mapped in `THIRD_PARTY_NOTICES.md`.
+- The provenance and redistribution terms of service-emitted or
+  server-supplied portions in `src/codex-reserved-tools.ts` remain unresolved,
+  so the package is private.
 
 Official upstream license:
 [`openai/codex/LICENSE`](https://github.com/openai/codex/blob/main/LICENSE).

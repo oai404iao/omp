@@ -1,6 +1,7 @@
 {
   "name": "pi-tree-continue",
   "version": "0.1.0",
+  "private": true,
   "description": "Add /continue to resume Pi from the current session tree node without creating a user message.",
   "repository": {
     "type": "git",
@@ -45,8 +46,8 @@
   "files": [
     "src/",
     "README.md",
-    "package.json",
-    "tsconfig.json"
+    "LICENSE",
+    "package.json"
   ],
   "engines": {
     "node": ">=22.19.0"
