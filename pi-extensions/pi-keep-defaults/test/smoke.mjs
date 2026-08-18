@@ -8,8 +8,14 @@
  * Run with: node --experimental-strip-types test/smoke.mjs
  */
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import extension from "../src/index.ts";
+
+const agentDir = mkdtempSync(join(tmpdir(), "pi-keep-defaults-smoke-"));
+process.env.PI_CODING_AGENT_DIR = agentDir;
 
 const handlers = new Map();
 let commandHandler;
@@ -71,4 +77,5 @@ console.log("PASS: patch survives reload (idempotent)");
 console.log("\nAll smoke tests passed.");
 
 // The extension keeps an fs.watch open on the settings dir; exit explicitly.
+rmSync(agentDir, { recursive: true, force: true });
 process.exit(0);
