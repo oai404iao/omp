@@ -22,8 +22,8 @@ if (process.env.NPM_PUBLISH_ENABLED !== "true") {
 if (process.env.PUBLISH_CONFIRMATION !== "publish") {
   fail('workflow confirmation must be exactly "publish"');
 }
-if (!repository || !/^[^/]+\/omp$/.test(repository)) {
-  fail(`expected the GitHub repository <owner>/omp, found ${repository ?? "(missing)"}`);
+if (repository !== "oai404iao/omp") {
+  fail(`expected the GitHub repository oai404iao/omp, found ${repository ?? "(missing)"}`);
 }
 if (process.env.GITHUB_REF !== "refs/heads/main") {
   fail(`publishing is allowed only from refs/heads/main, found ${process.env.GITHUB_REF ?? "(missing)"}`);

@@ -1,9 +1,9 @@
 # OMP Pi Extensions
 
 This repository contains a collection of extensions for
-[Pi](https://github.com/earendil-works/pi-mono). It is being prepared for a
-history-preserving move from a private Gitea remote to a public GitHub
-repository named `<owner>/omp`.
+[Pi](https://github.com/earendil-works/pi-mono). Its public source repository
+is [`oai404iao/omp`](https://github.com/oai404iao/omp); the existing private
+Gitea remote is retained as a migration backup.
 
 > npm publication is not enabled yet. The committed publish workflow contains
 > a hard safety lock until repository ownership, package metadata, licensing,

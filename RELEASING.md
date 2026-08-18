@@ -13,8 +13,8 @@ reviewed pull request after every prerequisite below is complete.
 
 ## One-time GitHub preparation
 
-1. Confirm the actual GitHub owner and create an empty `<owner>/omp`
-   repository without an initial README or license commit.
+1. Use the public `oai404iao/omp` repository, which was created without an
+   initial README or license commit.
 2. Preserve the existing Gitea remote and add GitHub as a separate remote.
 3. Complete `docs/audits/publication-readiness.md`.
 4. Add exact repository metadata to every npm package:
@@ -23,12 +23,12 @@ reviewed pull request after every prerequisite below is complete.
    {
      "repository": {
        "type": "git",
-       "url": "git+https://github.com/<owner>/omp.git",
+       "url": "git+https://github.com/oai404iao/omp.git",
        "directory": "pi-extensions/<package>"
      },
-     "homepage": "https://github.com/<owner>/omp/tree/main/pi-extensions/<package>#readme",
+     "homepage": "https://github.com/oai404iao/omp/tree/main/pi-extensions/<package>#readme",
      "bugs": {
-       "url": "https://github.com/<owner>/omp/issues"
+       "url": "https://github.com/oai404iao/omp/issues"
      }
    }
    ```
@@ -50,7 +50,7 @@ new package:
    reviewed `main` commit. That commit must remain in the public history. Do
    not store a bootstrap token in GitHub.
 3. Configure the package's GitHub Actions trusted publisher with:
-   - repository: `<owner>/omp`
+   - repository: `oai404iao/omp`
    - workflow: `publish.yml`
    - environment: `npm-publish`
    - allowed action: `npm publish`

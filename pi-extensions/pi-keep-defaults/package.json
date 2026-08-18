@@ -2,6 +2,15 @@
   "name": "pi-keep-defaults",
   "version": "0.1.0",
   "description": "Freeze default model/thinking in settings.json so switching models or toggling thinking never rewrites the defaults.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oai404iao/omp.git",
+    "directory": "pi-extensions/pi-keep-defaults"
+  },
+  "homepage": "https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-keep-defaults#readme",
+  "bugs": {
+    "url": "https://github.com/oai404iao/omp/issues"
+  },
   "type": "module",
   "keywords": [
     "pi-package",

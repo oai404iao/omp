@@ -2,15 +2,16 @@
 
 ## Decisions
 
-- Public repository target: `<owner>/omp`; the owner is intentionally unresolved.
+- Public repository target: `oai404iao/omp`.
 - Keep the current unscoped npm package names during phase 1.
 - Preserve and audit the existing Git history.
 - Phase 1 changes release infrastructure only; plugin behavior is out of scope.
 - GitHub will become the release source of truth. The private Gitea repository
   remains a backup/mirror until cutover is verified.
 
-No placeholder GitHub URLs will be written into package metadata. Provenance
-requires the final repository URL to match the real public repository exactly.
+Repository URLs were added only after the empty public repository was created
+and verified with GitHub CLI. Provenance requires package metadata to match
+that repository exactly.
 
 ## Phase 1 — repository preparation
 
@@ -21,10 +22,10 @@ requires the final repository URL to match the real public repository exactly.
 - [x] Add a manually triggered, hard-disabled OIDC publish workflow with
       read-only verification and immutable tarball handoff.
 - [x] Record the initial full-history and publication audit.
-- [ ] Obtain the GitHub owner.
+- [x] Obtain the GitHub owner.
 - [ ] Complete package licensing and third-party source review.
 - [ ] Remove unnecessary test/build files from published tarballs.
-- [ ] Add exact GitHub metadata to each package.
+- [x] Add exact GitHub metadata to each package.
 
 ## Phase 2 — GitHub cutover
 

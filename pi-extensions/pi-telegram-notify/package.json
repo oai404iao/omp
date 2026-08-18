@@ -2,6 +2,15 @@
   "name": "pi-telegram-notify",
   "version": "0.1.0",
   "description": "Send Telegram notifications when Pi completes, stops on an error, or waits for ask_user_question input.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oai404iao/omp.git",
+    "directory": "pi-extensions/pi-telegram-notify"
+  },
+  "homepage": "https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-telegram-notify#readme",
+  "bugs": {
+    "url": "https://github.com/oai404iao/omp/issues"
+  },
   "type": "module",
   "keywords": [
     "pi-package",

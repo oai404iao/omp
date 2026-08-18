@@ -98,7 +98,7 @@ Official upstream license:
 
 ## Remaining release gates
 
-- [ ] GitHub owner and real `<owner>/omp` repository confirmed.
+- [x] GitHub owner and real `oai404iao/omp` repository confirmed.
 - [ ] Historical identity approved for publication.
 - [ ] Package-level license files and source notices reviewed.
 - [ ] Final tarball contents reduced and approved.
