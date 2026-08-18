@@ -8,6 +8,7 @@ const lock = JSON.parse(readFileSync(resolve(root, "package-lock.json"), "utf8")
 
 const errors = [];
 const seenNames = new Set();
+const testedPiVersion = "0.84.2";
 const requiredRuntimeFiles = {
   "pi-codex-minimal-tools": [
     "LICENSES/Apache-2.0.txt",
@@ -86,6 +87,21 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
   }
   if (!Array.isArray(manifest.pi?.extensions) || manifest.pi.extensions.length === 0) {
     report(`${manifest.name}: pi.extensions must contain at least one entry`);
+  }
+  for (const [dependency, range] of Object.entries(manifest.peerDependencies ?? {})) {
+    if (!dependency.startsWith("@earendil-works/pi-")) continue;
+    if (range !== `>=${testedPiVersion}`) {
+      report(`${manifest.name}: ${dependency} peer range must be >=${testedPiVersion}`);
+    }
+    if (manifest.devDependencies?.[dependency] !== `^${testedPiVersion}`) {
+      report(`${manifest.name}: ${dependency} development baseline must be ^${testedPiVersion}`);
+    }
+  }
+  if (
+    manifest.name === "pi-codex-minimal-tools"
+    && manifest.dependencies?.undici !== "^8.10.0"
+  ) {
+    report("pi-codex-minimal-tools: undici must remain on the audited ^8.10.0 baseline");
   }
   if (
     manifest.publishConfig?.access !== "public"

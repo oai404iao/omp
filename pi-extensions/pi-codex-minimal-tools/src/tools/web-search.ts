@@ -1,5 +1,5 @@
 import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import {
 	buildCodexJsonHeaders,
@@ -48,7 +48,7 @@ interface WebSearchToolContext {
 	model?: Model<Api>;
 	modelRegistry?: {
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			| { ok: true; apiKey?: string; headers?: Record<string, string> }
+			| { ok: true; apiKey?: string; headers?: ProviderHeaders }
 			| { ok: false; error: string }
 		>;
 	};

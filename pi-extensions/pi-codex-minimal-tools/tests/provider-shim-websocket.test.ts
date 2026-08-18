@@ -386,14 +386,15 @@ test("OpenAI WebSocket URL and headers use the normal Responses endpoint and Pi 
 		"wss://api.openai.com/v1/responses",
 	);
 	const headers = buildWebSocketHeaders(
-		{ "x-model": "model" },
-		{ "x-pi-auth": "resolved" },
+		{ "x-model": "model", "x-remove": "inherited" },
+		{ "x-pi-auth": "resolved", "x-remove": null },
 		undefined,
 		"pi-key",
 		"pi-session",
 	);
 	assert.equal(headers.get("authorization"), "Bearer pi-key");
 	assert.equal(headers.get("x-pi-auth"), "resolved");
+	assert.equal(headers.get("x-remove"), null);
 	assert.equal(headers.get("chatgpt-account-id"), null);
 	assert.equal(headers.get("openai-beta"), "responses_websockets=2026-02-06");
 	assert.equal(headers.get("session-id"), "pi-session");
@@ -550,6 +551,62 @@ test("Pi-resolved Authorization header can authenticate without an API-key value
 
 		assert.equal(result.stopReason, "stop");
 		assert.equal(server.handshakes[0]?.headers.authorization, "Bearer pi-header-token");
+	} finally {
+		await server.close();
+	}
+});
+
+test("request-level null Authorization removes stale model authentication", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => successEvents("resp_1", "unexpected"),
+	]);
+	try {
+		const provider = createProviderHarness().openai;
+		const stream = provider.streamSimple(
+			{
+				provider: "openai",
+				api: "openai-responses",
+				id: "gpt-5.5",
+				baseUrl: server.url,
+				headers: { Authorization: "Bearer stale-model-token" },
+				input: ["text"],
+				reasoning: false,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			},
+			{ systemPrompt: "", messages: [{ role: "user", content: "hello" }], tools: [] },
+			{
+				headers: { Authorization: null },
+				sessionId: "pi-session",
+			},
+		);
+		const result = await stream.result();
+
+		assert.equal(result.stopReason, "error");
+		assert.match(result.errorMessage ?? "", /No request authentication/);
+		assert.equal(server.handshakes.length, 0);
+	} finally {
+		await server.close();
+	}
+});
+
+test("request-level null Authorization suppresses bearer fallback with alternate auth", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => successEvents("resp_1", "ok"),
+	]);
+	try {
+		const provider = createProviderHarness().openai;
+		const result = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }], {
+			headers: {
+				Authorization: null,
+				"x-api-key": "proxy-key",
+			},
+		});
+
+		assert.equal(result.stopReason, "stop");
+		assert.equal(server.handshakes[0]?.headers.authorization, undefined);
+		assert.equal(server.handshakes[0]?.headers["x-api-key"], "proxy-key");
 	} finally {
 		await server.close();
 	}

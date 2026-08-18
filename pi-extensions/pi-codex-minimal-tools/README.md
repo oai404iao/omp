@@ -3,6 +3,8 @@
 Codex-specific Responses support for Pi, driven by an exact per-model JSON
 catalog instead of model-name heuristics.
 
+Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+
 The extension adds:
 
 - Responses SSE, WebSocket, cached continuation, WebSocket retry, upgrade-only

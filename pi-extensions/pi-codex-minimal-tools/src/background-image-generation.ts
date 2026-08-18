@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { supportsImageInput, type ModelLike } from "./capabilities.js";
 import { frameGlyphs, glyphs, treeGlyph } from "./glyphs.js";
@@ -20,6 +20,7 @@ import {
 	buildCodexJsonHeaders,
 	hasCodexRequestAuth,
 } from "./codex-http.js";
+import { setProviderGeneratedHeader } from "./provider-headers.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const BACKGROUND_IMAGE_INSTRUCTIONS = "Generate or edit images with the hosted image_generation tool. Use the user's prompt and any provided reference images. Return the image_generation_call result.";
@@ -304,7 +305,7 @@ function resolveCodexUrl(baseUrl: string | undefined, options?: { apiKeyMode?: b
 
 function buildHeaders(
 	model: Model<Api>,
-	auth: { apiKey?: string; headers?: Record<string, string> },
+	auth: { apiKey?: string; headers?: ProviderHeaders },
 	options?: { apiKeyMode?: boolean },
 ): Headers {
 	const headers = buildCodexJsonHeaders({
@@ -312,8 +313,8 @@ function buildHeaders(
 		auth,
 		apiKeyMode: options?.apiKeyMode ?? false,
 	});
-	headers.set("OpenAI-Beta", "responses=experimental");
-	headers.set("accept", "text/event-stream");
+	setProviderGeneratedHeader(headers, "OpenAI-Beta", "responses=experimental");
+	setProviderGeneratedHeader(headers, "accept", "text/event-stream");
 	return headers;
 }
 

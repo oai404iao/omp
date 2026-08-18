@@ -2,6 +2,8 @@
 
 Durable, continuable subagents for [Pi](https://github.com/earendil-works/pi-mono). The design adapts the DeepSeek Harness subagent seam to Pi's extension and SDK APIs instead of copying Pi's subprocess-only example.
 
+Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+
 ## Features
 
 - **Named providers**
