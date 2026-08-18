@@ -6,8 +6,9 @@
 - Keep the current unscoped npm package names during phase 1.
 - Preserve and audit the existing Git history.
 - Phase 1 changes release infrastructure only; plugin behavior is out of scope.
-- GitHub will become the release source of truth. The private Gitea repository
-  remains a backup/mirror until cutover is verified.
+- GitHub is the public source repository and will become the release source of
+  truth when npm publishing is enabled. The private Gitea repository remains a
+  backup.
 
 Repository URLs were added only after the empty public repository was created
 and verified with GitHub CLI. Provenance requires package metadata to match
@@ -57,9 +58,19 @@ test "$(git rev-parse main)" = "$(git rev-parse github/main)"
 
 Do not use `git push --mirror`; it can publish unrelated local refs.
 
-After verification, decide whether to rename remotes so GitHub becomes
-`origin` and Gitea becomes `gitea`. That remote change is operational and is
-not part of phase 1.
+Cutover status:
+
+- [x] Verify and retain the local `../omp-before-publication.bundle`.
+- [x] Create the empty public `oai404iao/omp` repository.
+- [x] Add the verified GitHub URL as the separate `github` remote.
+- [x] Push `main` without mirroring unrelated refs.
+- [x] Verify local `main` and `github/main` are identical.
+- [x] Push the local tag set; it was empty at cutover.
+- [x] Track `github/main` from the local `main` branch.
+
+The original Gitea remote remains named `origin` so existing backup operations
+do not change silently. Renaming remotes is optional and is not required for
+GitHub to be the tracked public branch.
 
 ## Phase 3 — package identity
 

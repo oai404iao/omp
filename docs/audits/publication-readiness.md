@@ -2,6 +2,7 @@
 
 Audit date: 2026-08-17
 Baseline commit: `fdc4ed6a3702fb226ff85b9a084e940a3122d41a`
+Public cutover verified: 2026-08-18
 
 This document records evidence and open questions. It is not a legal opinion
 or proof that the repository contains no sensitive material.
@@ -19,10 +20,11 @@ or proof that the repository contains no sensitive material.
 | Largest reachable blob | 197,752 bytes |
 | Full-history gitleaks default scan | no findings |
 | Phase-1 current-tree gitleaks default scan | no findings |
+| Post-cutover `main` CI | passed on Node.js 22.19 and 24 |
 
-The repository will preserve its history. Before the public push, the
-maintainer must explicitly accept publication of historical author identity
-and commit metadata.
+The repository preserved its history. The maintainer approved publication of
+the historical author identity and commit metadata during the cutover, and
+local `main` was verified byte-for-byte against GitHub after each push.
 
 The initial scan found one repository-specific absolute path in
 `pi-keep-defaults/README.md`; phase 1 replaces it with an installation
@@ -48,11 +50,11 @@ silently accepted as a permanent exception.
 
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
-| `pi-codex-minimal-tools` | yes | typecheck and 202 tests passed before phase 1 | source/license audit, exact GitHub metadata |
-| `pi-keep-defaults` | yes | typecheck and smoke/guard tests passed before phase 1 | package LICENSE, exact GitHub metadata |
-| `pi-subagent` | yes | typecheck and 51 tests passed before phase 1 | package LICENSE, global preset side-effect review, exact GitHub metadata |
-| `pi-telegram-notify` | yes | typecheck and 8 tests passed before phase 1 | package LICENSE, privacy/internal-hook review, exact GitHub metadata |
-| `pi-tree-continue` | yes | packable; no test suite | private Pi API dependency, tests, package LICENSE, exact GitHub metadata |
+| `pi-codex-minimal-tools` | yes | typecheck and 202 tests | source/license audit |
+| `pi-keep-defaults` | yes | typecheck and smoke/guard tests | package LICENSE |
+| `pi-subagent` | yes | typecheck and 51 tests | package LICENSE, global preset side-effect review |
+| `pi-telegram-notify` | yes | typecheck and 8 tests | package LICENSE, privacy/internal-hook review |
+| `pi-tree-continue` | yes | typecheck and pack check; no test suite | private Pi API dependency, tests, package LICENSE |
 | `external-thinking` | no | not covered by npm workspace CI | manifest, tests, compatibility fix, upstream attribution |
 
 The exact six current unscoped names returned npm E404 during the phase-1
@@ -90,7 +92,8 @@ Official upstream license:
 
 ## Privacy and public presentation
 
-- Review the sole historical author identity before pushing.
+- The sole historical author identity was accepted for the current public
+  history during cutover.
 - Re-record media if screenshots expose private provider names.
 - Replace local installation paths with npm commands only after packages exist.
 - Do not publish real Telegram `config.json`, model credentials, session files,
@@ -99,7 +102,7 @@ Official upstream license:
 ## Remaining release gates
 
 - [x] GitHub owner and real `oai404iao/omp` repository confirmed.
-- [ ] Historical identity approved for publication.
+- [x] Historical identity approved for publication.
 - [ ] Package-level license files and source notices reviewed.
 - [ ] Final tarball contents reduced and approved.
 - [ ] Package names/owners rechecked on npm.
