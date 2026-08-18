@@ -718,6 +718,7 @@ test("Responses Lite native compaction preserves the Lite envelope on both compa
 	const legacy = await requestOpenAINativeCompaction(model, context, {
 		mode: "responses-compact",
 		apiKey: "plain-api-key",
+		headers: { "x-openai-internal-codex-responses-lite": null },
 		settings: {
 			...settings,
 			compactionMode: "responses-compact",
@@ -731,8 +732,9 @@ test("Responses Lite native compaction preserves the Lite envelope on both compa
 	assert.deepEqual(legacy, [
 		{ type: "compaction", encrypted_content: "legacy-lite-state" },
 	]);
+	assert.equal(requests[0]?.headers.get("x-openai-internal-codex-responses-lite"), "true");
+	assert.equal(requests[1]?.headers.get("x-openai-internal-codex-responses-lite"), null);
 	for (const request of requests) {
-		assert.equal(request.headers.get("x-openai-internal-codex-responses-lite"), "true");
 		assert.equal("instructions" in request.body, false);
 		assert.equal("tools" in request.body, false);
 		assert.equal(request.body.parallel_tool_calls, false);

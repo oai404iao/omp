@@ -89,6 +89,12 @@ Promote one only in a dedicated reviewed change after its documented source,
 compatibility, and release-track gates are complete. A prerelease package must
 also use prerelease SemVer so the workflow selects the `next` dist-tag.
 
+All package peer ranges currently require Pi 0.84.2 or newer. Update the
+development baseline, peer ranges, lockfile, compatibility notes, and tests
+together. Do not lower the minimum below the tested baseline. The open-ended
+upper range is an intentional forward-compatibility policy; evaluate each new
+Pi baseline in CI and tighten the range if an incompatibility is found.
+
 Official references:
 
 - [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)

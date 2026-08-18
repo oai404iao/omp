@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import { glyphs, treeGlyph } from "./glyphs.js";
 import { loadSettings } from "./settings.js";
 import { loadModelSettings, type ResolvedCodexModelSettings } from "./model-catalog/runtime.js";
@@ -42,6 +43,13 @@ import {
 	hasCodexRequestAuth,
 	resolveCodexRequestAccountId,
 } from "./codex-http.js";
+import {
+	isProviderHeaderSuppressed,
+	mergeProviderHeaders,
+	providerHeaderDirective,
+	setProviderDefaultHeader,
+	setProviderGeneratedHeader,
+} from "./provider-headers.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 export const IMAGE_SAVE_DISPLAY_MESSAGE_TYPE = "codex-image-generation-display";
@@ -552,16 +560,6 @@ function headersToRecord(headers: Headers): Record<string, string> {
 	return Object.fromEntries(headers.entries());
 }
 
-function definedHeaders(
-	headers: Record<string, string | null> | undefined,
-): Record<string, string> | undefined {
-	if (!headers) return undefined;
-	const result = Object.fromEntries(
-		Object.entries(headers).filter((entry): entry is [string, string] => entry[1] !== null),
-	);
-	return Object.keys(result).length > 0 ? result : undefined;
-}
-
 function createCodexRequestId(): string {
 	if (typeof globalThis.crypto?.randomUUID === "function") {
 		return globalThis.crypto.randomUUID();
@@ -577,51 +575,51 @@ function createPiTurnId(): string {
 }
 
 function buildBaseCodexHeaders(
-	modelHeaders: Record<string, string> | undefined,
-	additionalHeaders: Record<string, string> | undefined,
+	modelHeaders: ProviderHeaders | undefined,
+	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	token: string,
 ): Headers {
-	const headers = new Headers(modelHeaders);
-	const explicitAuthorization = Object.entries(additionalHeaders ?? {}).some(
-		([key, value]) => key.toLowerCase() === "authorization" && value.trim().length > 0,
+	const headers = mergeProviderHeaders(modelHeaders, additionalHeaders);
+	if (providerHeaderDirective(additionalHeaders, "authorization") === undefined && token) {
+		setProviderGeneratedHeader(headers, "Authorization", `Bearer ${token}`);
+	}
+	if (accountId) setProviderDefaultHeader(headers, "chatgpt-account-id", accountId);
+	setProviderDefaultHeader(headers, "originator", "pi");
+	setProviderDefaultHeader(
+		headers,
+		"User-Agent",
+		_os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "pi (browser)",
 	);
-	for (const [key, value] of Object.entries(additionalHeaders ?? {})) {
-		headers.set(key, value);
-	}
-
-	if (!explicitAuthorization && token) headers.set("Authorization", `Bearer ${token}`);
-	if (accountId && !headers.has("chatgpt-account-id")) headers.set("chatgpt-account-id", accountId);
-	if (!headers.has("originator")) headers.set("originator", "pi");
-	if (!headers.has("User-Agent")) {
-		headers.set("User-Agent", _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "pi (browser)");
-	}
 	return headers;
 }
 
 function buildSSEHeaders(
-	modelHeaders: Record<string, string> | undefined,
-	additionalHeaders: Record<string, string> | undefined,
+	modelHeaders: ProviderHeaders | undefined,
+	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	token: string,
 	sessionId: string | undefined,
 	profile: CodexRequestProfile,
 ): Headers {
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token);
-	headers.set("OpenAI-Beta", "responses=experimental");
-	headers.set("accept", "text/event-stream");
-	headers.set("content-type", "application/json");
-	if (profile.responsesMode === "lite") headers.set(X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
+	setProviderDefaultHeader(headers, "OpenAI-Beta", "responses=experimental");
+	setProviderDefaultHeader(headers, "accept", "text/event-stream");
+	setProviderDefaultHeader(headers, "content-type", "application/json");
+	if (profile.responsesMode === "lite") {
+		setProviderDefaultHeader(headers, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
+	}
 
 	if (sessionId) {
-		headers.set("session_id", sessionId);
-		headers.set("x-client-request-id", sessionId);
+		setProviderDefaultHeader(headers, "session_id", sessionId);
+		setProviderDefaultHeader(headers, "x-client-request-id", sessionId);
 	}
 
 	return headers;
 }
 
 function appendCommaSeparatedHeader(headers: Headers, name: string, value: string): void {
+	if (isProviderHeaderSuppressed(headers, name)) return;
 	const values = (headers.get(name) ?? "")
 		.split(",")
 		.map((entry) => entry.trim())
@@ -645,8 +643,8 @@ function applyConfiguredResponsesFeatureHeaders(
 }
 
 export function buildWebSocketHeaders(
-	modelHeaders: Record<string, string> | undefined,
-	additionalHeaders: Record<string, string> | undefined,
+	modelHeaders: ProviderHeaders | undefined,
+	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	token: string,
 	sessionId: string,
@@ -657,10 +655,10 @@ export function buildWebSocketHeaders(
 	headers.delete("content-type");
 	headers.delete("OpenAI-Beta");
 	headers.delete("openai-beta");
-	headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
-	headers.set("x-client-request-id", threadId);
-	headers.set("session-id", sessionId);
-	headers.set("thread-id", threadId);
+	setProviderDefaultHeader(headers, "OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
+	setProviderDefaultHeader(headers, "x-client-request-id", threadId);
+	setProviderDefaultHeader(headers, "session-id", sessionId);
+	setProviderDefaultHeader(headers, "thread-id", threadId);
 	return headers;
 }
 
@@ -2399,18 +2397,18 @@ function compactUrl(baseUrl: string | undefined, apiKeyMode: boolean): string {
 }
 
 function buildJsonHeaders(
-	modelHeaders: Record<string, string> | undefined,
-	additionalHeaders: Record<string, string> | undefined,
+	modelHeaders: ProviderHeaders | undefined,
+	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	apiKey: string,
 	sessionId?: string,
 ): Headers {
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, apiKey);
-	headers.set("accept", "application/json");
-	headers.set("content-type", "application/json");
+	setProviderDefaultHeader(headers, "accept", "application/json");
+	setProviderDefaultHeader(headers, "content-type", "application/json");
 	if (sessionId) {
-		headers.set("session_id", sessionId);
-		headers.set("x-client-request-id", sessionId);
+		setProviderDefaultHeader(headers, "session_id", sessionId);
+		setProviderDefaultHeader(headers, "x-client-request-id", sessionId);
 	}
 	return headers;
 }
@@ -2908,7 +2906,7 @@ export async function requestOpenAINativeCompaction(
 	options: {
 		mode: "responses" | "responses-compact";
 		apiKey: string;
-		headers?: Record<string, string>;
+		headers?: ProviderHeaders;
 		signal?: AbortSignal;
 		reasoning?: SimpleStreamOptions["reasoning"];
 		sessionId?: string;
@@ -3001,7 +2999,7 @@ export async function requestOpenAINativeCompaction(
 		options.sessionId,
 	);
 	if (profile.responsesMode === "lite") {
-		headers.set(X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
+		setProviderGeneratedHeader(headers, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
 	}
 	const compactBody: Record<string, unknown> = {
 		model: body.model,
@@ -3517,7 +3515,7 @@ function createCodexStream<TApi extends Api>(
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			const requestHeaders = definedHeaders(options?.headers);
+			const requestHeaders = options?.headers;
 			const auth = { apiKey: apiKey || undefined, headers: requestHeaders };
 			if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
 				throw new Error(`No request authentication for provider: ${model.provider}`);

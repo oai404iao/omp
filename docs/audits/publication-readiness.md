@@ -33,24 +33,20 @@ generic output example.
 
 ## Dependency audit
 
-`npm audit --omit=dev` reports zero production vulnerabilities for the
-workspace lockfile. The full development graph currently reports five
-high-severity findings through older Pi development/test baselines and their
-transitive dependencies (`undici`, `ws`, `protobufjs`, and
-`brace-expansion`).
+The Pi development/test baseline is 0.84.2, and the Codex package uses
+`undici` 8.10.0. A fresh npm 11.19.0 lockfile reports zero vulnerabilities for
+both the complete dependency graph and `--omit=dev`.
 
-Those packages are not bundled into the five npm tarballs as production
-dependencies, so CI gates the production graph while this baseline is being
-prepared. Before public release, update each plugin's tested Pi development
-version and resolve or explicitly re-evaluate the full development audit.
-Dependabot is configured to keep this visible; the findings must not be
-silently accepted as a permanent exception.
+The update also moves every Pi peer range from an unconstrained wildcard to
+`>=0.84.2`, so consumers do not silently combine these extensions with the
+older vulnerable baselines that GitHub's dependency graph identified.
+Dependabot remains enabled for ongoing review.
 
 ## npm package status
 
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
-| `pi-codex-minimal-tools` | private | typecheck and 202 tests | captured tool-metadata provenance |
+| `pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
 | `pi-keep-defaults` | publishable candidate | typecheck and smoke/guard tests | watcher lifecycle/release approval |
 | `pi-subagent` | private | typecheck and 51 tests | DeepSeek Harness provenance, global preset side-effect review |
 | `pi-telegram-notify` | publishable candidate | typecheck and 8 tests | privacy/internal-hook release approval |

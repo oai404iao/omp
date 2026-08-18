@@ -30,6 +30,8 @@ Requirements:
 
 - Node.js 22.19 or newer
 - npm 11.5.1 or newer; the repository pins npm 11.19.0
+- Pi 0.84.2 or newer for extension peer compatibility; CI tests against
+  `@earendil-works/*` 0.84.2
 
 ```bash
 npm ci --ignore-scripts
