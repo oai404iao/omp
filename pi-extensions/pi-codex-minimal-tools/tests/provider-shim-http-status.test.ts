@@ -579,7 +579,7 @@ test("Responses Lite carries custom apply_patch and replays custom history in in
 	assert.equal("instructions" in requestBody, false);
 	assert.equal("tools" in requestBody, false);
 	assert.equal(requestBody.parallel_tool_calls, false);
-	assert.deepEqual(requestBody.reasoning, { context: "all_turns" });
+	assert.deepEqual(requestBody.reasoning, { effort: "low", context: "all_turns" });
 	assert.equal(requestBody.client_metadata?.ws_request_header_x_openai_internal_codex_responses_lite, undefined);
 	assert.equal(requestHeaders?.get("x-openai-internal-codex-responses-lite"), "true");
 	assert.equal(requestBody.input[0].type, "additional_tools");
@@ -738,7 +738,7 @@ test("Responses Lite native compaction preserves the Lite envelope on both compa
 		assert.equal("instructions" in request.body, false);
 		assert.equal("tools" in request.body, false);
 		assert.equal(request.body.parallel_tool_calls, false);
-		assert.deepEqual(request.body.reasoning, { context: "all_turns" });
+		assert.deepEqual(request.body.reasoning, { effort: "low", context: "all_turns" });
 		assert.equal(request.body.input[0]?.type, "additional_tools");
 		assert.equal(request.body.input[0]?.role, "developer");
 		assert.equal(request.body.input[0]?.tools[0]?.type, "namespace");
@@ -1142,11 +1142,11 @@ test("native compaction supports Codex Responses compaction and legacy /response
 	assert.equal(requests[0]?.url, "https://example.test/v1/responses");
 	assert.equal(requests[0]?.body.stream, true);
 	assert.equal(requests[0]?.headers.get("accept"), "text/event-stream");
-	assert.equal(requests[0]?.headers.get("session_id"), "session-1");
+	assert.equal(requests[0]?.headers.get("session_id"), null);
+	assert.equal(requests[0]?.headers.get("session-id"), requests[0]?.body.prompt_cache_key);
 	assert.equal(requests[0]?.headers.get("x-codex-beta-features"), "remote_compaction_v2");
 	assert.equal("context_management" in requests[0]!.body, false);
 	assert.deepEqual(requests[0]?.body.input.at(-1), { type: "compaction_trigger" });
-	assert.equal(requests[0]?.body.prompt_cache_key, "session-1");
 	assert.equal(requests[0]?.body.service_tier, "priority");
 	assert.equal(JSON.stringify(requests[0]?.body).includes("compact_threshold"), false);
 	assert.equal(requests[1]?.url, "https://example.test/v1/responses/compact");

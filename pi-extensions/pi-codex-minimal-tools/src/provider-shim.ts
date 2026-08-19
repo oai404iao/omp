@@ -38,6 +38,12 @@ import {
 import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
 import { createCodexReservedNamespaceTool } from "./codex-reserved-tools.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
+import {
+	captureCodexTurnState,
+	codexTurnStateFor,
+	resolveCodexWireIdentity,
+	uuidV7,
+} from "./codex-wire-identity.js";
 import { applyFastModeServiceTier } from "./fast-mode.js";
 import {
 	hasCodexRequestAuth,
@@ -568,10 +574,7 @@ function createCodexRequestId(): string {
 }
 
 function createPiTurnId(): string {
-	if (typeof globalThis.crypto?.randomUUID === "function") {
-		return globalThis.crypto.randomUUID();
-	}
-	return `turn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+	return uuidV7();
 }
 
 function buildBaseCodexHeaders(
@@ -594,13 +597,46 @@ function buildBaseCodexHeaders(
 	return headers;
 }
 
-function buildSSEHeaders(
+/**
+ * Resolve the wire identity (UUID v7 session/thread/window) for a pi session
+ * and thread. Returns `undefined` when no pi session id is available so
+ * session-less requests keep their previous behavior.
+ */
+function wireIdentityFor(
+	sessionId: string | undefined,
+	threadId?: string,
+): { sessionId: string; threadId: string; windowId: string } | undefined {
+	if (!sessionId) return undefined;
+	return resolveCodexWireIdentity(sessionId, threadId || sessionId);
+}
+
+/** Inject the Codex-compatible identity headers for a session. */
+function applyWireIdentityHeaders(
+	headers: Headers,
+	sessionId: string | undefined,
+	threadId: string | undefined,
+): void {
+	const wire = wireIdentityFor(sessionId, threadId);
+	if (!wire) return;
+	setProviderGeneratedHeader(headers, "session-id", wire.sessionId);
+	setProviderGeneratedHeader(headers, "thread-id", wire.threadId);
+	setProviderGeneratedHeader(headers, "x-codex-window-id", wire.windowId);
+	setProviderGeneratedHeader(headers, "x-client-request-id", wire.threadId);
+	if (sessionId) {
+		const turnState = codexTurnStateFor(sessionId);
+		if (turnState) setProviderGeneratedHeader(headers, "x-codex-turn-state", turnState);
+	}
+}
+
+/** Codex identity headers for an SSE request (exported for tests). */
+export function buildSSEHeaders(
 	modelHeaders: ProviderHeaders | undefined,
 	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	token: string,
 	sessionId: string | undefined,
 	profile: CodexRequestProfile,
+	threadId?: string,
 ): Headers {
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token);
 	setProviderDefaultHeader(headers, "OpenAI-Beta", "responses=experimental");
@@ -610,10 +646,7 @@ function buildSSEHeaders(
 		setProviderDefaultHeader(headers, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
 	}
 
-	if (sessionId) {
-		setProviderDefaultHeader(headers, "session_id", sessionId);
-		setProviderDefaultHeader(headers, "x-client-request-id", sessionId);
-	}
+	applyWireIdentityHeaders(headers, sessionId, threadId);
 
 	return headers;
 }
@@ -659,6 +692,13 @@ export function buildWebSocketHeaders(
 	setProviderDefaultHeader(headers, "x-client-request-id", threadId);
 	setProviderDefaultHeader(headers, "session-id", sessionId);
 	setProviderDefaultHeader(headers, "thread-id", threadId);
+	const wire = wireIdentityFor(sessionId, threadId);
+	if (wire) {
+		setProviderGeneratedHeader(headers, "session-id", wire.sessionId);
+		setProviderGeneratedHeader(headers, "thread-id", wire.threadId);
+		setProviderGeneratedHeader(headers, "x-codex-window-id", wire.windowId);
+		setProviderGeneratedHeader(headers, "x-client-request-id", wire.threadId);
+	}
 	return headers;
 }
 
@@ -825,13 +865,17 @@ export function withResponsesLiteWebSocketMetadata<T extends { client_metadata?:
 }
 
 function withWebSocketRequestMetadata(body: ResponsesBody, metadata: WebSocketRequestMetadata): ResponsesBody {
+	const wire = wireIdentityFor(metadata.sessionId, metadata.threadId);
+	const turnState = metadata.sessionId ? codexTurnStateFor(metadata.sessionId) : undefined;
 	return {
 		...body,
 		client_metadata: {
 			...body.client_metadata,
-			...(metadata.sessionId ? { session_id: metadata.sessionId } : {}),
-			...(metadata.threadId ? { thread_id: metadata.threadId } : {}),
+			...(metadata.sessionId ? { session_id: wire?.sessionId ?? metadata.sessionId } : {}),
+			...(metadata.threadId ? { thread_id: wire?.threadId ?? metadata.threadId } : {}),
+			...(wire ? { "x-codex-window-id": wire.windowId } : {}),
 			turn_id: metadata.turnId,
+			...(turnState ? { "x-codex-turn-state": turnState } : {}),
 			[WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY]: Date.now().toString(),
 		},
 	};
@@ -886,7 +930,7 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 		input: [],
 		text: { verbosity: ((options as { textVerbosity?: string } | undefined)?.textVerbosity ?? "low") as string },
 		include: ["reasoning.encrypted_content"],
-		prompt_cache_key: options?.sessionId,
+		prompt_cache_key: wireIdentityFor(options?.sessionId)?.sessionId ?? options?.sessionId,
 		tool_choice: "auto",
 		parallel_tool_calls: profile.supportsParallelTools,
 	};
@@ -941,6 +985,14 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 		const summary = (options as { reasoningSummary?: ReasoningSummary | null } | undefined)?.reasoningSummary
 			?? profile.reasoningSummary;
 		if (summary && summary !== "none") reasoning.summary = summary;
+		body.reasoning = reasoning;
+	} else if (lite && clampedReasoning !== "off") {
+		// Match the Codex CLI default reasoning level for Lite models: the CLI
+		// always sends `reasoning.effort` (default "low") for gpt-5.6-* models.
+		const reasoning = body.reasoning ?? {};
+		if (reasoning.effort === undefined) {
+			reasoning.effort = model.thinkingLevelMap?.low ?? "low";
+		}
 		body.reasoning = reasoning;
 	}
 
@@ -2097,7 +2149,7 @@ async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promise<void>
 		);
 		const responseItems: unknown[] = [];
 		let responseId: string | undefined;
-		for await (const event of mapCodexEvents(parseWebSocket(socket, request.signal))) {
+		for await (const event of mapCodexEvents(parseWebSocket(socket, request.signal), request.requestMetadata.sessionId)) {
 			if (event.type === "response.created" && event.response?.id) responseId = event.response.id;
 			if (event.type === "response.output_item.done" && event.item) responseItems.push(event.item);
 			if (
@@ -2125,7 +2177,10 @@ async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promise<void>
 	}
 }
 
-async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIterable<StreamEventShape> {
+async function* mapCodexEvents(
+	events: AsyncIterable<StreamEventShape>,
+	sessionKey?: string,
+): AsyncIterable<StreamEventShape> {
 	let sawTerminalResponse = false;
 	const completedOutputItems = new Set<string>();
 	const outputItemKey = (item: unknown, index?: number): string | undefined => {
@@ -2137,6 +2192,16 @@ async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIt
 	for await (const event of events) {
 		const type = typeof event.type === "string" ? event.type : undefined;
 		if (!type) continue;
+
+		if (type === "response.metadata" && sessionKey) {
+			const eventHeaders = event.headers && typeof event.headers === "object" && !Array.isArray(event.headers)
+				? (event.headers as Record<string, unknown>)
+				: undefined;
+			const turnState = eventHeaders?.["x-codex-turn-state"];
+			if (typeof turnState === "string") {
+				captureCodexTurnState(sessionKey, turnState);
+			}
+		}
 
 		if (type === "error") {
 			const nestedError = event.error;
@@ -2320,6 +2385,7 @@ async function processCapturedResponsesStream<TApi extends Api>(
 	stream: AssistantMessageEventStream,
 	model: Model<TApi>,
 	options: SimpleStreamOptions | undefined,
+	sessionKey: string | undefined,
 	deps: {
 		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
 	},
@@ -2374,7 +2440,7 @@ async function processCapturedResponsesStream<TApi extends Api>(
 			yield event;
 		}
 	};
-	const tappedEvents = captureGeneratedImages(captureContinuation(mapCodexEvents(events)), {
+	const tappedEvents = captureGeneratedImages(captureContinuation(mapCodexEvents(events, sessionKey)), {
 		cwd,
 		requestPrompt,
 		onImageSaved: (image, imageData) => deps.onImageSaved?.(image, imageData),
@@ -2406,10 +2472,7 @@ function buildJsonHeaders(
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, apiKey);
 	setProviderDefaultHeader(headers, "accept", "application/json");
 	setProviderDefaultHeader(headers, "content-type", "application/json");
-	if (sessionId) {
-		setProviderDefaultHeader(headers, "session_id", sessionId);
-		setProviderDefaultHeader(headers, "x-client-request-id", sessionId);
-	}
+	applyWireIdentityHeaders(headers, sessionId, sessionId);
 	return headers;
 }
 
@@ -2631,8 +2694,8 @@ async function collectCodexCompactionStream(
 	};
 }
 
-async function collectCodexCompactionOutput(response: Response): Promise<unknown> {
-	const result = await collectCodexCompactionStream(mapCodexEvents(parseSSE(response)));
+async function collectCodexCompactionOutput(response: Response, sessionKey?: string): Promise<unknown> {
+	const result = await collectCodexCompactionStream(mapCodexEvents(parseSSE(response), sessionKey));
 	return result.item;
 }
 
@@ -2641,6 +2704,7 @@ async function requestCodexCompactionTrigger(
 	headers: Headers,
 	body: ResponsesBody,
 	signal: AbortSignal | undefined,
+	sessionKey?: string,
 ): Promise<unknown> {
 	const bodyJson = JSON.stringify(body);
 	const dispatcher = await proxyDispatcherForUrl(url);
@@ -2654,7 +2718,7 @@ async function requestCodexCompactionTrigger(
 				body: bodyJson,
 				...(dispatcher ? { dispatcher } : {}),
 			} as RequestInit, signal);
-			if (response.ok) return await collectCodexCompactionOutput(response);
+			if (response.ok) return await collectCodexCompactionOutput(response, sessionKey);
 
 			const errorText = await response.text();
 			if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
@@ -2739,6 +2803,7 @@ async function requestCodexCompactionTriggerWebSocket(
 					countWebSocketEvents(parseWebSocket(socket, signal), () => {
 						eventCount++;
 					}),
+					requestMetadata.sessionId,
 				),
 			);
 			if (signal?.aborted) {
@@ -2807,7 +2872,7 @@ async function requestCodexCompactionTriggerWithTransport(
 	const responsesMode = resolveCodexRequestProfile(options.settings.requestProfile).responsesMode;
 	const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
 	if (transport === "sse") {
-		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
+		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal, options.sessionId);
 	}
 
 	const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
@@ -2822,7 +2887,7 @@ async function requestCodexCompactionTriggerWithTransport(
 		&& fallbackKey
 		&& websocketHttpFallbackSessions.has(fallbackKey)
 	) {
-		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
+		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal, options.sessionId);
 	}
 
 	const requestMetadata: WebSocketRequestMetadata = {
@@ -2867,7 +2932,7 @@ async function requestCodexCompactionTriggerWithTransport(
 		}
 	}
 
-	return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
+	return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal, options.sessionId);
 }
 
 function hasNonEmptyResponseMessageContent(item: Record<string, unknown>): boolean {
@@ -3115,6 +3180,7 @@ async function processWebSocketStream<TApi extends Api>(
 				stream,
 				model,
 				options,
+				options?.sessionId,
 				deps,
 				cwd,
 				requestPrompt,
@@ -3578,7 +3644,15 @@ function createCodexStream<TApi extends Api>(
 				turnId: websocketTurnId,
 			};
 			const sseHeaders = applyConfiguredResponsesFeatureHeaders(
-				buildSSEHeaders(model.headers, requestHeaders, accountId, apiKey, options?.sessionId, requestProfile),
+				buildSSEHeaders(
+					model.headers,
+					requestHeaders,
+					accountId,
+					apiKey,
+					websocketSessionId || options?.sessionId,
+					requestProfile,
+					websocketThreadId || websocketRequestId,
+				),
 				settings,
 				model as Model<Api>,
 			);
@@ -3717,6 +3791,12 @@ function createCodexStream<TApi extends Api>(
 					await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 
 					if (response.ok) {
+						if (options?.sessionId) {
+							captureCodexTurnState(
+								options.sessionId,
+								response.headers.get("x-codex-turn-state") ?? undefined,
+							);
+						}
 						break;
 					}
 
@@ -3764,6 +3844,7 @@ function createCodexStream<TApi extends Api>(
 				stream,
 				model,
 				options,
+				options?.sessionId,
 				deps,
 				requestCwd,
 				requestPrompt,

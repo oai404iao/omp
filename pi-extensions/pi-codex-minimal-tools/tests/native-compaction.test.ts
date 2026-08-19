@@ -335,8 +335,16 @@ test("responses compaction is requested through Pi's session compaction hook", a
 		]);
 		assert.equal(result.compaction.details.sourceEntryId, undefined);
 		assert.deepEqual(requestBody.input.at(-1), { type: "compaction_trigger" });
-		assert.equal(requestBody.prompt_cache_key, "session-1");
-		assert.equal(requestHeaders?.get("session_id"), "session-1");
+		assert.ok(
+			typeof requestBody.prompt_cache_key === "string"
+			&& /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestBody.prompt_cache_key),
+		);
+		assert.equal(requestHeaders?.get("session-id"), requestBody.prompt_cache_key);
+		assert.equal(requestHeaders?.get("session_id"), null);
+		assert.ok(
+			requestHeaders?.get("x-codex-window-id")
+			&& /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestHeaders.get("x-codex-window-id")!),
+		);
 		assert.equal(requestHeaders?.get("x-codex-beta-features"), "remote_compaction_v2");
 	} finally {
 		globalThis.fetch = previousFetch;

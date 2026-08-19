@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
 import test, { afterEach } from "node:test";
+import { resetCodexWireState } from "../src/codex-wire-identity.js";
 import {
 	buildWebSocketHeaders,
 	closeProviderWebSocketSessions,
@@ -14,11 +15,15 @@ import {
 	resolveResponsesWebSocketUrl,
 	sendWebSocketRequest,
 } from "../src/provider-shim.js";
+
+const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 import { loadSettings } from "../src/settings.js";
 
 const originalPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 afterEach(() => {
+	resetCodexWireState();
 	closeProviderWebSocketSessions();
 	if (originalPiCodingAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = originalPiCodingAgentDir;
@@ -397,9 +402,13 @@ test("OpenAI WebSocket URL and headers use the normal Responses endpoint and Pi 
 	assert.equal(headers.get("x-remove"), null);
 	assert.equal(headers.get("chatgpt-account-id"), null);
 	assert.equal(headers.get("openai-beta"), "responses_websockets=2026-02-06");
-	assert.equal(headers.get("session-id"), "pi-session");
-	assert.equal(headers.get("thread-id"), "pi-session");
-	assert.equal(headers.get("x-client-request-id"), "pi-session");
+	const sessionId = headers.get("session-id");
+	const threadId = headers.get("thread-id");
+	assert.ok(sessionId && UUID_V7_PATTERN.test(sessionId));
+	assert.ok(threadId && UUID_V7_PATTERN.test(threadId));
+	assert.notEqual(threadId, sessionId);
+	assert.equal(headers.get("x-client-request-id"), threadId);
+	assert.ok(headers.get("x-codex-window-id") && UUID_V7_PATTERN.test(headers.get("x-codex-window-id")!));
 });
 
 test("WebSocket request send has an abortable timeout", async () => {
@@ -432,15 +441,23 @@ test("openai websocket transport performs an authenticated response.create reque
 		assert.equal(server.requests.length, 1);
 		assert.equal(server.requests[0]?.type, "response.create");
 		assert.equal(server.requests[0]?.model, "gpt-5.5");
-		assert.equal(server.requests[0]?.client_metadata?.session_id, "pi-session");
-		assert.equal(server.requests[0]?.client_metadata?.thread_id, "pi-session");
+		const handshakeHeaders = server.handshakes[0]?.headers as Record<string, string> | undefined;
+		const wireSessionId = handshakeHeaders?.["session-id"];
+		const wireThreadId = handshakeHeaders?.["thread-id"];
+		assert.ok(wireSessionId && UUID_V7_PATTERN.test(wireSessionId));
+		assert.ok(wireThreadId && UUID_V7_PATTERN.test(wireThreadId));
+		assert.equal(server.requests[0]?.client_metadata?.session_id, wireSessionId);
+		assert.equal(server.requests[0]?.client_metadata?.thread_id, wireThreadId);
+		assert.equal(
+			server.requests[0]?.client_metadata?.["x-codex-window-id"],
+			handshakeHeaders?.["x-codex-window-id"],
+		);
 		assert.equal(typeof server.requests[0]?.client_metadata?.turn_id, "string");
 		assert.match(server.requests[0]?.client_metadata?.["x-codex-ws-stream-request-start-ms"], /^\d+$/);
 		assert.equal(server.handshakes[0]?.headers.authorization, "Bearer pi-resolved-api-key");
 		assert.equal(server.handshakes[0]?.headers["x-pi-auth"], "resolved");
 		assert.equal(server.handshakes[0]?.headers["openai-beta"], "responses_websockets=2026-02-06");
-		assert.equal(server.handshakes[0]?.headers["session-id"], "pi-session");
-		assert.equal(server.handshakes[0]?.headers["thread-id"], "pi-session");
+		assert.equal(server.handshakes[0]?.headers["x-client-request-id"], wireThreadId);
 	} finally {
 		await server.close();
 	}
@@ -462,11 +479,15 @@ test("explicit Pi request metadata supplies the WebSocket turn identity", async 
 		});
 
 		assert.equal(result.stopReason, "stop");
-		assert.equal(server.handshakes[0]?.headers["session-id"], "pi-session-metadata");
-		assert.equal(server.handshakes[0]?.headers["thread-id"], "pi-thread");
-		assert.equal(server.handshakes[0]?.headers["x-client-request-id"], "pi-thread");
-		assert.equal(server.requests[0]?.client_metadata?.session_id, "pi-session-metadata");
-		assert.equal(server.requests[0]?.client_metadata?.thread_id, "pi-thread");
+		const handshakeHeaders = server.handshakes[0]?.headers as Record<string, string> | undefined;
+		const wireSessionId = handshakeHeaders?.["session-id"];
+		const wireThreadId = handshakeHeaders?.["thread-id"];
+		assert.ok(wireSessionId && UUID_V7_PATTERN.test(wireSessionId));
+		assert.ok(wireThreadId && UUID_V7_PATTERN.test(wireThreadId));
+		assert.notEqual(wireThreadId, wireSessionId);
+		assert.equal(handshakeHeaders?.["x-client-request-id"], wireThreadId);
+		assert.equal(server.requests[0]?.client_metadata?.session_id, wireSessionId);
+		assert.equal(server.requests[0]?.client_metadata?.thread_id, wireThreadId);
 		assert.equal(server.requests[0]?.client_metadata?.turn_id, "pi-turn");
 	} finally {
 		await server.close();
