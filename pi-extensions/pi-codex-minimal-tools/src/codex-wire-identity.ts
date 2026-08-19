@@ -32,6 +32,7 @@ interface CachedSession {
 
 const sessionCache = new Map<string, CachedSession>();
 const turnStateCache = new Map<string, string>();
+const installationIdCache = new Map<string, string>();
 
 function randomBytes(count: number): Uint8Array {
 	if (typeof globalThis.crypto?.getRandomValues === "function") {
@@ -73,6 +74,29 @@ export function uuidV7(): string {
 	bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70;
 	bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
 	return uuidBytesToHex(bytes);
+}
+
+function uuidV4(): string {
+	const bytes = randomBytes(16);
+	bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+	bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+	return uuidBytesToHex(bytes);
+}
+
+/**
+ * Stable per-session installation id (UUID v4), mirroring the CLI's
+ * `installation_id` file: one opaque id per installation that never changes
+ * for the lifetime of the session.
+ */
+export function codexInstallationIdFor(sessionKey: string): string {
+	let id = installationIdCache.get(sessionKey);
+	if (!id) {
+		id = typeof globalThis.crypto?.randomUUID === "function"
+			? globalThis.crypto.randomUUID()
+			: uuidV4();
+		installationIdCache.set(sessionKey, id);
+	}
+	return id;
 }
 
 function newCachedSession(): CachedSession {
@@ -149,6 +173,7 @@ export function captureCodexTurnState(sessionKey: string, token: string | undefi
 export function resetCodexWireState(): void {
 	sessionCache.clear();
 	turnStateCache.clear();
+	installationIdCache.clear();
 }
 
 /** Current number of cached identities (diagnostics/tests). */

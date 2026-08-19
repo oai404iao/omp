@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 import {
 	captureCodexTurnState,
+	codexInstallationIdFor,
 	codexTurnStateFor,
 	resetCodexWireState,
 	resolveCodexWireIdentity,
@@ -9,7 +10,12 @@ import {
 	uuidV7,
 } from "../src/codex-wire-identity.js";
 import { resolveCodexRequestProfile } from "../src/codex-request-profile.js";
-import { buildRequestBody, buildSSEHeaders, buildWebSocketHeaders } from "../src/provider-shim.js";
+import {
+	buildRequestBody,
+	buildSSEHeaders,
+	buildWebSocketHeaders,
+	withSseRequestMetadata,
+} from "../src/provider-shim.js";
 
 const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -60,6 +66,13 @@ test("rotateCodexWindowId changes only the window id", () => {
 	assert.equal(after.threadId, before.threadId);
 	assert.notEqual(after.windowId, before.windowId);
 	assert.match(after.windowId, UUID_V7_PATTERN);
+});
+
+test("codexInstallationIdFor is a stable per-session UUID v4", () => {
+	const first = codexInstallationIdFor("sess-1");
+	assert.match(first, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+	assert.equal(codexInstallationIdFor("sess-1"), first);
+	assert.notEqual(codexInstallationIdFor("sess-2"), first);
 });
 
 test("turn-state capture stores and replays the sticky-routing token", () => {
@@ -135,6 +148,27 @@ test("buildWebSocketHeaders emits the same UUID v7 identity", () => {
 	// Same wire session as the SSE request for the same pi session.
 	const sse = buildSSEHeaders(undefined, undefined, undefined, "token", "sess-1", liteProfile);
 	assert.equal(sessionId, sse.get("session-id"));
+});
+
+test("withSseRequestMetadata injects the Codex client_metadata envelope", () => {
+	const body = buildRequestBody(modelFixture(), contextFixture(), liteProfile, { sessionId: "sess-1" }) as any;
+	const sse = withSseRequestMetadata(body, {
+		sessionId: "sess-1",
+		threadId: "sess-1",
+		turnId: "0198e2c6-7a5b-7c00-9d1e-2f3a4b5c6d7e",
+	}) as any;
+	assert.ok(sse.client_metadata);
+	assert.equal(sse.client_metadata.session_id, body.prompt_cache_key);
+	assert.match(sse.client_metadata["x-codex-installation-id"], /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+	const turnMetadata = JSON.parse(sse.client_metadata["x-codex-turn-metadata"]);
+	assert.equal(turnMetadata.request_kind, "turn");
+	assert.equal(turnMetadata.turn_id, "0198e2c6-7a5b-7c00-9d1e-2f3a4b5c6d7e");
+	assert.equal(turnMetadata.window_id, sse.client_metadata["x-codex-window-id"]);
+	// SSE keeps the Lite/timing fields out of client_metadata.
+	assert.equal(sse.client_metadata["ws_request_header_x_openai_internal_codex_responses_lite"], undefined);
+	assert.equal(sse.client_metadata["x-codex-ws-stream-request-start-ms"], undefined);
+	// Session-less requests stay untouched.
+	assert.equal(withSseRequestMetadata(body, { turnId: "t1" }), body);
 });
 
 test("buildRequestBody defaults reasoning.effort to low for Lite models", () => {

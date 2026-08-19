@@ -452,6 +452,14 @@ test("openai websocket transport performs an authenticated response.create reque
 			server.requests[0]?.client_metadata?.["x-codex-window-id"],
 			handshakeHeaders?.["x-codex-window-id"],
 		);
+		assert.match(
+			server.requests[0]?.client_metadata?.["x-codex-installation-id"] ?? "",
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+		);
+		const wsTurnMetadata = JSON.parse(server.requests[0]?.client_metadata?.["x-codex-turn-metadata"] ?? "{}");
+		assert.equal(wsTurnMetadata.request_kind, "turn");
+		assert.equal(wsTurnMetadata.session_id, wireSessionId);
+		assert.equal(wsTurnMetadata.installation_id, server.requests[0]?.client_metadata?.["x-codex-installation-id"]);
 		assert.equal(typeof server.requests[0]?.client_metadata?.turn_id, "string");
 		assert.match(server.requests[0]?.client_metadata?.["x-codex-ws-stream-request-start-ms"], /^\d+$/);
 		assert.equal(server.handshakes[0]?.headers.authorization, "Bearer pi-resolved-api-key");

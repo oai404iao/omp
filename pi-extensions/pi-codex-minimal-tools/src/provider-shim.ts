@@ -40,6 +40,7 @@ import { createCodexReservedNamespaceTool } from "./codex-reserved-tools.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 import {
 	captureCodexTurnState,
+	codexInstallationIdFor,
 	codexTurnStateFor,
 	resolveCodexWireIdentity,
 	uuidV7,
@@ -219,6 +220,7 @@ interface WebSocketRequestMetadata {
 	sessionId?: string;
 	threadId?: string;
 	turnId: string;
+	requestKind?: "turn" | "compaction" | "prewarm";
 }
 
 export interface OpenAIResponsesProviderController {
@@ -864,9 +866,72 @@ export function withResponsesLiteWebSocketMetadata<T extends { client_metadata?:
 	};
 }
 
+/**
+ * Build the `x-codex-turn-metadata` compatibility blob the CLI sends inside
+ * `client_metadata` for every request kind. The gateway currently rewrites
+ * this blob (privacy normalization); once it honors client-supplied values,
+ * this keeps the shape identical to the CLI.
+ */
+function buildCodexTurnMetadataJson(
+	sessionId: string,
+	threadId: string | undefined,
+	turnId: string,
+	requestKind: "turn" | "compaction" | "prewarm",
+): string {
+	const wire = wireIdentityFor(sessionId, threadId);
+	if (!wire) return "";
+	const payload: Record<string, string | number> = {
+		installation_id: codexInstallationIdFor(sessionId),
+		session_id: wire.sessionId,
+		thread_id: wire.threadId,
+		turn_id: turnId,
+		window_id: wire.windowId,
+		request_kind: requestKind,
+		turn_started_at_unix_ms: Date.now(),
+	};
+	return JSON.stringify(payload);
+}
+
+/**
+ * Inject the Codex-compatible `client_metadata` for an SSE request, sourced
+ * from the same (session, thread, turn) metadata as the WebSocket path. The
+ * WebSocket-only fields (`x-codex-ws-stream-request-start-ms`, turn-state,
+ * Lite flag) stay out: SSE carries the Lite header and turn-state header.
+ */
+export function withSseRequestMetadata(body: ResponsesBody, metadata: WebSocketRequestMetadata): ResponsesBody {
+	const wire = wireIdentityFor(metadata.sessionId, metadata.threadId);
+	if (!metadata.sessionId || !wire) return body;
+	const turnMetadata = buildCodexTurnMetadataJson(
+		metadata.sessionId,
+		metadata.threadId,
+		metadata.turnId,
+		metadata.requestKind ?? "turn",
+	);
+	return {
+		...body,
+		client_metadata: {
+			...body.client_metadata,
+			session_id: wire.sessionId,
+			thread_id: wire.threadId,
+			"x-codex-window-id": wire.windowId,
+			turn_id: metadata.turnId,
+			"x-codex-installation-id": codexInstallationIdFor(metadata.sessionId),
+			...(turnMetadata ? { "x-codex-turn-metadata": turnMetadata } : {}),
+		},
+	};
+}
+
 function withWebSocketRequestMetadata(body: ResponsesBody, metadata: WebSocketRequestMetadata): ResponsesBody {
 	const wire = wireIdentityFor(metadata.sessionId, metadata.threadId);
 	const turnState = metadata.sessionId ? codexTurnStateFor(metadata.sessionId) : undefined;
+	const turnMetadata = metadata.sessionId
+		? buildCodexTurnMetadataJson(
+			metadata.sessionId,
+			metadata.threadId,
+			metadata.turnId,
+			metadata.requestKind ?? "turn",
+		)
+		: "";
 	return {
 		...body,
 		client_metadata: {
@@ -875,6 +940,8 @@ function withWebSocketRequestMetadata(body: ResponsesBody, metadata: WebSocketRe
 			...(metadata.threadId ? { thread_id: wire?.threadId ?? metadata.threadId } : {}),
 			...(wire ? { "x-codex-window-id": wire.windowId } : {}),
 			turn_id: metadata.turnId,
+			...(metadata.sessionId ? { "x-codex-installation-id": codexInstallationIdFor(metadata.sessionId) } : {}),
+			...(turnMetadata ? { "x-codex-turn-metadata": turnMetadata } : {}),
 			...(turnState ? { "x-codex-turn-state": turnState } : {}),
 			[WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY]: Date.now().toString(),
 		},
@@ -2871,8 +2938,19 @@ async function requestCodexCompactionTriggerWithTransport(
 	const transport = options.settings.openaiTransport;
 	const responsesMode = resolveCodexRequestProfile(options.settings.requestProfile).responsesMode;
 	const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
+	const requestMetadata: WebSocketRequestMetadata = {
+		...(options.sessionId ? { sessionId: options.sessionId, threadId: options.sessionId } : {}),
+		turnId: options.turnId || createPiTurnId(),
+		requestKind: "compaction",
+	};
 	if (transport === "sse") {
-		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal, options.sessionId);
+		return requestCodexCompactionTrigger(
+			sseUrl,
+			headers.sse,
+			withSseRequestMetadata(body, requestMetadata),
+			options.signal,
+			options.sessionId,
+		);
 	}
 
 	const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
@@ -2887,13 +2965,15 @@ async function requestCodexCompactionTriggerWithTransport(
 		&& fallbackKey
 		&& websocketHttpFallbackSessions.has(fallbackKey)
 	) {
-		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal, options.sessionId);
+		return requestCodexCompactionTrigger(
+			sseUrl,
+			headers.sse,
+			withSseRequestMetadata(body, requestMetadata),
+			options.signal,
+			options.sessionId,
+		);
 	}
 
-	const requestMetadata: WebSocketRequestMetadata = {
-		...(options.sessionId ? { sessionId: options.sessionId, threadId: options.sessionId } : {}),
-		turnId: options.turnId || createPiTurnId(),
-	};
 	const maxRetries = Math.min(
 		CODEX_REMOTE_COMPACTION_STREAM_RETRIES,
 		webSocketStreamMaxRetries({
@@ -2932,7 +3012,13 @@ async function requestCodexCompactionTriggerWithTransport(
 		}
 	}
 
-	return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal, options.sessionId);
+	return requestCodexCompactionTrigger(
+		sseUrl,
+		headers.sse,
+		withSseRequestMetadata(body, requestMetadata),
+		options.signal,
+		options.sessionId,
+	);
 }
 
 function hasNonEmptyResponseMessageContent(item: Record<string, unknown>): boolean {
@@ -3664,7 +3750,7 @@ function createCodexStream<TApi extends Api>(
 				websocketSessionId || websocketRequestId,
 				websocketThreadId || websocketRequestId,
 			), settings, model as Model<Api>);
-			const bodyJson = JSON.stringify(body);
+			const bodyJson = JSON.stringify(withSseRequestMetadata(body, websocketRequestMetadata));
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
 			const configuredTransport: ProviderTransport = settings.openaiTransport;
 			// Pi exposes a session transport setting through stream options. Treat
@@ -4021,6 +4107,7 @@ export function registerOpenAIResponsesProviders(
 				sessionId,
 				threadId: sessionId,
 				turnId: createPiTurnId(),
+				requestKind: "prewarm",
 			},
 			signal: abortController.signal,
 			connectTimeoutMs: WEBSOCKET_PREWARM_TIMEOUT_MS,

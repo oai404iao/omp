@@ -530,7 +530,7 @@ test("Responses Lite carries custom apply_patch and replays custom history in in
 	}) as typeof fetch;
 
 	const result = await runCodexProvider(
-		{},
+		{ sessionId: "pi-session" },
 		{ input: ["text", "image"] },
 		[{
 			name: "apply_patch",
@@ -581,6 +581,24 @@ test("Responses Lite carries custom apply_patch and replays custom history in in
 	assert.equal(requestBody.parallel_tool_calls, false);
 	assert.deepEqual(requestBody.reasoning, { effort: "low", context: "all_turns" });
 	assert.equal(requestBody.client_metadata?.ws_request_header_x_openai_internal_codex_responses_lite, undefined);
+	assert.ok(
+		typeof requestBody.client_metadata?.session_id === "string"
+		&& /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestBody.client_metadata.session_id),
+	);
+	assert.equal(requestBody.client_metadata?.session_id, requestBody.prompt_cache_key);
+	assert.equal(requestBody.client_metadata?.thread_id, requestHeaders?.get("thread-id"));
+	assert.equal(requestBody.client_metadata?.["x-codex-window-id"], requestHeaders?.get("x-codex-window-id"));
+	assert.ok(
+		typeof requestBody.client_metadata?.turn_id === "string"
+		&& /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestBody.client_metadata.turn_id),
+	);
+	assert.match(requestBody.client_metadata?.["x-codex-installation-id"] ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+	const sseTurnMetadata = JSON.parse(requestBody.client_metadata?.["x-codex-turn-metadata"] ?? "{}");
+	assert.equal(sseTurnMetadata.request_kind, "turn");
+	assert.equal(sseTurnMetadata.session_id, requestBody.client_metadata?.session_id);
+	assert.equal(sseTurnMetadata.turn_id, requestBody.client_metadata?.turn_id);
+	assert.equal(sseTurnMetadata.installation_id, requestBody.client_metadata?.["x-codex-installation-id"]);
+	assert.equal(requestBody.client_metadata?.["x-codex-ws-stream-request-start-ms"], undefined);
 	assert.equal(requestHeaders?.get("x-openai-internal-codex-responses-lite"), "true");
 	assert.equal(requestBody.input[0].type, "additional_tools");
 	assert.equal(requestBody.input[0].role, "developer");
