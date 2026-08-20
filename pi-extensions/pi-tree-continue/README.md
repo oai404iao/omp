@@ -2,19 +2,26 @@
 
 Adds `/continue` for Pi sessions. It resumes the agent without adding any new message to the LLM context.
 
-Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+Compatibility: experimental against Pi 0.84.2 only. It is not compatible by
+contract with any Pi version.
 
 > npm identity: `@oai404iao/pi-tree-continue`. This experimental package
-> remains private, so install it from a local checkout.
+> remains private and blocked from publication.
+
+> **Unsupported private API hook.** Pi has no public extension API for
+> message-free continuation. This package patches private `AgentSession`
+> internals and is not safe to distribute or rely on for production workflows.
+> It stays private until Pi provides an upstream continuation API with defined
+> lifecycle, authentication, and branch-prompt semantics.
 
 This is useful after transient provider failures such as 429s, network drops, or server errors where Pi is idle but the last useful point in the session is a `toolResult`.
 
 ## Install
 
-Install as a local Pi package:
+For local experimentation only:
 
 ```bash
-pi install /absolute/path/to/pi-tree-continue
+pi install ./pi-extensions/pi-tree-continue
 ```
 
 Restart Pi or run `/reload` after installation.
@@ -36,17 +43,22 @@ Instead, it:
 
 1. Finds the safe continuation `toolResult` on the current branch.
 2. Uses Pi's tree navigation API to make that tool result the active leaf when needed.
-3. Calls Pi's internal agent continuation path, the same kind of continuation Pi normally runs after tool results.
+3. Attempts to call Pi's internal agent continuation path.
 
 By default, `/continue` is conservative. It only continues from the current leaf if the leaf is already a `toolResult`, or if everything after the latest `toolResult` is ignorable metadata plus an empty assistant `error` / `aborted` entry. This avoids silently abandoning normal user or assistant messages.
 
 Use `/continue --force` when you intentionally want to roll the branch back to the latest `toolResult` even if normal entries exist after it.
 
-Because Pi does not currently expose a public extension API for message-free continuation, this package installs a small runtime hook into `AgentSession` to access the active session's internal `agent.continue()` method.
+Because Pi does not currently expose a public extension API for message-free
+continuation, this package installs a runtime hook into private
+`AgentSession` fields. That hook cannot currently preserve Pi's documented
+agent-run lifecycle, authentication preflight, and per-turn system-prompt
+semantics. Do not treat it as equivalent to normal Pi continuation.
 
 ## License and publication status
 
 MIT © 2026 oai404iao. See [LICENSE](LICENSE).
 
-This experimental package remains private until its internal Pi API dependency
-has tests and a reviewed compatibility policy.
+This experimental package remains private until Pi exposes a supported
+message-free continuation API. Tests alone cannot make the current private
+hook safe across Pi versions.

@@ -1,9 +1,10 @@
-import { AgentSession, type ExtensionAPI, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import { AgentSession, VERSION, type ExtensionAPI, type SessionEntry } from "@earendil-works/pi-coding-agent";
 
 const PATCHED = Symbol.for("pi-tree-continue.agent-session-patched");
 const ORIGINAL_BIND = Symbol.for("pi-tree-continue.original-bind-extension-core");
 const STATE = Symbol.for("pi-tree-continue.state");
 const PATCH_VERSION = 2;
+export const TESTED_PI_VERSION = "0.84.2";
 
 interface InternalAgentSession {
 	agent: {
@@ -32,7 +33,18 @@ interface TreeContinueState {
 	sessions: WeakMap<object, InternalAgentSession>;
 }
 
+export function supportsTestedPiVersion(version = VERSION): boolean {
+	return version === TESTED_PI_VERSION;
+}
+
 export default function treeContinueExtension(pi: ExtensionAPI) {
+	if (!supportsTestedPiVersion()) {
+		console.warn(
+			`[pi-tree-continue] disabled: this private AgentSession hook supports Pi ${TESTED_PI_VERSION} only (found ${VERSION}).`,
+		);
+		return;
+	}
+
 	const patchInstalled = installAgentSessionPatch();
 
 	pi.registerCommand("continue", {

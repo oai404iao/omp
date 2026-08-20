@@ -22,7 +22,7 @@ not change the private/public eligibility below.
 | `@oai404iao/pi-keep-defaults` | `0.1.3` | public; guarded manual releases enabled |
 | `@oai404iao/pi-subagent` | `0.2.0` | private; beta candidate after provenance review |
 | `@oai404iao/pi-telegram-notify` | `0.1.3` | public; guarded manual releases enabled |
-| `@oai404iao/pi-tree-continue` | `0.1.0` | private; experimental |
+| `@oai404iao/pi-tree-continue` | `0.1.0` | private; blocked pending a public Pi continuation API |
 
 The six scoped npm packages use independent versions.
 `pi-external-thinking` remains private until its compatibility and
@@ -34,8 +34,9 @@ Requirements:
 
 - Node.js 22.19 or newer
 - npm 11.5.1 or newer; the repository pins npm 11.19.0
-- Pi 0.84.2 or newer for extension peer compatibility; CI tests against
-  `@earendil-works/*` 0.84.2
+- Pi 0.84.2 or newer for public/supported extension peer compatibility; CI
+  tests against `@earendil-works/*` 0.84.2. The private
+  `pi-tree-continue` hook is pinned to exactly 0.84.2.
 
 ```bash
 npm ci --ignore-scripts
