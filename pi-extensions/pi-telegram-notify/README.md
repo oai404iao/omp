@@ -1,6 +1,8 @@
-# pi-telegram-notify
+# @oai404iao/pi-telegram-notify
 
 Pi 完成任务、最终停止于错误、或通过 `ask_user_question` 等待你的回复时，向 Telegram Bot 发送一条通知。
+
+兼容性：Pi 0.84.2 或更高版本；当前测试基线为 0.84.2。
 
 通知固定使用三行，正文概要会压缩为空白规范化后的前 30 个字符：
 
@@ -12,7 +14,21 @@ Pi 完成任务、最终停止于错误、或通过 `ask_user_question` 等待�
 
 `状态` 为 `完成`、`错误` 或 `等待回复`。
 
+## 隐私
+
+每条通知都会将 Pi 当前项目的**绝对工作目录**以及概要文本发送给
+Telegram。概要只保留空白规范化后的前 30 个字符，但截断不等于脱敏；
+这 30 个字符仍可能包含文件名、错误信息或其他敏感内容。
+
 ## 安装
+
+首个公开版本发布后：
+
+```bash
+pi install npm:@oai404iao/pi-telegram-notify
+```
+
+本地开发或尚未发布时：
 
 ```bash
 pi install /absolute/path/to/pi-telegram-notify
@@ -34,6 +50,9 @@ pi install /absolute/path/to/pi-telegram-notify
 <PI_CODING_AGENT_DIR>/extensions/pi-telegram-notify/config.json
 ```
 
+npm 包名使用 `@oai404iao/pi-telegram-notify`，但配置目录继续使用
+`pi-telegram-notify`，以保持已有配置兼容。
+
 将 [`config.example.json`](config.example.json) 和
 [`config.schema.json`](config.schema.json) 一起复制到该目录；示例中的
 `"$schema": "./config.schema.json"` 会让支持 JSON Schema 的编辑器提供字段补全和校验。
@@ -54,15 +73,18 @@ pi install /absolute/path/to/pi-telegram-notify
 
 ## 触发条件
 
-- `完成`：Pi 的 agent loop 确实结束，且最后一个 assistant 消息正常结束。
-- `错误`：Pi 已决定不再自动重试或自动压缩后继续，且最后一个 assistant 消息是错误。
+- `完成`：Pi 的 agent loop 确实结束，且当前 active branch 的最后一个
+  assistant 消息以 `stop` 或 `length` 结束。
+- `错误`：Pi 已决定不再自动重试或自动压缩后继续，且当前 active branch
+  的最后一个 assistant 消息以 `error` 结束。
 - `等待回复`：优先订阅
   `@juicesharp/rpiv-ask-user-question` 的 `rpiv:ask-user:prompt` 公开事件；
   同时对 `ask_user_question` / `ask-user-question` 工具名提供回退监听。
 
-“完成/错误”使用一个很小的 Pi 内部 post-run 兼容钩子，是为了避免在
-自动重试、上下文压缩并继续执行时过早发送错误通知。若未来 Pi 移除了该
-内部钩子，扩展会回退到公开的 `agent_end` 事件。
+“完成/错误”只使用 Pi 0.84.2 的公开 `agent_settled` 事件，并从
+`ctx.sessionManager.getBranch()` 读取当前 active branch。该事件只在没有
+自动重试、自动压缩或排队 continuation 时触发通知。`toolUse` 和
+`aborted` assistant 消息会被忽略；`agent_end` 不会触发通知。
 
 通知请求是 best-effort：网络或 Telegram API 失败不会中断 Pi 的任务。
 

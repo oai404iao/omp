@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://unpkg.com/pi-codex-minimal-tools@1/config.schema.json",
-  "title": "pi-codex-minimal-tools configuration",
-  "description": "Configuration for the pi-codex-minimal-tools Pi extension.",
+  "$id": "https://unpkg.com/@oai404iao/pi-codex-minimal-tools@1/config.schema.json",
+  "title": "@oai404iao/pi-codex-minimal-tools configuration",
+  "description": "Configuration for the @oai404iao/pi-codex-minimal-tools Pi extension.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "$schema": {
       "type": "string",
       "description": "JSON Schema URL used by editors for validation and completion.",
-      "default": "https://unpkg.com/pi-codex-minimal-tools@1/config.schema.json"
+      "default": "https://unpkg.com/@oai404iao/pi-codex-minimal-tools@1/config.schema.json"
     },
     "enabled": {
       "type": "boolean",
