@@ -43,8 +43,11 @@ reviewed pull request after every prerequisite below is complete.
 
 ## npm bootstrap and trusted publishing
 
+All workspace package manifests use the `@oai404iao` npm scope. Scope naming
+does not override each package's `private` flag or release eligibility.
+
 An npm trusted publisher can only be attached after a package exists. For each
-new package:
+new scoped package:
 
 1. Recheck package-name availability and ownership.
 2. Perform the one-time initial publish interactively with 2FA from the exact
@@ -81,13 +84,21 @@ Release eligibility is explicit in two places:
 2. the matching package manifest must not set `"private": true`.
 
 CI rejects mismatches. The guarded release scripts currently allow only
-`pi-keep-defaults` and `pi-telegram-notify`. These packages remain blocked by
-the global workflow lock and npm bootstrap requirements.
+`@oai404iao/pi-keep-defaults` and `@oai404iao/pi-telegram-notify`. These
+packages remain blocked by the global workflow lock and npm bootstrap
+requirements.
 
-`pi-codex-minimal-tools`, `pi-subagent`, and `pi-tree-continue` are private.
-Promote one only in a dedicated reviewed change after its documented source,
-compatibility, and release-track gates are complete. A prerelease package must
-also use prerelease SemVer so the workflow selects the `next` dist-tag.
+`@oai404iao/pi-codex-minimal-tools`, `@oai404iao/pi-subagent`, and
+`@oai404iao/pi-tree-continue` are private. Promote one only in a dedicated
+reviewed change after its documented source, compatibility, and release-track
+gates are complete. A prerelease package must also use prerelease SemVer so
+the workflow selects the `next` dist-tag.
+
+All package peer ranges currently require Pi 0.84.2 or newer. Update the
+development baseline, peer ranges, lockfile, compatibility notes, and tests
+together. Do not lower the minimum below the tested baseline. The open-ended
+upper range is an intentional forward-compatibility policy; evaluate each new
+Pi baseline in CI and tighten the range if an incompatibility is found.
 
 Official references:
 
@@ -116,8 +127,8 @@ Official references:
 Tags use Changesets' package-level format:
 
 ```text
-pi-subagent@0.3.0
-pi-telegram-notify@0.1.1
+@oai404iao/pi-subagent@0.3.0
+@oai404iao/pi-telegram-notify@0.1.2
 ```
 
 Prerelease SemVer versions are published with the `next` dist-tag; stable

@@ -1,6 +1,6 @@
 {
-  "name": "pi-keep-defaults",
-  "version": "0.1.0",
+  "name": "@oai404iao/pi-keep-defaults",
+  "version": "0.1.2",
   "description": "Freeze default model/thinking in settings.json so switching models or toggling thinking never rewrites the defaults.",
   "repository": {
     "type": "git",
@@ -32,16 +32,16 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": ">=0.84.2"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.84.2",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types test/smoke.mjs && PI_CODING_AGENT_DIR=/tmp/pi-kd-guard node --experimental-strip-types test/guard.mjs",
+    "test": "node --experimental-strip-types test/settings-patch.mjs && node --experimental-strip-types test/fallback.mjs && node --experimental-strip-types test/legacy-lifecycle.mjs && node --experimental-strip-types test/smoke.mjs && node --experimental-strip-types test/guard.mjs",
     "check": "npm run typecheck && npm test"
   },
   "files": [

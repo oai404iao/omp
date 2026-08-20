@@ -1,10 +1,19 @@
+import type { ProviderHeaders } from "@earendil-works/pi-ai";
+import {
+	isProviderHeaderSuppressed,
+	mergeProviderHeaders,
+	providerHeaderDirective,
+	setProviderDefaultHeader,
+	setProviderGeneratedHeader,
+} from "./provider-headers.js";
+
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 
 export interface CodexRequestAuth {
 	apiKey?: string;
-	headers?: Record<string, string>;
+	headers?: ProviderHeaders;
 }
 
 function bearerToken(headers: Headers): string | undefined {
@@ -14,33 +23,30 @@ function bearerToken(headers: Headers): string | undefined {
 }
 
 function authHeaders(options: {
-	modelHeaders?: Record<string, string>;
+	modelHeaders?: ProviderHeaders;
 	auth: CodexRequestAuth;
 }): Headers {
-	const headers = new Headers(options.modelHeaders);
-	for (const [name, value] of Object.entries(options.auth.headers ?? {})) headers.set(name, value);
-	return headers;
-}
-
-function explicitAuthorization(headers: Record<string, string> | undefined): string | undefined {
-	const entry = Object.entries(headers ?? {}).find(
-		([name, value]) => name.toLowerCase() === "authorization" && value.trim(),
-	);
-	return entry?.[1];
+	return mergeProviderHeaders(options.modelHeaders, options.auth.headers);
 }
 
 export function hasCodexRequestAuth(options: {
-	modelHeaders?: Record<string, string>;
+	modelHeaders?: ProviderHeaders;
 	auth: CodexRequestAuth;
 }): boolean {
-	if (options.auth.apiKey) return true;
 	const headers = authHeaders(options);
+	if (
+		options.auth.apiKey
+		&& providerHeaderDirective(options.auth.headers, "authorization") === undefined
+		&& !isProviderHeaderSuppressed(headers, "authorization")
+	) {
+		return true;
+	}
 	return ["authorization", "api-key", "x-api-key", "x-openai-actor-authorization"]
 		.some((name) => Boolean(headers.get(name)?.trim()));
 }
 
 export function resolveCodexRequestAccountId(options: {
-	modelHeaders?: Record<string, string>;
+	modelHeaders?: ProviderHeaders;
 	auth: CodexRequestAuth;
 	apiKeyMode: boolean;
 }): string | undefined {
@@ -49,13 +55,18 @@ export function resolveCodexRequestAccountId(options: {
 	if (
 		headers.get("chatgpt-account-id")?.trim()
 		|| headers.get("x-openai-actor-authorization")?.trim()
+		|| isProviderHeaderSuppressed(headers, "chatgpt-account-id")
 	) {
 		return undefined;
 	}
-	const explicit = explicitAuthorization(options.auth.headers);
-	const token = explicit
-		? bearerToken(new Headers({ authorization: explicit }))
-		: options.auth.apiKey ?? bearerToken(new Headers(options.modelHeaders));
+	const requestAuthorization = providerHeaderDirective(options.auth.headers, "authorization");
+	const token = requestAuthorization !== undefined
+		? typeof requestAuthorization === "string" && requestAuthorization.trim()
+			? bearerToken(new Headers({ authorization: requestAuthorization }))
+			: undefined
+		: isProviderHeaderSuppressed(headers, "authorization")
+			? undefined
+			: options.auth.apiKey ?? bearerToken(headers);
 	return token ? extractCodexAccountId(token) : undefined;
 }
 
@@ -94,17 +105,18 @@ export function extractCodexAccountId(token: string): string {
 }
 
 export function buildCodexJsonHeaders(options: {
-	modelHeaders?: Record<string, string>;
+	modelHeaders?: ProviderHeaders;
 	auth: CodexRequestAuth;
 	apiKeyMode: boolean;
 	extraHeaders?: Record<string, string>;
 }): Headers {
-	const headers = new Headers(options.modelHeaders);
-	for (const [name, value] of Object.entries(options.auth.headers ?? {})) headers.set(name, value);
-	for (const [name, value] of Object.entries(options.extraHeaders ?? {})) headers.set(name, value);
-	const hasExplicitAuthorization = Boolean(explicitAuthorization(options.auth.headers));
-	if (!hasExplicitAuthorization && options.auth.apiKey) {
-		headers.set("Authorization", `Bearer ${options.auth.apiKey}`);
+	const headers = authHeaders(options);
+	for (const [name, value] of Object.entries(options.extraHeaders ?? {})) {
+		setProviderGeneratedHeader(headers, name, value);
+	}
+	const requestAuthorization = providerHeaderDirective(options.auth.headers, "authorization");
+	if (requestAuthorization === undefined && options.auth.apiKey) {
+		setProviderGeneratedHeader(headers, "Authorization", `Bearer ${options.auth.apiKey}`);
 	}
 	if (
 		!options.apiKeyMode
@@ -112,10 +124,10 @@ export function buildCodexJsonHeaders(options: {
 		&& !headers.has("x-openai-actor-authorization")
 	) {
 		const accountId = resolveCodexRequestAccountId(options);
-		if (accountId) headers.set("chatgpt-account-id", accountId);
+		if (accountId) setProviderDefaultHeader(headers, "chatgpt-account-id", accountId);
 	}
-	if (!headers.has("originator")) headers.set("originator", "pi");
-	headers.set("accept", "application/json");
-	headers.set("content-type", "application/json");
+	setProviderDefaultHeader(headers, "originator", "pi");
+	setProviderDefaultHeader(headers, "accept", "application/json");
+	setProviderDefaultHeader(headers, "content-type", "application/json");
 	return headers;
 }

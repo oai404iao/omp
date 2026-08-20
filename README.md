@@ -11,17 +11,20 @@ Gitea remote is retained as a migration backup.
 
 ## Packages
 
+All five npm workspace packages use the `@oai404iao` scope. Scope naming does
+not change the private/public eligibility below.
+
 | Package | Version | Release track |
 | --- | ---: | --- |
-| `pi-codex-minimal-tools` | `1.3.0` | private; blocked pending third-party source review |
-| `pi-keep-defaults` | `0.1.0` | candidate |
-| `pi-subagent` | `0.2.0` | private; beta candidate after provenance review |
-| `pi-telegram-notify` | `0.1.0` | candidate |
-| `pi-tree-continue` | `0.1.0` | private; experimental |
+| `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | private; blocked pending third-party source review |
+| `@oai404iao/pi-keep-defaults` | `0.1.2` | candidate |
+| `@oai404iao/pi-subagent` | `0.2.0` | private; beta candidate after provenance review |
+| `@oai404iao/pi-telegram-notify` | `0.1.2` | candidate |
+| `@oai404iao/pi-tree-continue` | `0.1.0` | private; experimental |
 | `external-thinking` | unpublished | incubating; attribution complete, packaging/tests pending |
 
-The five npm packages use independent versions. `external-thinking` remains
-outside the workspace until it has an audited manifest, tests, and
+The five scoped npm packages use independent versions. `external-thinking`
+remains outside the workspace until it has an audited manifest, tests, and
 compatibility handling; its upstream attribution is recorded.
 
 ## Local development
@@ -30,6 +33,8 @@ Requirements:
 
 - Node.js 22.19 or newer
 - npm 11.5.1 or newer; the repository pins npm 11.19.0
+- Pi 0.84.2 or newer for extension peer compatibility; CI tests against
+  `@earendil-works/*` 0.84.2
 
 ```bash
 npm ci --ignore-scripts

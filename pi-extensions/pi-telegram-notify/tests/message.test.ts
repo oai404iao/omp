@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	formatNotification,
+	lastAssistantMessageEntry,
 	questionSummaryFromInput,
 	questionSummaryFromPromptEvent,
 	terminalNotificationFromMessage,
@@ -41,6 +42,41 @@ test("classifies completed, error, and non-terminal assistant messages", () => {
 			content: [],
 		}),
 		undefined,
+	);
+	assert.equal(
+		terminalNotificationFromMessage({
+			role: "assistant",
+			stopReason: "aborted",
+			content: [],
+		}),
+		undefined,
+	);
+});
+
+test("selects the last assistant message entry from the active branch", () => {
+	const first = {
+		type: "message",
+		id: "assistant-1",
+		parentId: null,
+		timestamp: "2026-01-01T00:00:00.000Z",
+		message: { role: "assistant", stopReason: "error", content: [] },
+	};
+	const last = {
+		type: "message",
+		id: "assistant-2",
+		parentId: "tool-result",
+		timestamp: "2026-01-01T00:00:03.000Z",
+		message: { role: "assistant", stopReason: "stop", content: [] },
+	};
+	assert.deepEqual(
+		lastAssistantMessageEntry([
+			first,
+			{ type: "model_change", id: "model", parentId: first.id, timestamp: "2026-01-01T00:00:01.000Z", provider: "test", modelId: "test" },
+			{ type: "message", id: "tool-result", parentId: "model", timestamp: "2026-01-01T00:00:02.000Z", message: { role: "toolResult" } },
+			last,
+			{ type: "label", id: "label", parentId: last.id, timestamp: "2026-01-01T00:00:04.000Z", targetId: last.id, label: "active" },
+		] as any),
+		{ id: last.id, message: last.message },
 	);
 });
 

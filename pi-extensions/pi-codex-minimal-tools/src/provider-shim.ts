@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import { glyphs, treeGlyph } from "./glyphs.js";
 import { loadSettings } from "./settings.js";
 import { loadModelSettings, type ResolvedCodexModelSettings } from "./model-catalog/runtime.js";
@@ -37,11 +38,25 @@ import {
 import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
 import { createCodexReservedNamespaceTool } from "./codex-reserved-tools.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
+import {
+	captureCodexTurnState,
+	codexInstallationIdFor,
+	codexTurnStateFor,
+	resolveCodexWireIdentity,
+	uuidV7,
+} from "./codex-wire-identity.js";
 import { applyFastModeServiceTier } from "./fast-mode.js";
 import {
 	hasCodexRequestAuth,
 	resolveCodexRequestAccountId,
 } from "./codex-http.js";
+import {
+	isProviderHeaderSuppressed,
+	mergeProviderHeaders,
+	providerHeaderDirective,
+	setProviderDefaultHeader,
+	setProviderGeneratedHeader,
+} from "./provider-headers.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 export const IMAGE_SAVE_DISPLAY_MESSAGE_TYPE = "codex-image-generation-display";
@@ -205,6 +220,7 @@ interface WebSocketRequestMetadata {
 	sessionId?: string;
 	threadId?: string;
 	turnId: string;
+	requestKind?: "turn" | "compaction" | "prewarm";
 }
 
 export interface OpenAIResponsesProviderController {
@@ -552,16 +568,6 @@ function headersToRecord(headers: Headers): Record<string, string> {
 	return Object.fromEntries(headers.entries());
 }
 
-function definedHeaders(
-	headers: Record<string, string | null> | undefined,
-): Record<string, string> | undefined {
-	if (!headers) return undefined;
-	const result = Object.fromEntries(
-		Object.entries(headers).filter((entry): entry is [string, string] => entry[1] !== null),
-	);
-	return Object.keys(result).length > 0 ? result : undefined;
-}
-
 function createCodexRequestId(): string {
 	if (typeof globalThis.crypto?.randomUUID === "function") {
 		return globalThis.crypto.randomUUID();
@@ -570,58 +576,85 @@ function createCodexRequestId(): string {
 }
 
 function createPiTurnId(): string {
-	if (typeof globalThis.crypto?.randomUUID === "function") {
-		return globalThis.crypto.randomUUID();
-	}
-	return `turn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+	return uuidV7();
 }
 
 function buildBaseCodexHeaders(
-	modelHeaders: Record<string, string> | undefined,
-	additionalHeaders: Record<string, string> | undefined,
+	modelHeaders: ProviderHeaders | undefined,
+	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	token: string,
 ): Headers {
-	const headers = new Headers(modelHeaders);
-	const explicitAuthorization = Object.entries(additionalHeaders ?? {}).some(
-		([key, value]) => key.toLowerCase() === "authorization" && value.trim().length > 0,
+	const headers = mergeProviderHeaders(modelHeaders, additionalHeaders);
+	if (providerHeaderDirective(additionalHeaders, "authorization") === undefined && token) {
+		setProviderGeneratedHeader(headers, "Authorization", `Bearer ${token}`);
+	}
+	if (accountId) setProviderDefaultHeader(headers, "chatgpt-account-id", accountId);
+	setProviderDefaultHeader(headers, "originator", "pi");
+	setProviderDefaultHeader(
+		headers,
+		"User-Agent",
+		_os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "pi (browser)",
 	);
-	for (const [key, value] of Object.entries(additionalHeaders ?? {})) {
-		headers.set(key, value);
-	}
-
-	if (!explicitAuthorization && token) headers.set("Authorization", `Bearer ${token}`);
-	if (accountId && !headers.has("chatgpt-account-id")) headers.set("chatgpt-account-id", accountId);
-	if (!headers.has("originator")) headers.set("originator", "pi");
-	if (!headers.has("User-Agent")) {
-		headers.set("User-Agent", _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "pi (browser)");
-	}
 	return headers;
 }
 
-function buildSSEHeaders(
-	modelHeaders: Record<string, string> | undefined,
-	additionalHeaders: Record<string, string> | undefined,
+/**
+ * Resolve the wire identity (UUID v7 session/thread/window) for a pi session
+ * and thread. Returns `undefined` when no pi session id is available so
+ * session-less requests keep their previous behavior.
+ */
+function wireIdentityFor(
+	sessionId: string | undefined,
+	threadId?: string,
+): { sessionId: string; threadId: string; windowId: string } | undefined {
+	if (!sessionId) return undefined;
+	return resolveCodexWireIdentity(sessionId, threadId || sessionId);
+}
+
+/** Inject the Codex-compatible identity headers for a session. */
+function applyWireIdentityHeaders(
+	headers: Headers,
+	sessionId: string | undefined,
+	threadId: string | undefined,
+): void {
+	const wire = wireIdentityFor(sessionId, threadId);
+	if (!wire) return;
+	setProviderGeneratedHeader(headers, "session-id", wire.sessionId);
+	setProviderGeneratedHeader(headers, "thread-id", wire.threadId);
+	setProviderGeneratedHeader(headers, "x-codex-window-id", wire.windowId);
+	setProviderGeneratedHeader(headers, "x-client-request-id", wire.threadId);
+	if (sessionId) {
+		const turnState = codexTurnStateFor(sessionId);
+		if (turnState) setProviderGeneratedHeader(headers, "x-codex-turn-state", turnState);
+	}
+}
+
+/** Codex identity headers for an SSE request (exported for tests). */
+export function buildSSEHeaders(
+	modelHeaders: ProviderHeaders | undefined,
+	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	token: string,
 	sessionId: string | undefined,
 	profile: CodexRequestProfile,
+	threadId?: string,
 ): Headers {
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token);
-	headers.set("OpenAI-Beta", "responses=experimental");
-	headers.set("accept", "text/event-stream");
-	headers.set("content-type", "application/json");
-	if (profile.responsesMode === "lite") headers.set(X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
-
-	if (sessionId) {
-		headers.set("session_id", sessionId);
-		headers.set("x-client-request-id", sessionId);
+	setProviderDefaultHeader(headers, "OpenAI-Beta", "responses=experimental");
+	setProviderDefaultHeader(headers, "accept", "text/event-stream");
+	setProviderDefaultHeader(headers, "content-type", "application/json");
+	if (profile.responsesMode === "lite") {
+		setProviderDefaultHeader(headers, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
 	}
+
+	applyWireIdentityHeaders(headers, sessionId, threadId);
 
 	return headers;
 }
 
 function appendCommaSeparatedHeader(headers: Headers, name: string, value: string): void {
+	if (isProviderHeaderSuppressed(headers, name)) return;
 	const values = (headers.get(name) ?? "")
 		.split(",")
 		.map((entry) => entry.trim())
@@ -645,8 +678,8 @@ function applyConfiguredResponsesFeatureHeaders(
 }
 
 export function buildWebSocketHeaders(
-	modelHeaders: Record<string, string> | undefined,
-	additionalHeaders: Record<string, string> | undefined,
+	modelHeaders: ProviderHeaders | undefined,
+	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	token: string,
 	sessionId: string,
@@ -657,10 +690,17 @@ export function buildWebSocketHeaders(
 	headers.delete("content-type");
 	headers.delete("OpenAI-Beta");
 	headers.delete("openai-beta");
-	headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
-	headers.set("x-client-request-id", threadId);
-	headers.set("session-id", sessionId);
-	headers.set("thread-id", threadId);
+	setProviderDefaultHeader(headers, "OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
+	setProviderDefaultHeader(headers, "x-client-request-id", threadId);
+	setProviderDefaultHeader(headers, "session-id", sessionId);
+	setProviderDefaultHeader(headers, "thread-id", threadId);
+	const wire = wireIdentityFor(sessionId, threadId);
+	if (wire) {
+		setProviderGeneratedHeader(headers, "session-id", wire.sessionId);
+		setProviderGeneratedHeader(headers, "thread-id", wire.threadId);
+		setProviderGeneratedHeader(headers, "x-codex-window-id", wire.windowId);
+		setProviderGeneratedHeader(headers, "x-client-request-id", wire.threadId);
+	}
 	return headers;
 }
 
@@ -826,14 +866,83 @@ export function withResponsesLiteWebSocketMetadata<T extends { client_metadata?:
 	};
 }
 
-function withWebSocketRequestMetadata(body: ResponsesBody, metadata: WebSocketRequestMetadata): ResponsesBody {
+/**
+ * Build the `x-codex-turn-metadata` compatibility blob the CLI sends inside
+ * `client_metadata` for every request kind. The gateway currently rewrites
+ * this blob (privacy normalization); once it honors client-supplied values,
+ * this keeps the shape identical to the CLI.
+ */
+function buildCodexTurnMetadataJson(
+	sessionId: string,
+	threadId: string | undefined,
+	turnId: string,
+	requestKind: "turn" | "compaction" | "prewarm",
+): string {
+	const wire = wireIdentityFor(sessionId, threadId);
+	if (!wire) return "";
+	const payload: Record<string, string | number> = {
+		installation_id: codexInstallationIdFor(sessionId),
+		session_id: wire.sessionId,
+		thread_id: wire.threadId,
+		turn_id: turnId,
+		window_id: wire.windowId,
+		request_kind: requestKind,
+		turn_started_at_unix_ms: Date.now(),
+	};
+	return JSON.stringify(payload);
+}
+
+/**
+ * Inject the Codex-compatible `client_metadata` for an SSE request, sourced
+ * from the same (session, thread, turn) metadata as the WebSocket path. The
+ * WebSocket-only fields (`x-codex-ws-stream-request-start-ms`, turn-state,
+ * Lite flag) stay out: SSE carries the Lite header and turn-state header.
+ */
+export function withSseRequestMetadata(body: ResponsesBody, metadata: WebSocketRequestMetadata): ResponsesBody {
+	const wire = wireIdentityFor(metadata.sessionId, metadata.threadId);
+	if (!metadata.sessionId || !wire) return body;
+	const turnMetadata = buildCodexTurnMetadataJson(
+		metadata.sessionId,
+		metadata.threadId,
+		metadata.turnId,
+		metadata.requestKind ?? "turn",
+	);
 	return {
 		...body,
 		client_metadata: {
 			...body.client_metadata,
-			...(metadata.sessionId ? { session_id: metadata.sessionId } : {}),
-			...(metadata.threadId ? { thread_id: metadata.threadId } : {}),
+			session_id: wire.sessionId,
+			thread_id: wire.threadId,
+			"x-codex-window-id": wire.windowId,
 			turn_id: metadata.turnId,
+			"x-codex-installation-id": codexInstallationIdFor(metadata.sessionId),
+			...(turnMetadata ? { "x-codex-turn-metadata": turnMetadata } : {}),
+		},
+	};
+}
+
+function withWebSocketRequestMetadata(body: ResponsesBody, metadata: WebSocketRequestMetadata): ResponsesBody {
+	const wire = wireIdentityFor(metadata.sessionId, metadata.threadId);
+	const turnState = metadata.sessionId ? codexTurnStateFor(metadata.sessionId) : undefined;
+	const turnMetadata = metadata.sessionId
+		? buildCodexTurnMetadataJson(
+			metadata.sessionId,
+			metadata.threadId,
+			metadata.turnId,
+			metadata.requestKind ?? "turn",
+		)
+		: "";
+	return {
+		...body,
+		client_metadata: {
+			...body.client_metadata,
+			...(metadata.sessionId ? { session_id: wire?.sessionId ?? metadata.sessionId } : {}),
+			...(metadata.threadId ? { thread_id: wire?.threadId ?? metadata.threadId } : {}),
+			...(wire ? { "x-codex-window-id": wire.windowId } : {}),
+			turn_id: metadata.turnId,
+			...(metadata.sessionId ? { "x-codex-installation-id": codexInstallationIdFor(metadata.sessionId) } : {}),
+			...(turnMetadata ? { "x-codex-turn-metadata": turnMetadata } : {}),
+			...(turnState ? { "x-codex-turn-state": turnState } : {}),
 			[WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY]: Date.now().toString(),
 		},
 	};
@@ -888,7 +997,7 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 		input: [],
 		text: { verbosity: ((options as { textVerbosity?: string } | undefined)?.textVerbosity ?? "low") as string },
 		include: ["reasoning.encrypted_content"],
-		prompt_cache_key: options?.sessionId,
+		prompt_cache_key: wireIdentityFor(options?.sessionId)?.sessionId ?? options?.sessionId,
 		tool_choice: "auto",
 		parallel_tool_calls: profile.supportsParallelTools,
 	};
@@ -943,6 +1052,14 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 		const summary = (options as { reasoningSummary?: ReasoningSummary | null } | undefined)?.reasoningSummary
 			?? profile.reasoningSummary;
 		if (summary && summary !== "none") reasoning.summary = summary;
+		body.reasoning = reasoning;
+	} else if (lite && clampedReasoning !== "off") {
+		// Match the Codex CLI default reasoning level for Lite models: the CLI
+		// always sends `reasoning.effort` (default "low") for gpt-5.6-* models.
+		const reasoning = body.reasoning ?? {};
+		if (reasoning.effort === undefined) {
+			reasoning.effort = model.thinkingLevelMap?.low ?? "low";
+		}
 		body.reasoning = reasoning;
 	}
 
@@ -2099,7 +2216,7 @@ async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promise<void>
 		);
 		const responseItems: unknown[] = [];
 		let responseId: string | undefined;
-		for await (const event of mapCodexEvents(parseWebSocket(socket, request.signal))) {
+		for await (const event of mapCodexEvents(parseWebSocket(socket, request.signal), request.requestMetadata.sessionId)) {
 			if (event.type === "response.created" && event.response?.id) responseId = event.response.id;
 			if (event.type === "response.output_item.done" && event.item) responseItems.push(event.item);
 			if (
@@ -2127,7 +2244,10 @@ async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promise<void>
 	}
 }
 
-async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIterable<StreamEventShape> {
+async function* mapCodexEvents(
+	events: AsyncIterable<StreamEventShape>,
+	sessionKey?: string,
+): AsyncIterable<StreamEventShape> {
 	let sawTerminalResponse = false;
 	const completedOutputItems = new Set<string>();
 	const outputItemKey = (item: unknown, index?: number): string | undefined => {
@@ -2139,6 +2259,16 @@ async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIt
 	for await (const event of events) {
 		const type = typeof event.type === "string" ? event.type : undefined;
 		if (!type) continue;
+
+		if (type === "response.metadata" && sessionKey) {
+			const eventHeaders = event.headers && typeof event.headers === "object" && !Array.isArray(event.headers)
+				? (event.headers as Record<string, unknown>)
+				: undefined;
+			const turnState = eventHeaders?.["x-codex-turn-state"];
+			if (typeof turnState === "string") {
+				captureCodexTurnState(sessionKey, turnState);
+			}
+		}
 
 		if (type === "error") {
 			const nestedError = event.error;
@@ -2322,6 +2452,7 @@ async function processCapturedResponsesStream<TApi extends Api>(
 	stream: AssistantMessageEventStream,
 	model: Model<TApi>,
 	options: SimpleStreamOptions | undefined,
+	sessionKey: string | undefined,
 	deps: {
 		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
 	},
@@ -2376,7 +2507,7 @@ async function processCapturedResponsesStream<TApi extends Api>(
 			yield event;
 		}
 	};
-	const tappedEvents = captureGeneratedImages(captureContinuation(mapCodexEvents(events)), {
+	const tappedEvents = captureGeneratedImages(captureContinuation(mapCodexEvents(events, sessionKey)), {
 		cwd,
 		requestPrompt,
 		onImageSaved: (image, imageData) => deps.onImageSaved?.(image, imageData),
@@ -2399,19 +2530,16 @@ function compactUrl(baseUrl: string | undefined, apiKeyMode: boolean): string {
 }
 
 function buildJsonHeaders(
-	modelHeaders: Record<string, string> | undefined,
-	additionalHeaders: Record<string, string> | undefined,
+	modelHeaders: ProviderHeaders | undefined,
+	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	apiKey: string,
 	sessionId?: string,
 ): Headers {
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, apiKey);
-	headers.set("accept", "application/json");
-	headers.set("content-type", "application/json");
-	if (sessionId) {
-		headers.set("session_id", sessionId);
-		headers.set("x-client-request-id", sessionId);
-	}
+	setProviderDefaultHeader(headers, "accept", "application/json");
+	setProviderDefaultHeader(headers, "content-type", "application/json");
+	applyWireIdentityHeaders(headers, sessionId, sessionId);
 	return headers;
 }
 
@@ -2633,8 +2761,8 @@ async function collectCodexCompactionStream(
 	};
 }
 
-async function collectCodexCompactionOutput(response: Response): Promise<unknown> {
-	const result = await collectCodexCompactionStream(mapCodexEvents(parseSSE(response)));
+async function collectCodexCompactionOutput(response: Response, sessionKey?: string): Promise<unknown> {
+	const result = await collectCodexCompactionStream(mapCodexEvents(parseSSE(response), sessionKey));
 	return result.item;
 }
 
@@ -2643,6 +2771,7 @@ async function requestCodexCompactionTrigger(
 	headers: Headers,
 	body: ResponsesBody,
 	signal: AbortSignal | undefined,
+	sessionKey?: string,
 ): Promise<unknown> {
 	const bodyJson = JSON.stringify(body);
 	const dispatcher = await proxyDispatcherForUrl(url);
@@ -2656,7 +2785,7 @@ async function requestCodexCompactionTrigger(
 				body: bodyJson,
 				...(dispatcher ? { dispatcher } : {}),
 			} as RequestInit, signal);
-			if (response.ok) return await collectCodexCompactionOutput(response);
+			if (response.ok) return await collectCodexCompactionOutput(response, sessionKey);
 
 			const errorText = await response.text();
 			if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
@@ -2741,6 +2870,7 @@ async function requestCodexCompactionTriggerWebSocket(
 					countWebSocketEvents(parseWebSocket(socket, signal), () => {
 						eventCount++;
 					}),
+					requestMetadata.sessionId,
 				),
 			);
 			if (signal?.aborted) {
@@ -2808,8 +2938,19 @@ async function requestCodexCompactionTriggerWithTransport(
 	const transport = options.settings.openaiTransport;
 	const responsesMode = resolveCodexRequestProfile(options.settings.requestProfile).responsesMode;
 	const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
+	const requestMetadata: WebSocketRequestMetadata = {
+		...(options.sessionId ? { sessionId: options.sessionId, threadId: options.sessionId } : {}),
+		turnId: options.turnId || createPiTurnId(),
+		requestKind: "compaction",
+	};
 	if (transport === "sse") {
-		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
+		return requestCodexCompactionTrigger(
+			sseUrl,
+			headers.sse,
+			withSseRequestMetadata(body, requestMetadata),
+			options.signal,
+			options.sessionId,
+		);
 	}
 
 	const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
@@ -2824,13 +2965,15 @@ async function requestCodexCompactionTriggerWithTransport(
 		&& fallbackKey
 		&& websocketHttpFallbackSessions.has(fallbackKey)
 	) {
-		return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
+		return requestCodexCompactionTrigger(
+			sseUrl,
+			headers.sse,
+			withSseRequestMetadata(body, requestMetadata),
+			options.signal,
+			options.sessionId,
+		);
 	}
 
-	const requestMetadata: WebSocketRequestMetadata = {
-		...(options.sessionId ? { sessionId: options.sessionId, threadId: options.sessionId } : {}),
-		turnId: options.turnId || createPiTurnId(),
-	};
 	const maxRetries = Math.min(
 		CODEX_REMOTE_COMPACTION_STREAM_RETRIES,
 		webSocketStreamMaxRetries({
@@ -2869,7 +3012,13 @@ async function requestCodexCompactionTriggerWithTransport(
 		}
 	}
 
-	return requestCodexCompactionTrigger(sseUrl, headers.sse, body, options.signal);
+	return requestCodexCompactionTrigger(
+		sseUrl,
+		headers.sse,
+		withSseRequestMetadata(body, requestMetadata),
+		options.signal,
+		options.sessionId,
+	);
 }
 
 function hasNonEmptyResponseMessageContent(item: Record<string, unknown>): boolean {
@@ -2908,7 +3057,7 @@ export async function requestOpenAINativeCompaction(
 	options: {
 		mode: "responses" | "responses-compact";
 		apiKey: string;
-		headers?: Record<string, string>;
+		headers?: ProviderHeaders;
 		signal?: AbortSignal;
 		reasoning?: SimpleStreamOptions["reasoning"];
 		sessionId?: string;
@@ -3001,7 +3150,7 @@ export async function requestOpenAINativeCompaction(
 		options.sessionId,
 	);
 	if (profile.responsesMode === "lite") {
-		headers.set(X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
+		setProviderGeneratedHeader(headers, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
 	}
 	const compactBody: Record<string, unknown> = {
 		model: body.model,
@@ -3117,6 +3266,7 @@ async function processWebSocketStream<TApi extends Api>(
 				stream,
 				model,
 				options,
+				options?.sessionId,
 				deps,
 				cwd,
 				requestPrompt,
@@ -3517,7 +3667,7 @@ function createCodexStream<TApi extends Api>(
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			const requestHeaders = definedHeaders(options?.headers);
+			const requestHeaders = options?.headers;
 			const auth = { apiKey: apiKey || undefined, headers: requestHeaders };
 			if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
 				throw new Error(`No request authentication for provider: ${model.provider}`);
@@ -3580,7 +3730,15 @@ function createCodexStream<TApi extends Api>(
 				turnId: websocketTurnId,
 			};
 			const sseHeaders = applyConfiguredResponsesFeatureHeaders(
-				buildSSEHeaders(model.headers, requestHeaders, accountId, apiKey, options?.sessionId, requestProfile),
+				buildSSEHeaders(
+					model.headers,
+					requestHeaders,
+					accountId,
+					apiKey,
+					websocketSessionId || options?.sessionId,
+					requestProfile,
+					websocketThreadId || websocketRequestId,
+				),
 				settings,
 				model as Model<Api>,
 			);
@@ -3592,7 +3750,7 @@ function createCodexStream<TApi extends Api>(
 				websocketSessionId || websocketRequestId,
 				websocketThreadId || websocketRequestId,
 			), settings, model as Model<Api>);
-			const bodyJson = JSON.stringify(body);
+			const bodyJson = JSON.stringify(withSseRequestMetadata(body, websocketRequestMetadata));
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
 			const configuredTransport: ProviderTransport = settings.openaiTransport;
 			// Pi exposes a session transport setting through stream options. Treat
@@ -3719,6 +3877,12 @@ function createCodexStream<TApi extends Api>(
 					await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 
 					if (response.ok) {
+						if (options?.sessionId) {
+							captureCodexTurnState(
+								options.sessionId,
+								response.headers.get("x-codex-turn-state") ?? undefined,
+							);
+						}
 						break;
 					}
 
@@ -3766,6 +3930,7 @@ function createCodexStream<TApi extends Api>(
 				stream,
 				model,
 				options,
+				options?.sessionId,
 				deps,
 				requestCwd,
 				requestPrompt,
@@ -3942,6 +4107,7 @@ export function registerOpenAIResponsesProviders(
 				sessionId,
 				threadId: sessionId,
 				turnId: createPiTurnId(),
+				requestKind: "prewarm",
 			},
 			signal: abortController.signal,
 			connectTimeoutMs: WEBSOCKET_PREWARM_TIMEOUT_MS,

@@ -4,7 +4,7 @@ import { extname, isAbsolute, resolve } from "node:path";
 import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { saveBase64Image } from "../utils/images.js";
 import type { CodexMinimalToolsSettings } from "../settings.js";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import {
 	buildCodexJsonHeaders,
 	hasCodexRequestAuth,
@@ -86,7 +86,7 @@ interface ImageGenerationToolContext {
 	model?: Model<Api>;
 	modelRegistry?: {
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			| { ok: true; apiKey?: string; headers?: Record<string, string> }
+			| { ok: true; apiKey?: string; headers?: ProviderHeaders }
 			| { ok: false; error: string }
 		>;
 	};

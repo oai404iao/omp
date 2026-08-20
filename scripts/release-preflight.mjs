@@ -62,12 +62,12 @@ for (const { name, directory } of workspaces) {
 
 const codexNotice = resolve(root, "pi-extensions/pi-codex-minimal-tools/THIRD_PARTY_NOTICES.md");
 const codexManifest = readManifest("pi-extensions/pi-codex-minimal-tools");
-if (publishableWorkspaces.some(({ name }) => name === "pi-codex-minimal-tools")) {
+if (publishableWorkspaces.some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools")) {
   if (!existsSync(codexNotice)) {
-    fail("pi-codex-minimal-tools has no THIRD_PARTY_NOTICES.md; complete its source audit before publishing");
+    fail("@oai404iao/pi-codex-minimal-tools has no THIRD_PARTY_NOTICES.md; complete its source audit before publishing");
   }
   if (!codexManifest.files?.includes("THIRD_PARTY_NOTICES.md")) {
-    fail("pi-codex-minimal-tools must include THIRD_PARTY_NOTICES.md in its npm files allowlist");
+    fail("@oai404iao/pi-codex-minimal-tools must include THIRD_PARTY_NOTICES.md in its npm files allowlist");
   }
 }
 

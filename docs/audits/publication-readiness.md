@@ -33,33 +33,31 @@ generic output example.
 
 ## Dependency audit
 
-`npm audit --omit=dev` reports zero production vulnerabilities for the
-workspace lockfile. The full development graph currently reports five
-high-severity findings through older Pi development/test baselines and their
-transitive dependencies (`undici`, `ws`, `protobufjs`, and
-`brace-expansion`).
+The Pi development/test baseline is 0.84.2, and the Codex package uses
+`undici` 8.10.0. A fresh npm 11.19.0 lockfile reports zero vulnerabilities for
+both the complete dependency graph and `--omit=dev`.
 
-Those packages are not bundled into the five npm tarballs as production
-dependencies, so CI gates the production graph while this baseline is being
-prepared. Before public release, update each plugin's tested Pi development
-version and resolve or explicitly re-evaluate the full development audit.
-Dependabot is configured to keep this visible; the findings must not be
-silently accepted as a permanent exception.
+The update also moves every Pi peer range from an unconstrained wildcard to
+`>=0.84.2`, so consumers do not silently combine these extensions with the
+older vulnerable baselines that GitHub's dependency graph identified.
+Dependabot remains enabled for ongoing review.
 
 ## npm package status
 
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
-| `pi-codex-minimal-tools` | private | typecheck and 202 tests | captured tool-metadata provenance |
-| `pi-keep-defaults` | publishable candidate | typecheck and smoke/guard tests | watcher lifecycle/release approval |
-| `pi-subagent` | private | typecheck and 51 tests | DeepSeek Harness provenance, global preset side-effect review |
-| `pi-telegram-notify` | publishable candidate | typecheck and 8 tests | privacy/internal-hook release approval |
-| `pi-tree-continue` | private | typecheck and pack check; no test suite | private Pi API dependency, tests |
+| `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
+| `@oai404iao/pi-keep-defaults` | publishable candidate | typecheck and smoke/guard tests | watcher lifecycle/release approval |
+| `@oai404iao/pi-subagent` | private | typecheck and 51 tests | DeepSeek Harness provenance, global preset side-effect review |
+| `@oai404iao/pi-telegram-notify` | publishable candidate | typecheck and 8 tests | privacy/internal-hook release approval |
+| `@oai404iao/pi-tree-continue` | private | typecheck and pack check; no test suite | private Pi API dependency, tests |
 | `external-thinking` | no | not covered by npm workspace CI | manifest, tests, compatibility fix |
 
-The exact six current unscoped names returned npm E404 during the phase-1
-audit. E404 is not a reservation or ownership guarantee; availability must be
-checked again immediately before bootstrap publishing.
+The exact six unscoped names returned npm E404 during the phase-1
+audit. That result is historical only: all five workspace package manifests
+now use the `@oai404iao` scope. E404 is not a reservation or ownership
+guarantee; the exact scoped names must be checked again immediately before
+bootstrap publishing.
 
 ## License and source review
 
@@ -78,7 +76,7 @@ than being relicensed under the project MIT grant.
   notices, and local modification scope are recorded in its
   `THIRD_PARTY_NOTICES.md`.
 
-### `pi-codex-minimal-tools`
+### `@oai404iao/pi-codex-minimal-tools`
 
 - Reference documents identify an analyzed OpenAI Codex revision.
 - `src/providers/codex-apply-patch.lark` is described as an exact grammar
@@ -100,7 +98,8 @@ Official upstream license:
 - The sole historical author identity was accepted for the current public
   history during cutover.
 - Re-record media if screenshots expose private provider names.
-- Replace local installation paths with npm commands only after packages exist.
+- Keep local installation instructions available until the scoped packages
+  exist; npm examples must use the `npm:@oai404iao/<package>` form.
 - Do not publish real Telegram `config.json`, model credentials, session files,
   or private provider endpoints.
 
@@ -110,7 +109,7 @@ Official upstream license:
 - [x] Historical identity approved for publication.
 - [ ] Package-level license files and source notices reviewed.
 - [ ] Final tarball contents reduced and approved.
-- [ ] Package names/owners rechecked on npm.
+- [ ] Scoped package names/owners rechecked on npm.
 - [ ] Initial packages created with interactive 2FA.
 - [ ] npm trusted publishers configured for `publish.yml`.
 - [ ] `npm-publish` environment protected and enabled.
