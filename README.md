@@ -17,9 +17,9 @@ not change the private/public eligibility below.
 | Package | Version | Release track |
 | --- | ---: | --- |
 | `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | private; blocked pending third-party source review |
-| `@oai404iao/pi-keep-defaults` | `0.1.1` | candidate |
+| `@oai404iao/pi-keep-defaults` | `0.1.2` | candidate |
 | `@oai404iao/pi-subagent` | `0.2.0` | private; beta candidate after provenance review |
-| `@oai404iao/pi-telegram-notify` | `0.1.1` | candidate |
+| `@oai404iao/pi-telegram-notify` | `0.1.2` | candidate |
 | `@oai404iao/pi-tree-continue` | `0.1.0` | private; experimental |
 | `external-thinking` | unpublished | incubating; attribution complete, packaging/tests pending |
 
