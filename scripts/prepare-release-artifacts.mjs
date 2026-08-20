@@ -10,6 +10,7 @@ import {
   sha512,
   tagFor,
 } from "./release-utils.mjs";
+import { normalizePackagePath, tarballFacingChangedPaths } from "./recovery-guard.mjs";
 import { publishableWorkspaces, readManifest, registry, root } from "./workspaces.mjs";
 
 const outputDirectory = resolve(root, "release-artifacts");
@@ -19,6 +20,61 @@ const candidates = [];
 
 rmSync(outputDirectory, { recursive: true, force: true });
 mkdirSync(outputDirectory, { recursive: true });
+
+function currentPackedPaths(name) {
+  const packed = spawnSync(
+    npm,
+    ["pack", "--dry-run", "--json", "--ignore-scripts", "--workspace", name],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, npm_config_loglevel: "error" },
+    },
+  );
+  if (packed.status !== 0) {
+    throw new Error(`could not inspect current tarball for ${name}: ${(packed.stderr || packed.stdout).trim()}`);
+  }
+
+  let output;
+  try {
+    output = JSON.parse(packed.stdout);
+  } catch (error) {
+    throw new Error(`could not parse current tarball for ${name}: ${error.message}`);
+  }
+  if (!Array.isArray(output) || output.length !== 1 || !Array.isArray(output[0]?.files)) {
+    throw new Error(`npm pack returned an unexpected file list for ${name}`);
+  }
+  return new Set(output[0].files.map((file) => normalizePackagePath(file.path)));
+}
+
+function assertPublishedPayloadIsUnchanged(name, version, directory, sourceCommit) {
+  if (sourceCommit === commit) return;
+
+  const diff = spawnSync(
+    "git",
+    ["diff", "--name-only", "--no-renames", `${sourceCommit}..${commit}`, "--", directory],
+    { cwd: root, encoding: "utf8" },
+  );
+  if (diff.status !== 0) {
+    throw new Error(`could not compare ${name}@${version} with npm gitHead ${sourceCommit}`);
+  }
+
+  const packedPaths = currentPackedPaths(name);
+  const changedTarballPaths = tarballFacingChangedPaths(
+    diff.stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((path) => normalizePackagePath(path)),
+    directory,
+    packedPaths,
+  );
+
+  if (changedTarballPaths.length > 0) {
+    throw new Error(
+      `${name}@${version} is already published, but its current tarball-facing files changed after npm gitHead ${sourceCommit}: ${changedTarballPaths.join(", ")}. Add a changeset/version bump or restore the published payload before recovery.`,
+    );
+  }
+}
 
 function verifyPublishedSource(name, version, directory, sourceCommit, tag) {
   if (!/^[0-9a-f]{40,64}$/i.test(sourceCommit)) {
@@ -70,6 +126,7 @@ for (const { name, directory } of publishableWorkspaces) {
       );
     }
     verifyPublishedSource(name, manifest.version, directory, published.gitHead, tag);
+    assertPublishedPayloadIsUnchanged(name, manifest.version, directory, published.gitHead);
     candidates.push({
       name,
       version: manifest.version,

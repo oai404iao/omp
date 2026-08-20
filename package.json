@@ -31,11 +31,12 @@
     "changeset:status": "changeset status --verbose",
     "changeset:version": "changeset version && npm install --package-lock-only --ignore-scripts",
     "check": "npm run check --workspaces --if-present",
-    "ci": "npm run check && npm run license:check && npm run pack:check",
+    "ci": "npm run check && npm run test:release-scripts && npm run license:check && npm run pack:check",
     "license:check": "node scripts/verify-licenses.mjs",
     "pack:check": "node scripts/verify-packages.mjs",
     "release:artifacts": "node scripts/prepare-release-artifacts.mjs",
-    "release:preflight": "node scripts/release-preflight.mjs"
+    "release:preflight": "node scripts/release-preflight.mjs",
+    "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "3.0.0"
