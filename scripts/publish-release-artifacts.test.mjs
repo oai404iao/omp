@@ -81,6 +81,7 @@ function runPublisher(candidates, wrongDistTagFor) {
         PATH: `${binaryDirectory}:${process.env.PATH}`,
         CALL_LOG: callLog,
         FAKE_COMMIT: commit,
+        GITHUB_SHA: commit,
         WRONG_DIST_TAG_FOR: wrongDistTagFor ?? "",
       },
     });
