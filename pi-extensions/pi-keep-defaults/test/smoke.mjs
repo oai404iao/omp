@@ -1,41 +1,67 @@
-/**
- * Smoke test for pi-keep-defaults.
- *
- * Loads the real extension with a stub pi API and verifies that
- * SettingsManager default setters are frozen while protection is on,
- * and delegate normally while protection is off.
- *
- * Run with: node --experimental-strip-types test/smoke.mjs
- */
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import extension from "../src/index.ts";
 
 const agentDir = mkdtempSync(join(tmpdir(), "pi-keep-defaults-smoke-"));
 process.env.PI_CODING_AGENT_DIR = agentDir;
 
-const handlers = new Map();
-let commandHandler;
-
-const pi = {
-	on: (event, handler) => {
-		handlers.set(event, handler);
-	},
-	registerCommand: (name, options) => {
-		assert.equal(name, "keep-defaults");
-		commandHandler = options.handler;
-	},
+const { SettingsManager } = await import("@earendil-works/pi-coding-agent");
+const { default: extension } = await import("../src/index.ts");
+const settingsPath = join(agentDir, "settings.json");
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const waitUntil = async (predicate, timeoutMs = 500) => {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() >= deadline) throw new Error("timed out waiting for guard state");
+		await wait(5);
+	}
 };
 
+function writeSettings(defaultModel) {
+	writeFileSync(
+		settingsPath,
+		JSON.stringify(
+			{
+				defaultProvider: "openai",
+				defaultModel,
+				defaultThinkingLevel: "max",
+			},
+			null,
+			2,
+		),
+		"utf8",
+	);
+}
+
+function createRuntime() {
+	const handlers = new Map();
+	let commandHandler;
+	const pi = {
+		on(event, handler) {
+			handlers.set(event, handler);
+		},
+		registerCommand(name, options) {
+			assert.equal(name, "keep-defaults");
+			commandHandler = options.handler;
+		},
+	};
+	return { pi, handlers, get commandHandler() { return commandHandler; } };
+}
+
 const ctx = { ui: { notify: () => {} } };
+writeSettings("baseline");
 
-extension(pi);
+// A factory-only invocation may patch the process and register hooks, but must
+// not start an fs watcher or debounce timer.
+const first = createRuntime();
+extension(first.pi);
+writeSettings("factory-only-change");
+await wait(150);
+assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).defaultModel, "factory-only-change");
+console.log("PASS: factory-only load starts no file guard");
 
-// Simulate a session so the ui handle is set.
-handlers.get("session_start")?.({}, ctx);
+await first.handlers.get("session_start")?.({ reason: "startup" }, ctx);
 
 const sm = SettingsManager.inMemory({
 	defaultProvider: "openai",
@@ -43,39 +69,85 @@ const sm = SettingsManager.inMemory({
 	defaultThinkingLevel: "max",
 });
 
-// --- Protection ON (default): writes must be ignored ---
 sm.setDefaultModelAndProvider("anthropic", "claude-sonnet-4-5");
 sm.setDefaultThinkingLevel("low");
-assert.equal(sm.getDefaultProvider(), "openai", "defaultProvider must stay frozen");
-assert.equal(sm.getDefaultModel(), "deepseek-v4-flash", "defaultModel must stay frozen");
-assert.equal(sm.getDefaultThinkingLevel(), "max", "defaultThinkingLevel must stay frozen");
-console.log("PASS: protection ON freezes defaults (setDefaultModelAndProvider / setDefaultThinkingLevel)");
+assert.equal(sm.getDefaultProvider(), "openai");
+assert.equal(sm.getDefaultModel(), "deepseek-v4-flash");
+assert.equal(sm.getDefaultThinkingLevel(), "max");
+console.log("PASS: protection ON freezes SettingsManager defaults");
 
-// --- Protection OFF: original behavior restored ---
-await commandHandler("off", ctx);
+await first.commandHandler("off", ctx);
 sm.setDefaultModelAndProvider("anthropic", "claude-sonnet-4-5");
 sm.setDefaultThinkingLevel("low");
 assert.equal(sm.getDefaultProvider(), "anthropic");
 assert.equal(sm.getDefaultModel(), "claude-sonnet-4-5");
 assert.equal(sm.getDefaultThinkingLevel(), "low");
-console.log("PASS: protection OFF restores original write behavior");
 
-// --- Back ON: frozen again ---
-await commandHandler("on", ctx);
-sm.setDefaultModelAndProvider("xai", "grok-4.5");
-sm.setDefaultThinkingLevel("medium");
-assert.equal(sm.getDefaultModel(), "claude-sonnet-4-5", "defaultModel must stay frozen after re-enable");
-assert.equal(sm.getDefaultThinkingLevel(), "low", "defaultThinkingLevel must stay frozen after re-enable");
-console.log("PASS: protection re-enable freezes again");
+await first.commandHandler("on", ctx);
+sm.setDefaultModel("gpt-5.6");
+assert.equal(sm.getDefaultModel(), "claude-sonnet-4-5");
+console.log("PASS: off delegates and on freezes again");
 
-// --- Idempotent patch install (simulates /reload) ---
-extension(pi);
-sm.setDefaultModelAndProvider("openai", "gpt-5.6-terra");
-assert.equal(sm.getDefaultModel(), "claude-sonnet-4-5", "patch must stay installed across reload");
-console.log("PASS: patch survives reload (idempotent)");
+const wrapperBeforeReload = Object.getOwnPropertyDescriptor(
+	SettingsManager.prototype,
+	"setDefaultModelAndProvider",
+).value;
+const second = createRuntime();
+extension(second.pi);
+const wrapperAfterReload = Object.getOwnPropertyDescriptor(
+	SettingsManager.prototype,
+	"setDefaultModelAndProvider",
+).value;
+assert.equal(wrapperAfterReload, wrapperBeforeReload, "reload must reuse the verified global wrapper");
 
-console.log("\nAll smoke tests passed.");
+// Let the second factory take ownership before the first shuts down. The stale
+// timer must not restore its old baseline, and the stale shutdown must not
+// close the replacement guard.
+writeSettings("reload-baseline");
+const sharedState = globalThis[Symbol.for("pi-keep-defaults.state")];
+await waitUntil(() => sharedState.current.debounceTimer !== undefined);
+await second.handlers.get("session_start")?.({ reason: "reload" }, ctx);
+await first.handlers.get("session_shutdown")?.({ reason: "reload" }, ctx);
+sm.setDefaultModel("must-remain-blocked-after-old-shutdown");
+assert.equal(
+	sm.getDefaultModel(),
+	"claude-sonnet-4-5",
+	"an old owner's shutdown must not deactivate the replacement session's wrappers",
+);
+await wait(100);
+assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).defaultModel, "reload-baseline");
+writeSettings("bypass-after-reload");
+await wait(250);
+assert.equal(
+	JSON.parse(readFileSync(settingsPath, "utf8")).defaultModel,
+	"reload-baseline",
+	"new guard must survive the old factory's shutdown",
+);
+console.log("PASS: reload is idempotent and old timer/shutdown cannot affect the new guard");
 
-// The extension keeps an fs.watch open on the settings dir; exit explicitly.
+await second.handlers.get("session_shutdown")?.({ reason: "quit" }, ctx);
+await second.handlers.get("session_shutdown")?.({ reason: "quit" }, ctx);
+assert.equal(sharedState.enabled, false, "the final owner shutdown must deactivate process-global protection");
+assert.equal(sharedState.configured, true, "shutdown must preserve the user's ON preference");
+sm.setDefaultModel("delegated-after-shutdown");
+assert.equal(
+	sm.getDefaultModel(),
+	"delegated-after-shutdown",
+	"installed wrappers must delegate to native setters when no session is active",
+);
+console.log("PASS: final shutdown restores native setter delegation without losing preference");
+
+const third = createRuntime();
+extension(third.pi);
+sm.setDefaultModel("delegated-before-next-start");
+assert.equal(sm.getDefaultModel(), "delegated-before-next-start", "factory load alone must not reactivate protection");
+await third.handlers.get("session_start")?.({ reason: "next-session" }, ctx);
+assert.equal(sharedState.enabled, true, "a new session must reactivate the configured ON preference");
+sm.setDefaultModel("blocked-after-next-start");
+assert.equal(sm.getDefaultModel(), "delegated-before-next-start");
+await third.handlers.get("session_shutdown")?.({ reason: "quit" }, ctx);
+assert.equal(sharedState.enabled, false);
+console.log("PASS: a later session reactivates protection and its shutdown deactivates it");
+
 rmSync(agentDir, { recursive: true, force: true });
-process.exit(0);
+console.log("\nAll smoke tests passed.");

@@ -41,7 +41,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types test/smoke.mjs && PI_CODING_AGENT_DIR=/tmp/pi-kd-guard node --experimental-strip-types test/guard.mjs",
+    "test": "node --experimental-strip-types test/settings-patch.mjs && node --experimental-strip-types test/fallback.mjs && node --experimental-strip-types test/legacy-lifecycle.mjs && node --experimental-strip-types test/smoke.mjs && node --experimental-strip-types test/guard.mjs",
     "check": "npm run typecheck && npm test"
   },
   "files": [
