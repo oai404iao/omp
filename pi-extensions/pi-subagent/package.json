@@ -55,9 +55,12 @@
   },
   "files": [
     "agents/",
+    "LICENSES/",
+    "provenance/",
     "src/",
     "README.md",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "config.example.json",
     "config.schema.json",
     "package.json"

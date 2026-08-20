@@ -56,9 +56,18 @@ The verified upstream license is preserved in
 `LICENSES/oh-my-pi-MIT.txt`. The port's package-level `LICENSE` retains those
 notices and adds the local modification copyright.
 
-## Unresolved design provenance
+## DeepSeek Harness design reference
 
-`pi-extensions/pi-subagent/README.md` says its design adapts a "DeepSeek
-Harness subagent seam", but the original repository, revision, and license
-were not recorded in Git history. No copied source file has been identified;
-the package nevertheless remains private until that reference is clarified.
+`pi-extensions/pi-subagent` independently implements Pi extension and SDK
+integration while adapting high-level subagent design concepts from the public
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+documentation at revision
+[`4d03472cd098dc48a630e526ca620f4f37f18a0e`](https://github.com/deepseek-ai/deepseek-harness/commit/4d03472cd098dc48a630e526ca620f4f37f18a0e).
+
+DeepSeek Harness is MIT-licensed. Its verified license snapshot is preserved
+at `LICENSES/DeepSeek-Harness-MIT.txt` and in the package's
+`LICENSES/DeepSeek-Harness-MIT.txt`. No DeepSeek Harness source file is
+included in the package; its immutable source revision, blob identifiers, and
+SHA-256 checksums are recorded in
+`pi-extensions/pi-subagent/provenance/deepseek-harness-4d03472.json`. See its
+package-level `THIRD_PARTY_NOTICES.md` for the implementation boundary.

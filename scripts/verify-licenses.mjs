@@ -6,6 +6,7 @@ import { readManifest, root } from "./workspaces.mjs";
 const expectedHashes = new Map([
   ["LICENSES/Apache-2.0.txt", "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"],
   ["LICENSES/OpenAI-Codex-NOTICE.txt", "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"],
+  ["LICENSES/DeepSeek-Harness-MIT.txt", "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"],
   ["LICENSES/oh-my-pi-MIT.txt", "545636e19386d3d4e0ae6d77354527499999c3ebfbca61b9fa5aa4ead7c0b308"],
   [
     "pi-extensions/pi-codex-minimal-tools/src/providers/codex-apply-patch.lark",
@@ -40,6 +41,13 @@ for (const filename of ["Apache-2.0.txt", "OpenAI-Codex-NOTICE.txt"]) {
     `pi-codex-minimal-tools LICENSES/${filename} differs from the verified root copy`,
   );
 }
+
+check(
+  read("LICENSES/DeepSeek-Harness-MIT.txt").equals(
+    read("pi-extensions/pi-subagent/LICENSES/DeepSeek-Harness-MIT.txt"),
+  ),
+  "pi-subagent LICENSES/DeepSeek-Harness-MIT.txt differs from the verified root copy",
+);
 
 const projectLicense = read("LICENSE");
 for (const name of [
@@ -79,6 +87,39 @@ for (const path of ["src/patch/parser.ts", "src/patch/apply.ts"]) {
 check(
   codexNotice.includes("must not be published"),
   "pi-codex-minimal-tools notice must retain the unresolved publication warning",
+);
+
+const subagentNotice = text("pi-extensions/pi-subagent/THIRD_PARTY_NOTICES.md");
+const subagentProvenance = JSON.parse(
+  text("pi-extensions/pi-subagent/provenance/deepseek-harness-4d03472.json"),
+);
+check(
+  subagentProvenance.upstream?.repository === "https://github.com/deepseek-ai/deepseek-harness",
+  "pi-subagent provenance must name the DeepSeek Harness repository",
+);
+check(
+  subagentProvenance.upstream?.revision === "4d03472cd098dc48a630e526ca620f4f37f18a0e",
+  "pi-subagent provenance must name the analyzed DeepSeek Harness revision",
+);
+check(
+  subagentProvenance.files?.LICENSE?.gitBlobSha === "c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785"
+    && subagentProvenance.files?.LICENSE?.sha256 === "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+    && subagentProvenance.files?.LICENSE?.rawUrl === "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/4d03472cd098dc48a630e526ca620f4f37f18a0e/LICENSE",
+  "pi-subagent provenance must retain the verified DeepSeek Harness LICENSE identifiers",
+);
+check(
+  subagentProvenance.files?.["docs/subsystems/subagent.md"]?.gitBlobSha === "9a21cecce9144c3aa4c268d753c0aeff5f3ac178"
+    && subagentProvenance.files?.["docs/subsystems/subagent.md"]?.sha256 === "f8210c06d7e21e3981946d84e1914a057728f07f9b291a5e2a4c2a62b645d685"
+    && subagentProvenance.files?.["docs/subsystems/subagent.md"]?.rawUrl === "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/4d03472cd098dc48a630e526ca620f4f37f18a0e/docs/subsystems/subagent.md",
+  "pi-subagent provenance must retain the verified DeepSeek Harness subagent-document identifiers",
+);
+check(
+  subagentNotice.includes("4d03472cd098dc48a630e526ca620f4f37f18a0e"),
+  "pi-subagent notice lacks the mapped DeepSeek Harness revision",
+);
+check(
+  subagentNotice.includes("No DeepSeek Harness source file is included"),
+  "pi-subagent notice must distinguish the design reference from copied source",
 );
 
 const externalLicense = text("pi-extensions/external-thinking/LICENSE");
