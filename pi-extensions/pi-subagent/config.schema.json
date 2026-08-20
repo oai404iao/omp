@@ -17,6 +17,11 @@
       "description": "Select user definitions, project definitions, or user definitions followed by project overrides.",
       "default": "user"
     },
+    "syncBundledAgents": {
+      "type": "boolean",
+      "description": "User-level configuration only. Opt in to materializing bundled presets under the Pi agent directory. When true, startup may install, replace, retire, and back up managed agent files; when false, bundled definitions are read directly without writing user files.",
+      "default": false
+    },
     "maxDepth": {
       "type": "integer",
       "minimum": 0,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import {
@@ -20,7 +20,11 @@ import {
 	ModelRuntime,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { syncBundledAgents, type AgentSyncResult } from "./agent-sync.ts";
+import {
+	syncBundledAgents,
+	type AgentSyncResult,
+	unmodifiedManagedAgentNames,
+} from "./agent-sync.ts";
 import {
 	discoverAgents,
 	formatAgentCatalog,
@@ -203,6 +207,7 @@ function stopReasonHeadline(reason: SubagentStopReason): string {
 function makeRuntimeSettings(descriptor: SubagentDescriptor): SubagentSettings {
 	return {
 		agentScope: descriptor.runtime.agentScope,
+		syncBundledAgents: descriptor.runtime.syncBundledAgents,
 		maxDepth: descriptor.runtime.maxDepth,
 		enableRunInBackground: descriptor.runtime.enableRunInBackground,
 		defaultBackground: descriptor.runtime.defaultBackground,
@@ -220,7 +225,7 @@ function isPathInside(parent: string, child: string): boolean {
 export class SubagentCoordinator {
 	private readonly providers = new ProviderRegistry();
 	private readonly active = new Map<string, Activation>();
-	private readonly agentSyncResult: AgentSyncResult;
+	private agentSyncResult: AgentSyncResult | undefined;
 	private draining = false;
 
 	constructor(
@@ -229,31 +234,42 @@ export class SubagentCoordinator {
 		private readonly packageRoot: string,
 		private readonly agentDir: string = getAgentDir(),
 	) {
+		this.providers.register(new SpawnProvider());
+		this.providers.register(new ForkProvider());
+	}
+
+	synchronizeBundledAgents(): AgentSyncResult {
 		this.agentSyncResult = syncBundledAgents({
 			bundledDir: this.bundledAgentsDir,
 			agentDir: this.agentDir,
 			packageRoot: this.packageRoot,
 		});
-		this.providers.register(new SpawnProvider());
-		this.providers.register(new ForkProvider());
+		return this.agentSyncResult;
 	}
 
-	getAgentSyncResult(): AgentSyncResult {
-		return this.agentSyncResult;
+	getUserAgentsDir(): string {
+		return join(this.agentDir, "agents");
 	}
 
 	discoverAvailableAgents(
 		cwd: string,
-		agentScope: SubagentSettings["agentScope"],
+		settings: SubagentSettings,
 		projectTrusted: boolean,
 	): AgentDiscoveryResult {
+		if (settings.syncBundledAgents && !this.agentSyncResult) {
+			this.synchronizeBundledAgents();
+		}
+		const excludeUserAgentNames = settings.syncBundledAgents
+			? undefined
+			: unmodifiedManagedAgentNames(this.agentDir);
 		return discoverAgents({
 			cwd,
-			scope: agentScope,
+			scope: settings.agentScope,
 			projectTrusted,
 			bundledDir: this.bundledAgentsDir,
 			agentDir: this.agentDir,
-			includeBundled: false,
+			includeBundled: !settings.syncBundledAgents && settings.agentScope !== "project",
+			excludeUserAgentNames,
 		});
 	}
 
@@ -331,7 +347,7 @@ export class SubagentCoordinator {
 			agentDiscovery ??
 			this.discoverAvailableAgents(
 				parent.cwd,
-				settings.agentScope,
+				settings,
 				parent.projectTrusted,
 			);
 		const agent = discovery.agents.find((candidate) => candidate.name === input.agent);
@@ -363,6 +379,7 @@ export class SubagentCoordinator {
 			thinkingLevel,
 			runtime: {
 				agentScope: settings.agentScope,
+				syncBundledAgents: settings.syncBundledAgents,
 				maxDepth: settings.maxDepth,
 				enableRunInBackground: settings.enableRunInBackground,
 				defaultBackground: settings.defaultBackground,
@@ -761,7 +778,7 @@ export class SubagentCoordinator {
 		const descriptor = options.descriptor;
 		const agentDiscovery = this.discoverAvailableAgents(
 			descriptor.cwd,
-			descriptor.runtime.agentScope,
+			makeRuntimeSettings(descriptor),
 			options.parent.projectTrusted,
 		);
 		const customTools = this.createChildToolDefinitions(

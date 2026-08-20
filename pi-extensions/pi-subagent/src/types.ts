@@ -10,6 +10,7 @@ export type SubagentStopReason = "completed" | "aborted" | "error" | "max-tokens
 
 export interface SubagentSettings {
 	agentScope: AgentScope;
+	syncBundledAgents: boolean;
 	maxDepth: number;
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;
@@ -46,6 +47,7 @@ export interface ResolvedModel {
 
 export interface SubagentRuntimeSnapshot {
 	agentScope: AgentScope;
+	syncBundledAgents: boolean;
 	maxDepth: number;
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;

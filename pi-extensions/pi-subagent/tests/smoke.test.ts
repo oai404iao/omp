@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, test } from "node:test";
@@ -76,8 +76,50 @@ test("extension loads and registers its model-facing surface", async () => {
 			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
 			assert.deepEqual(agentEnum(tool), ["planner", "reviewer", "scout", "worker"]);
 		}
+		assert.equal(existsSync(join(agentDir, "agents")), false);
+		assert.equal(existsSync(join(agentDir, ".pi-subagent")), false);
 	} finally {
 		session.dispose();
+	}
+});
+
+test("explicit syncBundledAgents opt-in materializes managed presets", async () => {
+	const cwd = resolve(import.meta.dirname, "..");
+	const agentDir = join(root, "agent");
+	mkdirSync(agentDir, { recursive: true });
+	writeFileSync(join(agentDir, "subagent.json"), JSON.stringify({ syncBundledAgents: true }));
+	const settingsManager = SettingsManager.inMemory({});
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir,
+		settingsManager,
+		noExtensions: true,
+		additionalExtensionPaths: [join(cwd, "src", "index.ts")],
+		noSkills: true,
+		noPromptTemplates: true,
+		noThemes: true,
+		noContextFiles: true,
+	});
+	await loader.reload();
+	assert.deepEqual(loader.getExtensions().errors, []);
+
+	const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null });
+	const { session } = await createAgentSession({
+		cwd,
+		resourceLoader: loader,
+		modelRuntime,
+		settingsManager,
+		sessionManager: SessionManager.inMemory(cwd),
+	});
+	try {
+		await session.bindExtensions({ mode: "print" });
+		assert.equal(existsSync(join(agentDir, "agents", "planner.md")), true);
+		assert.equal(existsSync(join(agentDir, ".pi-subagent", "agents-manifest.json")), true);
+	} finally {
+		session.dispose();
+		rmSync(join(agentDir, "agents"), { recursive: true, force: true });
+		rmSync(join(agentDir, ".pi-subagent"), { recursive: true, force: true });
+		rmSync(join(agentDir, "subagent.json"), { force: true });
 	}
 });
 

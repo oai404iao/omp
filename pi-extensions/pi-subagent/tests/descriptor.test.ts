@@ -27,6 +27,7 @@ function descriptor(label = "inspect auth"): SubagentDescriptor {
 		thinkingLevel: "low",
 		runtime: {
 			agentScope: "user",
+			syncBundledAgents: false,
 			maxDepth: 3,
 			enableRunInBackground: true,
 			defaultBackground: true,
@@ -62,6 +63,15 @@ test("legacy descriptors default to background-enabled behavior", () => {
 	delete (input.runtime as Partial<SubagentDescriptor["runtime"]>).enableRunInBackground;
 	const parsed = parseDescriptor(input);
 	assert.equal(parsed.runtime.enableRunInBackground, true);
+});
+
+test("legacy descriptors preserve synchronized bundled-agent behavior", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		runtime: Omit<SubagentDescriptor["runtime"], "syncBundledAgents">;
+	};
+	delete (input.runtime as Partial<SubagentDescriptor["runtime"]>).syncBundledAgents;
+	const parsed = parseDescriptor(input);
+	assert.equal(parsed.runtime.syncBundledAgents, true);
 });
 
 test("descriptor folding is last-wins for fork seeds", () => {

@@ -12,6 +12,7 @@ import {
 	formatAgentCatalog,
 	type AgentDiscoveryResult,
 } from "./agents.ts";
+import type { AgentSyncResult } from "./agent-sync.ts";
 import {
 	InterruptParameters,
 	ListAgentsParameters,
@@ -196,8 +197,8 @@ function registerForkDelegationTool(
 
 export default function subagentExtension(pi: ExtensionAPI): void {
 	const coordinator = new SubagentCoordinator(pi, BUNDLED_AGENTS_DIR, PACKAGE_ROOT);
-	const agentSync = coordinator.getAgentSyncResult();
 	let agentSyncNotified = false;
+	let agentSync: AgentSyncResult | undefined;
 	let sessionSettings: SubagentSettings = DEFAULT_SETTINGS;
 	let sessionDiscovery: AgentDiscoveryResult | undefined;
 
@@ -294,7 +295,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				sessionDiscovery ??
 				coordinator.discoverAvailableAgents(
 					ctx.cwd,
-					sessionSettings.agentScope,
+					sessionSettings,
 					ctx.isProjectTrusted(),
 				);
 			const parent = await coordinator.parentFromContext(ctx);
@@ -306,7 +307,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 					: "foreground-first";
 			const sections = [
 				`Mode: ${schedulingMode}`,
-				`Agent config: ${agentSync.userAgentsDir}`,
+				sessionSettings.syncBundledAgents
+					? `Bundled presets: synchronized to ${agentSync?.userAgentsDir ?? coordinator.getUserAgentsDir()}`
+					: "Bundled presets: package defaults (no filesystem sync)",
+				`User agent dir: ${agentSync?.userAgentsDir ?? coordinator.getUserAgentsDir()}`,
 				`Agents:\n${formatAgentCatalog(discovery.agents)}`,
 				`Children:\n${coordinator.formatCatalog(entries, "descendants")}`,
 			];
@@ -320,9 +324,12 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
 		sessionSettings = loaded.settings;
+		agentSync = sessionSettings.syncBundledAgents
+			? coordinator.synchronizeBundledAgents()
+			: undefined;
 		sessionDiscovery = coordinator.discoverAvailableAgents(
 			ctx.cwd,
-			sessionSettings.agentScope,
+			sessionSettings,
 			ctx.isProjectTrusted(),
 		);
 		const registeredParameters = new Map<string, unknown>([
@@ -341,7 +348,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		if (!sessionSettings.enableRunInBackground) {
 			disableOwnedTools(pi, backgroundControlParameters);
 		}
-		if (!agentSyncNotified) {
+		if (!agentSyncNotified && agentSync) {
 			agentSyncNotified = true;
 			const lines = [`pi-subagent agent config: ${agentSync.userAgentsDir}`];
 			if (agentSync.installed.length > 0) {

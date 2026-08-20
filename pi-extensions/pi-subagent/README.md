@@ -8,8 +8,7 @@ to Pi's extension and SDK APIs.
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 
 > npm identity: `@oai404iao/pi-subagent`. This package remains private pending
-> review of its managed global-preset side effects, so install it from a local
-> checkout.
+> final public-release approval, so install it from a local checkout.
 
 ## Features
 
@@ -21,7 +20,8 @@ Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
   - background continuable runs return a child session id immediately
 - **Foreground-only policy** that removes background scheduling and lifecycle controls
 - **Independent context and session** for every child
-- **Materialized user presets** with update-time backup and replacement
+- **Bundled presets without filesystem writes by default**, with opt-in
+  materialization, backup, and replacement
 - **Durable descriptors and lineage** stored in child JSONL sessions
 - **Cold resume** through `send_message`
 - **Control plane** with listing and interruption
@@ -87,17 +87,41 @@ Pi executes sibling tool calls in parallel, so this package deliberately accepts
 
 ## Agent definitions
 
-The package includes `scout`, `planner`, `reviewer`, and `worker`. On extension startup,
-these bundled definitions are materialized into:
+The package includes `scout`, `planner`, `reviewer`, and `worker`. By default,
+these bundled definitions are read directly from the package. Startup does
+**not** create, replace, remove, or back up files in the Pi agent directory.
+`/subagents` reports those defaults as `(bundled)`.
+
+User and project definitions can override the same names without modifying
+package files. Runtime locations and precedence are:
+
+1. bundled package definitions
+2. `<Pi agent dir>/agents/*.md`
+3. nearest trusted `.pi/agents/*.md`
+
+Project definitions replace user and bundled definitions with the same name
+when project scope is enabled. Project agents are disabled by the default
+`agentScope: "user"`. Setting the scope to `project` explicitly selects only
+project definitions; `both` loads bundled definitions, user overrides, then
+project overrides.
+
+When upgrading from a version that synchronized presets by default, unchanged
+previously managed files are recognized read-only and do not shadow newer
+package defaults. Edited managed files remain user overrides. The default
+never deletes or rewrites those existing files.
+
+### Opt-in managed preset synchronization
+
+Set `syncBundledAgents: true` only if you explicitly want the package to
+materialize its bundled definitions into:
 
 ```text
 <Pi agent dir>/agents/*.md
 ```
 
-Runtime discovery uses these user files rather than reading the package copies directly.
-`/subagents` therefore reports the built-in presets as `(user)`.
-
-Synchronization behavior:
+With that opt-in, runtime discovery uses the managed user files rather than
+reading package copies directly, and `/subagents` reports built-ins as
+`(user)`. Synchronization behavior is then:
 
 1. **First startup:** missing presets are installed. A different pre-existing same-name file
    is backed up before the bundled version replaces it.
@@ -123,9 +147,10 @@ Synchronization state and backups live at:
 <Pi agent dir>/.pi-subagent/backups/<timestamp>-to-<version>/*.md
 ```
 
-The startup notification reports installed/updated files and exact backup paths. To restore
-a customization after an update, copy its backup over the corresponding user agent file;
-later startups of that same plugin release preserve the restored edit.
+The startup notification reports installed/updated files and exact backup
+paths. To restore a customization after an update, copy its backup over the
+corresponding user agent file; later startups of that same plugin release
+preserve the restored edit.
 
 Add or edit user agents as Markdown files with YAML frontmatter:
 
@@ -140,16 +165,6 @@ thinking: high
 
 Review the delegated change. Report concrete security defects with exact paths.
 ```
-
-Runtime locations and precedence:
-
-1. `<Pi agent dir>/agents/*.md`
-2. nearest trusted `.pi/agents/*.md`
-
-Project definitions replace user definitions with the same name when project scope is
-enabled. Project agents are disabled by the default `agentScope: "user"`. Setting the scope
-to `project` explicitly selects only project definitions; `both` loads user definitions
-followed by project overrides.
 
 Frontmatter:
 
@@ -212,6 +227,7 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 {
   "$schema": "/path/to/pi-subagent/config.schema.json",
   "agentScope": "user",
+  "syncBundledAgents": false,
   "maxDepth": 3,
   "enableRunInBackground": true,
   "defaultBackground": true,
@@ -224,6 +240,7 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `agentScope` | `user` | Select user definitions, project definitions, or user definitions followed by project overrides. |
+| `syncBundledAgents` | `false` | **User-level config only.** Opt in to writing managed bundled presets into `<Pi agent dir>/agents`. `true` may install, replace, retire, and back up those files. |
 | `maxDepth` | `3` | Absolute delegation depth; a top-level Pi session is depth 0. |
 | `enableRunInBackground` | `true` | Enable continuable background children and their model-facing lifecycle controls. Set `false` for strict foreground-only mode. |
 | `defaultBackground` | `true` | Default scheduling for fresh `subagent` calls when background execution is enabled. |
@@ -291,7 +308,10 @@ The parent is executing a tool when `subagent_fork` starts, so its current assis
 ## Security
 
 - Extensions and subagents run with the user's OS permissions.
-- Startup synchronizes bundled presets into the user agent directory and may create backups under `<Pi agent dir>/.pi-subagent/backups`.
+- Opt-in `syncBundledAgents: true` synchronizes bundled presets into the user
+  agent directory and may create backups under
+  `<Pi agent dir>/.pi-subagent/backups`. The default does not write these
+  paths.
 - Project-local agents are repository-controlled prompts. They are loaded only when the project is trusted and configuration enables project scope.
 - `inheritExtensions` is disabled by default because loading an extension in a child executes its code and may duplicate external side effects.
 - Explicit agent tool lists are enforced as registry ceilings, but this controls model visibility and execution composition rather than providing an OS sandbox.
@@ -323,8 +343,6 @@ The test suite includes provider-boundary, descriptor, configuration, discovery,
 MIT © 2026 oai404iao. See [LICENSE](LICENSE) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-This package remains private until its managed global-preset behavior has a
-reviewed public-release policy. On first startup and package updates it can
-materialize, replace, back up, and retire managed files under
-`<Pi agent dir>/agents/`; users must explicitly accept that behavior before
-public publication.
+This package remains private pending final public-release approval. Managed
+global-preset synchronization is opt-in through `syncBundledAgents: true`; the
+default reads bundled definitions without writing user files.

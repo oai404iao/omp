@@ -7,6 +7,7 @@ export const CONFIG_FILE_NAME = "subagent.json";
 
 export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	agentScope: "user",
+	syncBundledAgents: false,
 	maxDepth: 3,
 	enableRunInBackground: true,
 	defaultBackground: true,
@@ -18,6 +19,7 @@ export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 const CONFIG_KEYS = new Set([
 	"$schema",
 	"agentScope",
+	"syncBundledAgents",
 	"maxDepth",
 	"enableRunInBackground",
 	"defaultBackground",
@@ -106,10 +108,22 @@ function parseInteger(
 	return value;
 }
 
-function applyConfig(settings: SubagentSettings, config: ConfigRecord, source: string): SubagentSettings {
+function applyConfig(
+	settings: SubagentSettings,
+	config: ConfigRecord,
+	source: string,
+	options: { allowSyncBundledAgents: boolean },
+): SubagentSettings {
+	if (config.syncBundledAgents !== undefined && !options.allowSyncBundledAgents) {
+		throw new Error(`${source}: syncBundledAgents may be configured only in the user-level subagent.json`);
+	}
 	return {
 		agentScope:
 			config.agentScope === undefined ? settings.agentScope : parseAgentScope(config.agentScope, source),
+		syncBundledAgents:
+			config.syncBundledAgents === undefined
+				? settings.syncBundledAgents
+				: parseBoolean(config.syncBundledAgents, "syncBundledAgents", source),
 		maxDepth:
 			config.maxDepth === undefined
 				? settings.maxDepth
@@ -149,7 +163,7 @@ export function loadSettings(options: LoadSettingsOptions): LoadedSettings {
 	const userPath = join(options.agentDir ?? getAgentDir(), CONFIG_FILE_NAME);
 	const userConfig = readConfig(userPath);
 	if (userConfig) {
-		settings = applyConfig(settings, userConfig, userPath);
+		settings = applyConfig(settings, userConfig, userPath, { allowSyncBundledAgents: true });
 		sources.push(userPath);
 	}
 
@@ -158,7 +172,7 @@ export function loadSettings(options: LoadSettingsOptions): LoadedSettings {
 		if (projectPath) {
 			const projectConfig = readConfig(projectPath);
 			if (projectConfig) {
-				settings = applyConfig(settings, projectConfig, projectPath);
+				settings = applyConfig(settings, projectConfig, projectPath, { allowSyncBundledAgents: false });
 				sources.push(projectPath);
 			}
 		}
