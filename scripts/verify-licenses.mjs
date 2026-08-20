@@ -83,6 +83,9 @@ check(
 
 const externalLicense = text("pi-extensions/external-thinking/LICENSE");
 const externalNotice = text("pi-extensions/external-thinking/THIRD_PARTY_NOTICES.md");
+const externalManifest = readManifest("pi-extensions/external-thinking");
+check(externalManifest.private === true, "external-thinking must remain private while compatibility review is incomplete");
+check(externalManifest.license === "MIT", "external-thinking manifest license must be MIT");
 for (const copyright of [
   "Copyright (c) 2025 Mario Zechner",
   "Copyright (c) 2025-2026 Can Bölük",

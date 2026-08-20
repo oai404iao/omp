@@ -7,6 +7,11 @@ export const registry = "https://registry.npmjs.org/";
 
 export const workspaces = [
   {
+    name: "@oai404iao/pi-external-thinking",
+    directory: "pi-extensions/external-thinking",
+    releaseStatus: "blocked",
+  },
+  {
     name: "@oai404iao/pi-codex-minimal-tools",
     directory: "pi-extensions/pi-codex-minimal-tools",
     releaseStatus: "blocked",

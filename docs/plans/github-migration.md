@@ -3,7 +3,7 @@
 ## Decisions
 
 - Public repository target: `oai404iao/omp`.
-- Use `@oai404iao/<package-name>` for all five npm workspace package names.
+- Use `@oai404iao/<package-name>` for all six npm workspace package names.
 - Preserve and audit the existing Git history.
 - Phase 1 changes release infrastructure only; plugin behavior is out of scope.
 - GitHub is the public source repository and will become the release source of
@@ -20,7 +20,7 @@ that repository exactly.
 - [x] Add Changesets with independent package versions.
 - [x] Add CI for package checks and npm tarball inspection.
 - [x] Add a release-PR workflow.
-- [x] Add a manually triggered, hard-disabled OIDC publish workflow with
+- [x] Add a manually triggered OIDC publish workflow with
       read-only verification and immutable tarball handoff.
 - [x] Record the initial full-history and publication audit.
 - [x] Obtain the GitHub owner.
@@ -74,7 +74,7 @@ GitHub to be the tracked public branch.
 
 ## Phase 3 — package identity
 
-For all five npm workspaces:
+For all six npm workspaces:
 
 1. Recheck exact scoped package-name ownership.
 2. Add real `repository`, `homepage`, and `bugs` metadata.
@@ -84,25 +84,27 @@ For all five npm workspaces:
 6. Record the bootstrap commit in npm `gitHead` and create matching tags.
 7. Bind trusted publishing to `publish.yml` and `npm-publish`.
 
-`external-thinking` remains incubating until it has its own manifest, tests,
-and compatibility handling. Its upstream attribution and license are now
+`@oai404iao/pi-external-thinking` now has an audited manifest, tarball
+allowlist, and behavior tests. It remains private until compatibility and
+public-release review is complete. Its upstream attribution and license are
 recorded.
 
 The initial `0.1.2` bootstrap releases for
 `@oai404iao/pi-keep-defaults` and `@oai404iao/pi-telegram-notify` were
 published from `0c53bdb9e13b006a23a8da05a01c06f106fa2c10`, with matching tags
-and GitHub Releases. Their trusted publishers are configured and guarded
-manual releases are enabled. The other workspaces set `private: true` and
-require a separate promotion review.
+and GitHub Releases. Guarded publishing subsequently released `0.1.3` from
+`16dccb8953b717670c34fe978c79c07d592ca7e2`. Their trusted publishers are
+configured and guarded manual releases are enabled. The other workspaces set
+`private: true` and require a separate promotion review.
 
 ## Phase 4 — enable releases
 
-Open a dedicated pull request that changes only the release lock and any final
-release-policy checks:
+The release lock was enabled in a dedicated reviewed pull request:
 
 ```yaml
 RELEASE_INFRASTRUCTURE_ENABLED: "true"
 ```
 
-Do not combine that change with plugin implementation work. Publish candidate
-packages separately and use prerelease dist-tags for beta/experimental code.
+Do not combine future release-policy changes with plugin implementation work.
+Publish candidate packages separately and use prerelease dist-tags for
+beta/experimental code.

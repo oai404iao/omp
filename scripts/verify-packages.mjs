@@ -10,6 +10,7 @@ const errors = [];
 const seenNames = new Set();
 const testedPiVersion = "0.84.2";
 const requiredRuntimeFiles = {
+  "@oai404iao/pi-external-thinking": ["THIRD_PARTY_NOTICES.md"],
   "@oai404iao/pi-codex-minimal-tools": [
     "LICENSES/Apache-2.0.txt",
     "LICENSES/OpenAI-Codex-NOTICE.txt",
@@ -174,8 +175,6 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
     `✓ ${manifest.name}@${manifest.version} [${releaseStatus}]: ${packedPaths.size} files, ${unpackedSize.toLocaleString()} bytes unpacked`,
   );
 }
-
-console.log("ℹ external-thinking is intentionally excluded until it has its own audited package manifest.");
 
 if (errors.length > 0) {
   console.error("\nPackage verification failed:");

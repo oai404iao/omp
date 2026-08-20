@@ -19,6 +19,7 @@
     "npm": ">=11.5.1"
   },
   "workspaces": [
+    "pi-extensions/external-thinking",
     "pi-extensions/pi-codex-minimal-tools",
     "pi-extensions/pi-keep-defaults",
     "pi-extensions/pi-subagent",
