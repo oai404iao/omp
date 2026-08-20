@@ -10,7 +10,7 @@ const errors = [];
 const seenNames = new Set();
 const testedPiVersion = "0.84.2";
 const requiredRuntimeFiles = {
-  "pi-codex-minimal-tools": [
+  "@oai404iao/pi-codex-minimal-tools": [
     "LICENSES/Apache-2.0.txt",
     "LICENSES/OpenAI-Codex-NOTICE.txt",
     "THIRD_PARTY_NOTICES.md",
@@ -19,8 +19,8 @@ const requiredRuntimeFiles = {
     "src/model-catalog/default-models.json",
     "src/providers/codex-apply-patch.lark",
   ],
-  "pi-keep-defaults": [],
-  "pi-subagent": [
+  "@oai404iao/pi-keep-defaults": [],
+  "@oai404iao/pi-subagent": [
     "agents/planner.md",
     "agents/reviewer.md",
     "agents/scout.md",
@@ -28,8 +28,8 @@ const requiredRuntimeFiles = {
     "config.example.json",
     "config.schema.json",
   ],
-  "pi-telegram-notify": ["config.example.json", "config.schema.json"],
-  "pi-tree-continue": [],
+  "@oai404iao/pi-telegram-notify": ["config.example.json", "config.schema.json"],
+  "@oai404iao/pi-tree-continue": [],
 };
 
 function report(message) {
@@ -98,10 +98,10 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
     }
   }
   if (
-    manifest.name === "pi-codex-minimal-tools"
+    manifest.name === "@oai404iao/pi-codex-minimal-tools"
     && manifest.dependencies?.undici !== "^8.10.0"
   ) {
-    report("pi-codex-minimal-tools: undici must remain on the audited ^8.10.0 baseline");
+    report("@oai404iao/pi-codex-minimal-tools: undici must remain on the audited ^8.10.0 baseline");
   }
   if (
     manifest.publishConfig?.access !== "public"

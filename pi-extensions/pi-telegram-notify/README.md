@@ -1,4 +1,4 @@
-# pi-telegram-notify
+# @oai404iao/pi-telegram-notify
 
 Pi 完成任务、最终停止于错误、或通过 `ask_user_question` 等待你的回复时，向 Telegram Bot 发送一条通知。
 
@@ -22,6 +22,14 @@ Telegram。概要只保留空白规范化后的前 30 个字符，但截断不�
 
 ## 安装
 
+首个公开版本发布后：
+
+```bash
+pi install npm:@oai404iao/pi-telegram-notify
+```
+
+本地开发或尚未发布时：
+
 ```bash
 pi install /absolute/path/to/pi-telegram-notify
 ```
@@ -41,6 +49,9 @@ pi install /absolute/path/to/pi-telegram-notify
 ```text
 <PI_CODING_AGENT_DIR>/extensions/pi-telegram-notify/config.json
 ```
+
+npm 包名使用 `@oai404iao/pi-telegram-notify`，但配置目录继续使用
+`pi-telegram-notify`，以保持已有配置兼容。
 
 将 [`config.example.json`](config.example.json) 和
 [`config.schema.json`](config.schema.json) 一起复制到该目录；示例中的

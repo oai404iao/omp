@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://unpkg.com/pi-codex-minimal-tools@1/models.schema.json",
-  "title": "pi-codex-minimal-tools model catalog overrides",
+  "$id": "https://unpkg.com/@oai404iao/pi-codex-minimal-tools@1/models.schema.json",
+  "title": "@oai404iao/pi-codex-minimal-tools model catalog overrides",
   "description": "Per-model Codex protocol and tool capability profiles. User entries override bundled entries by exact provider/model id.",
   "type": "object",
   "additionalProperties": false,
@@ -10,7 +10,7 @@
     "$schema": {
       "type": "string",
       "description": "JSON Schema URL used by editors for validation and completion.",
-      "default": "https://unpkg.com/pi-codex-minimal-tools@1/models.schema.json"
+      "default": "https://unpkg.com/@oai404iao/pi-codex-minimal-tools@1/models.schema.json"
     },
     "version": {
       "const": 1,

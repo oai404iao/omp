@@ -1,4 +1,4 @@
-# pi-telegram-notify
+# @oai404iao/pi-telegram-notify
 
 ## 0.1.1
 

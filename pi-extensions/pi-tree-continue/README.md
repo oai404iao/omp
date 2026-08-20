@@ -1,8 +1,11 @@
-# pi-tree-continue
+# @oai404iao/pi-tree-continue
 
 Adds `/continue` for Pi sessions. It resumes the agent without adding any new message to the LLM context.
 
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+
+> npm identity: `@oai404iao/pi-tree-continue`. This experimental package
+> remains private, so install it from a local checkout.
 
 This is useful after transient provider failures such as 429s, network drops, or server errors where Pi is idle but the last useful point in the session is a `toolResult`.
 

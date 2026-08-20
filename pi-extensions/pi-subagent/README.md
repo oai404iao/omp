@@ -1,8 +1,11 @@
-# pi-subagent
+# @oai404iao/pi-subagent
 
 Durable, continuable subagents for [Pi](https://github.com/earendil-works/pi-mono). The design adapts the DeepSeek Harness subagent seam to Pi's extension and SDK APIs instead of copying Pi's subprocess-only example.
 
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+
+> npm identity: `@oai404iao/pi-subagent`. This package remains private pending
+> its provenance review, so install it from a local checkout.
 
 ## Features
 
@@ -177,7 +180,7 @@ model-specific tool extensions:
 - if no mutation implementation is active, child creation fails before the first model request.
 
 The bundled `worker` uses `$mutation`. For example, to use
-`pi-codex-minimal-tools` inside workers:
+`@oai404iao/pi-codex-minimal-tools` inside workers:
 
 ```json
 {

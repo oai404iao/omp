@@ -1,4 +1,4 @@
-# pi-keep-defaults
+# @oai404iao/pi-keep-defaults
 
 让 pi 在会话内切换模型、切换思考级别时,**不修改** `settings.json` 中的默认配置:
 
@@ -11,6 +11,14 @@
 兼容性: Pi 0.84.2 或更高版本;当前测试基线为 0.84.2。
 
 ## 安装
+
+首个公开版本发布后：
+
+```bash
+pi install npm:@oai404iao/pi-keep-defaults
+```
+
+本地开发或尚未发布时：
 
 ```bash
 pi install /absolute/path/to/pi-keep-defaults
