@@ -1,5 +1,12 @@
 # @oai404iao/pi-telegram-notify
 
+## 0.1.3
+
+### Patch Changes
+
+- ead78ef: Update the published package manifests to the current TypeScript and Node type
+  development baselines.
+
 ## 0.1.2
 
 ### Patch Changes
