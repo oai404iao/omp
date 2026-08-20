@@ -97,14 +97,17 @@ Release eligibility is explicit in two places:
 1. `scripts/workspaces.mjs` must set `releaseStatus: "publishable"`;
 2. the matching package manifest must not set `"private": true`.
 
-CI rejects mismatches. The guarded release scripts currently allow only
-`@oai404iao/pi-keep-defaults` and `@oai404iao/pi-telegram-notify`. Both are
-public at `0.1.3`; future releases require a maintainer to manually dispatch
-and approve the guarded workflow. Their trusted-publisher configuration and
-`NPM_PUBLISH_ENABLED` environment variable are release prerequisites.
+CI rejects mismatches. The guarded release scripts currently allow
+`@oai404iao/pi-external-thinking`, `@oai404iao/pi-keep-defaults`, and
+`@oai404iao/pi-telegram-notify`. The latter two are public at `0.1.3`;
+`pi-external-thinking` requires its one-time npm bootstrap before the guarded
+OIDC workflow can publish future versions. All future releases require a
+maintainer to manually dispatch and approve the guarded workflow. Their
+trusted-publisher configuration and `NPM_PUBLISH_ENABLED` environment variable
+are release prerequisites.
 
-`@oai404iao/pi-codex-minimal-tools`, `@oai404iao/pi-external-thinking`,
-`@oai404iao/pi-subagent`, and `@oai404iao/pi-tree-continue` are private.
+`@oai404iao/pi-codex-minimal-tools`, `@oai404iao/pi-subagent`, and
+`@oai404iao/pi-tree-continue` are private.
 Promote one only in a dedicated reviewed change after its documented source,
 compatibility, and release-track gates are complete. A prerelease package must
 also use prerelease SemVer so the workflow selects the `next` dist-tag.

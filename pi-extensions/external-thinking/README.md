@@ -5,9 +5,9 @@ scratchpad tool.
 
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 
-> npm identity: `@oai404iao/pi-external-thinking`. This package is currently
-> private while its compatibility and public-release review are completed. To
-> load it for one run from a local checkout:
+> npm identity: `@oai404iao/pi-external-thinking`. This package is approved for
+> npm bootstrap but is not published yet. To load it for one run from a local
+> checkout:
 >
 > ```bash
 > pi -e ./pi-extensions/external-thinking
@@ -19,7 +19,7 @@ Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 > pi install ./pi-extensions/external-thinking
 > ```
 >
-> After promotion, install it with:
+> After initial npm bootstrap, install it with:
 >
 > ```bash
 > pi install npm:@oai404iao/pi-external-thinking
