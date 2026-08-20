@@ -8,9 +8,9 @@ on:
         required: true
         type: string
 
-# Phase 1 safety lock. Enabling publication requires a separate reviewed PR.
+# Publication is enabled only after trusted-publisher and environment review.
 env:
-  RELEASE_INFRASTRUCTURE_ENABLED: "false"
+  RELEASE_INFRASTRUCTURE_ENABLED: "true"
 
 permissions:
   contents: read

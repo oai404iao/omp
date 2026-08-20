@@ -91,9 +91,9 @@ recorded.
 The initial `0.1.2` bootstrap releases for
 `@oai404iao/pi-keep-defaults` and `@oai404iao/pi-telegram-notify` were
 published from `0c53bdb9e13b006a23a8da05a01c06f106fa2c10`, with matching tags
-and GitHub Releases. Configure their trusted publishers before enabling
-automated updates. The other workspaces set `private: true` and require a
-separate promotion review.
+and GitHub Releases. Their trusted publishers are configured and guarded
+manual releases are enabled. The other workspaces set `private: true` and
+require a separate promotion review.
 
 ## Phase 4 — enable releases
 

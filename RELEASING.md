@@ -2,14 +2,15 @@
 
 ## Current state
 
-Automated publication is intentionally disabled:
+Guarded npm publication is enabled:
 
 ```yaml
-RELEASE_INFRASTRUCTURE_ENABLED: "false"
+RELEASE_INFRASTRUCTURE_ENABLED: "true"
 ```
 
-in `.github/workflows/publish.yml`. Changing that value requires a separate,
-reviewed pull request after every prerequisite below is complete.
+in `.github/workflows/publish.yml`. The workflow remains manually dispatched:
+it requires the exact `publish` confirmation and approval of the protected
+`npm-publish` environment.
 
 The initial public releases already exist:
 
@@ -95,9 +96,9 @@ Release eligibility is explicit in two places:
 
 CI rejects mismatches. The guarded release scripts currently allow only
 `@oai404iao/pi-keep-defaults` and `@oai404iao/pi-telegram-notify`. Both are
-public at `0.1.2`; their future automated releases remain blocked by the
-global workflow lock, trusted-publisher configuration, and the
-`NPM_PUBLISH_ENABLED` environment variable.
+public at `0.1.2`; future releases require a maintainer to manually dispatch
+and approve the guarded workflow. Their trusted-publisher configuration and
+`NPM_PUBLISH_ENABLED` environment variable are release prerequisites.
 
 `@oai404iao/pi-codex-minimal-tools`, `@oai404iao/pi-subagent`, and
 `@oai404iao/pi-tree-continue` are private. Promote one only in a dedicated
