@@ -9,7 +9,7 @@ export const workspaces = [
   {
     name: "@oai404iao/pi-external-thinking",
     directory: "pi-extensions/external-thinking",
-    releaseStatus: "blocked",
+    releaseStatus: "publishable",
   },
   {
     name: "@oai404iao/pi-codex-minimal-tools",

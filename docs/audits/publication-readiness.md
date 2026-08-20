@@ -49,7 +49,7 @@ is pinned to exactly 0.84.2. Dependabot remains enabled for ongoing review.
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
 | `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
-| `@oai404iao/pi-external-thinking` | private `0.1.0` | typecheck and 6 behavior tests | compatibility/public-release review |
+| `@oai404iao/pi-external-thinking` | publishable candidate `0.1.0` | typecheck and 9 behavior tests | npm bootstrap and trusted-publisher setup |
 | `@oai404iao/pi-keep-defaults` | public `0.1.3` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
 | `@oai404iao/pi-subagent` | private | typecheck and 60 tests | final public-release approval |
 | `@oai404iao/pi-telegram-notify` | public `0.1.3` | typecheck and 8 tests | privacy/internal-hook release approval |
@@ -88,8 +88,8 @@ than being relicensed under the project MIT grant.
   notices, and local modification scope are recorded in its
   `THIRD_PARTY_NOTICES.md`.
 - The package manifest, tarball allowlist, and behavior tests now cover the
-  workspace. It remains private pending compatibility and public-release
-  review.
+  workspace. It is approved for one-time npm bootstrap, followed by
+  trusted-publisher setup.
 
 ### `@oai404iao/pi-codex-minimal-tools`
 
