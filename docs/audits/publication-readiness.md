@@ -3,6 +3,7 @@
 Audit date: 2026-08-17
 Baseline commit: `fdc4ed6a3702fb226ff85b9a084e940a3122d41a`
 Public cutover verified: 2026-08-18
+Public npm registry checked: 2026-08-20
 
 This document records evidence and open questions. It is not a legal opinion
 or proof that the repository contains no sensitive material.
@@ -47,9 +48,9 @@ Dependabot remains enabled for ongoing review.
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
 | `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
-| `@oai404iao/pi-keep-defaults` | publishable candidate | typecheck and smoke/guard tests | watcher lifecycle/release approval |
+| `@oai404iao/pi-keep-defaults` | public `0.1.2` | typecheck and smoke/guard tests | trusted publisher, protected environment variable, automated-release approval |
 | `@oai404iao/pi-subagent` | private | typecheck and 51 tests | DeepSeek Harness provenance, global preset side-effect review |
-| `@oai404iao/pi-telegram-notify` | publishable candidate | typecheck and 8 tests | privacy/internal-hook release approval |
+| `@oai404iao/pi-telegram-notify` | public `0.1.2` | typecheck and 8 tests | trusted publisher, protected environment variable, privacy/internal-hook release approval |
 | `@oai404iao/pi-tree-continue` | private | typecheck and pack check; no test suite | private Pi API dependency, tests |
 | `external-thinking` | no | not covered by npm workspace CI | manifest, tests, compatibility fix |
 
@@ -58,6 +59,11 @@ audit. That result is historical only: all five workspace package manifests
 now use the `@oai404iao` scope. E404 is not a reservation or ownership
 guarantee; the exact scoped names must be checked again immediately before
 bootstrap publishing.
+
+The two public candidate packages were observed on npm at `0.1.2`, with npm
+`gitHead` `0c53bdb9e13b006a23a8da05a01c06f106fa2c10`; their package tags and
+GitHub Releases match that commit. This confirms the bootstrap artifacts, not
+the npm account's 2FA policy or trusted-publisher configuration.
 
 ## License and source review
 
@@ -110,7 +116,9 @@ Official upstream license:
 - [ ] Package-level license files and source notices reviewed.
 - [ ] Final tarball contents reduced and approved.
 - [ ] Scoped package names/owners rechecked on npm.
-- [ ] Initial packages created with interactive 2FA.
+- [x] Initial public `0.1.2` bootstrap artifacts observed on npm, GitHub tags, and GitHub Releases.
+- [ ] Confirm the npm account's 2FA and package-owner settings.
 - [ ] npm trusted publishers configured for `publish.yml`.
-- [ ] `npm-publish` environment protected and enabled.
+- [x] `npm-publish` environment requires approval and protected branches.
+- [ ] Add `NPM_PUBLISH_ENABLED=true` to the `npm-publish` environment.
 - [ ] Release lock changed in a dedicated reviewed pull request.

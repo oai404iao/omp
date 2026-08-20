@@ -5,9 +5,10 @@ This repository contains a collection of extensions for
 is [`oai404iao/omp`](https://github.com/oai404iao/omp); the existing private
 Gitea remote is retained as a migration backup.
 
-> npm publication is not enabled yet. The committed publish workflow contains
-> a hard safety lock until repository ownership, package metadata, licensing,
-> and npm trusted publishers have been reviewed.
+> Automated npm publication is not enabled yet. The initial `0.1.2` releases
+> of `pi-keep-defaults` and `pi-telegram-notify` are public; the committed
+> publish workflow remains hard-locked until npm trusted publishers and the
+> protected publishing environment are verified.
 
 ## Packages
 
@@ -17,9 +18,9 @@ not change the private/public eligibility below.
 | Package | Version | Release track |
 | --- | ---: | --- |
 | `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | private; blocked pending third-party source review |
-| `@oai404iao/pi-keep-defaults` | `0.1.2` | candidate |
+| `@oai404iao/pi-keep-defaults` | `0.1.2` | public; automated updates locked |
 | `@oai404iao/pi-subagent` | `0.2.0` | private; beta candidate after provenance review |
-| `@oai404iao/pi-telegram-notify` | `0.1.2` | candidate |
+| `@oai404iao/pi-telegram-notify` | `0.1.2` | public; automated updates locked |
 | `@oai404iao/pi-tree-continue` | `0.1.0` | private; experimental |
 | `external-thinking` | unpublished | incubating; attribution complete, packaging/tests pending |
 

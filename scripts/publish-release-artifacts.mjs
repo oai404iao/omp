@@ -80,28 +80,32 @@ for (const candidate of manifest.candidates) {
 }
 
 const releases = [];
+const tagsToCreate = [];
 const unresolved = [];
 for (const candidate of manifest.candidates) {
+  const candidateUnresolved = [];
   const published = lookupWithPropagationRetry(candidate.name, candidate.version);
   if (!published.exists) {
-    unresolved.push(`${candidate.name}@${candidate.version} is not published`);
+    candidateUnresolved.push(`${candidate.name}@${candidate.version} is not published`);
+    unresolved.push(...candidateUnresolved);
     continue;
   }
   if (published.gitHead !== candidate.sourceCommit) {
-    unresolved.push(
+    candidateUnresolved.push(
       `${candidate.name}@${candidate.version} has npm gitHead ${published.gitHead ?? "(missing)"}, expected ${candidate.sourceCommit}`,
     );
+    unresolved.push(...candidateUnresolved);
     continue;
   }
 
   const distTags = lookupDistTags(candidate.name);
   if (distTags[candidate.distTag] !== candidate.version) {
-    unresolved.push(
+    candidateUnresolved.push(
       `${candidate.name}@${candidate.version} is not assigned to npm dist-tag ${candidate.distTag}; fix it interactively`,
     );
   }
   if (candidate.prerelease && distTags.latest === candidate.version) {
-    unresolved.push(
+    candidateUnresolved.push(
       `${candidate.name}@${candidate.version} is a prerelease but is also assigned to npm dist-tag latest`,
     );
   }
@@ -110,7 +114,10 @@ for (const candidate of manifest.candidates) {
   if (tagCommit && tagCommit !== candidate.sourceCommit) {
     throw new Error(`tag ${candidate.tag} points to ${tagCommit}, expected ${candidate.sourceCommit}`);
   }
-  if (!tagCommit) git(["tag", candidate.tag, candidate.sourceCommit]);
+  if (candidateUnresolved.length > 0) {
+    unresolved.push(...candidateUnresolved);
+    continue;
+  }
 
   releases.push({
     name: candidate.name,
@@ -119,12 +126,25 @@ for (const candidate of manifest.candidates) {
     notes: candidate.notes,
     prerelease: candidate.prerelease === true,
   });
+  if (!tagCommit) tagsToCreate.push({ tag: candidate.tag, sourceCommit: candidate.sourceCommit });
+}
+
+const ok =
+  unresolved.length === 0
+  && publishWarnings.length === 0
+  && releases.length === manifest.candidates.length
+  && releases.length > 0;
+
+if (ok) {
+  for (const { tag, sourceCommit } of tagsToCreate) {
+    git(["tag", tag, sourceCommit]);
+  }
 }
 
 const result = {
   schemaVersion: 1,
   commit,
-  ok: unresolved.length === 0 && releases.length > 0,
+  ok,
   releases,
   unresolved,
   publishWarnings,
@@ -135,4 +155,7 @@ for (const release of releases) console.log(`✓ reconciled ${release.tag}`);
 for (const message of unresolved) console.error(`✗ ${message}`);
 for (const warning of publishWarnings) {
   console.error(`! npm publish reported an error for ${warning.name}; registry state was reconciled afterward`);
+}
+if (!ok) {
+  console.error("! npm release finalization is deferred until a clean recovery run; no new tags were created");
 }
