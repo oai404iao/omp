@@ -20,7 +20,7 @@ not change the private/public eligibility below.
 | `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | private; blocked pending third-party source review |
 | `@oai404iao/pi-external-thinking` | `0.1.0` | private; compatibility and public-release review pending |
 | `@oai404iao/pi-keep-defaults` | `0.1.3` | public; guarded manual releases enabled |
-| `@oai404iao/pi-subagent` | `0.2.0` | private; managed-preset policy review pending |
+| `@oai404iao/pi-subagent` | `0.2.0` | private; final public-release approval pending |
 | `@oai404iao/pi-telegram-notify` | `0.1.3` | public; guarded manual releases enabled |
 | `@oai404iao/pi-tree-continue` | `0.1.0` | private; blocked pending a public Pi continuation API |
 

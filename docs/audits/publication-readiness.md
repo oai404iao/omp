@@ -51,7 +51,7 @@ is pinned to exactly 0.84.2. Dependabot remains enabled for ongoing review.
 | `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
 | `@oai404iao/pi-external-thinking` | private `0.1.0` | typecheck and 6 behavior tests | compatibility/public-release review |
 | `@oai404iao/pi-keep-defaults` | public `0.1.3` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
-| `@oai404iao/pi-subagent` | private | typecheck and 51 tests | managed global-preset side-effect review |
+| `@oai404iao/pi-subagent` | private | typecheck and 60 tests | final public-release approval |
 | `@oai404iao/pi-telegram-notify` | public `0.1.3` | typecheck and 8 tests | privacy/internal-hook release approval |
 | `@oai404iao/pi-tree-continue` | private | typecheck, exact-version guard, and pack check | upstream public continuation API required; private hook bypasses lifecycle/auth/prompt guarantees |
 
@@ -117,8 +117,10 @@ Official upstream license:
   records the implementation boundary and carries a verified MIT license
   snapshot. Its provenance manifest records immutable source/blob URLs and
   SHA-256 checksums for that document and license.
-- The package remains private while its managed global-preset behavior is
-  reviewed for public release.
+- Managed global-preset synchronization is now explicit opt-in
+  (`syncBundledAgents: true`); the default reads bundled definitions without
+  writing user files. The package remains private pending final
+  public-release approval.
 
 ## Privacy and public presentation
 

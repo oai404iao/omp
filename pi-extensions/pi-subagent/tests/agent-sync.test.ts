@@ -17,7 +17,7 @@ import {
 import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
-import { syncBundledAgents } from "../src/agent-sync.ts";
+import { syncBundledAgents, unmodifiedManagedAgentNames } from "../src/agent-sync.ts";
 
 const roots: string[] = [];
 
@@ -70,6 +70,35 @@ test("same-version restarts preserve edits, then an update backs up and replaces
 	assert.equal(update.backups.length, 1);
 	assert.equal(readFileSync(update.backups[0].path, "utf8"), "my customized scout\n");
 	assert.equal(readFileSync(userScout, "utf8"), "bundled scout v2\n");
+});
+
+test("read-only migration identifies only unchanged formerly managed presets", () => {
+	const root = tempRoot();
+	const bundledDir = join(root, "bundled");
+	const agentDir = join(root, "agent");
+	writeBundled(bundledDir, "scout", "bundled scout v1\n");
+	syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+
+	assert.deepEqual([...unmodifiedManagedAgentNames(agentDir)], ["scout.md"]);
+
+	writeFileSync(join(agentDir, "agents", "scout.md"), "custom scout\n");
+	assert.deepEqual([...unmodifiedManagedAgentNames(agentDir)], []);
+});
+
+test("read-only migration preserves a user-replaced symlink as an override", () => {
+	const root = tempRoot();
+	const bundledDir = join(root, "bundled");
+	const agentDir = join(root, "agent");
+	const target = join(root, "same-content-scout.md");
+	writeBundled(bundledDir, "scout", "bundled scout v1\n");
+	syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+
+	writeFileSync(target, "bundled scout v1\n");
+	const userScout = join(agentDir, "agents", "scout.md");
+	unlinkSync(userScout);
+	symlinkSync(target, userScout);
+
+	assert.deepEqual([...unmodifiedManagedAgentNames(agentDir)], []);
 });
 
 test("a bundled prompt change triggers a safe refresh even without a version bump", () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -119,4 +119,44 @@ test("managed runtime discovery uses materialized user agents without bundled fa
 	assert.equal(result.agents.length, 1);
 	assert.equal(result.agents[0].source, "user");
 	assert.equal(result.agents[0].description, "materialized user scout");
+});
+
+test("direct bundled discovery does not require a user agent directory", () => {
+	const root = tempRoot();
+	const bundled = join(root, "bundled");
+	const agentDir = join(root, "agent");
+	writeAgent(bundled, "scout", "bundled scout");
+
+	const result = discoverAgents({
+		cwd: root,
+		scope: "user",
+		projectTrusted: false,
+		bundledDir: bundled,
+		agentDir,
+		includeBundled: true,
+	});
+	assert.equal(result.agents.length, 1);
+	assert.equal(result.agents[0].source, "bundled");
+	assert.equal(existsSync(join(agentDir, "agents")), false);
+});
+
+test("unchanged legacy materialized presets do not shadow direct bundled updates", () => {
+	const root = tempRoot();
+	const bundled = join(root, "bundled");
+	const agentDir = join(root, "agent");
+	writeAgent(bundled, "scout", "bundled scout v2");
+	writeAgent(join(agentDir, "agents"), "scout", "bundled scout v1");
+
+	const result = discoverAgents({
+		cwd: root,
+		scope: "user",
+		projectTrusted: false,
+		bundledDir: bundled,
+		agentDir,
+		includeBundled: true,
+		excludeUserAgentNames: new Set(["scout.md"]),
+	});
+	assert.equal(result.agents.length, 1);
+	assert.equal(result.agents[0].source, "bundled");
+	assert.equal(result.agents[0].description, "bundled scout v2");
 });

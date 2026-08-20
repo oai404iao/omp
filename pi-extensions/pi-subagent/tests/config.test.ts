@@ -28,6 +28,7 @@ test("global and trusted project settings merge", () => {
 		join(agentDir, "subagent.json"),
 		JSON.stringify({
 			maxDepth: 5,
+			syncBundledAgents: true,
 			enableRunInBackground: false,
 			reportDelivery: "quiet",
 			inheritExtensions: true,
@@ -44,6 +45,7 @@ test("global and trusted project settings merge", () => {
 	assert.equal(loaded.settings.reportDelivery, "quiet");
 	assert.equal(loaded.settings.inheritExtensions, true);
 	assert.equal(loaded.settings.enableRunInBackground, false);
+	assert.equal(loaded.settings.syncBundledAgents, true);
 	assert.equal(loaded.sources.length, 2);
 });
 
@@ -57,6 +59,7 @@ test("untrusted project configuration is not read", () => {
 
 	const loaded = loadSettings({ cwd: project, projectTrusted: false, agentDir });
 	assert.equal(loaded.settings.maxDepth, 3);
+	assert.equal(loaded.settings.syncBundledAgents, false);
 	assert.deepEqual(loaded.sources, []);
 });
 
@@ -68,5 +71,32 @@ test("invalid settings fail loud", () => {
 	assert.throws(
 		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
 		/maxDepth must be a safe integer/,
+	);
+});
+
+test("syncBundledAgents must be a boolean", () => {
+	const root = tempRoot();
+	const agentDir = join(root, "agent");
+	mkdirSync(agentDir, { recursive: true });
+	writeFileSync(join(agentDir, "subagent.json"), JSON.stringify({ syncBundledAgents: "yes" }));
+	assert.throws(
+		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
+		/syncBundledAgents must be a boolean/,
+	);
+});
+
+test("trusted project configuration cannot enable bundled-agent synchronization", () => {
+	const root = tempRoot();
+	const agentDir = join(root, "agent");
+	const project = join(root, "repo");
+	mkdirSync(agentDir, { recursive: true });
+	mkdirSync(join(project, ".pi"), { recursive: true });
+	writeFileSync(
+		join(project, ".pi", "subagent.json"),
+		JSON.stringify({ syncBundledAgents: true }),
+	);
+	assert.throws(
+		() => loadSettings({ cwd: project, projectTrusted: true, agentDir }),
+		/syncBundledAgents may be configured only in the user-level/,
 	);
 });

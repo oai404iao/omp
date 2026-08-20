@@ -16,6 +16,7 @@ export interface AgentDiscoveryOptions {
 	bundledDir: string;
 	agentDir?: string;
 	includeBundled?: boolean;
+	excludeUserAgentNames?: ReadonlySet<string>;
 }
 
 export interface AgentDiscoveryResult {
@@ -93,7 +94,11 @@ function loadAgentFile(filePath: string, source: AgentSource): AgentDefinition {
 	};
 }
 
-function loadDirectory(dir: string, source: AgentSource): { agents: AgentDefinition[]; diagnostics: string[] } {
+function loadDirectory(
+	dir: string,
+	source: AgentSource,
+	excludeNames?: ReadonlySet<string>,
+): { agents: AgentDefinition[]; diagnostics: string[] } {
 	if (!isDirectory(dir)) return { agents: [], diagnostics: [] };
 	const agents: AgentDefinition[] = [];
 	const diagnostics: string[] = [];
@@ -109,6 +114,7 @@ function loadDirectory(dir: string, source: AgentSource): { agents: AgentDefinit
 
 	for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
 		if (!entry.name.endsWith(".md") || (!entry.isFile() && !entry.isSymbolicLink())) continue;
+		if (excludeNames?.has(entry.name)) continue;
 		const filePath = join(dir, entry.name);
 		try {
 			agents.push(loadAgentFile(filePath, source));
@@ -142,7 +148,11 @@ export function discoverAgents(options: AgentDiscoveryOptions): AgentDiscoveryRe
 
 	const byName = new Map<string, AgentDefinition>();
 	for (const item of sources) {
-		const loaded = loadDirectory(item.dir, item.source);
+		const loaded = loadDirectory(
+			item.dir,
+			item.source,
+			item.source === "user" ? options.excludeUserAgentNames : undefined,
+		);
 		diagnostics.push(...loaded.diagnostics);
 		for (const agent of loaded.agents) byName.set(agent.name, agent);
 	}

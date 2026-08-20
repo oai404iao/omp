@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, test } from "node:test";
@@ -215,7 +215,7 @@ async function fixture(
 		isIdle: () => true,
 	} as unknown as ExtensionContext;
 	const parent = await coordinator.parentFromContext(context);
-	return { coordinator, parent, messages, events };
+	return { coordinator, parent, messages, events, agentDir };
 }
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
@@ -247,6 +247,28 @@ test("one-shot child returns only its own final output and usage", async () => {
 			assert.equal(outcome.result.usage.turns, 1);
 		}
 		assert.deepEqual(events, ["pi-subagent:start", "pi-subagent:end"]);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("synchronized runtime settings materialize presets before discovery", async () => {
+	const { coordinator, parent, agentDir } = await fixture();
+	try {
+		assert.equal(existsSync(join(agentDir, "agents")), false);
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "synchronized scout",
+				prompt: "Inspect it.",
+				run_in_background: false,
+			},
+			{ ...DEFAULT_SETTINGS, syncBundledAgents: true, defaultBackground: false },
+		);
+		assert.equal(outcome.kind, "foreground");
+		assert.equal(existsSync(join(agentDir, "agents", "scout.md")), true);
 	} finally {
 		await coordinator.shutdown();
 	}

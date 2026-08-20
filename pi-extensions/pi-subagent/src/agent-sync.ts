@@ -197,6 +197,40 @@ function readPreviousManifest(manifestPath: string): AgentManifest | undefined {
 	}
 }
 
+/**
+ * Identify untouched files created by the old opt-out synchronizer without
+ * changing the user filesystem. Direct bundled discovery can then use newer
+ * package definitions while real user edits continue to override them.
+ */
+export function unmodifiedManagedAgentNames(agentDir: string): Set<string> {
+	const manifestPath = join(agentDir, STATE_DIR_NAME, MANIFEST_FILE_NAME);
+	if (!existsSync(manifestPath)) return new Set();
+
+	let manifest: AgentManifest;
+	try {
+		manifest = parseManifest(JSON.parse(readFileSync(manifestPath, "utf8")), manifestPath);
+	} catch {
+		// A malformed historical manifest must never cause a default read-only
+		// session to hide user files or rewrite state.
+		return new Set();
+	}
+
+	const unmodified = new Set<string>();
+	const userAgentsDir = join(agentDir, "agents");
+	for (const [name, expectedHash] of Object.entries(manifest.files)) {
+		try {
+			const path = join(userAgentsDir, name);
+			if (lstatSync(path).isFile() && hash(readFileSync(path)) === expectedHash) {
+				unmodified.add(name);
+			}
+		} catch {
+			// Missing, unreadable, or replaced paths are user-controlled and
+			// therefore remain visible to discovery.
+		}
+	}
+	return unmodified;
+}
+
 function sleepSync(milliseconds: number): void {
 	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }

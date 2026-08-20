@@ -150,6 +150,10 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 		thinkingLevel,
 		runtime: {
 			agentScope,
+			syncBundledAgents:
+				runtime.syncBundledAgents === undefined
+					? true
+					: boolean(runtime.syncBundledAgents, "runtime.syncBundledAgents"),
 			maxDepth: safeNatural(runtime.maxDepth, "runtime.maxDepth"),
 			enableRunInBackground:
 				runtime.enableRunInBackground === undefined
