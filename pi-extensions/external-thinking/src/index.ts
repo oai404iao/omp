@@ -2,8 +2,8 @@
  * external-thinking — a port of oh-my-pi's `externalThinking` feature for pi.
  *
  * What it does (mirrors https://github.com/can1357/oh-my-pi):
- *   1. Registers a private `think` scratchpad tool (hidden from the system
- *      prompt's tool list, rendered in the TUI as dim italic thoughts).
+ *   1. Registers a visible `think` scratchpad tool (omitted from the system
+ *      prompt's tool list and rendered in the TUI as dim italic thoughts).
  *   2. Forces native model reasoning OFF (`thinking level = off`).
  *   3. In hard mode (default) the model is forced to call `think` first on
  *      every user prompt (`tool_choice` pinned to the think tool for the
@@ -35,7 +35,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -45,20 +45,18 @@ import { join } from "node:path";
 // Constants
 // ---------------------------------------------------------------------------
 
-const TOOL_NAME = "think";
-const THINK_DESCRIPTION = "private scratchpad; not shown to user";
-const STATE_FILE = join(getAgentDir(), "external-thinking.json");
+const TOOL_NAME = "external_think";
+const THINK_DESCRIPTION = "Visible reasoning scratchpad shown to the user.";
 const FLAG_NAME = "external-thinking";
 const COMMAND_NAME = "external-thinking";
 const STATUS_KEY = "external-thinking";
 
 /** Provider APIs whose request payloads we can rewrite (tool_choice pinning). */
-const OPENAI_RESPONSES_APIS = ["openai-responses", "azure-openai-responses", "openai-codex-responses"];
+const OPENAI_RESPONSES_APIS = ["openai-responses", "azure-openai-responses"];
 const GOOGLE_APIS = ["google-generative-ai", "google-vertex"];
 const SUPPORTED_APIS = [...OPENAI_RESPONSES_APIS, "openai-completions", "anthropic-messages", ...GOOGLE_APIS];
 
-/** Runtime thinking levels include "off", which the public API type omits. */
-type AnyThinkingLevel = "off" | ThinkingLevel;
+type ExtensionThinkingLevel = Parameters<ExtensionAPI["setThinkingLevel"]>[0];
 
 // ---------------------------------------------------------------------------
 // Persisted state
@@ -67,7 +65,7 @@ type AnyThinkingLevel = "off" | ThinkingLevel;
 interface PersistedState {
 	enabled: boolean;
 	/** Thinking level to restore when the feature is turned off. */
-	previousThinkingLevel?: string;
+	previousThinkingLevel?: ExtensionThinkingLevel;
 	/**
 	 * Pin `tool_choice` to the think tool (true, "hard" mode) or leave it
 	 * unset and let the model call think voluntarily (false, "soft" mode).
@@ -76,13 +74,21 @@ interface PersistedState {
 	forceToolChoice?: boolean;
 }
 
+function stateFile(): string {
+	return join(getAgentDir(), "external-thinking.json");
+}
+
 function loadState(): PersistedState {
 	try {
-		if (existsSync(STATE_FILE)) {
-			const raw = JSON.parse(readFileSync(STATE_FILE, "utf8")) as Partial<PersistedState>;
+		const path = stateFile();
+		if (existsSync(path)) {
+			const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<PersistedState>;
 			return {
 				enabled: raw.enabled === true,
-				previousThinkingLevel: typeof raw.previousThinkingLevel === "string" ? raw.previousThinkingLevel : undefined,
+				previousThinkingLevel:
+					typeof raw.previousThinkingLevel === "string"
+						? raw.previousThinkingLevel as ExtensionThinkingLevel
+						: undefined,
 				forceToolChoice: raw.forceToolChoice !== false,
 			};
 		}
@@ -94,7 +100,7 @@ function loadState(): PersistedState {
 
 function saveState(state: PersistedState): void {
 	try {
-		writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+		writeFileSync(stateFile(), JSON.stringify(state, null, 2));
 	} catch (err) {
 		console.warn("[external-thinking] failed to save state:", err);
 	}
@@ -111,6 +117,17 @@ function saveState(state: PersistedState): void {
  */
 function canRewritePayload(api: string | undefined): boolean {
 	return api !== undefined && SUPPORTED_APIS.includes(api);
+}
+
+function externalThinkingCompatibilityIssue(model: Model<Api> | null | undefined): string | undefined {
+	if (!model) return "no active model";
+	if (!canRewritePayload(model.api)) {
+		return `API "${model.api}" cannot be rewritten (needs openai-responses, azure-openai-responses, openai-completions, anthropic-messages, or google)`;
+	}
+	if (!getSupportedThinkingLevels(model).includes("off")) {
+		return "the selected model cannot disable native reasoning";
+	}
+	return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,9 +198,10 @@ export default function externalThinking(pi: ExtensionAPI): void {
 
 	// ---- runtime state (not persisted) -------------------------------------
 	let runtimeEnabled = false;
-	let previousThinkingLevel: AnyThinkingLevel | undefined;
+	let previousThinkingLevel: ExtensionThinkingLevel | undefined;
 	let pendingThinkForce = false;
 	let forceToolChoice = persisted.forceToolChoice !== false;
+	let thinkToolDisabledByExtension = false;
 
 	// ---- helpers ------------------------------------------------------------
 
@@ -207,7 +225,7 @@ export default function externalThinking(pi: ExtensionAPI): void {
 	function restorePreviousThinkingLevel(): void {
 		if (previousThinkingLevel !== undefined) {
 			try {
-				pi.setThinkingLevel(previousThinkingLevel as ThinkingLevel);
+				pi.setThinkingLevel(previousThinkingLevel);
 			} catch {
 				// Model may not support the level; pi clamps internally.
 			}
@@ -219,22 +237,77 @@ export default function externalThinking(pi: ExtensionAPI): void {
 		const active = pi.getActiveTools();
 		if (active.includes(TOOL_NAME)) {
 			pi.setActiveTools(active.filter((name) => name !== TOOL_NAME));
+			thinkToolDisabledByExtension = !pi.getActiveTools().includes(TOOL_NAME);
 		}
 		updateStatus(ctx);
 	}
 
+	function isThinkToolAvailableToSession(): boolean {
+		return pi.getAllTools().some((tool) => tool.name === TOOL_NAME);
+	}
+
 	/**
-	 * Apply the enabled state for the current model: force native reasoning
-	 * off and make sure the think tool is active. No request interception
-	 * happens here — requests are always sent through unchanged.
+	 * Return the reason the extension must not take ownership of the current
+	 * session. Explicit user tool restrictions are never widened.
 	 */
-	function applyEnabled(ctx: ExtensionContext): void {
-		pi.setThinkingLevel("off" as ThinkingLevel);
-		const active = pi.getActiveTools();
-		if (!active.includes(TOOL_NAME)) {
-			pi.setActiveTools([...active, TOOL_NAME]);
+	function activationIssue(ctx: ExtensionContext): string | undefined {
+		const compatibilityIssue = externalThinkingCompatibilityIssue(ctx.model);
+		if (compatibilityIssue) return compatibilityIssue;
+		if (!pi.getActiveTools().includes(TOOL_NAME)) {
+			if (!isThinkToolAvailableToSession()) {
+				return "the think tool is excluded by --tools or user tool settings";
+			}
+			if (thinkToolDisabledByExtension) return undefined;
+			return "the think tool is not active (it may be excluded by --tools or user tool settings)";
 		}
+		return undefined;
+	}
+
+	/** Force native reasoning off only after compatibility and tool access are verified. */
+	function applyEnabled(ctx: ExtensionContext): boolean {
+		if (activationIssue(ctx)) return false;
+		if (!pi.getActiveTools().includes(TOOL_NAME)) {
+			pi.setActiveTools([...pi.getActiveTools(), TOOL_NAME]);
+			if (!pi.getActiveTools().includes(TOOL_NAME)) return false;
+		}
+		thinkToolDisabledByExtension = false;
+		pi.setThinkingLevel("off");
+		if (pi.getThinkingLevel() !== "off") return false;
 		updateStatus(ctx);
+		return true;
+	}
+
+	function pauseForIncompatibility(ctx: ExtensionContext, issue: string): void {
+		const wasEnabled = runtimeEnabled;
+		runtimeEnabled = false;
+		pendingThinkForce = false;
+		restorePreviousThinkingLevel();
+		updateStatus(ctx);
+		ctx.ui.notify(
+			`external thinking: ${wasEnabled ? "paused" : "not enabled"} for ${modelLabel(ctx.model)} — ${issue}`,
+			"warning",
+		);
+	}
+
+	/**
+	 * Resume an explicitly persisted/flag-enabled extension only when the
+	 * selected model and current tool restrictions make its promise truthful.
+	 */
+	function resumePersistedState(ctx: ExtensionContext): boolean {
+		const issue = activationIssue(ctx);
+		if (issue) {
+			pauseForIncompatibility(ctx, issue);
+			return false;
+		}
+		if (!runtimeEnabled) {
+			previousThinkingLevel = persisted.previousThinkingLevel ?? pi.getThinkingLevel();
+			runtimeEnabled = true;
+		}
+		if (!applyEnabled(ctx)) {
+			pauseForIncompatibility(ctx, activationIssue(ctx) ?? "the extension could not be activated");
+			return false;
+		}
+		return true;
 	}
 
 	async function enable(ctx: ExtensionContext, force?: boolean): Promise<void> {
@@ -242,36 +315,33 @@ export default function externalThinking(pi: ExtensionAPI): void {
 			ctx.ui.notify("external thinking is already ON", "info");
 			return;
 		}
-		if (!canRewritePayload(ctx.model?.api)) {
+		const issue = activationIssue(ctx);
+		if (issue) {
 			ctx.ui.notify(
-				`external thinking: cannot enable — ${modelLabel(ctx.model)}: API "${ctx.model?.api ?? "unknown"}" payload cannot be rewritten (needs openai-responses / openai-completions / anthropic-messages / google)`,
+				`external thinking: cannot enable — ${modelLabel(ctx.model)}: ${issue}`,
 				"error",
 			);
 			return;
 		}
 		// Undefined keeps the persisted/default mode; hard|soft picks explicitly.
 		const mode = force ?? persisted.forceToolChoice !== false;
-		previousThinkingLevel = pi.getThinkingLevel() as AnyThinkingLevel;
+		previousThinkingLevel = pi.getThinkingLevel();
 		runtimeEnabled = true;
 		forceToolChoice = mode;
 		persisted.enabled = true;
 		persisted.previousThinkingLevel = previousThinkingLevel;
 		persisted.forceToolChoice = mode;
 		saveState(persisted);
-		pi.setThinkingLevel("off" as ThinkingLevel);
-		const active = pi.getActiveTools();
-		if (!active.includes(TOOL_NAME)) {
-			pi.setActiveTools([...active, TOOL_NAME]);
-		}
-		if (!pi.getActiveTools().includes(TOOL_NAME)) {
-			// The session restricts tools (e.g. --tools): the think tool is not
-			// in the registry, so enforcement would silently fail. Refuse.
+		if (!applyEnabled(ctx)) {
+			// A tool or model may have changed while the command was being
+			// handled. Fail closed rather than widening restrictions.
 			runtimeEnabled = false;
 			persisted.enabled = false;
 			saveState(persisted);
 			restorePreviousThinkingLevel();
+			ensureToolInactive(ctx);
 			ctx.ui.notify(
-				`external thinking: cannot enable — the think tool is not available in the active tool set (restricted tools?)`,
+				`external thinking: cannot enable — ${activationIssue(ctx) ?? "the extension could not be activated"}`,
 				"error",
 			);
 			return;
@@ -297,17 +367,17 @@ export default function externalThinking(pi: ExtensionAPI): void {
 	}
 
 	async function disable(ctx: ExtensionContext): Promise<void> {
-		if (!runtimeEnabled) {
-			ctx.ui.notify("external thinking is already OFF", "info");
-			return;
-		}
+		const wasEnabled = runtimeEnabled;
 		runtimeEnabled = false;
 		pendingThinkForce = false;
 		persisted.enabled = false;
 		saveState(persisted);
 		restorePreviousThinkingLevel();
 		ensureToolInactive(ctx);
-		ctx.ui.notify("external thinking: OFF", "info");
+		ctx.ui.notify(
+			wasEnabled ? "external thinking: OFF" : "external thinking: OFF (cleared paused state)",
+			"info",
+		);
 	}
 
 	function showStatus(ctx: ExtensionContext): void {
@@ -317,7 +387,7 @@ export default function externalThinking(pi: ExtensionAPI): void {
 				`external thinking: ${runtimeEnabled ? "ON" : "OFF"}`,
 				`model: ${modelLabel(model)}`,
 				`mode: ${forceToolChoice ? "hard" : "soft"}`,
-				`payload rewrite: ${canRewritePayload(model?.api) ? "yes" : "no"}`,
+				`compatible: ${externalThinkingCompatibilityIssue(model) ?? "yes"}`,
 				`thinking level: ${pi.getThinkingLevel()}`,
 				`think tool active: ${pi.getActiveTools().includes(TOOL_NAME) ? "yes" : "no"}`,
 			].join(" · "),
@@ -335,7 +405,7 @@ export default function externalThinking(pi: ExtensionAPI): void {
 		// It is still sent to the provider, so the model can call it.
 		parameters: Type.Object(
 			{
-				thoughts: Type.String({ description: "private scratchpad; not shown to user" }),
+				thoughts: Type.String({ description: "Visible reasoning scratchpad shown to the user." }),
 			},
 			{ additionalProperties: false },
 		),
@@ -372,19 +442,15 @@ export default function externalThinking(pi: ExtensionAPI): void {
 			saveState(persisted);
 		}
 		if (persisted.enabled) {
-			if (!runtimeEnabled) {
-				runtimeEnabled = true;
-				previousThinkingLevel = (persisted.previousThinkingLevel as AnyThinkingLevel | undefined) ?? (pi.getThinkingLevel() as AnyThinkingLevel);
-			}
-			applyEnabled(ctx);
+			resumePersistedState(ctx);
 		} else {
 			ensureToolInactive(ctx);
 		}
 	});
 
-	pi.on("model_select", async (event, ctx) => {
-		if (!runtimeEnabled) return;
-		applyEnabled(ctx);
+	pi.on("model_select", async (_event, ctx) => {
+		if (!persisted.enabled) return;
+		resumePersistedState(ctx);
 	});
 
 	pi.on("thinking_level_select", async (event, ctx) => {
@@ -392,7 +458,7 @@ export default function externalThinking(pi: ExtensionAPI): void {
 		if (event.level !== "off") {
 			// External thinking owns the reasoning channel: native reasoning
 			// stays off no matter what the level UI says.
-			pi.setThinkingLevel("off" as ThinkingLevel);
+			pi.setThinkingLevel("off");
 			ctx.ui.notify("external thinking: native reasoning forced off — use the think tool instead", "info");
 		}
 	});
@@ -400,10 +466,13 @@ export default function externalThinking(pi: ExtensionAPI): void {
 	// Arm the forced think call on every user prompt (incl. follow-ups).
 	pi.on("before_agent_start", async (_event, ctx) => {
 		if (!runtimeEnabled) return;
-		// Hard mode only: soft mode leaves tool_choice unset.
-		if (forceToolChoice && pi.getActiveTools().includes(TOOL_NAME)) {
-			pendingThinkForce = true;
+		const issue = activationIssue(ctx);
+		if (issue) {
+			pauseForIncompatibility(ctx, issue);
+			return;
 		}
+		// Hard mode only: soft mode leaves tool_choice unset.
+		if (forceToolChoice) pendingThinkForce = true;
 	});
 
 	// Consume the arming flag on the first provider request of the turn by
@@ -418,10 +487,14 @@ export default function externalThinking(pi: ExtensionAPI): void {
 			return event.payload;
 		}
 		const api = ctx.model?.api;
-		if (api) {
-			forceThinkToolChoice(event.payload, api);
+		if (!api || !forceThinkToolChoice(event.payload, api)) {
+			pauseForIncompatibility(
+				ctx,
+				"the first provider request did not contain a writable think tool definition",
+			);
+			return event.payload;
 		}
-		// Send the (possibly rewritten) payload through unchanged.
+		// Send the rewritten request through unchanged.
 		return event.payload;
 	});
 
@@ -475,7 +548,7 @@ export default function externalThinking(pi: ExtensionAPI): void {
 	// ---- CLI flag -------------------------------------------------------------
 
 	pi.registerFlag(FLAG_NAME, {
-		description: "Enable external thinking: model must reason via the private think tool instead of native reasoning",
+		description: "Enable external thinking: model reasons through the visible think tool instead of native reasoning",
 		type: "boolean",
 		default: false,
 	});

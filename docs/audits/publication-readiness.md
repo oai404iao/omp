@@ -48,14 +48,14 @@ Dependabot remains enabled for ongoing review.
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
 | `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
-| `@oai404iao/pi-keep-defaults` | public `0.1.2` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
+| `@oai404iao/pi-external-thinking` | private `0.1.0` | typecheck and 6 behavior tests | compatibility/public-release review |
+| `@oai404iao/pi-keep-defaults` | public `0.1.3` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
 | `@oai404iao/pi-subagent` | private | typecheck and 51 tests | DeepSeek Harness provenance, global preset side-effect review |
-| `@oai404iao/pi-telegram-notify` | public `0.1.2` | typecheck and 8 tests | privacy/internal-hook release approval |
+| `@oai404iao/pi-telegram-notify` | public `0.1.3` | typecheck and 8 tests | privacy/internal-hook release approval |
 | `@oai404iao/pi-tree-continue` | private | typecheck and pack check; no test suite | private Pi API dependency, tests |
-| `external-thinking` | no | not covered by npm workspace CI | manifest, tests, compatibility fix |
 
 The exact six unscoped names returned npm E404 during the phase-1
-audit. That result is historical only: all five workspace package manifests
+audit. That result is historical only: all six workspace package manifests
 now use the `@oai404iao` scope. E404 is not a reservation or ownership
 guarantee; the exact scoped names must be checked again immediately before
 bootstrap publishing.
@@ -65,6 +65,11 @@ The two public candidate packages were observed on npm at `0.1.2`, with npm
 GitHub Releases match that commit. This confirms the bootstrap artifacts, not
 the npm account's 2FA policy or trusted-publisher configuration.
 
+The guarded publishing workflow subsequently released both public packages at
+`0.1.3`, with npm `gitHead`
+`16dccb8953b717670c34fe978c79c07d592ca7e2`, matching package tags and GitHub
+Releases.
+
 ## License and source review
 
 Project-authored material now carries an MIT license with the user-confirmed
@@ -72,7 +77,7 @@ copyright `2026 oai404iao`. Each npm workspace includes a package-level
 license. Third-party license texts and notices are preserved separately rather
 than being relicensed under the project MIT grant.
 
-### `external-thinking`
+### `@oai404iao/pi-external-thinking`
 
 - README and source identify it as a port of
   [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi).
@@ -81,6 +86,9 @@ than being relicensed under the project MIT grant.
 - The feature-introduction and reference revisions, applicable upstream
   notices, and local modification scope are recorded in its
   `THIRD_PARTY_NOTICES.md`.
+- The package manifest, tarball allowlist, and behavior tests now cover the
+  workspace. It remains private pending compatibility and public-release
+  review.
 
 ### `@oai404iao/pi-codex-minimal-tools`
 

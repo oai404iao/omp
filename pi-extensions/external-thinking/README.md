@@ -1,33 +1,44 @@
-# external-thinking
+# @oai404iao/pi-external-thinking
 
-Port of [oh-my-pi](https://github.com/can1357/oh-my-pi)'s `externalThinking`
-feature as a [pi](https://github.com/badlogic/pi-mono) extension.
+Replace compatible Pi models' native reasoning with a visible `Think`
+scratchpad tool.
+
+Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+
+> npm identity: `@oai404iao/pi-external-thinking`. This package is currently
+> private while its compatibility and public-release review are completed. To
+> load it for one run from a local checkout:
+>
+> ```bash
+> pi -e ./pi-extensions/external-thinking
+> ```
+>
+> To install that local package persistently, use:
+>
+> ```bash
+> pi install ./pi-extensions/external-thinking
+> ```
+>
+> After promotion, install it with:
+>
+> ```bash
+> pi install npm:@oai404iao/pi-external-thinking
+> ```
 
 ## What it does
 
-oh-my-pi's `externalThinking` replaces a model's opaque native reasoning with
-an explicit, visible `think` scratchpad tool:
+1. Registers a package-specific tool labelled `Think` whose arguments are rendered as dim, italic,
+   **visible** reasoning in the Pi TUI. Do not put secrets or user-sensitive
+   data in `thoughts`.
+2. Sets Pi's thinking level to `off`, but only after checking that the active
+   model actually supports disabling native reasoning.
+3. In **hard mode** (the default), forces the first provider request of every
+   user turn to call `Think`. In **soft mode**, the tool remains available but
+   the model decides whether to call it.
 
-1. A private `think` tool is registered. It is **hidden from the system
-   prompt's tool list** (no `promptSnippet`), but is still sent to the
-   provider so the model can call it. In the TUI its arguments are rendered
-   as dim, italic text — exactly like the built-in thinking blocks.
-2. **Native reasoning is forced off** (`pi.setThinkingLevel("off")`), so the
-   model cannot quietly burn tokens on hidden reasoning.
-3. In **hard mode** (default) the **first provider request of every user
-   prompt pins `tool_choice` to `think`** (OpenAI Responses / Anthropic /
-   Google payloads are rewritten in `before_provider_request`), so the model
-   *must* think out loud before it does anything else. In **soft mode**
-   `tool_choice` is left unset — the think tool is available, but the model
-   decides whether to call it. The think result is a private `------` marker
-   — the thoughts are not duplicated back into the model's context.
-
-Why it's useful:
-- Full visibility: you see exactly what the model reasoned, in the theme's
-  `thinkingText` color, instead of collapsed native thinking.
-- Works with `reasoning: false` models (cheap "thinking" via a tool call).
-- Gives you control: reasoning is a separate, optional channel you can turn
-  off at any time.
+The tool has no `promptSnippet`, so it is omitted from Pi's system-prompt tool
+list. It is still sent to the provider and its visible description tells the
+model that the scratchpad is shown to the user.
 
 ## Usage
 
@@ -40,61 +51,49 @@ Why it's useful:
 | Show state | `/external-thinking status` |
 | Enable at startup | `pi --external-thinking` |
 
-State persists across restarts in
-`<agentDir>/external-thinking.json` (usually `~/.pi/agent/` or
-`~/.config/pi/agent/`). The thinking level that was active before enabling is
-remembered and restored when the feature is turned off. The mode (hard/soft)
-also persists; `pi --external-thinking` and `/external-thinking on` re-use the
-last saved mode.
+State persists in `<agentDir>/external-thinking.json` (normally
+`~/.pi/agent/` or `~/.config/pi/agent/`). The prior thinking level is restored
+when you turn the feature off.
 
-## Hard vs soft mode
+## Hard vs. soft mode
 
-- **Hard** (default): `tool_choice` is pinned to the `think` tool on the first
-  request of every turn, so the model is forced to call it before doing
-  anything else. This guarantees the "think out loud first" behavior, but some
-  upstreams reject a forced tool call (e.g. gateways that keep a model in
-  thinking mode).
-- **Soft**: `tool_choice` is never set and payloads are sent completely
-  untouched. The `think` tool is available and described to the model, but
-  whether it gets called is up to the model. This works with any upstream that
-  accepts the tool definition, at the cost of not *guaranteeing* reasoning
-  happens.
+- **Hard**: Pins `tool_choice` to the package-specific `Think` tool for the
+  first request of a user turn. If the provider payload does not contain a
+  writable extension-tool definition,
+  the extension pauses itself and restores native-thinking settings rather than
+  falsely claiming enforcement.
+- **Soft**: Does not change `tool_choice`. The model may call `Think`, but is
+  not required to do so.
+
+Both modes require a provider API that the extension recognizes and a model
+for which Pi reports the `off` thinking level as supported.
 
 ## Supported models
 
-External thinking requires that native reasoning can be suppressed, which we
-can only guarantee for payloads the extension can rewrite:
+The extension supports these Pi provider APIs:
 
-- OpenAI Responses family: `openai-responses`, `azure-openai-responses`,
-  `openai-codex-responses`
-- OpenAI Completions (incl. DeepSeek-style `thinking: {type: "disabled"}`)
+- `openai-responses`
+- `azure-openai-responses`
+- `openai-completions`
 - `anthropic-messages`
-- Google: `google-generative-ai`, `google-vertex`
+- `google-generative-ai`
+- `google-vertex`
 
-Additionally, models that pin the `off` thinking level to `null` (always-on
-reasoning models) and reasoning models served via the codex protocol (no
-reasoning-off knob; detected from the request payload) are not eligible.
+It refuses to enable for unsupported APIs, models that cannot disable native
+reasoning (`thinkingLevelMap.off === null`), sessions where the extension tool
+is excluded by `--tools` or user tool settings, and `openai-codex-responses` models whose
+protocol cannot provide the required reasoning-off guarantee.
 
-## Pass-through behavior — no interception, no degradation
+If a persisted/flag-enabled session later selects an incompatible model, the
+extension pauses, restores the prior thinking level, and resumes only after a
+compatible model is selected.
 
-The extension rewrites the first provider request of each turn
-(`tool_choice` pinned to `think`, hard mode only) and sends it straight
-through. In soft mode requests are never touched at all. It never detects,
-blocks, or degrades anything: if the upstream rejects the forced tool call
-(e.g. a gateway that keeps a model in thinking mode), the error comes back
-from the provider exactly as-is — that is an upstream limitation, not
-something this extension hides or works around.
+## Upstream attribution
 
-## How it maps to oh-my-pi's implementation
-
-| oh-my-pi | this extension |
-| --- | --- |
-| `settings.get("externalThinking")` | persisted `external-thinking.json` + `/external-thinking` command + `--external-thinking` flag |
-| `supportsExternalThinking(model)` | `supportsExternalThinking(model)` — same API whitelist; `thinkingLevelMap.off === null` replaces the fork's `thinking.requiresEffort && !thinking.suppressWhenOff` metadata |
-| `ThinkTool` (hidden, `intent: "omit"`) | `pi.registerTool({ name: "think", renderShell: "self" })` without `promptSnippet` |
-| `toolChoiceQueue.pushOnce(think)` | `before_provider_request` rewrites `tool_choice` / `toolConfig` on the first request of each turn |
-| `forceReasoningOff: externalThinking` | `pi.setThinkingLevel("off")` on enable + re-asserted on `thinking_level_select` and `model_select` |
-| Think tool renderer (italic `thinkingText` markdown) | `renderCall` → `Markdown` with `getMarkdownTheme()` + `theme.fg("thinkingText", …)` italic |
+This is a modified port of
+[oh-my-pi](https://github.com/can1357/oh-my-pi)'s `externalThinking` feature.
+The exact source revisions and local modification scope are recorded in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 

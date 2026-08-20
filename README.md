@@ -5,28 +5,28 @@ This repository contains a collection of extensions for
 is [`oai404iao/omp`](https://github.com/oai404iao/omp); the existing private
 Gitea remote is retained as a migration backup.
 
-> Guarded npm publication is enabled. The initial `0.1.2` releases of
+> Guarded npm publication is enabled. The current `0.1.3` releases of
 > `pi-keep-defaults` and `pi-telegram-notify` are public; future releases
 > require an explicit `publish.yml` dispatch, its `publish` confirmation, and
 > the protected `npm-publish` environment.
 
 ## Packages
 
-All five npm workspace packages use the `@oai404iao` scope. Scope naming does
+All six npm workspace packages use the `@oai404iao` scope. Scope naming does
 not change the private/public eligibility below.
 
 | Package | Version | Release track |
 | --- | ---: | --- |
 | `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | private; blocked pending third-party source review |
-| `@oai404iao/pi-keep-defaults` | `0.1.2` | public; guarded manual releases enabled |
+| `@oai404iao/pi-external-thinking` | `0.1.0` | private; compatibility and public-release review pending |
+| `@oai404iao/pi-keep-defaults` | `0.1.3` | public; guarded manual releases enabled |
 | `@oai404iao/pi-subagent` | `0.2.0` | private; beta candidate after provenance review |
-| `@oai404iao/pi-telegram-notify` | `0.1.2` | public; guarded manual releases enabled |
+| `@oai404iao/pi-telegram-notify` | `0.1.3` | public; guarded manual releases enabled |
 | `@oai404iao/pi-tree-continue` | `0.1.0` | private; experimental |
-| `external-thinking` | unpublished | incubating; attribution complete, packaging/tests pending |
 
-The five scoped npm packages use independent versions. `external-thinking`
-remains outside the workspace until it has an audited manifest, tests, and
-compatibility handling; its upstream attribution is recorded.
+The six scoped npm packages use independent versions.
+`pi-external-thinking` remains private until its compatibility and
+public-release review is complete; its upstream attribution is recorded.
 
 ## Local development
 

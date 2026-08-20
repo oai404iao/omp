@@ -1,0 +1,79 @@
+{
+  "name": "@oai404iao/pi-external-thinking",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Replace compatible Pi models' native reasoning with a visible think scratchpad tool.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oai404iao/omp.git",
+    "directory": "pi-extensions/external-thinking"
+  },
+  "homepage": "https://github.com/oai404iao/omp/tree/main/pi-extensions/external-thinking#readme",
+  "bugs": {
+    "url": "https://github.com/oai404iao/omp/issues"
+  },
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "thinking",
+    "reasoning",
+    "scratchpad"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.84.2",
+    "@earendil-works/pi-coding-agent": ">=0.84.2",
+    "@earendil-works/pi-tui": ">=0.84.2",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.84.2",
+    "@earendil-works/pi-coding-agent": "^0.84.2",
+    "@earendil-works/pi-tui": "^0.84.2",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.20.6",
+    "typebox": "^1.1.24",
+    "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "package.json"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  }
+}

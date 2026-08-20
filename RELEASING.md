@@ -18,9 +18,12 @@ The initial public releases already exist:
 - `@oai404iao/pi-telegram-notify@0.1.2`
 
 Their npm `gitHead`, package tags, and GitHub Releases point to
-`0c53bdb9e13b006a23a8da05a01c06f106fa2c10`. This does not enable future
-automation; the trusted-publisher and protected-environment gates below still
-apply.
+`0c53bdb9e13b006a23a8da05a01c06f106fa2c10`. The guarded workflow for future
+releases is enabled; the trusted-publisher and protected-environment gates
+below still apply.
+
+The current stable version of both packages is `0.1.3`, published from
+`16dccb8953b717670c34fe978c79c07d592ca7e2`.
 
 ## One-time GitHub preparation
 
@@ -96,15 +99,15 @@ Release eligibility is explicit in two places:
 
 CI rejects mismatches. The guarded release scripts currently allow only
 `@oai404iao/pi-keep-defaults` and `@oai404iao/pi-telegram-notify`. Both are
-public at `0.1.2`; future releases require a maintainer to manually dispatch
+public at `0.1.3`; future releases require a maintainer to manually dispatch
 and approve the guarded workflow. Their trusted-publisher configuration and
 `NPM_PUBLISH_ENABLED` environment variable are release prerequisites.
 
-`@oai404iao/pi-codex-minimal-tools`, `@oai404iao/pi-subagent`, and
-`@oai404iao/pi-tree-continue` are private. Promote one only in a dedicated
-reviewed change after its documented source, compatibility, and release-track
-gates are complete. A prerelease package must also use prerelease SemVer so
-the workflow selects the `next` dist-tag.
+`@oai404iao/pi-codex-minimal-tools`, `@oai404iao/pi-external-thinking`,
+`@oai404iao/pi-subagent`, and `@oai404iao/pi-tree-continue` are private.
+Promote one only in a dedicated reviewed change after its documented source,
+compatibility, and release-track gates are complete. A prerelease package must
+also use prerelease SemVer so the workflow selects the `next` dist-tag.
 
 All package peer ranges currently require Pi 0.84.2 or newer. Update the
 development baseline, peer ranges, lockfile, compatibility notes, and tests
@@ -140,7 +143,7 @@ Tags use Changesets' package-level format:
 
 ```text
 @oai404iao/pi-subagent@0.3.0
-@oai404iao/pi-telegram-notify@0.1.2
+@oai404iao/pi-telegram-notify@0.1.3
 ```
 
 Prerelease SemVer versions are published with the `next` dist-tag; stable
