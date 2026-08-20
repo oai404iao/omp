@@ -31,6 +31,9 @@ const requiredRuntimeFiles = {
   ],
   "@oai404iao/pi-keep-defaults": [],
   "@oai404iao/pi-subagent": [
+    "LICENSES/DeepSeek-Harness-MIT.txt",
+    "THIRD_PARTY_NOTICES.md",
+    "provenance/deepseek-harness-4d03472.json",
     "agents/planner.md",
     "agents/reviewer.md",
     "agents/scout.md",

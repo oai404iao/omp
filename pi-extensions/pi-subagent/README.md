@@ -1,11 +1,15 @@
 # @oai404iao/pi-subagent
 
-Durable, continuable subagents for [Pi](https://github.com/earendil-works/pi-mono). The design adapts the DeepSeek Harness subagent seam to Pi's extension and SDK APIs instead of copying Pi's subprocess-only example.
+Durable, continuable subagents for [Pi](https://github.com/earendil-works/pi-mono).
+The design independently adapts the
+[DeepSeek Harness subagent seam](https://github.com/deepseek-ai/deepseek-harness/tree/4d03472cd098dc48a630e526ca620f4f37f18a0e/docs/subsystems)
+to Pi's extension and SDK APIs.
 
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 
 > npm identity: `@oai404iao/pi-subagent`. This package remains private pending
-> its provenance review, so install it from a local checkout.
+> review of its managed global-preset side effects, so install it from a local
+> checkout.
 
 ## Features
 
@@ -44,7 +48,7 @@ For a temporary test:
 pi -e /absolute/path/to/pi-extensions/pi-subagent
 ```
 
-This implementation targets Pi `0.83.x`.
+This implementation targets Pi `0.84.2`.
 
 ## Model-facing tools
 
@@ -316,7 +320,11 @@ The test suite includes provider-boundary, descriptor, configuration, discovery,
 
 ## License and publication status
 
-MIT © 2026 oai404iao. See [LICENSE](LICENSE).
+MIT © 2026 oai404iao. See [LICENSE](LICENSE) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-This package remains private until the README's DeepSeek Harness design
-reference is mapped to an exact public source and revision.
+This package remains private until its managed global-preset behavior has a
+reviewed public-release policy. On first startup and package updates it can
+materialize, replace, back up, and retire managed files under
+`<Pi agent dir>/agents/`; users must explicitly accept that behavior before
+public publication.
