@@ -1,5 +1,11 @@
 # @oai404iao/pi-telegram-notify
 
+## 0.1.2
+
+### Patch Changes
+
+- 87b8eb3: Move the first public releases to the `@oai404iao` npm scope.
+
 ## 0.1.1
 
 ### Patch Changes
