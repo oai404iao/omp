@@ -7,27 +7,27 @@ export const registry = "https://registry.npmjs.org/";
 
 export const workspaces = [
   {
-    name: "pi-codex-minimal-tools",
+    name: "@oai404iao/pi-codex-minimal-tools",
     directory: "pi-extensions/pi-codex-minimal-tools",
     releaseStatus: "blocked",
   },
   {
-    name: "pi-keep-defaults",
+    name: "@oai404iao/pi-keep-defaults",
     directory: "pi-extensions/pi-keep-defaults",
     releaseStatus: "publishable",
   },
   {
-    name: "pi-subagent",
+    name: "@oai404iao/pi-subagent",
     directory: "pi-extensions/pi-subagent",
     releaseStatus: "blocked",
   },
   {
-    name: "pi-telegram-notify",
+    name: "@oai404iao/pi-telegram-notify",
     directory: "pi-extensions/pi-telegram-notify",
     releaseStatus: "publishable",
   },
   {
-    name: "pi-tree-continue",
+    name: "@oai404iao/pi-tree-continue",
     directory: "pi-extensions/pi-tree-continue",
     releaseStatus: "blocked",
   },

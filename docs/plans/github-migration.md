@@ -3,7 +3,7 @@
 ## Decisions
 
 - Public repository target: `oai404iao/omp`.
-- Keep the current unscoped npm package names during phase 1.
+- Use `@oai404iao/<package-name>` for all five npm workspace package names.
 - Preserve and audit the existing Git history.
 - Phase 1 changes release infrastructure only; plugin behavior is out of scope.
 - GitHub is the public source repository and will become the release source of
@@ -76,7 +76,7 @@ GitHub to be the tracked public branch.
 
 For all five npm workspaces:
 
-1. Recheck exact package-name ownership.
+1. Recheck exact scoped package-name ownership.
 2. Add real `repository`, `homepage`, and `bugs` metadata.
 3. Resolve package-level license and notice requirements.
 4. Audit the final `npm pack --dry-run --json` output.
@@ -88,9 +88,10 @@ For all five npm workspaces:
 and compatibility handling. Its upstream attribution and license are now
 recorded.
 
-Only `pi-keep-defaults` and `pi-telegram-notify` are currently marked
-publishable by the guarded scripts. The other workspaces set `private: true`
-and require a separate promotion review.
+Only `@oai404iao/pi-keep-defaults` and
+`@oai404iao/pi-telegram-notify` are currently marked publishable by the
+guarded scripts. The other workspaces set `private: true` and require a
+separate promotion review.
 
 ## Phase 4 — enable releases
 

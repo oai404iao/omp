@@ -1,9 +1,13 @@
-# pi-codex-minimal-tools
+# @oai404iao/pi-codex-minimal-tools
 
 Codex-specific Responses support for Pi, driven by an exact per-model JSON
 catalog instead of model-name heuristics.
 
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+
+> npm identity: `@oai404iao/pi-codex-minimal-tools`. This package remains
+> private while its third-party source review is incomplete, so install it
+> from a local checkout.
 
 The extension adds:
 
@@ -64,7 +68,7 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 
 ```json
 {
-  "$schema": "https://unpkg.com/pi-codex-minimal-tools@1/config.schema.json",
+  "$schema": "https://unpkg.com/@oai404iao/pi-codex-minimal-tools@1/config.schema.json",
   "enabled": true,
   "glyphStyle": "unicode",
   "autoEnable": true,
@@ -104,7 +108,7 @@ Example overriding a bundled model and adding a custom provider/model:
 
 ```json
 {
-  "$schema": "https://unpkg.com/pi-codex-minimal-tools@1/models.schema.json",
+  "$schema": "https://unpkg.com/@oai404iao/pi-codex-minimal-tools@1/models.schema.json",
   "version": 1,
   "models": [
     {

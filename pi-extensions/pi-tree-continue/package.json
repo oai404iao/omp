@@ -1,5 +1,5 @@
 {
-  "name": "pi-tree-continue",
+  "name": "@oai404iao/pi-tree-continue",
   "version": "0.1.0",
   "private": true,
   "description": "Add /continue to resume Pi from the current session tree node without creating a user message.",
