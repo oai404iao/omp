@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-keep-defaults",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Freeze default model/thinking in settings.json so switching models or toggling thinking never rewrites the defaults.",
   "repository": {
     "type": "git",

@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-telegram-notify",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Send Telegram notifications when Pi completes, stops on an error, or waits for ask_user_question input.",
   "repository": {
     "type": "git",
