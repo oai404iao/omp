@@ -1,8 +1,15 @@
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+
 export type NotificationStatus = "completed" | "error" | "waiting";
 
 export interface TerminalNotification {
 	status: Exclude<NotificationStatus, "waiting">;
 	summary: string;
+}
+
+export interface AssistantMessageEntry {
+	id: string;
+	message: unknown;
 }
 
 const STATUS_LABEL: Record<NotificationStatus, string> = {
@@ -67,10 +74,12 @@ export function terminalNotificationFromMessage(message: unknown, fallbackSummar
 	return undefined;
 }
 
-export function lastAssistantMessage(messages: readonly unknown[]): unknown | undefined {
-	for (let index = messages.length - 1; index >= 0; index--) {
-		const candidate = asRecord(messages[index]);
-		if (candidate?.role === "assistant") return candidate;
+export function lastAssistantMessageEntry(entries: readonly SessionEntry[]): AssistantMessageEntry | undefined {
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry?.type === "message" && entry.message.role === "assistant") {
+			return { id: entry.id, message: entry.message };
+		}
 	}
 	return undefined;
 }

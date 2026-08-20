@@ -1,20 +1,21 @@
 import type { ExtensionAPI, ExtensionCommandContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import {
 	formatNotification,
-	lastAssistantMessage,
+	lastAssistantMessageEntry,
 	questionSummaryFromInput,
 	questionSummaryFromPromptEvent,
 	terminalNotificationFromMessage,
 } from "./message.js";
 import { configPath, isConfigured, loadSettings, settingsDiagnostics } from "./settings.js";
 import { sendTelegramMessage } from "./telegram.js";
-import { bindTerminalObserver, installTerminalObserver, unbindTerminalObserver } from "./terminal-observer.js";
 
 const ASK_USER_PROMPT_EVENT = "rpiv:ask-user:prompt";
+const ASK_USER_FALLBACK_GRACE_MS = 100;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user_question", "ask-user-question"]);
 
 interface PendingQuestionNotification {
 	cwd: string;
+	notified: boolean;
 	summary: string;
 	timer: NodeJS.Timeout;
 }
@@ -41,8 +42,8 @@ function notifyConfigurationStatus(ctx: ExtensionCommandContext): void {
 export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 	let currentCwd = process.cwd();
 	let lastTaskSummary = "";
-	let terminalObserverBound = false;
-	const terminalObserverInstalled = installTerminalObserver();
+	let lastHandledAssistantEntryId: string | undefined;
+	let unsubscribeAskUserPrompt: (() => void) | undefined;
 	const pendingQuestionNotifications = new Map<string, PendingQuestionNotification>();
 
 	const send = (status: "completed" | "error" | "waiting", summary: string, cwd = currentCwd): void => {
@@ -55,29 +56,71 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 		});
 	};
 
-	const notifyTerminal = (message: unknown): void => {
-		const notification = terminalNotificationFromMessage(message, lastTaskSummary);
-		if (notification) send(notification.status, notification.summary);
-	};
-
 	const clearQuestionFallbacks = (): void => {
 		for (const pending of pendingQuestionNotifications.values()) clearTimeout(pending.timer);
 		pendingQuestionNotifications.clear();
 	};
 
+	const clearQuestionFallback = (toolCallId: string): void => {
+		const pending = pendingQuestionNotifications.get(toolCallId);
+		if (!pending) return;
+		clearTimeout(pending.timer);
+		pendingQuestionNotifications.delete(toolCallId);
+	};
+
+	const takeQuestionFallback = (summary: string): PendingQuestionNotification | undefined => {
+		let toolCallId: string | undefined;
+		if (summary) {
+			for (const [pendingToolCallId, pending] of pendingQuestionNotifications) {
+				if (pending.summary === summary) {
+					toolCallId = pendingToolCallId;
+					break;
+				}
+			}
+		}
+		toolCallId ??= pendingQuestionNotifications.keys().next().value;
+		if (toolCallId === undefined) return undefined;
+
+		const pending = pendingQuestionNotifications.get(toolCallId);
+		if (!pending) return undefined;
+		clearTimeout(pending.timer);
+		pendingQuestionNotifications.delete(toolCallId);
+		return pending;
+	};
+
+	const unsubscribeAskUserPromptEvent = (): void => {
+		unsubscribeAskUserPrompt?.();
+		unsubscribeAskUserPrompt = undefined;
+	};
+
 	pi.on("session_start", (_event, ctx) => {
+		clearQuestionFallbacks();
+		unsubscribeAskUserPromptEvent();
 		currentCwd = ctx.cwd;
-		if (!terminalObserverInstalled) return;
-		bindTerminalObserver(ctx.sessionManager as object, notifyTerminal);
-		terminalObserverBound = true;
+		lastTaskSummary = "";
+		lastHandledAssistantEntryId = undefined;
+
+		// rpiv emits this immediately before opening its questionnaire UI. Match
+		// its question to one fallback, or consume the oldest call when it cannot
+		// be matched, without disturbing concurrent questionnaires.
+		unsubscribeAskUserPrompt = pi.events.on(ASK_USER_PROMPT_EVENT, (payload) => {
+			const summary = questionSummaryFromPromptEvent(payload);
+			const pending = takeQuestionFallback(summary);
+			if (pending?.notified) return;
+			send(
+				"waiting",
+				summary || pending?.summary || "等待用户回复",
+				pending?.cwd ?? currentCwd,
+			);
+		});
 	});
 
-	pi.on("session_shutdown", (_event, ctx) => {
+	pi.on("session_shutdown", () => {
 		clearQuestionFallbacks();
+		unsubscribeAskUserPromptEvent();
+		currentCwd = process.cwd();
 		lastTaskSummary = "";
-		if (!terminalObserverInstalled) return;
-		unbindTerminalObserver(ctx.sessionManager as object);
-		terminalObserverBound = false;
+		lastHandledAssistantEntryId = undefined;
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
@@ -85,44 +128,42 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 		lastTaskSummary = event.prompt;
 	});
 
-	// The rpiv extension emits this immediately before opening its questionnaire
-	// UI. It avoids notifying for invalid/no-UI calls and gives us the question.
-	pi.events.on(ASK_USER_PROMPT_EVENT, (payload) => {
-		const firstPending = pendingQuestionNotifications.entries().next().value as
-			| [string, PendingQuestionNotification]
-			| undefined;
-		if (firstPending) {
-			clearTimeout(firstPending[1].timer);
-			pendingQuestionNotifications.delete(firstPending[0]);
-		}
-		send("waiting", questionSummaryFromPromptEvent(payload) || firstPending?.[1].summary || "等待用户回复", firstPending?.[1].cwd);
-	});
-
 	// Fallback for another extension that exposes the same tool name but not the
-	// rpiv event. A zero-delay timer lets the rpiv event above take precedence.
+	// rpiv event. A short grace period lets the authoritative event win.
 	pi.on("tool_call", (event, ctx) => {
 		currentCwd = ctx.cwd;
 		if (!ctx.hasUI || !isAskUserQuestion(event)) return;
 
+		clearQuestionFallback(event.toolCallId);
 		const summary = questionSummaryFromInput(event.input) || "等待用户回复";
+		let timer: NodeJS.Timeout;
 		const pending: PendingQuestionNotification = {
 			cwd: ctx.cwd,
+			notified: false,
 			summary,
-			timer: setTimeout(() => {
-				pendingQuestionNotifications.delete(event.toolCallId);
+			timer: timer = setTimeout(() => {
+				const current = pendingQuestionNotifications.get(event.toolCallId);
+				if (current?.timer !== timer || current.notified) return;
+				current.notified = true;
 				send("waiting", summary, ctx.cwd);
-			}, 0),
+			}, ASK_USER_FALLBACK_GRACE_MS),
 		};
+		timer.unref?.();
 		pendingQuestionNotifications.set(event.toolCallId, pending);
 	});
 
-	// Compatibility fallback for a future Pi version where the post-run hook is
-	// unavailable. Current Pi versions use the more accurate hook above.
-	pi.on("agent_end", (event, ctx) => {
+	pi.on("tool_result", (event) => {
+		clearQuestionFallback(event.toolCallId);
+	});
+
+	pi.on("agent_settled", (_event, ctx) => {
 		currentCwd = ctx.cwd;
-		if (terminalObserverBound) return;
-		const assistant = lastAssistantMessage(event.messages);
-		if (assistant) notifyTerminal(assistant);
+		const assistantEntry = lastAssistantMessageEntry(ctx.sessionManager.getBranch());
+		if (!assistantEntry || assistantEntry.id === lastHandledAssistantEntryId) return;
+		lastHandledAssistantEntryId = assistantEntry.id;
+
+		const notification = terminalNotificationFromMessage(assistantEntry.message, lastTaskSummary);
+		if (notification) send(notification.status, notification.summary);
 	});
 
 	const sendTest = async (ctx: ExtensionCommandContext): Promise<void> => {
