@@ -48,9 +48,9 @@ Dependabot remains enabled for ongoing review.
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
 | `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
-| `@oai404iao/pi-keep-defaults` | public `0.1.2` | typecheck and smoke/guard tests | trusted publisher, protected environment variable, automated-release approval |
+| `@oai404iao/pi-keep-defaults` | public `0.1.2` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
 | `@oai404iao/pi-subagent` | private | typecheck and 51 tests | DeepSeek Harness provenance, global preset side-effect review |
-| `@oai404iao/pi-telegram-notify` | public `0.1.2` | typecheck and 8 tests | trusted publisher, protected environment variable, privacy/internal-hook release approval |
+| `@oai404iao/pi-telegram-notify` | public `0.1.2` | typecheck and 8 tests | privacy/internal-hook release approval |
 | `@oai404iao/pi-tree-continue` | private | typecheck and pack check; no test suite | private Pi API dependency, tests |
 | `external-thinking` | no | not covered by npm workspace CI | manifest, tests, compatibility fix |
 
@@ -118,7 +118,7 @@ Official upstream license:
 - [ ] Scoped package names/owners rechecked on npm.
 - [x] Initial public `0.1.2` bootstrap artifacts observed on npm, GitHub tags, and GitHub Releases.
 - [ ] Confirm the npm account's 2FA and package-owner settings.
-- [ ] npm trusted publishers configured for `publish.yml`.
+- [x] npm trusted publishers configured for `publish.yml`.
 - [x] `npm-publish` environment requires approval and protected branches.
-- [ ] Add `NPM_PUBLISH_ENABLED=true` to the `npm-publish` environment.
-- [ ] Release lock changed in a dedicated reviewed pull request.
+- [x] `NPM_PUBLISH_ENABLED=true` is set in the `npm-publish` environment.
+- [x] Release lock changed in a dedicated reviewed pull request.
