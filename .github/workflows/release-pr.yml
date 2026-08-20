@@ -43,9 +43,9 @@ jobs:
       - name: Create or update the release pull request
         uses: changesets/action@198f833dd7d863100ea6e28967bc9a9fdefadb0a # v2.1.0
         with:
-          version: npm run changeset:version
-          title: "chore: version packages"
-          commit: "chore: version packages"
-          commitMode: github-api
+          version-script: npm run changeset:version
+          pr-title: "chore: version packages"
+          commit-message: "chore: version packages"
+          push-with-git-cli: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
