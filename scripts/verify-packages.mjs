@@ -9,6 +9,15 @@ const lock = JSON.parse(readFileSync(resolve(root, "package-lock.json"), "utf8")
 const errors = [];
 const seenNames = new Set();
 const testedPiVersion = "0.84.2";
+const exactPiPeerPackages = new Set(["@oai404iao/pi-tree-continue"]);
+const requiredPiDependencies = {
+  "@oai404iao/pi-tree-continue": {
+    "@earendil-works/pi-coding-agent": {
+      peer: testedPiVersion,
+      dev: testedPiVersion,
+    },
+  },
+};
 const requiredRuntimeFiles = {
   "@oai404iao/pi-external-thinking": ["THIRD_PARTY_NOTICES.md"],
   "@oai404iao/pi-codex-minimal-tools": [
@@ -89,13 +98,24 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
   if (!Array.isArray(manifest.pi?.extensions) || manifest.pi.extensions.length === 0) {
     report(`${manifest.name}: pi.extensions must contain at least one entry`);
   }
+  const exactPiPeerRange = exactPiPeerPackages.has(manifest.name);
+  const expectedPiPeerRange = exactPiPeerRange ? testedPiVersion : `>=${testedPiVersion}`;
+  const expectedPiDevBaseline = exactPiPeerRange ? testedPiVersion : `^${testedPiVersion}`;
   for (const [dependency, range] of Object.entries(manifest.peerDependencies ?? {})) {
     if (!dependency.startsWith("@earendil-works/pi-")) continue;
-    if (range !== `>=${testedPiVersion}`) {
-      report(`${manifest.name}: ${dependency} peer range must be >=${testedPiVersion}`);
+    if (range !== expectedPiPeerRange) {
+      report(`${manifest.name}: ${dependency} peer range must be ${expectedPiPeerRange}`);
     }
-    if (manifest.devDependencies?.[dependency] !== `^${testedPiVersion}`) {
-      report(`${manifest.name}: ${dependency} development baseline must be ^${testedPiVersion}`);
+    if (manifest.devDependencies?.[dependency] !== expectedPiDevBaseline) {
+      report(`${manifest.name}: ${dependency} development baseline must be ${expectedPiDevBaseline}`);
+    }
+  }
+  for (const [dependency, expected] of Object.entries(requiredPiDependencies[manifest.name] ?? {})) {
+    if (manifest.peerDependencies?.[dependency] !== expected.peer) {
+      report(`${manifest.name}: ${dependency} peer dependency must be ${expected.peer}`);
+    }
+    if (manifest.devDependencies?.[dependency] !== expected.dev) {
+      report(`${manifest.name}: ${dependency} development dependency must be ${expected.dev}`);
     }
   }
   if (

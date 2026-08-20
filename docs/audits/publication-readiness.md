@@ -38,10 +38,11 @@ The Pi development/test baseline is 0.84.2, and the Codex package uses
 `undici` 8.10.0. A fresh npm 11.19.0 lockfile reports zero vulnerabilities for
 both the complete dependency graph and `--omit=dev`.
 
-The update also moves every Pi peer range from an unconstrained wildcard to
-`>=0.84.2`, so consumers do not silently combine these extensions with the
+The update moves public/supported Pi peer ranges from an unconstrained wildcard
+to `>=0.84.2`, so consumers do not silently combine those extensions with the
 older vulnerable baselines that GitHub's dependency graph identified.
-Dependabot remains enabled for ongoing review.
+`pi-tree-continue` is the deliberate exception: its private unsupported hook
+is pinned to exactly 0.84.2. Dependabot remains enabled for ongoing review.
 
 ## npm package status
 
@@ -52,7 +53,7 @@ Dependabot remains enabled for ongoing review.
 | `@oai404iao/pi-keep-defaults` | public `0.1.3` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
 | `@oai404iao/pi-subagent` | private | typecheck and 51 tests | DeepSeek Harness provenance, global preset side-effect review |
 | `@oai404iao/pi-telegram-notify` | public `0.1.3` | typecheck and 8 tests | privacy/internal-hook release approval |
-| `@oai404iao/pi-tree-continue` | private | typecheck and pack check; no test suite | private Pi API dependency, tests |
+| `@oai404iao/pi-tree-continue` | private | typecheck, exact-version guard, and pack check | upstream public continuation API required; private hook bypasses lifecycle/auth/prompt guarantees |
 
 The exact six unscoped names returned npm E404 during the phase-1
 audit. That result is historical only: all six workspace package manifests
