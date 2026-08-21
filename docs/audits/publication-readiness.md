@@ -51,7 +51,7 @@ is pinned to exactly 0.84.2. Dependabot remains enabled for ongoing review.
 | `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
 | `@oai404iao/pi-external-thinking` | public `0.1.0` | typecheck and 9 behavior tests | confirm trusted publisher before its next OIDC release |
 | `@oai404iao/pi-keep-defaults` | public `0.1.3` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
-| `@oai404iao/pi-subagent` | bootstrap candidate `0.2.0` | typecheck and 60 tests | npm bootstrap and trusted-publisher setup |
+| `@oai404iao/pi-subagent` | public `0.2.0` | typecheck and 60 tests | guarded release approval |
 | `@oai404iao/pi-telegram-notify` | public `0.1.3` | typecheck and 8 tests | privacy/internal-hook release approval |
 | `@oai404iao/pi-tree-continue` | private | typecheck, exact-version guard, and pack check | upstream public continuation API required; private hook bypasses lifecycle/auth/prompt guarantees |
 
@@ -74,6 +74,11 @@ Releases.
 `@oai404iao/pi-external-thinking@0.1.0` was bootstrapped from
 `aae803f4b25603991d9375c602cf35da1df922b0`; its npm `gitHead`, `latest`
 dist-tag, package tag, and GitHub Release match that commit.
+
+`@oai404iao/pi-subagent@0.2.0` was bootstrapped from
+`ef42984c0e40ef1f26ead4b4c7d149b21280e66b`; its npm `gitHead` and `latest`
+dist-tag match that commit. Its trusted publisher is configured; the guarded
+workflow owns initial tag/Release reconciliation and future releases.
 
 ## License and source review
 
@@ -123,8 +128,8 @@ Official upstream license:
   SHA-256 checksums for that document and license.
 - Managed global-preset synchronization is now explicit opt-in
   (`syncBundledAgents: true`); the default reads bundled definitions without
-  writing user files. The package is approved for one-time npm bootstrap,
-  followed by trusted-publisher setup.
+  writing user files. Its `0.2.0` bootstrap and trusted-publisher setup are
+  complete.
 
 ## Privacy and public presentation
 

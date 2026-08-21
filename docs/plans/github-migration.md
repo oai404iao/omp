@@ -89,7 +89,9 @@ and behavior tests. Its public `0.1.0` bootstrap, package tag, and GitHub
 Release match npm `gitHead`
 `aae803f4b25603991d9375c602cf35da1df922b0`. Its upstream attribution and
 license are recorded. `@oai404iao/pi-subagent` has completed its dedicated
-public-release review and is queued for its separate `0.2.0` bootstrap.
+public-release review; its public `0.2.0` bootstrap has npm `gitHead`
+`ef42984c0e40ef1f26ead4b4c7d149b21280e66b` and its trusted publisher is
+configured for guarded release reconciliation.
 
 The initial `0.1.2` bootstrap releases for
 `@oai404iao/pi-keep-defaults` and `@oai404iao/pi-telegram-notify` were
