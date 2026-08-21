@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
-import { createCodexReservedNamespaceTool } from "../src/codex-reserved-tools.js";
 import { loadModelSettings } from "../src/model-catalog/runtime.js";
 import { decodeWebSearchActivityTextSignature } from "../src/providers/openai-responses-shared.js";
 import {
@@ -21,6 +21,21 @@ import {
 const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
 const originalPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
+
+function canonicalJson(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+	if (value && typeof value === "object") {
+		return `{${Object.entries(value as Record<string, unknown>)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+			.join(",")}}`;
+	}
+	return JSON.stringify(value);
+}
+
+function sha256(value: unknown): string {
+	return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
 
 interface FetchFactory {
 	(): Response;
@@ -648,7 +663,7 @@ test("Responses Lite namespace function tools normalize strict to false", async 
 	assert.equal(requestBody.input[0]?.tools[0]?.tools[0]?.strict, false);
 });
 
-test("Responses Lite emits canonical Codex reserved namespaces", async () => {
+test("Responses Lite emits the reviewed Codex namespace compatibility serialization", async () => {
 	writeSettings({ requestProfile: { responsesMode: "lite" } });
 	let requestBody: any;
 	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -669,10 +684,20 @@ test("Responses Lite emits canonical Codex reserved namespaces", async () => {
 		},
 	]);
 
-	assert.deepEqual(requestBody.input[0].tools, [
-		createCodexReservedNamespaceTool("web_search"),
-		createCodexReservedNamespaceTool("image_generation"),
-	]);
+	const reservedNamespaces = requestBody.input[0].tools.filter(
+		(tool: any) => tool.type === "namespace" && (tool.name === "web" || tool.name === "image_gen"),
+	);
+	assert.equal(requestBody.input[0].tools.length, 2);
+	assert.equal(reservedNamespaces.length, 2);
+	assert.deepEqual(reservedNamespaces.map((tool: any) => tool.name), ["web", "image_gen"]);
+	assert.equal(
+		sha256(reservedNamespaces[0]),
+		"f67597d3df3f3a77cb517646508e7305804ea029c6f8b1c1c1f241f0de0b214f",
+	);
+	assert.equal(
+		sha256(reservedNamespaces[1]),
+		"ccc508cff0a216bbdf368be8c98be94134a1aed0479cddd28c77d8e004f5b73e",
+	);
 });
 
 test("Responses Lite native compaction preserves the Lite envelope on both compaction endpoints", async () => {

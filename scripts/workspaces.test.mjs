@@ -29,3 +29,10 @@ test("subagent enters guarded artifacts after bootstrap activation", () => {
   );
   assert(guardedNames.includes("@oai404iao/pi-subagent"));
 });
+
+test("Codex minimal tools stays blocked while its separate public gate is pending", () => {
+  const codex = workspaces.find(({ name }) => name === "@oai404iao/pi-codex-minimal-tools");
+  assert.equal(codex?.releaseStatus, "blocked");
+  assert(!publishableWorkspaces.some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
+  assert(!artifactWorkspaces().some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
+});

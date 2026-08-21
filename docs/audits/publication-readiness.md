@@ -48,7 +48,7 @@ is pinned to exactly 0.84.2. Dependabot remains enabled for ongoing review.
 
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
-| `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
+| `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | separate internal-Lite compatibility and release approval |
 | `@oai404iao/pi-external-thinking` | public `0.1.0` | typecheck and 9 behavior tests | confirm trusted publisher before its next OIDC release |
 | `@oai404iao/pi-keep-defaults` | public `0.1.3` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
 | `@oai404iao/pi-subagent` | public `0.2.0` | typecheck and 60 tests | guarded release approval |
@@ -106,13 +106,19 @@ than being relicensed under the project MIT grant.
 - `src/providers/codex-apply-patch.lark` is described as an exact grammar
   snapshot and was verified byte-for-byte against upstream revision
   `eb9dceba1a2e658142a456c5898836774835616b`.
-- `src/codex-reserved-tools.ts` contains captured tool definitions that need a
-  source and redistribution review.
+- `src/codex-reserved-tools.ts` is a modified TypeScript compatibility
+  serialization of the pinned `web.run` and `image_gen.imagegen` namespace
+  declarations. Its two descriptions are byte-for-byte mapped to upstream
+  Markdown sources; its parameter declarations are mapped to the pinned Rust
+  schema types and generators.
 - OpenAI Codex is Apache-2.0. Its license and NOTICE are preserved, and the
-  exact grammar source is mapped in `THIRD_PARTY_NOTICES.md`.
-- The provenance and redistribution terms of service-emitted or
-  server-supplied portions in `src/codex-reserved-tools.ts` remain unresolved,
-  so the package is private.
+  exact grammar source and namespace-tool blob hashes are mapped in
+  `THIRD_PARTY_NOTICES.md` and
+  `provenance/openai-codex-eb9dceba-reserved-tools.json`.
+- This engineering source-attribution review is not legal advice. The package
+  remains private pending a separate public compatibility and release decision
+  because Responses Lite is an internal Codex compatibility path, not a
+  supported public API contract.
 
 Official upstream license:
 [`openai/codex/LICENSE`](https://github.com/openai/codex/blob/main/LICENSE).

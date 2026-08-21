@@ -49,12 +49,47 @@ The repository's `reference/` directory contains protocol analysis based on
 both Codex revisions above. It is development documentation and is excluded
 from the npm tarball.
 
-### Captured tool metadata — review incomplete
+### Modified namespace-tool compatibility serialization
 
-`src/codex-reserved-tools.ts` contains tool descriptions and JSON schemas
-captured from the Responses Lite `additional_tools` output emitted by Codex
-CLI 0.146.0 for `gpt-5.6-sol`.
+`src/codex-reserved-tools.ts` is a modified TypeScript compatibility
+serialization of the Codex namespace-tool construction at the pinned revision
+above. It preserves the local `web.run` and `image_gen.imagegen` declaration
+shapes used by this package's internal Responses Lite path; it is not an exact
+copy of one upstream file or an OpenAI-supported public API contract.
 
-The exact provenance and redistribution terms of service-emitted or
-server-supplied portions have not yet been confirmed. This package remains
-private and must not be published to npm until that review is resolved.
+The two local function descriptions are byte-for-byte matches for:
+
+```text
+codex-rs/ext/web-search/web_run_description.md
+codex-rs/ext/image-generation/imagegen_description.md
+```
+
+The local `web.run` parameters are a compatibility serialization derived from
+the web-search schema generator and `SearchCommands` input types in:
+
+```text
+codex-rs/ext/web-search/src/tool.rs
+codex-rs/ext/web-search/src/schema.rs
+codex-rs/codex-api/src/search.rs
+```
+
+The local `image_gen.imagegen` parameters are a compatibility serialization
+derived from `ImagegenArgs` and its namespace-tool construction in:
+
+```text
+codex-rs/ext/image-generation/src/lib.rs
+codex-rs/ext/image-generation/src/tool.rs
+```
+
+`codex-rs/tools/src/responses_api.rs`,
+`codex-rs/tools/src/tool_spec.rs`, and `codex-rs/core/src/client.rs` establish
+the namespace serialization and Responses Lite tool placement. The immutable
+upstream blob IDs, SHA-256 checksums, source URLs, and local canonical-JSON
+fingerprints are recorded in
+`provenance/openai-codex-eb9dceba-reserved-tools.json`.
+
+The Apache-2.0 license and upstream NOTICE above apply to the derived material.
+This source-attribution record resolves the earlier captured-metadata
+classification at the engineering level; it is not legal advice. This package
+remains private and must not be published until a separate public
+compatibility and release approval is complete.

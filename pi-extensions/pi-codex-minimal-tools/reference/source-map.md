@@ -89,6 +89,30 @@ retains an explicitly documented earlier execution baseline.
 | `codex-rs/core/tests/suite/responses_lite.rs` | Verifies request shape, headers, tool placement, reasoning context, image detail removal, and hosted-tool exclusion. |
 | `codex-rs/models-manager/models.json` | Marks model entries with `use_responses_lite` and other capabilities. |
 
+## Standalone namespace compatibility serialization
+
+`src/codex-reserved-tools.ts` is a modified TypeScript compatibility
+serialization of the pinned Codex namespace-tool construction. It preserves
+the local `web.run` and `image_gen.imagegen` declaration shapes used in the
+internal Responses Lite path; it is neither an exact source-file copy nor a
+claim of a stable, OpenAI-supported public API.
+
+| Local surface | Source evidence |
+| --- | --- |
+| `web.run` namespace/name/function construction | `codex-rs/ext/web-search/src/tool.rs` and `codex-rs/tools/src/responses_api.rs` |
+| `web.run` description | `codex-rs/ext/web-search/web_run_description.md`; its local description is byte-for-byte identical |
+| `web.run` parameters | `codex-rs/ext/web-search/src/schema.rs` and `codex-rs/codex-api/src/search.rs` |
+| `image_gen.imagegen` namespace/name/function construction | `codex-rs/ext/image-generation/src/lib.rs`, `codex-rs/ext/image-generation/src/tool.rs`, and `codex-rs/tools/src/responses_api.rs` |
+| `image_gen.imagegen` description | `codex-rs/ext/image-generation/imagegen_description.md`; its local description is byte-for-byte identical |
+| `image_gen.imagegen` parameters | `ImagegenArgs` and the schema construction in `codex-rs/ext/image-generation/src/tool.rs` |
+| Responses Lite placement | `codex-rs/tools/src/tool_spec.rs` and `codex-rs/core/src/client.rs` |
+
+The package-published
+`provenance/openai-codex-eb9dceba-reserved-tools.json` records each immutable
+upstream blob ID, SHA-256, raw source URL, and local canonical-JSON
+fingerprint. The pinned Cargo manifest and lockfile are included because the
+upstream parameter declarations are generated from Rust types.
+
 ## Standalone web search
 
 | Source | Evidence |

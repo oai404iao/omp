@@ -5,9 +5,9 @@ catalog instead of model-name heuristics.
 
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 
-> npm identity: `@oai404iao/pi-codex-minimal-tools`. This package remains
-> private while its third-party source review is incomplete, so install it
-> from a local checkout.
+> npm identity: `@oai404iao/pi-codex-minimal-tools`. Its Apache source
+> provenance is recorded, but it remains private pending a separate public
+> compatibility and release approval, so install it from a local checkout.
 
 The extension adds:
 
@@ -389,5 +389,8 @@ Project-authored portions are MIT-licensed, copyright 2026 oai404iao.
 Third-party material retains its own terms; see
 [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-This package is currently private and must not be published until the
-provenance review for captured Codex tool metadata is complete.
+The Codex namespace-tool source attribution is recorded in
+`provenance/openai-codex-eb9dceba-reserved-tools.json`. This package is
+currently private and must not be published until its separate public
+compatibility and release approval is complete. Responses Lite is an internal
+Codex compatibility path, not an OpenAI-supported public API contract.
