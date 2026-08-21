@@ -48,7 +48,7 @@ is pinned to exactly 0.84.2. Dependabot remains enabled for ongoing review.
 
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
-| `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | separate internal-Lite compatibility and release approval |
+| `@oai404iao/pi-codex-minimal-tools` | non-private `1.3.0` bootstrap candidate | typecheck, full test suite, source hashes, and pack check | one-time manual bootstrap, trusted publisher, and activation PR |
 | `@oai404iao/pi-external-thinking` | public `0.1.0` | typecheck and 9 behavior tests | confirm trusted publisher before its next OIDC release |
 | `@oai404iao/pi-keep-defaults` | public `0.1.3` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
 | `@oai404iao/pi-subagent` | public `0.2.0` | typecheck and 60 tests | guarded release approval |
@@ -60,6 +60,11 @@ audit. That result is historical only: all six workspace package manifests
 now use the `@oai404iao` scope. E404 is not a reservation or ownership
 guarantee; the exact scoped names must be checked again immediately before
 bootstrap publishing.
+
+When its `1.3.0` bootstrap candidate was prepared on 2026-08-21,
+`@oai404iao/pi-codex-minimal-tools` returned npm E404. This is only a
+point-in-time availability observation, not a reservation or ownership
+guarantee; recheck it immediately before interactive publishing.
 
 The two public candidate packages were observed on npm at `0.1.2`, with npm
 `gitHead` `0c53bdb9e13b006a23a8da05a01c06f106fa2c10`; their package tags and
@@ -115,10 +120,13 @@ than being relicensed under the project MIT grant.
   exact grammar source and namespace-tool blob hashes are mapped in
   `THIRD_PARTY_NOTICES.md` and
   `provenance/openai-codex-eb9dceba-reserved-tools.json`.
-- This engineering source-attribution review is not legal advice. The package
-  remains private pending a separate public compatibility and release decision
-  because Responses Lite is an internal Codex compatibility path, not a
-  supported public API contract.
+- This engineering source-attribution review is not legal advice. The
+  non-private `1.3.0` source revision is a local-only bootstrap candidate:
+  it remains excluded from guarded GitHub Actions artifacts until its
+  one-time interactive publish, trusted-publisher setup, and dedicated
+  `bootstrap` → `publishable` activation change are complete. Responses Lite
+  is an internal Codex compatibility path, not a supported public API
+  contract.
 
 Official upstream license:
 [`openai/codex/LICENSE`](https://github.com/openai/codex/blob/main/LICENSE).
@@ -160,3 +168,5 @@ Official upstream license:
 - [x] `npm-publish` environment requires approval and protected branches.
 - [x] `NPM_PUBLISH_ENABLED=true` is set in the `npm-publish` environment.
 - [x] Release lock changed in a dedicated reviewed pull request.
+- [x] Codex namespace-tool source attribution and immutable packed provenance record reviewed.
+- [ ] Bootstrap `@oai404iao/pi-codex-minimal-tools@1.3.0`, configure its trusted publisher, and merge its activation PR.

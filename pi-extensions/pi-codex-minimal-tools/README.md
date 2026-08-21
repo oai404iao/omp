@@ -5,9 +5,14 @@ catalog instead of model-name heuristics.
 
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 
-> npm identity: `@oai404iao/pi-codex-minimal-tools`. Its Apache source
-> provenance is recorded, but it remains private pending a separate public
-> compatibility and release approval, so install it from a local checkout.
+> npm identity: `@oai404iao/pi-codex-minimal-tools`. Version `1.3.0` is
+> prepared for a one-time manually authenticated npm bootstrap from a reviewed
+> public `main` commit.
+
+> **Compatibility boundary:** Responses Lite uses an internal Codex request
+> shape. This package pins and tests a compatibility serialization for exact
+> configured model profiles, but it is not an OpenAI-supported public API
+> contract and may stop working if that internal protocol changes.
 
 The extension adds:
 
@@ -25,6 +30,14 @@ Unknown models are not guessed. They keep Pi's native provider implementation
 and do not receive package tools.
 
 ## Install
+
+After `1.3.0` is available on npm:
+
+```bash
+pi install npm:@oai404iao/pi-codex-minimal-tools@1.3.0
+```
+
+Before the initial bootstrap, or when testing unreleased source:
 
 ```bash
 pi install /absolute/path/to/pi-codex-minimal-tools
@@ -390,7 +403,8 @@ Third-party material retains its own terms; see
 [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The Codex namespace-tool source attribution is recorded in
-`provenance/openai-codex-eb9dceba-reserved-tools.json`. This package is
-currently private and must not be published until its separate public
-compatibility and release approval is complete. Responses Lite is an internal
-Codex compatibility path, not an OpenAI-supported public API contract.
+`provenance/openai-codex-eb9dceba-reserved-tools.json`. The `1.3.0` source
+revision is intentionally staged for its one-time manual npm bootstrap and
+excluded from guarded GitHub Actions release artifacts until trusted publishing
+is configured. Responses Lite remains an internal Codex compatibility path,
+not an OpenAI-supported public API contract.

@@ -90,6 +90,8 @@ fingerprints are recorded in
 
 The Apache-2.0 license and upstream NOTICE above apply to the derived material.
 This source-attribution record resolves the earlier captured-metadata
-classification at the engineering level; it is not legal advice. This package
-remains private and must not be published until a separate public
-compatibility and release approval is complete.
+classification at the engineering level; it is not legal advice. This `1.3.0`
+source revision is approved only for a one-time manual npm bootstrap from a
+reviewed public `main` commit. It is intentionally excluded from guarded
+GitHub Actions release artifacts until the npm trusted publisher is configured
+and a separate reviewed activation changes its release track to `publishable`.

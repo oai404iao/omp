@@ -1,7 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-minimal-tools",
   "version": "1.3.0",
-  "private": true,
   "description": "Model-profiled Codex Responses tools for Pi: WebSocket, Lite, web search, images, compaction, and apply_patch",
   "repository": {
     "type": "git",
