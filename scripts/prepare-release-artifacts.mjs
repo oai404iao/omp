@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   currentCommit,
@@ -11,13 +11,96 @@ import {
   tagFor,
 } from "./release-utils.mjs";
 import { normalizePackagePath, tarballFacingChangedPaths } from "./recovery-guard.mjs";
-import { publishableWorkspaces, readManifest, registry, root } from "./workspaces.mjs";
+import { artifactWorkspaces, readManifest, registry, root } from "./workspaces.mjs";
 
 const outputDirectory = resolve(root, "release-artifacts");
 const stagingDirectory = resolve(outputDirectory, ".staging");
+const publicRepository = "https://github.com/oai404iao/omp.git";
+const arguments_ = process.argv.slice(2);
+if (arguments_.some((argument) => argument !== "--include-bootstrap")) {
+  throw new Error("usage: prepare-release-artifacts.mjs [--include-bootstrap]");
+}
+const includeBootstrap = arguments_.includes("--include-bootstrap");
+if (includeBootstrap && process.env.GITHUB_ACTIONS === "true") {
+  throw new Error("bootstrap artifacts must be prepared from a reviewed local checkout, not GitHub Actions");
+}
 const commit = currentCommit();
 const candidates = [];
 
+function assertCleanCheckout() {
+  const status = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (status.status !== 0) {
+    throw new Error(`could not inspect checkout cleanliness: ${(status.stderr || status.stdout).trim()}`);
+  }
+  if (status.stdout.trim()) {
+    throw new Error(
+      "release artifacts require a clean Git checkout; commit or remove local changes before packing",
+    );
+  }
+}
+
+function extractPackageAtCommit(directory, destination) {
+  mkdirSync(destination, { recursive: true });
+  const archive = spawnSync("git", ["archive", "--format=tar", `${commit}:${directory}`], {
+    cwd: root,
+    encoding: null,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  if (archive.status !== 0) {
+    throw new Error(
+      `could not archive ${directory} from ${commit}: ${String(archive.stderr ?? "").trim()}`,
+    );
+  }
+
+  const extracted = spawnSync("tar", ["-x", "-C", destination], {
+    cwd: root,
+    input: archive.stdout,
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  if (extracted.status !== 0) {
+    throw new Error(
+      `could not extract immutable archive for ${directory}: ${(extracted.stderr || extracted.stdout).trim()}`,
+    );
+  }
+}
+
+function assertBootstrapCommitIsPublic() {
+  const fetched = spawnSync("git", ["fetch", "--no-tags", publicRepository, "main"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (fetched.status !== 0) {
+    throw new Error(
+      `could not fetch public main before bootstrap: ${(fetched.stderr || fetched.stdout).trim()}`,
+    );
+  }
+
+  const publicHead = spawnSync("git", ["rev-parse", "FETCH_HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (publicHead.status !== 0 || !/^[0-9a-f]{40,64}$/i.test(publicHead.stdout.trim())) {
+    throw new Error("could not resolve freshly fetched public main");
+  }
+
+  const ancestry = spawnSync(
+    "git",
+    ["merge-base", "--is-ancestor", commit, publicHead.stdout.trim()],
+    { cwd: root, encoding: "utf8" },
+  );
+  if (ancestry.status !== 0) {
+    throw new Error(
+      `bootstrap source commit ${commit} is not reachable from freshly fetched public main; merge it before publishing`,
+    );
+  }
+}
+
+assertCleanCheckout();
+if (includeBootstrap) assertBootstrapCommitIsPublic();
 rmSync(outputDirectory, { recursive: true, force: true });
 mkdirSync(outputDirectory, { recursive: true });
 
@@ -110,7 +193,7 @@ function verifyPublishedSource(name, version, directory, sourceCommit, tag) {
   }
 }
 
-for (const { name, directory } of publishableWorkspaces) {
+for (const { name, directory } of artifactWorkspaces(includeBootstrap)) {
   const manifest = readManifest(directory);
   if (manifest.private === true) {
     throw new Error(`${name} is approved in workspaces.mjs but remains private in package.json`);
@@ -146,10 +229,7 @@ for (const { name, directory } of publishableWorkspaces) {
   }
 
   const stagedPackage = resolve(stagingDirectory, name);
-  cpSync(resolve(root, directory), stagedPackage, {
-    recursive: true,
-    filter: (source) => !source.split(/[\\/]/).includes("node_modules"),
-  });
+  extractPackageAtCommit(directory, stagedPackage);
   const stagedManifestPath = resolve(stagedPackage, "package.json");
   const stagedManifest = JSON.parse(readFileSync(stagedManifestPath, "utf8"));
   stagedManifest.gitHead = commit;

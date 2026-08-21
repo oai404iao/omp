@@ -5,10 +5,10 @@ This repository contains a collection of extensions for
 is [`oai404iao/omp`](https://github.com/oai404iao/omp); the existing private
 Gitea remote is retained as a migration backup.
 
-> Guarded npm publication is enabled. The current `0.1.3` releases of
-> `pi-keep-defaults` and `pi-telegram-notify` are public; future releases
-> require an explicit `publish.yml` dispatch, its `publish` confirmation, and
-> the protected `npm-publish` environment.
+> Guarded npm publication is enabled. `pi-external-thinking@0.1.0`,
+> `pi-keep-defaults@0.1.3`, and `pi-telegram-notify@0.1.3` are public; future
+> releases require an explicit `publish.yml` dispatch, its `publish`
+> confirmation, and the protected `npm-publish` environment.
 
 ## Packages
 
@@ -18,15 +18,16 @@ not change the private/public eligibility below.
 | Package | Version | Release track |
 | --- | ---: | --- |
 | `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | private; blocked pending third-party source review |
-| `@oai404iao/pi-external-thinking` | `0.1.0` | publishable candidate; npm bootstrap pending |
+| `@oai404iao/pi-external-thinking` | `0.1.0` | public; guarded manual releases enabled |
 | `@oai404iao/pi-keep-defaults` | `0.1.3` | public; guarded manual releases enabled |
-| `@oai404iao/pi-subagent` | `0.2.0` | private; final public-release approval pending |
+| `@oai404iao/pi-subagent` | `0.2.0` | bootstrap candidate; npm bootstrap and trusted publisher pending |
 | `@oai404iao/pi-telegram-notify` | `0.1.3` | public; guarded manual releases enabled |
 | `@oai404iao/pi-tree-continue` | `0.1.0` | private; blocked pending a public Pi continuation API |
 
 The six scoped npm packages use independent versions.
-`pi-external-thinking` is approved for npm bootstrap; its upstream attribution
-and compatibility review are recorded.
+`pi-external-thinking` is public at `0.1.0`; its upstream attribution and
+compatibility review are recorded. `pi-subagent` is approved for its separate
+one-time bootstrap and trusted-publisher setup.
 
 ## Local development
 

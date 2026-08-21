@@ -3,7 +3,7 @@
 Audit date: 2026-08-17
 Baseline commit: `fdc4ed6a3702fb226ff85b9a084e940a3122d41a`
 Public cutover verified: 2026-08-18
-Public npm registry checked: 2026-08-20
+Public npm registry checked: 2026-08-21
 
 This document records evidence and open questions. It is not a legal opinion
 or proof that the repository contains no sensitive material.
@@ -49,9 +49,9 @@ is pinned to exactly 0.84.2. Dependabot remains enabled for ongoing review.
 | Package | Manifest | Local check | Publication blockers |
 | --- | --- | --- | --- |
 | `@oai404iao/pi-codex-minimal-tools` | private | typecheck and full test suite | captured tool-metadata provenance |
-| `@oai404iao/pi-external-thinking` | publishable candidate `0.1.0` | typecheck and 9 behavior tests | npm bootstrap and trusted-publisher setup |
+| `@oai404iao/pi-external-thinking` | public `0.1.0` | typecheck and 9 behavior tests | confirm trusted publisher before its next OIDC release |
 | `@oai404iao/pi-keep-defaults` | public `0.1.3` | typecheck and smoke/guard tests | watcher lifecycle/release approval |
-| `@oai404iao/pi-subagent` | private | typecheck and 60 tests | final public-release approval |
+| `@oai404iao/pi-subagent` | bootstrap candidate `0.2.0` | typecheck and 60 tests | npm bootstrap and trusted-publisher setup |
 | `@oai404iao/pi-telegram-notify` | public `0.1.3` | typecheck and 8 tests | privacy/internal-hook release approval |
 | `@oai404iao/pi-tree-continue` | private | typecheck, exact-version guard, and pack check | upstream public continuation API required; private hook bypasses lifecycle/auth/prompt guarantees |
 
@@ -71,6 +71,10 @@ The guarded publishing workflow subsequently released both public packages at
 `16dccb8953b717670c34fe978c79c07d592ca7e2`, matching package tags and GitHub
 Releases.
 
+`@oai404iao/pi-external-thinking@0.1.0` was bootstrapped from
+`aae803f4b25603991d9375c602cf35da1df922b0`; its npm `gitHead`, `latest`
+dist-tag, package tag, and GitHub Release match that commit.
+
 ## License and source review
 
 Project-authored material now carries an MIT license with the user-confirmed
@@ -88,8 +92,8 @@ than being relicensed under the project MIT grant.
   notices, and local modification scope are recorded in its
   `THIRD_PARTY_NOTICES.md`.
 - The package manifest, tarball allowlist, and behavior tests now cover the
-  workspace. It is approved for one-time npm bootstrap, followed by
-  trusted-publisher setup.
+  workspace. Its `0.1.0` bootstrap is complete; retain its trusted publisher
+  for subsequent guarded OIDC releases.
 
 ### `@oai404iao/pi-codex-minimal-tools`
 
@@ -119,8 +123,8 @@ Official upstream license:
   SHA-256 checksums for that document and license.
 - Managed global-preset synchronization is now explicit opt-in
   (`syncBundledAgents: true`); the default reads bundled definitions without
-  writing user files. The package remains private pending final
-  public-release approval.
+  writing user files. The package is approved for one-time npm bootstrap,
+  followed by trusted-publisher setup.
 
 ## Privacy and public presentation
 

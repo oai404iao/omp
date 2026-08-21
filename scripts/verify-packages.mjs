@@ -69,7 +69,7 @@ function parsePackOutput(name, stdout) {
 for (const { name: expectedName, directory, releaseStatus } of workspaces) {
   const manifest = readManifest(directory);
 
-  if (!["blocked", "publishable"].includes(releaseStatus)) {
+  if (!["blocked", "bootstrap", "publishable"].includes(releaseStatus)) {
     report(`${expectedName}: unknown releaseStatus ${String(releaseStatus)}`);
   }
   if (manifest.name !== expectedName) {

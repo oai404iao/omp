@@ -25,6 +25,10 @@ below still apply.
 The current stable version of both packages is `0.1.3`, published from
 `16dccb8953b717670c34fe978c79c07d592ca7e2`.
 
+`@oai404iao/pi-external-thinking@0.1.0` is public, published from
+`aae803f4b25603991d9375c602cf35da1df922b0`; its npm `gitHead`, package tag,
+and GitHub Release match that commit.
+
 ## One-time GitHub preparation
 
 1. Use the public `oai404iao/omp` repository, which was created without an
@@ -79,10 +83,24 @@ it now for both initial public packages. For each additional new scoped package:
 5. Restrict traditional token publishing and revoke bootstrap credentials
    after OIDC has been verified.
 
+For a workspace on the `bootstrap` track:
+
+1. Fetch public `main`, then check out a clean commit reachable from it (use
+   `git fetch github main` and normally `git checkout github/main`). Run
+   `npm ci --ignore-scripts`, `npm run ci`, and
+   `npm run release:bootstrap-artifacts`.
+2. Publish only that workspace's named tarball from `release-artifacts/` with
+   interactive 2FA and `--access public --tag latest`. Bootstrap artifacts
+   cannot be prepared from GitHub Actions.
+3. Configure its trusted publisher, then merge a dedicated reviewed change
+   from `bootstrap` to `publishable`.
+4. Dispatch the guarded workflow to reconcile the matching Git tag and GitHub
+   Release. Do not dispatch it while the package remains on `bootstrap`.
+
 Create the matching package tag and GitHub Release during bootstrap when
 possible. If they are missing, the guarded workflow can reconstruct them only
-when npm `gitHead` is a reachable ancestor and that commit contains the same
-package name and version.
+after the package is `publishable`, npm `gitHead` is a reachable ancestor, and
+that commit contains the same package name and version.
 
 The publish job uses a GitHub-hosted runner, `id-token: write`, npm 11.19.0,
 and provenance. It does not read an `NPM_TOKEN`. Verification runs in a
@@ -94,20 +112,28 @@ package lifecycle scripts.
 
 Release eligibility is explicit in two places:
 
-1. `scripts/workspaces.mjs` must set `releaseStatus: "publishable"`;
-2. the matching package manifest must not set `"private": true`.
+1. `scripts/workspaces.mjs` must set one of:
+   - `blocked`: package stays private and is excluded from artifacts;
+   - `bootstrap`: package is non-private but is included only by the local
+     `npm run release:bootstrap-artifacts` command;
+   - `publishable`: package is non-private and enters guarded workflow
+     artifacts.
+2. only `blocked` packages may set `"private": true`.
 
 CI rejects mismatches. The guarded release scripts currently allow
-`@oai404iao/pi-external-thinking`, `@oai404iao/pi-keep-defaults`, and
-`@oai404iao/pi-telegram-notify`. The latter two are public at `0.1.3`;
-`pi-external-thinking` requires its one-time npm bootstrap before the guarded
-OIDC workflow can publish future versions. All future releases require a
+`@oai404iao/pi-external-thinking`, `@oai404iao/pi-keep-defaults`,
+and `@oai404iao/pi-telegram-notify`.
+`pi-external-thinking` is public at `0.1.0`; the latter two are public at
+`0.1.3`. `pi-subagent` requires its one-time `0.2.0` npm bootstrap and
+trusted-publisher setup before a dedicated reviewed change marks it
+`publishable`; only then can the guarded OIDC workflow reconcile its initial
+tag/Release and publish later versions. All future releases require a
 maintainer to manually dispatch and approve the guarded workflow. Their
 trusted-publisher configuration and `NPM_PUBLISH_ENABLED` environment variable
 are release prerequisites.
 
-`@oai404iao/pi-codex-minimal-tools`, `@oai404iao/pi-subagent`, and
-`@oai404iao/pi-tree-continue` are private.
+`@oai404iao/pi-codex-minimal-tools` and `@oai404iao/pi-tree-continue` are
+private.
 Promote one only in a dedicated reviewed change after its documented source,
 compatibility, and release-track gates are complete. A prerelease package must
 also use prerelease SemVer so the workflow selects the `next` dist-tag.
