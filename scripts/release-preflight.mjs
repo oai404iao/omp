@@ -61,13 +61,23 @@ for (const { name, directory } of workspaces) {
 }
 
 const codexNotice = resolve(root, "pi-extensions/pi-codex-minimal-tools/THIRD_PARTY_NOTICES.md");
+const codexProvenance = resolve(
+  root,
+  "pi-extensions/pi-codex-minimal-tools/provenance/openai-codex-eb9dceba-reserved-tools.json",
+);
 const codexManifest = readManifest("pi-extensions/pi-codex-minimal-tools");
 if (publishableWorkspaces.some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools")) {
   if (!existsSync(codexNotice)) {
     fail("@oai404iao/pi-codex-minimal-tools has no THIRD_PARTY_NOTICES.md; complete its source audit before publishing");
   }
+  if (!existsSync(codexProvenance)) {
+    fail("@oai404iao/pi-codex-minimal-tools has no immutable Codex provenance record");
+  }
   if (!codexManifest.files?.includes("THIRD_PARTY_NOTICES.md")) {
     fail("@oai404iao/pi-codex-minimal-tools must include THIRD_PARTY_NOTICES.md in its npm files allowlist");
+  }
+  if (!codexManifest.files?.includes("provenance/")) {
+    fail("@oai404iao/pi-codex-minimal-tools must include its Codex provenance record in the npm files allowlist");
   }
 }
 

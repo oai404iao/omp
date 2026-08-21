@@ -18,9 +18,14 @@ following components retain their own licenses and attribution.
 - The package's `reference/` documentation contains protocol analysis based
   on both revisions, as recorded in `reference/source-map.md` and
   `reference/apply-patch-behavior.md`.
-- `src/codex-reserved-tools.ts` contains tool descriptions and schemas
-  captured from the Responses Lite `additional_tools` output emitted by
-  Codex CLI 0.146.0 for `gpt-5.6-sol`.
+- `src/codex-reserved-tools.ts` is a modified TypeScript compatibility
+  serialization of the pinned Codex `web.run` and
+  `image_gen.imagegen` namespace-tool construction. Its two descriptions
+  exactly match the upstream Markdown sources; its parameter declarations are
+  source-derived compatibility serializations of the pinned schema types and
+  generators. Immutable source/blob IDs, SHA-256 checksums, source URLs, and
+  local fingerprints are recorded in
+  `pi-extensions/pi-codex-minimal-tools/provenance/openai-codex-eb9dceba-reserved-tools.json`.
 
 OpenAI Codex is distributed under the Apache License 2.0. The verified license
 and upstream NOTICE are identical at both analyzed revisions and are
@@ -29,10 +34,12 @@ preserved in:
 - `LICENSES/Apache-2.0.txt`
 - `LICENSES/OpenAI-Codex-NOTICE.txt`
 
-The exact provenance and redistribution terms of any service-emitted or
-server-supplied portions of `src/codex-reserved-tools.ts` have not yet been
-confirmed. The package remains private and excluded from npm publication
-until that review is complete.
+The package-level source-attribution record replaces its earlier
+captured-metadata classification at the engineering level; it is not legal
+advice. `pi-codex-minimal-tools` remains private and excluded from npm
+publication until a separate public compatibility and release approval is
+complete. Its Responses Lite path is an internal Codex compatibility layer,
+not an OpenAI-supported public API contract.
 
 ## oh-my-pi
 

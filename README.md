@@ -18,7 +18,7 @@ not change the private/public eligibility below.
 
 | Package | Version | Release track |
 | --- | ---: | --- |
-| `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | private; blocked pending third-party source review |
+| `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | private; Apache source map complete, separate compatibility/release gate pending |
 | `@oai404iao/pi-external-thinking` | `0.1.0` | public; guarded manual releases enabled |
 | `@oai404iao/pi-keep-defaults` | `0.1.3` | public; guarded manual releases enabled |
 | `@oai404iao/pi-subagent` | `0.2.0` | public; guarded manual releases enabled |
@@ -73,7 +73,7 @@ GitHub migration plan.
   long-lived npm token.
 - Project-authored material is MIT-licensed. Upstream-derived material is
   mapped in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); unresolved
-  provenance keeps the affected packages private.
+  source or compatibility gates keep the affected packages private.
 
 See [SECURITY.md](SECURITY.md) and the
 [publication readiness audit](docs/audits/publication-readiness.md).

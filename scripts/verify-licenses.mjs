@@ -14,6 +14,85 @@ const expectedHashes = new Map([
   ],
 ]);
 
+const codexRepository = "https://github.com/openai/codex";
+const codexRevision = "eb9dceba1a2e658142a456c5898836774835616b";
+const expectedCodexReservedToolSources = {
+  LICENSE: {
+    gitBlobSha: "4606e72e042564097e8780d66c1d4dcb611869bd",
+    sha256: "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+  },
+  NOTICE: {
+    gitBlobSha: "2805899d56d0332d175cfc613c67d45d6f006db7",
+    sha256: "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+  },
+  "codex-rs/ext/web-search/web_run_description.md": {
+    gitBlobSha: "77be9a0a03e6e2e2760651e903ead2dce9996a57",
+    sha256: "1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e",
+  },
+  "codex-rs/ext/web-search/src/tool.rs": {
+    gitBlobSha: "9747b75eddd1052ee4d75e868a644de7fd4135c1",
+    sha256: "6ce56d7705c4b29b91d9d39af5468788a04dd925b414c7b44de67014f3329cb3",
+  },
+  "codex-rs/ext/web-search/src/schema.rs": {
+    gitBlobSha: "2f71f1595c3b75d21cf78f35877f75b9314a3737",
+    sha256: "6371391751d2a5dddad546aa810a6c64f770498702cec8153df74d1d7dff6f9b",
+  },
+  "codex-rs/codex-api/src/search.rs": {
+    gitBlobSha: "237e7a7ebff4a0eeaa6dbb7b94c457d23dfc09de",
+    sha256: "a83fd7ddd41c86985cce2aa899a2907ca820c226d5e7337949cc7e47a35c5f4f",
+  },
+  "codex-rs/ext/image-generation/imagegen_description.md": {
+    gitBlobSha: "368aa10ea8f1909f9171b7a7b701bba6321f6f89",
+    sha256: "77a992a7c90e45fcd11623a1efa34bfd4c7870697e0aa54ce9b28f690877170e",
+  },
+  "codex-rs/ext/image-generation/src/lib.rs": {
+    gitBlobSha: "fd9db419309e5b06acb944a553f5ef144c8a261d",
+    sha256: "c710abe1967cd3f7faaf78c0a35de0f5e6cc5c461f130b79d2b25d27ba8df9de",
+  },
+  "codex-rs/ext/image-generation/src/tool.rs": {
+    gitBlobSha: "ab973da74cec4de053cbe943171bb9ad5703bad6",
+    sha256: "8b8abe637c63e1fa8f52340a4609d96f37a5089364c4d82f0e695fd6731b2206",
+  },
+  "codex-rs/tools/src/responses_api.rs": {
+    gitBlobSha: "e450dcf35f93ab4af7bf3f34956755066114ccae",
+    sha256: "7af0354e43c3fa7f052d86df5ae0c6ce276569243af6f6ea5fe00abcb15bd244",
+  },
+  "codex-rs/tools/src/tool_spec.rs": {
+    gitBlobSha: "530da1be164ce3c6aa4b128ccb878bda7025e217",
+    sha256: "af8b5286fb6d2eb3574c484b25076f515bca2d4350ecb5059e436966ecdd519d",
+  },
+  "codex-rs/core/src/client.rs": {
+    gitBlobSha: "da3b6dad382fd4520026ac447c270e5cc11fa887",
+    sha256: "4b4d00234a7fb649525fdcc913ffe288e4ef3348a916acbd265c22607fd8652d",
+  },
+  "codex-rs/Cargo.toml": {
+    gitBlobSha: "f23232e3d0b8246330d2409fc7fe9690062075c2",
+    sha256: "2e8122fdd528a4d648d9417865153827dc5f7b45ee3afd86bfb129a1e01dcdb8",
+  },
+  "codex-rs/Cargo.lock": {
+    gitBlobSha: "a67d1f3d7b062424d881a612f4cfd8b14e0ac630",
+    sha256: "3a4a5361f289227c1ce09dc072811a1e7d1c7b599c58dd91dce6758d187c993d",
+  },
+};
+const expectedCodexReservedToolFingerprints = {
+  web_search: {
+    namespace: "web",
+    function: "run",
+    descriptionSource: "codex-rs/ext/web-search/web_run_description.md",
+    descriptionSha256: "1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e",
+    parametersSha256: "de3be87e7abfe9b67ba757f27804d4206b51c2a8de9e9799fa7db9ef4abe3539",
+    namespaceSha256: "f67597d3df3f3a77cb517646508e7305804ea029c6f8b1c1c1f241f0de0b214f",
+  },
+  image_generation: {
+    namespace: "image_gen",
+    function: "imagegen",
+    descriptionSource: "codex-rs/ext/image-generation/imagegen_description.md",
+    descriptionSha256: "77a992a7c90e45fcd11623a1efa34bfd4c7870697e0aa54ce9b28f690877170e",
+    parametersSha256: "b4fea7c38ae74635e0072643ac2030899db242657071271e13cdd192a7377a27",
+    namespaceSha256: "ccc508cff0a216bbdf368be8c98be94134a1aed0479cddd28c77d8e004f5b73e",
+  },
+};
+
 const errors = [];
 
 function read(path) {
@@ -67,11 +146,22 @@ const codexDirectory = "pi-extensions/pi-codex-minimal-tools";
 const codexManifest = readManifest(codexDirectory);
 const codexLicense = text(`${codexDirectory}/LICENSE`);
 const codexNotice = text(`${codexDirectory}/THIRD_PARTY_NOTICES.md`);
-check(codexManifest.private === true, "pi-codex-minimal-tools must remain private while source review is incomplete");
+const codexReservedTools = text(`${codexDirectory}/src/codex-reserved-tools.ts`);
+const codexReservedProvenancePath =
+  `${codexDirectory}/provenance/openai-codex-eb9dceba-reserved-tools.json`;
+const codexReservedProvenance = JSON.parse(text(codexReservedProvenancePath));
+check(
+  codexManifest.private === true,
+  "pi-codex-minimal-tools must remain private pending separate compatibility and release approval",
+);
 check(codexManifest.license === "SEE LICENSE IN LICENSE", "pi-codex-minimal-tools must use its composite LICENSE");
 check(codexLicense.includes("Copyright (c) 2026 oai404iao"), "pi-codex-minimal-tools LICENSE lacks project copyright");
 check(
-  codexNotice.includes("eb9dceba1a2e658142a456c5898836774835616b"),
+  codexManifest.files?.includes("provenance/"),
+  "pi-codex-minimal-tools must package its Codex provenance record",
+);
+check(
+  codexNotice.includes(codexRevision),
   "pi-codex-minimal-tools notice lacks the analyzed Codex revision",
 );
 check(
@@ -85,9 +175,44 @@ for (const path of ["src/patch/parser.ts", "src/patch/apply.ts"]) {
   );
 }
 check(
-  codexNotice.includes("must not be published"),
-  "pi-codex-minimal-tools notice must retain the unresolved publication warning",
+  codexReservedTools.includes("SPDX-License-Identifier: Apache-2.0")
+    && codexReservedTools.includes("Modified TypeScript compatibility serialization"),
+  "pi-codex-minimal-tools reserved-tool serialization lacks its Apache modification notice",
 );
+check(
+  codexNotice.includes("Modified namespace-tool compatibility serialization")
+    && /must not be published until a separate public\s+compatibility and release approval/.test(codexNotice),
+  "pi-codex-minimal-tools notice must retain its source map and private-release guard",
+);
+check(
+  codexReservedProvenance.upstream?.repository === codexRepository
+    && codexReservedProvenance.upstream?.revision === codexRevision
+    && codexReservedProvenance.upstream?.commitUrl === `${codexRepository}/commit/${codexRevision}`
+    && codexReservedProvenance.upstream?.license === "Apache-2.0",
+  "pi-codex-minimal-tools provenance must identify the pinned Apache-2.0 Codex source",
+);
+for (const [path, expected] of Object.entries(expectedCodexReservedToolSources)) {
+  const actual = codexReservedProvenance.files?.[path];
+  const expectedRawUrl = `https://raw.githubusercontent.com/openai/codex/${codexRevision}/${path}`;
+  check(
+    actual?.gitBlobSha === expected.gitBlobSha
+      && actual?.sha256 === expected.sha256
+      && actual?.rawUrl === expectedRawUrl,
+    `pi-codex-minimal-tools provenance must retain verified identifiers for ${path}`,
+  );
+}
+for (const [name, expected] of Object.entries(expectedCodexReservedToolFingerprints)) {
+  const actual = codexReservedProvenance.localCompatibilitySerialization?.namespaces?.[name];
+  check(
+    actual?.namespace === expected.namespace
+      && actual?.function === expected.function
+      && actual?.description?.sourcePath === expected.descriptionSource
+      && actual?.description?.sha256 === expected.descriptionSha256
+      && actual?.parameters?.canonicalJsonSha256 === expected.parametersSha256
+      && actual?.canonicalJsonSha256 === expected.namespaceSha256,
+    `pi-codex-minimal-tools provenance must retain the ${name} compatibility fingerprint`,
+  );
+}
 
 const subagentNotice = text("pi-extensions/pi-subagent/THIRD_PARTY_NOTICES.md");
 const subagentProvenance = JSON.parse(
@@ -148,4 +273,4 @@ if (errors.length > 0) {
 
 console.log("✓ project and package license files are present");
 console.log("✓ verified third-party license snapshots and source hashes match");
-console.log("✓ unresolved packages retain their private publication guards");
+console.log("✓ private packages retain their publication guards");

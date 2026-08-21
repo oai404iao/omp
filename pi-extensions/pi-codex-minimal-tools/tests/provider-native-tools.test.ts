@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createCodexReservedNamespaceTool } from "../src/codex-reserved-tools.js";
 import { rewriteNativeOpenAiTools } from "../src/provider-native-tools.js";
@@ -19,14 +20,42 @@ function sha256(value: unknown): string {
 	return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
-test("Codex reserved namespace definitions match the 0.146.0 gpt-5.6-sol capture", () => {
+test("Codex reserved namespace definitions retain the reviewed Apache compatibility serialization", () => {
+	const web = createCodexReservedNamespaceTool("web_search");
+	const image = createCodexReservedNamespaceTool("image_generation");
+	const provenance = JSON.parse(readFileSync(
+		new URL("../provenance/openai-codex-eb9dceba-reserved-tools.json", import.meta.url),
+		"utf8",
+	));
+	const webProvenance = provenance.localCompatibilitySerialization.namespaces.web_search;
+	const imageProvenance = provenance.localCompatibilitySerialization.namespaces.image_generation;
 	assert.equal(
-		sha256(createCodexReservedNamespaceTool("web_search")),
+		sha256(web),
 		"f67597d3df3f3a77cb517646508e7305804ea029c6f8b1c1c1f241f0de0b214f",
 	);
 	assert.equal(
-		sha256(createCodexReservedNamespaceTool("image_generation")),
+		sha256(image),
 		"ccc508cff0a216bbdf368be8c98be94134a1aed0479cddd28c77d8e004f5b73e",
+	);
+	assert.equal(
+		createHash("sha256").update(web.tools[0]!.description).digest("hex"),
+		"1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e",
+	);
+	assert.equal(
+		createHash("sha256").update(image.tools[0]!.description).digest("hex"),
+		"77a992a7c90e45fcd11623a1efa34bfd4c7870697e0aa54ce9b28f690877170e",
+	);
+	assert.equal(sha256(web), webProvenance.canonicalJsonSha256);
+	assert.equal(sha256(web.tools[0]!.parameters), webProvenance.parameters.canonicalJsonSha256);
+	assert.equal(
+		createHash("sha256").update(web.tools[0]!.description).digest("hex"),
+		webProvenance.description.sha256,
+	);
+	assert.equal(sha256(image), imageProvenance.canonicalJsonSha256);
+	assert.equal(sha256(image.tools[0]!.parameters), imageProvenance.parameters.canonicalJsonSha256);
+	assert.equal(
+		createHash("sha256").update(image.tools[0]!.description).digest("hex"),
+		imageProvenance.description.sha256,
 	);
 });
 
