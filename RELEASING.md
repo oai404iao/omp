@@ -98,7 +98,9 @@ For a workspace on the `bootstrap` track:
    interactive 2FA and `--access public --tag latest`. Bootstrap artifacts
    cannot be prepared from GitHub Actions.
 3. Configure its trusted publisher, then merge a dedicated reviewed change
-   from `bootstrap` to `publishable`.
+   from `bootstrap` to `publishable`. That activation change must record the
+   reviewed npm `gitHead` and SHA-512 integrity in
+   `release-locks/npm-published-artifacts.json`.
 4. Dispatch the guarded workflow to reconcile the matching Git tag and GitHub
    Release. Do not dispatch it while the package remains on `bootstrap`.
 
@@ -134,15 +136,19 @@ All future releases require a maintainer to manually dispatch and approve the
 guarded workflow. Their trusted-publisher configuration and
 `NPM_PUBLISH_ENABLED` environment variable are release prerequisites.
 
-`@oai404iao/pi-codex-minimal-tools@1.3.0` is a non-private `bootstrap`
-candidate. Its Apache source map is recorded in
-`pi-extensions/pi-codex-minimal-tools/provenance/`; its internal Responses
-Lite compatibility boundary is documented in the package README and notice.
-It remains excluded from guarded GitHub Actions release artifacts until its
-one-time manual npm bootstrap and trusted-publisher setup are complete, then a
-dedicated reviewed change may move it from `bootstrap` to `publishable`.
-`@oai404iao/pi-tree-continue` remains private. A prerelease package must also
-use prerelease SemVer so the workflow selects the `next` dist-tag.
+`@oai404iao/pi-codex-minimal-tools@1.3.0` was manually bootstrapped from
+`596d799c6f7db3508b6d46bb05cdca6ea9e3b716`. Its Apache source map is
+recorded in `pi-extensions/pi-codex-minimal-tools/provenance/`; its internal
+Responses Lite compatibility boundary remains documented in the package README
+and notice. Its trusted publisher is configured, so it now enters guarded
+GitHub Actions release artifacts. `@oai404iao/pi-tree-continue` remains
+private. A prerelease package must also use prerelease SemVer so the workflow
+selects the `next` dist-tag.
+
+The recovery guard compares the registry `gitHead` and SHA-512 integrity with
+any matching entry in `release-locks/npm-published-artifacts.json`. Add an
+entry when an interactive bootstrap is verified; do not alter a locked value
+without a separate source-and-registry investigation.
 
 Public and supported-package peer ranges currently require Pi 0.84.2 or
 newer. Update the development baseline, peer ranges, lockfile, compatibility

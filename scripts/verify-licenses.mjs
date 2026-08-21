@@ -156,8 +156,8 @@ check(
   "pi-codex-minimal-tools must be non-private for its approved npm bootstrap",
 );
 check(
-  codexWorkspace?.releaseStatus === "bootstrap",
-  "pi-codex-minimal-tools must remain on the local-only bootstrap release track",
+  codexWorkspace?.releaseStatus === "publishable",
+  "pi-codex-minimal-tools must enter the guarded publishable release track after bootstrap",
 );
 check(codexManifest.license === "SEE LICENSE IN LICENSE", "pi-codex-minimal-tools must use its composite LICENSE");
 check(codexLicense.includes("Copyright (c) 2026 oai404iao"), "pi-codex-minimal-tools LICENSE lacks project copyright");
@@ -188,7 +188,7 @@ check(
   codexNotice.includes("Modified namespace-tool compatibility serialization")
     && codexNotice.includes("internal Responses Lite path")
     && /one-time manual npm\s+bootstrap/.test(codexNotice),
-  "pi-codex-minimal-tools notice must retain its source map, Lite warning, and bootstrap guard",
+  "pi-codex-minimal-tools notice must retain its source map, Lite warning, and immutable bootstrap record",
 );
 check(
   codexReservedProvenance.upstream?.repository === codexRepository

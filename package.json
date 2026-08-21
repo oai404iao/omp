@@ -38,7 +38,7 @@
     "release:artifacts": "node scripts/prepare-release-artifacts.mjs",
     "release:bootstrap-artifacts": "node scripts/prepare-release-artifacts.mjs --include-bootstrap",
     "release:preflight": "node scripts/release-preflight.mjs",
-    "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/workspaces.test.mjs"
+    "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "3.0.0"

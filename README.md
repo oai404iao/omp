@@ -18,7 +18,7 @@ not change the private/public eligibility below.
 
 | Package | Version | Release track |
 | --- | ---: | --- |
-| `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | bootstrap candidate; one-time manual npm publish and trusted-publisher setup pending |
+| `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | public; guarded manual releases enabled |
 | `@oai404iao/pi-external-thinking` | `0.1.0` | public; guarded manual releases enabled |
 | `@oai404iao/pi-keep-defaults` | `0.1.3` | public; guarded manual releases enabled |
 | `@oai404iao/pi-subagent` | `0.2.0` | public; guarded manual releases enabled |
@@ -29,6 +29,11 @@ The six scoped npm packages use independent versions.
 `pi-external-thinking` is public at `0.1.0`; its upstream attribution and
 compatibility review are recorded. `pi-subagent` is public at `0.2.0`; its
 DeepSeek Harness provenance and compatibility review are recorded.
+
+> **Codex 1.3.0 documentation note:** the package README and notice inside the
+> immutable `1.3.0` tarball are bootstrap-stage snapshots and retain
+> pre-publication wording. The release status above is authoritative; correct
+> those package-facing texts only in a future versioned release.
 
 ## Local development
 

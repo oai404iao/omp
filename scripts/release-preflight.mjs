@@ -68,7 +68,7 @@ const codexProvenance = resolve(
 const codexManifest = readManifest("pi-extensions/pi-codex-minimal-tools");
 if (publishableWorkspaces.some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools")) {
   if (!existsSync(codexNotice)) {
-    fail("@oai404iao/pi-codex-minimal-tools has no THIRD_PARTY_NOTICES.md; complete its source audit before publishing");
+    fail("@oai404iao/pi-codex-minimal-tools has no THIRD_PARTY_NOTICES.md; its source-attribution record is required before publishing");
   }
   if (!existsSync(codexProvenance)) {
     fail("@oai404iao/pi-codex-minimal-tools has no immutable Codex provenance record");
