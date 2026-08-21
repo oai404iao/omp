@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  assertLockedPublishedArtifact,
   currentCommit,
   existingTagCommit,
   lookupPublishedVersion,
@@ -159,10 +160,12 @@ function assertPublishedPayloadIsUnchanged(name, version, directory, sourceCommi
   }
 }
 
-function verifyPublishedSource(name, version, directory, sourceCommit, tag) {
+function verifyPublishedSource(name, version, directory, published, tag) {
+  const sourceCommit = published.gitHead;
   if (!/^[0-9a-f]{40,64}$/i.test(sourceCommit)) {
     throw new Error(`${name}@${version} has invalid npm gitHead ${sourceCommit}`);
   }
+  assertLockedPublishedArtifact(name, version, published);
 
   const ancestry = spawnSync("git", ["merge-base", "--is-ancestor", sourceCommit, commit], {
     cwd: root,
@@ -208,7 +211,7 @@ for (const { name, directory } of artifactWorkspaces(includeBootstrap)) {
         `${name}@${manifest.version} exists on npm without gitHead; release identity is ambiguous`,
       );
     }
-    verifyPublishedSource(name, manifest.version, directory, published.gitHead, tag);
+    verifyPublishedSource(name, manifest.version, directory, published, tag);
     assertPublishedPayloadIsUnchanged(name, manifest.version, directory, published.gitHead);
     candidates.push({
       name,
