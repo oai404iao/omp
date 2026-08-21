@@ -46,7 +46,7 @@ export function renderDelegationResult(
 	const header = `${icon} ${theme.fg("toolTitle", theme.bold(details.agent))} ${theme.fg(
 		"muted",
 		`[${details.provider}/${details.mode}]`,
-	)} ${theme.fg("dim", details.id)}`;
+	)} ${theme.fg("dim", details.agentId)}`;
 
 	if (!options.expanded) {
 		const lines = [header, theme.fg("muted", details.label)];
@@ -102,7 +102,7 @@ export function renderParentMessage(
 		theme.fg("accent", icon) +
 			" " +
 			theme.fg("toolTitle", theme.bold(`subagent ${kind}`)) +
-			theme.fg("muted", ` ${details?.childId ?? "unknown"}${label}`),
+			theme.fg("muted", ` ${details?.childAgentId ?? "unknown"}${label}`),
 		outputPad,
 		0,
 	);

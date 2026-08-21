@@ -78,11 +78,11 @@ function registerDelegationTool(
 			"This foreground-only tool waits for the child and returns its final answer. " +
 			"Independent sibling calls may still execute in parallel."
 		: defaultBackground
-			? "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
-				"Background mode is continuable and returns a durable child id; use send_message for later FIFO turns. " +
-				"Start independent children together in one assistant message."
-			: "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
-				"This tool waits for the result by default; set run_in_background to true to return a durable child id.";
+		? "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
+			"Background mode is continuable and returns a durable agent id; use send_message for later FIFO turns. " +
+			"Start independent children together in one assistant message."
+		: "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
+			"This tool waits for the result by default; set run_in_background to true to return a durable agent id.";
 	const promptGuidelines = !enableRunInBackground
 		? [
 				"Use subagent for focused independent work and give it a complete standalone prompt.",
@@ -214,7 +214,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		name: "send_message",
 		label: "Send Message",
 		description:
-			"Queue a message as a direct continuable child's next FIFO turn. If it is inactive, its persisted session is cold-resumed. " +
+			"Queue a message as a direct continuable child's next FIFO turn. If it is inactive, its persisted session is cold-resumed by agent id. " +
 			"This call returns acceptance only, never the child's answer.",
 		promptSnippet: "Send a later FIFO turn to a direct continuable subagent",
 		executionMode: "parallel",
@@ -230,7 +230,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 						text: `message queued as the next turn for subagent ${params.subagent_id}`,
 					},
 				],
-				details: { kind: "control", action: "send", id: params.subagent_id } satisfies ControlDetails,
+				details: { kind: "control", action: "send", agentId: params.subagent_id } satisfies ControlDetails,
 			};
 		},
 	});
@@ -250,7 +250,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			await coordinator.interrupt(parent, params.agent_id);
 			return {
 				content: [{ type: "text", text: `interrupt requested for agent ${params.agent_id}` }],
-				details: { kind: "control", action: "interrupt", id: params.agent_id } satisfies ControlDetails,
+				details: { kind: "control", action: "interrupt", agentId: params.agent_id } satisfies ControlDetails,
 			};
 		},
 	});
@@ -307,6 +307,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 					: "foreground-first";
 			const sections = [
 				`Mode: ${schedulingMode}`,
+				`OpenAI identity inline: ${sessionSettings.openAIIdentity ? "enabled" : "disabled"}`,
 				sessionSettings.syncBundledAgents
 					? `Bundled presets: synchronized to ${agentSync?.userAgentsDir ?? coordinator.getUserAgentsDir()}`
 					: "Bundled presets: package defaults (no filesystem sync)",

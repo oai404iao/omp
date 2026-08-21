@@ -29,6 +29,27 @@ The extension adds:
 Unknown models are not guessed. They keep Pi's native provider implementation
 and do not receive package tools.
 
+## Codex Identity
+
+This package owns Codex wire identity independently from Pi's session-file id:
+
+- a root has `SessionId === ThreadId`;
+- subagents share the root `SessionId` and receive their own `ThreadId`;
+- `prompt_cache_key` is the shared `SessionId`;
+- `x-client-request-id` is the current `ThreadId`;
+- TurnId and `x-codex-turn-state` are scoped to one logical agent turn;
+- WindowId is thread-scoped and advances after successful compaction;
+- the installation UUIDv4 is stored at
+  `<PI_CODING_AGENT_DIR>/pi-codex-minimal-tools/installation_id`.
+
+SSE, Responses Lite, WebSocket, native compaction, and standalone `web.run`
+are projections of the same request identity snapshot.
+
+The package also exports
+`@oai404iao/pi-codex-minimal-tools/subagent-inline`. Its named inline
+extension installs only identity lifecycle hooks for SDK-created child
+sessions; it does not register providers, tools, commands, or renderers.
+
 ## Install
 
 After `1.3.0` is available on npm:

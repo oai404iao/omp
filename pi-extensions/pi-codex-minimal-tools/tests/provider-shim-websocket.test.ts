@@ -406,7 +406,7 @@ test("OpenAI WebSocket URL and headers use the normal Responses endpoint and Pi 
 	const threadId = headers.get("thread-id");
 	assert.ok(sessionId && UUID_V7_PATTERN.test(sessionId));
 	assert.ok(threadId && UUID_V7_PATTERN.test(threadId));
-	assert.notEqual(threadId, sessionId);
+	assert.equal(threadId, sessionId);
 	assert.equal(headers.get("x-client-request-id"), threadId);
 	assert.ok(headers.get("x-codex-window-id") && UUID_V7_PATTERN.test(headers.get("x-codex-window-id")!));
 });
@@ -433,6 +433,10 @@ test("openai websocket transport performs an authenticated response.create reque
 		const provider = createProviderHarness().openai;
 		const result = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }], {
 			headers: { "x-pi-auth": "resolved" },
+			transformHeaders: (headers: Record<string, string | null>) => ({
+				...headers,
+				"x-inline-header": "enabled",
+			}),
 		});
 
 		assert.equal(result.stopReason, "stop");
@@ -464,6 +468,10 @@ test("openai websocket transport performs an authenticated response.create reque
 		assert.match(server.requests[0]?.client_metadata?.["x-codex-ws-stream-request-start-ms"], /^\d+$/);
 		assert.equal(server.handshakes[0]?.headers.authorization, "Bearer pi-resolved-api-key");
 		assert.equal(server.handshakes[0]?.headers["x-pi-auth"], "resolved");
+		assert.equal(
+			server.handshakes[0]?.headers["x-inline-header"],
+			"enabled",
+		);
 		assert.equal(server.handshakes[0]?.headers["openai-beta"], "responses_websockets=2026-02-06");
 		assert.equal(server.handshakes[0]?.headers["x-client-request-id"], wireThreadId);
 	} finally {
@@ -478,11 +486,14 @@ test("explicit Pi request metadata supplies the WebSocket turn identity", async 
 	]);
 	try {
 		const provider = createProviderHarness().openai;
+		const explicitSessionId = "0198e2c6-7a5b-7c00-9d1e-2f3a4b5c6d7e";
+		const explicitThreadId = "0198e2c6-7a5b-7c01-9d1e-2f3a4b5c6d7e";
+		const explicitTurnId = "0198e2c6-7a5b-7c02-9d1e-2f3a4b5c6d7e";
 		const result = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }], {
 			metadata: {
-				session_id: "pi-session-metadata",
-				thread_id: "pi-thread",
-				turn_id: "pi-turn",
+				session_id: explicitSessionId,
+				thread_id: explicitThreadId,
+				turn_id: explicitTurnId,
 			},
 		});
 
@@ -490,13 +501,12 @@ test("explicit Pi request metadata supplies the WebSocket turn identity", async 
 		const handshakeHeaders = server.handshakes[0]?.headers as Record<string, string> | undefined;
 		const wireSessionId = handshakeHeaders?.["session-id"];
 		const wireThreadId = handshakeHeaders?.["thread-id"];
-		assert.ok(wireSessionId && UUID_V7_PATTERN.test(wireSessionId));
-		assert.ok(wireThreadId && UUID_V7_PATTERN.test(wireThreadId));
-		assert.notEqual(wireThreadId, wireSessionId);
+		assert.equal(wireSessionId, explicitSessionId);
+		assert.equal(wireThreadId, explicitThreadId);
 		assert.equal(handshakeHeaders?.["x-client-request-id"], wireThreadId);
 		assert.equal(server.requests[0]?.client_metadata?.session_id, wireSessionId);
 		assert.equal(server.requests[0]?.client_metadata?.thread_id, wireThreadId);
-		assert.equal(server.requests[0]?.client_metadata?.turn_id, "pi-turn");
+		assert.equal(server.requests[0]?.client_metadata?.turn_id, explicitTurnId);
 	} finally {
 		await server.close();
 	}
@@ -768,6 +778,8 @@ test("OpenAI Responses compaction reuses the cached WebSocket continuation", asy
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	} as any;
 	try {
+		const compactionTurnId =
+			"0198e2c6-7a5b-7c03-9d1e-2f3a4b5c6d7e";
 		const provider = createProviderHarness().openai;
 		const first = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
 		const output = await requestOpenAINativeCompaction(model, {
@@ -781,7 +793,7 @@ test("OpenAI Responses compaction reuses the cached WebSocket continuation", asy
 			mode: "responses",
 			apiKey: "pi-resolved-api-key",
 			sessionId: "pi-session",
-			turnId: "pi-turn",
+			turnId: compactionTurnId,
 			settings: loadSettings(),
 		});
 
@@ -794,7 +806,10 @@ test("OpenAI Responses compaction reuses the cached WebSocket continuation", asy
 		assert.equal(server.requests[1]?.type, "response.create");
 		assert.equal(server.requests[1]?.previous_response_id, "resp_1");
 		assert.deepEqual(server.requests[1]?.input, [{ type: "compaction_trigger" }]);
-		assert.equal(server.requests[1]?.client_metadata?.turn_id, "pi-turn");
+		assert.equal(
+			server.requests[1]?.client_metadata?.turn_id,
+			compactionTurnId,
+		);
 		assert.equal(server.handshakes[0]?.headers["x-codex-beta-features"], "remote_compaction_v2");
 
 		const checkpointMessage = {

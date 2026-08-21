@@ -4,7 +4,7 @@ import type { SessionView } from "./providers.ts";
 import type { CatalogDiagnostic, SubagentDescriptor } from "./types.ts";
 
 export interface PersistedDescriptor {
-	id: string;
+	agentId: string;
 	sessionFile: string;
 	descriptor: SubagentDescriptor;
 }
@@ -44,7 +44,7 @@ export async function readPersistedCatalog(session: SessionView): Promise<Persis
 				if (headerParent !== folded.descriptor.parentSessionFile) {
 					diagnostics.push({
 						kind: "diagnostic",
-						id: manager.getSessionId(),
+						piSessionId: manager.getSessionId(),
 						reason: "corrupt",
 						sessionFile: info.path,
 						...(headerParent ? { parentSessionFile: headerParent } : {}),
@@ -53,7 +53,7 @@ export async function readPersistedCatalog(session: SessionView): Promise<Persis
 					return;
 				}
 				descriptors.push({
-					id: manager.getSessionId(),
+					agentId: folded.descriptor.agentId,
 					sessionFile: info.path,
 					descriptor: folded.descriptor,
 				});
@@ -61,7 +61,7 @@ export async function readPersistedCatalog(session: SessionView): Promise<Persis
 				const headerParent = manager.getHeader()?.parentSession;
 				diagnostics.push({
 					kind: "diagnostic",
-					id: manager.getSessionId(),
+					piSessionId: manager.getSessionId(),
 					reason: "corrupt",
 					sessionFile: info.path,
 					...(headerParent ? { parentSessionFile: headerParent } : {}),
@@ -71,7 +71,7 @@ export async function readPersistedCatalog(session: SessionView): Promise<Persis
 		} catch (error) {
 			diagnostics.push({
 				kind: "diagnostic",
-				id: info.id,
+				piSessionId: info.id,
 				reason: "unavailable",
 				sessionFile: info.path,
 				...(info.parentSessionPath ? { parentSessionFile: info.parentSessionPath } : {}),
@@ -82,8 +82,11 @@ export async function readPersistedCatalog(session: SessionView): Promise<Persis
 
 	descriptors.sort(
 		(left, right) =>
-			left.descriptor.createdAt.localeCompare(right.descriptor.createdAt) || left.id.localeCompare(right.id),
+			left.descriptor.createdAt.localeCompare(right.descriptor.createdAt) ||
+			left.agentId.localeCompare(right.agentId),
 	);
-	diagnostics.sort((left, right) => left.id.localeCompare(right.id));
+	diagnostics.sort((left, right) =>
+		left.piSessionId.localeCompare(right.piSessionId),
+	);
 	return { descriptors, diagnostics };
 }

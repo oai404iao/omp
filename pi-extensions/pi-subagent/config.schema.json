@@ -50,6 +50,11 @@
       "description": "Load the parent's other Pi extensions in child runtimes. pi-subagent itself is filtered out and explicit agent tool ceilings still apply.",
       "default": false
     },
+    "openAIIdentity": {
+      "type": "boolean",
+      "description": "Inject the pi-codex-minimal-tools identity lifecycle as a named inline extension for OpenAI Responses child models.",
+      "default": false
+    },
     "maxOutputBytes": {
       "type": "integer",
       "minimum": 1024,

@@ -8,6 +8,10 @@ import {
 } from "../codex-http.js";
 import { glyphs, truncateText } from "../glyphs.js";
 import { loadModelSettings } from "../model-catalog/runtime.js";
+import {
+	resolveCodexRequestIdentity,
+	type CodexRequestIdentity,
+} from "../codex-wire-identity.js";
 
 export interface SearchQuery {
 	q: string;
@@ -80,6 +84,7 @@ export interface StandaloneWebSearchDetails {
 
 export interface StandaloneWebSearchInvocation {
 	turnId?: string;
+	identity?: CodexRequestIdentity;
 }
 
 const CODEX_STANDALONE_SEARCH_OUTPUT_TOKEN_LIMIT = 10_000;
@@ -431,12 +436,29 @@ export async function standaloneWebSearch(
 	}
 
 	const url = resolveCodexApiEndpoint(model.baseUrl, settings.apiKeyMode, "alpha/search");
-	const sessionId = ctx.sessionManager?.getSessionId();
-	const searchInput = recentSearchInput(ctx, invocation.turnId);
-	const turnMetadata = invocation.turnId
+	const piSessionId = ctx.sessionManager?.getSessionId();
+	const identity = invocation.identity
+		?? resolveCodexRequestIdentity(
+			piSessionId,
+			invocation.turnId ? { turn_id: invocation.turnId } : undefined,
+			"turn",
+		);
+	const turnId = identity?.turnId || invocation.turnId;
+	const searchInput = recentSearchInput(ctx, turnId);
+	const turnMetadata = identity && turnId
 		? JSON.stringify({
-				...(sessionId ? { session_id: sessionId, thread_id: sessionId } : {}),
-				turn_id: invocation.turnId,
+				session_id: identity.sessionId,
+				thread_id: identity.threadId,
+				turn_id: turnId,
+				...(identity.forkedFromThreadId
+					? {
+							forked_from_thread_id:
+								identity.forkedFromThreadId,
+						}
+					: {}),
+				...(identity.parentThreadId
+					? { parent_thread_id: identity.parentThreadId }
+					: {}),
 				model: model.id,
 			})
 		: undefined;
@@ -451,7 +473,9 @@ export async function standaloneWebSearch(
 				: {}),
 		}),
 		body: JSON.stringify({
-			id: sessionId ?? `pi-search-${Date.now()}`,
+			id: identity?.sessionId
+				?? piSessionId
+				?? `pi-search-${Date.now()}`,
 			model: model.id,
 			...(searchInput ? { input: searchInput } : {}),
 			commands: input,
@@ -482,6 +506,9 @@ export async function standaloneWebSearch(
 
 export function createWebSearchToolDefinition(options: {
 	getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
+	getRequestIdentity?: (
+		sessionId: string | undefined,
+	) => CodexRequestIdentity | undefined;
 } = {}) {
 	return {
 		name: "web_search",
@@ -511,8 +538,11 @@ export function createWebSearchToolDefinition(options: {
 			const settings = loadModelSettings(ctx.model, ctx.cwd);
 			if (settings.webSearchImplementation === "standalone") {
 				const sessionId = ctx.sessionManager?.getSessionId();
+				const identity = options.getRequestIdentity?.(sessionId);
 				return standaloneWebSearch(input, ctx, signal, {
-					turnId: options.getCurrentTurnId?.(sessionId),
+					turnId: identity?.turnId
+						?? options.getCurrentTurnId?.(sessionId),
+					identity,
 				});
 			}
 			return {

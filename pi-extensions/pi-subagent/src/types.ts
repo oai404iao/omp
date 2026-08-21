@@ -16,6 +16,7 @@ export interface SubagentSettings {
 	defaultBackground: boolean;
 	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
+	openAIIdentity: boolean;
 	maxOutputBytes: number;
 }
 
@@ -53,15 +54,22 @@ export interface SubagentRuntimeSnapshot {
 	defaultBackground: boolean;
 	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
+	openAIIdentity: boolean;
 	maxOutputBytes: number;
 }
 
 export interface SubagentDescriptor {
-	version: 1;
+	version: 2;
 	mode: SubagentMode;
 	provider: SubagentProviderName;
 	label: string;
-	parentSessionId: string;
+	/** Durable pi-subagent control identity, independent of provider wire ids. */
+	agentId: string;
+	/** Durable control identity of the delegating pi-subagent. */
+	parentAgentId: string;
+	/** Pi session lookup key of the delegating agent; never used as a wire id. */
+	parentPiSessionId: string;
+	/** Path of the parent's session file at delegation time (attribute, not identity). */
 	parentSessionFile?: string;
 	depth: number;
 	cwd: string;
@@ -77,7 +85,8 @@ export interface SubagentUsage extends Usage {
 }
 
 export interface SubagentRunResult {
-	id: string;
+	agentId: string;
+	piSessionId?: string;
 	sessionFile?: string;
 	output: string;
 	stopReason: SubagentStopReason;
@@ -92,7 +101,8 @@ export interface TraceItem {
 
 export interface DelegationDetails {
 	kind: "delegation";
-	id: string;
+	agentId: string;
+	piSessionId?: string;
 	provider: SubagentProviderName;
 	mode: SubagentMode;
 	agent: string;
@@ -109,13 +119,13 @@ export interface DelegationDetails {
 export interface ControlDetails {
 	kind: "control";
 	action: "send" | "interrupt" | "list" | "report";
-	id?: string;
+	agentId?: string;
 }
 
 export interface CatalogChild {
 	kind: "child";
-	id: string;
-	parentId: string;
+	agentId: string;
+	parentAgentId: string;
 	depth: number;
 	descriptor: SubagentDescriptor;
 	sessionFile?: string;
@@ -124,7 +134,7 @@ export interface CatalogChild {
 
 export interface CatalogDiagnostic {
 	kind: "diagnostic";
-	id: string;
+	piSessionId: string;
 	reason: "corrupt" | "unavailable";
 	sessionFile?: string;
 	parentSessionFile?: string;
@@ -135,7 +145,7 @@ export type CatalogEntry = CatalogChild | CatalogDiagnostic;
 
 export interface ParentMessageDetails {
 	kind: "report" | "settled";
-	childId: string;
+	childAgentId: string;
 	label: string;
 	stopReason?: SubagentStopReason;
 	truncated?: boolean;

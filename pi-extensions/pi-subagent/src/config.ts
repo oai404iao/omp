@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	defaultBackground: true,
 	reportDelivery: "wakeup",
 	inheritExtensions: false,
+	openAIIdentity: false,
 	maxOutputBytes: 50 * 1024,
 };
 
@@ -25,6 +26,7 @@ const CONFIG_KEYS = new Set([
 	"defaultBackground",
 	"reportDelivery",
 	"inheritExtensions",
+	"openAIIdentity",
 	"maxOutputBytes",
 ]);
 
@@ -147,6 +149,10 @@ function applyConfig(
 			config.inheritExtensions === undefined
 				? settings.inheritExtensions
 				: parseBoolean(config.inheritExtensions, "inheritExtensions", source),
+		openAIIdentity:
+			config.openAIIdentity === undefined
+				? settings.openAIIdentity
+				: parseBoolean(config.openAIIdentity, "openAIIdentity", source),
 		maxOutputBytes:
 			config.maxOutputBytes === undefined
 				? settings.maxOutputBytes

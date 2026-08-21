@@ -225,6 +225,8 @@ function registerTools(
 	}) as never);
 	pi.registerTool(createWebSearchToolDefinition({
 		getCurrentTurnId: (sessionId) => providerController?.getCurrentTurnId(sessionId),
+		getRequestIdentity: (sessionId) =>
+			providerController?.getRequestIdentity?.(sessionId),
 	}) as never);
 	pi.registerTool({
 		renderShell: "self",

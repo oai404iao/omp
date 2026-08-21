@@ -1,13 +1,13 @@
-import { randomUUID } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Model } from "@earendil-works/pi-ai";
+import { type Model, uuidv7 } from "@earendil-works/pi-ai";
 import {
 	type AgentSessionEvent,
 	type AgentToolResult,
 	type AgentToolUpdateCallback,
 	type ExtensionAPI,
 	type ExtensionContext,
+	type InlineExtension,
 	type ModelRegistry,
 	type ToolDefinition,
 	type CreateAgentSessionRuntimeFactory,
@@ -75,6 +75,10 @@ import {
 
 const REPORT_CUSTOM_TYPE = "pi-subagent/report";
 const SETTLED_CUSTOM_TYPE = "pi-subagent/settled";
+const AGENT_CUSTOM_TYPE = "pi-subagent/agent";
+const LINEAGE_CUSTOM_TYPE = "pi-subagent/lineage";
+const AGENT_ID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_TRACE_ITEMS = 100;
 const MAX_TRACE_TEXT = 4000;
 const BACKGROUND_CONTROL_TOOLS = new Set([
@@ -107,7 +111,7 @@ export type DelegationOutcome =
 	| { kind: "foreground"; details: DelegationDetails; result: SubagentRunResult };
 
 interface ParentRef {
-	id: string;
+	agentId: string;
 	depth: number;
 	cwd: string;
 	sessionManager: SessionView;
@@ -125,8 +129,8 @@ interface ParentRef {
 }
 
 interface Activation {
-	id: string;
-	epochId: string;
+	agentId: string;
+	runId: string;
 	descriptor: SubagentDescriptor;
 	parent: ParentRef;
 	runtime: AgentSessionRuntime;
@@ -158,7 +162,7 @@ interface CreateActivationOptions {
 }
 
 interface CatalogRecord {
-	id: string;
+	agentId: string;
 	descriptor: SubagentDescriptor;
 	sessionFile?: string;
 	active?: Activation;
@@ -191,6 +195,41 @@ function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Read the durable pi-subagent control id recorded for a session, if any.
+ *
+ * The latest entry wins because a copied/forked Pi session may contain older
+ * identity checkpoints.
+ */
+function readAgentId(session: Pick<SessionView, "getEntries">): string | undefined {
+	const entries = session.getEntries();
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (!entry) continue;
+		if (entry.type !== "custom" || entry.customType !== AGENT_CUSTOM_TYPE) continue;
+		const data = entry.data as { agentId?: unknown } | undefined;
+		if (
+			typeof data?.agentId === "string"
+			&& AGENT_ID_PATTERN.test(data.agentId)
+		) {
+			return data.agentId;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Resolve the provider-neutral control id for a session, creating it on first
+ * use. In-memory SessionManager instances retain custom entries too.
+ */
+function ensureAgentId(session: SessionView): string {
+	const existing = readAgentId(session);
+	if (existing) return existing;
+	const agentId = uuidv7();
+	session.appendCustomEntry(AGENT_CUSTOM_TYPE, { agentId });
+	return agentId;
+}
+
 function stopReasonHeadline(reason: SubagentStopReason): string {
 	switch (reason) {
 		case "completed":
@@ -213,6 +252,7 @@ function makeRuntimeSettings(descriptor: SubagentDescriptor): SubagentSettings {
 		defaultBackground: descriptor.runtime.defaultBackground,
 		reportDelivery: descriptor.runtime.reportDelivery,
 		inheritExtensions: descriptor.runtime.inheritExtensions,
+		openAIIdentity: descriptor.runtime.openAIIdentity,
 		maxOutputBytes: descriptor.runtime.maxOutputBytes,
 	};
 }
@@ -220,6 +260,29 @@ function makeRuntimeSettings(descriptor: SubagentDescriptor): SubagentSettings {
 function isPathInside(parent: string, child: string): boolean {
 	const rel = relative(resolve(parent), resolve(child));
 	return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
+}
+
+function isOpenAIResponsesModel(model: Model<any>): boolean {
+	return model.api === "openai-responses"
+		|| model.api === "openai-codex-responses";
+}
+
+async function loadCodexIdentityInlineExtension(
+	parentSessionManager: SessionView,
+): Promise<InlineExtension> {
+	try {
+		const integration = await import(
+			"@oai404iao/pi-codex-minimal-tools/subagent-inline"
+		);
+		return integration.createCodexSubagentInlineExtension({
+			parentSessionManager,
+		});
+	} catch (error) {
+		throw new Error(
+			"openAIIdentity requires @oai404iao/pi-codex-minimal-tools with its subagent-inline export",
+			{ cause: error },
+		);
+	}
 }
 
 export class SubagentCoordinator {
@@ -278,10 +341,15 @@ export class SubagentCoordinator {
 		const descriptor = folded.kind === "valid" ? folded.descriptor : undefined;
 		const modelRuntime = runtimeFromRegistry(ctx.modelRegistry);
 		return {
-			id: ctx.sessionManager.getSessionId(),
+			agentId: readAgentId(ctx.sessionManager) ?? ensureAgentId(
+				ctx.sessionManager as unknown as SessionView,
+			),
 			depth: descriptor?.depth ?? 0,
 			cwd: ctx.cwd,
-			sessionManager: ctx.sessionManager,
+			// ExtensionContext narrows the live SessionManager to a read-only
+			// view; appending the agent entry through the same instance keeps
+			// the in-memory tree and the session file consistent.
+			sessionManager: ctx.sessionManager as unknown as SessionView,
 			modelRuntime,
 			model: ctx.model,
 			thinkingLevel: ctx.thinkingLevel ?? "off",
@@ -362,12 +430,17 @@ export class SubagentCoordinator {
 		const model = this.resolveModel(parent, agent);
 		const thinkingLevel = agent.thinking ?? parent.thinkingLevel;
 		const prepared = await provider.prepare(parent, mode);
+		parent.agentId = ensureAgentId(parent.sessionManager);
+		const openAIIdentityEnabled =
+			settings.openAIIdentity && isOpenAIResponsesModel(model);
 		const descriptor: SubagentDescriptor = {
-			version: 1,
+			version: 2,
 			mode,
 			provider: providerName,
 			label: input.description.trim(),
-			parentSessionId: parent.id,
+			agentId: uuidv7(),
+			parentAgentId: parent.agentId,
+			parentPiSessionId: parent.sessionManager.getSessionId(),
 			...(parent.sessionManager.getSessionFile()
 				? { parentSessionFile: parent.sessionManager.getSessionFile() }
 				: {}),
@@ -385,9 +458,25 @@ export class SubagentCoordinator {
 				defaultBackground: settings.defaultBackground,
 				reportDelivery: settings.reportDelivery,
 				inheritExtensions: settings.inheritExtensions,
+				openAIIdentity: openAIIdentityEnabled,
 				maxOutputBytes: settings.maxOutputBytes,
 			},
 		};
+		prepared.sessionManager.appendCustomEntry(AGENT_CUSTOM_TYPE, {
+			agentId: descriptor.agentId,
+		});
+		prepared.sessionManager.appendCustomEntry(LINEAGE_CUSTOM_TYPE, {
+			version: 1,
+			agentId: descriptor.agentId,
+			parentAgentId: descriptor.parentAgentId,
+			parentPiSessionId: descriptor.parentPiSessionId,
+			relation: descriptor.provider,
+			agentName: descriptor.agent.name,
+			openAIIdentity: openAIIdentityEnabled,
+			...(descriptor.parentSessionFile
+				? { parentSessionFile: descriptor.parentSessionFile }
+				: {}),
+		});
 
 		let activation: Activation | undefined;
 		try {
@@ -399,7 +488,7 @@ export class SubagentCoordinator {
 				onUpdate,
 			});
 			if (mode === "continuable" && parent.activation) {
-				parent.activation.ownedChildren.add(activation.id);
+				parent.activation.ownedChildren.add(activation.agentId);
 			}
 			const started = this.startPrompt(activation, input.prompt, signal, mode === "continuable");
 			await started.accepted;
@@ -456,7 +545,7 @@ export class SubagentCoordinator {
 				prepared: coldPrepared,
 				isNew: false,
 			});
-			if (parent.activation) parent.activation.ownedChildren.add(activation.id);
+			if (parent.activation) parent.activation.ownedChildren.add(activation.agentId);
 		} else {
 			this.assertDirectParent(parent, activation.descriptor);
 		}
@@ -484,7 +573,7 @@ export class SubagentCoordinator {
 		const target = this.active.get(targetId);
 		if (!target) return;
 		if (!(await this.isDescendantOf(parent, target.descriptor))) {
-			throw new Error(`subagent ${targetId} is not a live descendant of ${parent.id}`);
+			throw new Error(`subagent ${targetId} is not a live descendant of ${parent.agentId}`);
 		}
 		target.status = "failed";
 		void target.runtime.session.abort().catch((error) => {
@@ -495,16 +584,16 @@ export class SubagentCoordinator {
 	async list(parent: ParentRef, scope: "children" | "descendants"): Promise<CatalogEntry[]> {
 		const catalog = await this.catalogRecords(parent);
 		const records = catalog.records;
-		const byId = new Map(records.map((record) => [record.id, record]));
+		const byId = new Map(records.map((record) => [record.agentId, record]));
 		const children: CatalogChild[] = [];
 		for (const record of records) {
 			if (record.descriptor.mode !== "continuable") continue;
-			const distance = this.distanceFrom(parent.id, record.descriptor, byId);
+			const distance = this.distanceFrom(parent.agentId, record.descriptor, byId);
 			if (distance === undefined || (scope === "children" && distance !== 1)) continue;
 			children.push({
 				kind: "child",
-				id: record.id,
-				parentId: record.descriptor.parentSessionId,
+				agentId: record.agentId,
+				parentAgentId: record.descriptor.parentAgentId,
 				depth: distance,
 				descriptor: record.descriptor,
 				...(record.sessionFile ? { sessionFile: record.sessionFile } : {}),
@@ -517,7 +606,8 @@ export class SubagentCoordinator {
 		}
 		children.sort(
 			(left, right) =>
-				left.descriptor.createdAt.localeCompare(right.descriptor.createdAt) || left.id.localeCompare(right.id),
+				left.descriptor.createdAt.localeCompare(right.descriptor.createdAt) ||
+				left.agentId.localeCompare(right.agentId),
 		);
 		const parentFile = parent.sessionManager.getSessionFile();
 		const diagnostics = parentFile
@@ -533,7 +623,7 @@ export class SubagentCoordinator {
 			throw new Error("report is available only to continuable subagents");
 		}
 		const truncated = truncateUtf8(output, child.descriptor.runtime.maxOutputBytes);
-		const content = `Background subagent ${child.id} reported:\n\n${truncated.text}${
+		const content = `Background subagent ${child.agentId} reported:\n\n${truncated.text}${
 			truncated.truncated ? `\n\n[Report truncated; ${truncated.omittedBytes} bytes omitted.]` : ""
 		}`;
 		await child.parent.deliver(
@@ -541,7 +631,7 @@ export class SubagentCoordinator {
 			content,
 			{
 				kind: "report",
-				childId: child.id,
+				childAgentId: child.agentId,
 				label: child.descriptor.label,
 				...(truncated.truncated ? { truncated: true } : {}),
 			},
@@ -653,7 +743,7 @@ export class SubagentCoordinator {
 							text: `message queued as the next turn for subagent ${params.subagent_id}`,
 						},
 					],
-					details: { kind: "control", action: "send", id: params.subagent_id } satisfies ControlDetails,
+					details: { kind: "control", action: "send", agentId: params.subagent_id } satisfies ControlDetails,
 				};
 			},
 		});
@@ -670,7 +760,7 @@ export class SubagentCoordinator {
 				await this.interrupt(this.parentForActivation(activation), params.agent_id);
 				return {
 					content: [{ type: "text", text: `interrupt requested for agent ${params.agent_id}` }],
-					details: { kind: "control", action: "interrupt", id: params.agent_id } satisfies ControlDetails,
+					details: { kind: "control", action: "interrupt", agentId: params.agent_id } satisfies ControlDetails,
 				};
 			},
 		});
@@ -706,7 +796,7 @@ export class SubagentCoordinator {
 				await this.report(activation, params.output);
 				return {
 					content: [{ type: "text", text: `report accepted by the agent that started you` }],
-					details: { kind: "control", action: "report", id: activation.id } satisfies ControlDetails,
+					details: { kind: "control", action: "report", agentId: activation.agentId } satisfies ControlDetails,
 				};
 			},
 		});
@@ -717,7 +807,7 @@ export class SubagentCoordinator {
 	outcomeToolResult(outcome: DelegationOutcome): AgentToolResult<DelegationDetails> {
 		if (outcome.kind === "continuable") {
 			return {
-				content: [{ type: "text", text: `started subagent ${outcome.details.id}` }],
+				content: [{ type: "text", text: `started subagent ${outcome.details.agentId}` }],
 				details: outcome.details,
 			};
 		}
@@ -740,10 +830,12 @@ export class SubagentCoordinator {
 		if (entries.length === 0) return "(no subagents)";
 		return entries
 			.map((entry) => {
-				if (entry.kind === "diagnostic") return `${entry.id} [diagnostic: ${entry.reason}]`;
+				if (entry.kind === "diagnostic") {
+					return `${entry.piSessionId} [diagnostic: ${entry.reason}]`;
+				}
 				const location =
-					scope === "descendants" ? ` parent=${entry.parentId} depth=${entry.depth}` : "";
-				return `${entry.id} [${entry.status}]${location} — ${entry.descriptor.label} (${entry.descriptor.agent.name})`;
+					scope === "descendants" ? ` parent=${entry.parentAgentId} depth=${entry.depth}` : "";
+				return `${entry.agentId} [${entry.status}]${location} — ${entry.descriptor.label} (${entry.descriptor.agent.name})`;
 			})
 			.join("\n");
 	}
@@ -801,6 +893,14 @@ export class SubagentCoordinator {
 				`cannot materialize subagent: model ${descriptor.model.provider}/${descriptor.model.id} is unavailable`,
 			);
 		}
+		const extensionFactories: InlineExtension[] =
+			descriptor.runtime.openAIIdentity && isOpenAIResponsesModel(model)
+				? [
+						await loadCodexIdentityInlineExtension(
+							options.parent.sessionManager,
+						),
+					]
+				: [];
 
 		const appendSystemPrompt = [
 			descriptor.agent.systemPrompt,
@@ -836,10 +936,13 @@ export class SubagentCoordinator {
 					noExtensions: !descriptor.runtime.inheritExtensions,
 					noThemes: true,
 					appendSystemPrompt,
+					extensionFactories,
 					extensionsOverride: (base) => ({
 						...base,
 						extensions: base.extensions.filter(
-							(extension) => !isPathInside(this.packageRoot, extension.resolvedPath),
+							(extension) =>
+								extension.resolvedPath.startsWith("<inline:")
+								|| !isPathInside(this.packageRoot, extension.resolvedPath),
 						),
 					}),
 				},
@@ -935,8 +1038,8 @@ export class SubagentCoordinator {
 			}
 
 			activation = {
-				id: runtime.session.sessionId,
-				epochId: randomUUID(),
+				agentId: descriptor.agentId,
+				runId: uuidv7(),
 				descriptor,
 				parent: options.parent,
 				runtime,
@@ -954,7 +1057,7 @@ export class SubagentCoordinator {
 				disposed: false,
 			};
 			activation.unsubscribe = runtime.session.subscribe((event) => this.observe(activation!, event));
-			this.active.set(activation.id, activation);
+			this.active.set(activation.agentId, activation);
 			return activation;
 		} catch (error) {
 			await runtime.dispose().catch(() => {});
@@ -968,7 +1071,7 @@ export class SubagentCoordinator {
 		signal: AbortSignal | undefined,
 		detachAtAcceptance: boolean,
 	): { accepted: Promise<void>; result: Promise<SubagentRunResult> } {
-		if (activation.currentRun) throw new Error(`subagent ${activation.id} is already running`);
+		if (activation.currentRun) throw new Error(`subagent ${activation.agentId} is already running`);
 		if (signal?.aborted) throw signal.reason ?? new Error("subagent start aborted");
 		activation.pendingSettlement = undefined;
 		activation.status = "running";
@@ -1111,7 +1214,7 @@ export class SubagentCoordinator {
 		const closing = truncated.text.trim()
 			? `Its closing message:\n\n${truncated.text}`
 			: "It left no closing message.";
-		const content = `Background subagent ${activation.id} ${stopReasonHeadline(result.stopReason)} and will do no further work unless you send it more.\n\n${closing}${
+		const content = `Background subagent ${activation.agentId} ${stopReasonHeadline(result.stopReason)} and will do no further work unless you send it more.\n\n${closing}${
 			truncated.truncated ? `\n\n[Closing message truncated; ${truncated.omittedBytes} bytes omitted.]` : ""
 		}`;
 		await activation.parent.deliver(
@@ -1119,7 +1222,7 @@ export class SubagentCoordinator {
 			content,
 			{
 				kind: "settled",
-				childId: activation.id,
+				childAgentId: activation.agentId,
 				label: activation.descriptor.label,
 				stopReason: result.stopReason,
 				...(truncated.truncated ? { truncated: true } : {}),
@@ -1130,7 +1233,7 @@ export class SubagentCoordinator {
 
 	private parentForActivation(activation: Activation): ParentRef {
 		return {
-			id: activation.id,
+			agentId: activation.agentId,
 			depth: activation.descriptor.depth,
 			cwd: activation.descriptor.cwd,
 			sessionManager: activation.runtime.session.sessionManager,
@@ -1140,7 +1243,7 @@ export class SubagentCoordinator {
 			projectTrusted: activation.parent.projectTrusted,
 			activation,
 			deliver: async (customType, content, details, delivery) => {
-				if (activation.disposed) throw new Error(`parent subagent ${activation.id} is no longer resident`);
+				if (activation.disposed) throw new Error(`parent subagent ${activation.agentId} is no longer resident`);
 				const session = activation.runtime.session;
 				if (delivery === "quiet") {
 					await session.sendCustomMessage(
@@ -1170,7 +1273,8 @@ export class SubagentCoordinator {
 		const truncated = truncateUtf8(output, activation.descriptor.runtime.maxOutputBytes);
 		const sessionFile = activation.runtime.session.sessionFile;
 		return {
-			id: activation.id,
+			agentId: activation.agentId,
+			piSessionId: activation.runtime.session.sessionId,
 			...(sessionFile ? { sessionFile } : {}),
 			output: truncated.truncated
 				? `${truncated.text}\n\n[Output truncated; ${truncated.omittedBytes} bytes omitted.${
@@ -1224,22 +1328,24 @@ export class SubagentCoordinator {
 		if (activation.published) return;
 		activation.published = true;
 		this.pi.events.emit("pi-subagent:start", {
-			runId: activation.epochId,
-			id: activation.id,
+			runId: activation.runId,
+			agentId: activation.agentId,
+			piSessionId: activation.runtime.session.sessionId,
+			parentAgentId: activation.descriptor.parentAgentId,
 			provider: activation.descriptor.provider,
 			mode: activation.descriptor.mode,
-			parentId: activation.descriptor.parentSessionId,
 		});
 	}
 
 	private emitEnd(activation: Activation, result: SubagentRunResult): void {
 		if (!activation.published) return;
 		this.pi.events.emit("pi-subagent:end", {
-			runId: activation.epochId,
-			id: activation.id,
+			runId: activation.runId,
+			agentId: activation.agentId,
+			piSessionId: activation.runtime.session.sessionId,
+			parentAgentId: activation.descriptor.parentAgentId,
 			provider: activation.descriptor.provider,
 			mode: activation.descriptor.mode,
-			parentId: activation.descriptor.parentSessionId,
 			stopReason: result.stopReason,
 			output: result.output,
 		});
@@ -1248,7 +1354,8 @@ export class SubagentCoordinator {
 	private detailsOf(activation: Activation, result?: SubagentRunResult): DelegationDetails {
 		return {
 			kind: "delegation",
-			id: activation.id,
+			agentId: activation.agentId,
+			piSessionId: activation.runtime.session.sessionId,
 			provider: activation.descriptor.provider,
 			mode: activation.descriptor.mode,
 			agent: activation.descriptor.agent.name,
@@ -1302,14 +1409,14 @@ export class SubagentCoordinator {
 		try {
 			await activation.runtime.dispose();
 		} finally {
-			if (this.active.get(activation.id) === activation) this.active.delete(activation.id);
+			if (this.active.get(activation.agentId) === activation) this.active.delete(activation.agentId);
 		}
 	}
 
 	private async releaseParentOwnership(activation: Activation): Promise<void> {
 		const owner = activation.parent.activation;
 		if (!owner) return;
-		owner.ownedChildren.delete(activation.id);
+		owner.ownedChildren.delete(activation.agentId);
 		if (
 			!owner.currentRun &&
 			owner.ownedChildren.size === 0 &&
@@ -1321,9 +1428,9 @@ export class SubagentCoordinator {
 	}
 
 	private assertDirectParent(parent: ParentRef, descriptor: SubagentDescriptor): void {
-		if (descriptor.parentSessionId !== parent.id) {
+		if (descriptor.parentAgentId !== parent.agentId) {
 			throw new Error(
-				`subagent ${descriptor.label} is not a direct child of ${parent.id}; message was not delivered`,
+				`subagent ${descriptor.label} is not a direct child of ${parent.agentId}; message was not delivered`,
 			);
 		}
 	}
@@ -1333,7 +1440,7 @@ export class SubagentCoordinator {
 		childId: string,
 	): Promise<{ descriptor: SubagentDescriptor; sessionFile: string } | undefined> {
 		const catalog = await readPersistedCatalog(parent.sessionManager);
-		const entry = catalog.descriptors.find((candidate) => candidate.id === childId);
+		const entry = catalog.descriptors.find((candidate) => candidate.agentId === childId);
 		return entry ? { descriptor: entry.descriptor, sessionFile: entry.sessionFile } : undefined;
 	}
 
@@ -1341,16 +1448,19 @@ export class SubagentCoordinator {
 		const persisted = await readPersistedCatalog(parent.sessionManager);
 		const records = new Map<string, CatalogRecord>();
 		for (const item of persisted.descriptors) {
-			records.set(item.id, {
-				id: item.id,
+			records.set(item.agentId, {
+				agentId: item.agentId,
 				descriptor: item.descriptor,
 				sessionFile: item.sessionFile,
 			});
 		}
+		const activeSessionIds = new Set(
+			[...this.active.values()].map((activation) => activation.runtime.session.sessionId),
+		);
 		for (const activation of this.active.values()) {
 			if (activation.descriptor.cwd !== parent.cwd) continue;
-			records.set(activation.id, {
-				id: activation.id,
+			records.set(activation.agentId, {
+				agentId: activation.agentId,
 				descriptor: activation.descriptor,
 				...(activation.runtime.session.sessionFile
 					? { sessionFile: activation.runtime.session.sessionFile }
@@ -1360,7 +1470,9 @@ export class SubagentCoordinator {
 		}
 		return {
 			records: [...records.values()],
-			diagnostics: persisted.diagnostics.filter((diagnostic) => !this.active.has(diagnostic.id)),
+			diagnostics: persisted.diagnostics.filter(
+				(diagnostic) => !activeSessionIds.has(diagnostic.piSessionId),
+			),
 		};
 	}
 
@@ -1369,7 +1481,7 @@ export class SubagentCoordinator {
 		descriptor: SubagentDescriptor,
 		byId: Map<string, CatalogRecord>,
 	): number | undefined {
-		let parentId = descriptor.parentSessionId;
+		let parentId = descriptor.parentAgentId;
 		let distance = 1;
 		const visited = new Set<string>();
 		while (true) {
@@ -1378,16 +1490,21 @@ export class SubagentCoordinator {
 			visited.add(parentId);
 			const parent = byId.get(parentId);
 			if (!parent) return undefined;
-			parentId = parent.descriptor.parentSessionId;
+			parentId = parent.descriptor.parentAgentId;
 			distance++;
 		}
 	}
 
 	private async isDescendantOf(parent: ParentRef, descriptor: SubagentDescriptor): Promise<boolean> {
 		const { records } = await this.catalogRecords(parent);
-		const byId = new Map(records.map((record) => [record.id, record]));
-		return this.distanceFrom(parent.id, descriptor, byId) !== undefined;
+		const byId = new Map(records.map((record) => [record.agentId, record]));
+		return this.distanceFrom(parent.agentId, descriptor, byId) !== undefined;
 	}
 }
 
-export { REPORT_CUSTOM_TYPE, SETTLED_CUSTOM_TYPE };
+export {
+	REPORT_CUSTOM_TYPE,
+	SETTLED_CUSTOM_TYPE,
+	AGENT_CUSTOM_TYPE,
+	LINEAGE_CUSTOM_TYPE,
+};

@@ -6,11 +6,13 @@ import type { SubagentDescriptor } from "../src/types.ts";
 
 function descriptor(label = "inspect auth"): SubagentDescriptor {
 	return {
-		version: 1,
+		version: 2,
 		mode: "continuable",
 		provider: "spawn",
 		label,
-		parentSessionId: "parent-id",
+		agentId: "01900000-0000-7000-8000-000000000000",
+		parentAgentId: "018fffff-ffff-7000-8000-000000000000",
+		parentPiSessionId: "pi-parent-session",
 		parentSessionFile: "/tmp/parent.jsonl",
 		depth: 1,
 		cwd: "/tmp/project",
@@ -33,6 +35,7 @@ function descriptor(label = "inspect auth"): SubagentDescriptor {
 			defaultBackground: true,
 			reportDelivery: "wakeup",
 			inheritExtensions: false,
+			openAIIdentity: false,
 			maxOutputBytes: 51200,
 		},
 	};
@@ -87,4 +90,21 @@ test("malformed current descriptors fold to a diagnostic", () => {
 	const folded = foldDescriptor([customEntry("bad", malformed)]);
 	assert.equal(folded.kind, "corrupt");
 	if (folded.kind === "corrupt") assert.match(folded.message, /depth/);
+});
+
+test("descriptor agent ids must be UUIDv7", () => {
+	for (const agentId of ["not-a-uuid", "01900000-0000-4000-8000-000000000000"]) {
+		const folded = foldDescriptor([customEntry("bad", { ...descriptor(), agentId })]);
+		assert.equal(folded.kind, "corrupt");
+		if (folded.kind === "corrupt") assert.match(folded.message, /agent id/);
+	}
+});
+
+test("v1 descriptors are rejected as failed legacy data", () => {
+	const legacy = { ...descriptor(), version: 1 };
+	delete (legacy as Partial<SubagentDescriptor>).agentId;
+	delete (legacy as Partial<SubagentDescriptor>).parentAgentId;
+	const folded = foldDescriptor([customEntry("legacy", legacy)]);
+	assert.equal(folded.kind, "corrupt");
+	if (folded.kind === "corrupt") assert.match(folded.message, /version/);
 });

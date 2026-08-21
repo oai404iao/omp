@@ -11,7 +11,7 @@ import type {
 } from "./types.ts";
 
 export const DESCRIPTOR_CUSTOM_TYPE = "pi-subagent/descriptor";
-export const DESCRIPTOR_VERSION = 1;
+export const DESCRIPTOR_VERSION = 2;
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const AGENT_SOURCES = new Set<AgentSource>(["bundled", "user", "project"]);
@@ -20,6 +20,8 @@ const PROVIDERS = new Set<SubagentProviderName>(["spawn", "fork"]);
 const REPORT_DELIVERIES = new Set<ReportDelivery>(["wakeup", "quiet"]);
 const AGENT_SCOPES = new Set<AgentScope>(["user", "project", "both"]);
 const AGENT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+/** UUIDv7 with the standard RFC 9562 variant bits (version 7, variant 10xx). */
+const AGENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -44,6 +46,14 @@ function string(value: unknown, field: string, allowEmpty = false): string {
 
 function optionalString(value: unknown, field: string): string | undefined {
 	return value === undefined ? undefined : string(value, field);
+}
+
+function agentId(value: unknown, field: string): string {
+	const parsed = string(value, field);
+	if (!AGENT_ID_PATTERN.test(parsed)) {
+		throw new Error(`${field} must be a UUIDv7 agent id`);
+	}
+	return parsed;
 }
 
 function limitedString(value: unknown, field: string, maxLength: number): string {
@@ -135,7 +145,9 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 		mode,
 		provider,
 		label: limitedString(input.label, "label", 200),
-		parentSessionId: string(input.parentSessionId, "parentSessionId"),
+		agentId: agentId(input.agentId, "agentId"),
+		parentAgentId: agentId(input.parentAgentId, "parentAgentId"),
+		parentPiSessionId: string(input.parentPiSessionId, "parentPiSessionId"),
 		...(optionalString(input.parentSessionFile, "parentSessionFile")
 			? { parentSessionFile: input.parentSessionFile as string }
 			: {}),
@@ -162,6 +174,7 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 			defaultBackground: boolean(runtime.defaultBackground, "runtime.defaultBackground"),
 			reportDelivery,
 			inheritExtensions: boolean(runtime.inheritExtensions, "runtime.inheritExtensions"),
+			openAIIdentity: boolean(runtime.openAIIdentity, "runtime.openAIIdentity"),
 			maxOutputBytes: boundedInteger(
 				runtime.maxOutputBytes,
 				"runtime.maxOutputBytes",

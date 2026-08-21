@@ -87,7 +87,10 @@ export function forkDelegationParameters(agentNames?: readonly string[]) {
 
 export const SendMessageParameters = Type.Object(
 	{
-		subagent_id: Type.String({ description: "Durable id of a direct continuable child", minLength: 1 }),
+		subagent_id: Type.String({
+			description: "Durable agent id of a direct continuable child",
+			minLength: 1,
+		}),
 		message: Type.String({
 			description: "Message to enqueue as the child's next FIFO turn",
 			minLength: 1,
@@ -99,7 +102,7 @@ export const SendMessageParameters = Type.Object(
 export const InterruptParameters = Type.Object(
 	{
 		agent_id: Type.String({
-			description: "Id of a live child or deeper descendant whose current turn should stop",
+			description: "Agent id of a live child or deeper descendant whose current turn should stop",
 			minLength: 1,
 		}),
 	},

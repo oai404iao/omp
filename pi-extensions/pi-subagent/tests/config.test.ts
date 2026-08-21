@@ -32,6 +32,7 @@ test("global and trusted project settings merge", () => {
 			enableRunInBackground: false,
 			reportDelivery: "quiet",
 			inheritExtensions: true,
+			openAIIdentity: true,
 		}),
 	);
 	writeFileSync(
@@ -44,6 +45,7 @@ test("global and trusted project settings merge", () => {
 	assert.equal(loaded.settings.agentScope, "both");
 	assert.equal(loaded.settings.reportDelivery, "quiet");
 	assert.equal(loaded.settings.inheritExtensions, true);
+	assert.equal(loaded.settings.openAIIdentity, true);
 	assert.equal(loaded.settings.enableRunInBackground, false);
 	assert.equal(loaded.settings.syncBundledAgents, true);
 	assert.equal(loaded.sources.length, 2);
@@ -60,6 +62,7 @@ test("untrusted project configuration is not read", () => {
 	const loaded = loadSettings({ cwd: project, projectTrusted: false, agentDir });
 	assert.equal(loaded.settings.maxDepth, 3);
 	assert.equal(loaded.settings.syncBundledAgents, false);
+	assert.equal(loaded.settings.openAIIdentity, false);
 	assert.deepEqual(loaded.sources, []);
 });
 

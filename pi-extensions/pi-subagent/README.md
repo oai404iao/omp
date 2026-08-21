@@ -18,7 +18,7 @@ Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
   - `fork`: one-shot child seeded through the parent's latest completed turn
 - **Two lifecycles**
   - foreground one-shot runs return the child's final answer
-  - background continuable runs return a child session id immediately
+  - background continuable runs return a durable agent id immediately
 - **Foreground-only policy** that removes background scheduling and lifecycle controls
 - **Independent context and session** for every child
 - **Bundled presets without filesystem writes by default**, with opt-in
@@ -242,6 +242,7 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
   "defaultBackground": true,
   "reportDelivery": "wakeup",
   "inheritExtensions": false,
+  "openAIIdentity": false,
   "maxOutputBytes": 51200
 }
 ```
@@ -255,9 +256,20 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 | `defaultBackground` | `true` | Default scheduling for fresh `subagent` calls when background execution is enabled. |
 | `reportDelivery` | `wakeup` | `wakeup` starts/queues a parent turn; `quiet` waits for the parent's next turn. |
 | `inheritExtensions` | `false` | Load other Pi extensions in child runtimes. This package filters itself out; explicit agent tool ceilings still apply. |
+| `openAIIdentity` | `false` | For OpenAI Responses child models, inject only the named `pi-codex-minimal-tools` identity lifecycle inline. Codex Session/Thread/Turn/Window ids remain owned and serialized by that package. |
 | `maxOutputBytes` | `51200` | Cap for parent-visible foreground output, reports, and settlement notices. Full output remains in the child session. |
 
 Invalid configuration and unknown child tool names fail loud before the child's first model request.
+
+`openAIIdentity` and `inheritExtensions` are independent. The former adds only
+the lightweight Codex identity lifecycle even when normal extension inheritance
+is disabled. Enable `inheritExtensions` as well when the child should receive
+the complete separately installed Codex extension tool surface such as
+`web_search` and `apply_patch`.
+
+The Codex adapter is an optional package dependency. If an installation omits
+optional dependencies, `openAIIdentity: true` fails before the child starts
+with an actionable missing-adapter error.
 
 ### Foreground-only mode
 
@@ -301,7 +313,11 @@ The caller waits for one isolated child run. Only the child's last non-empty ass
 
 ### Continuable
 
-The start tool resolves at prompt preflight acceptance and returns the stable child session id. When an activation settles:
+The start tool resolves at prompt preflight acceptance and returns the child's durable
+agent id (UUIDv7). Agent ids are independent of Pi session (file) ids: they are
+generated once per subagent, recorded in the child's session as `pi-subagent/agent`,
+and chained through `parentAgentId` in the descriptor, so children stay addressable
+even when a parent session is forked or re-created. When an activation settles:
 
 1. the runtime sends the parent a settlement notice with the stop reason and closing message;
 2. the child runtime is disposed once its owned descendants are done;

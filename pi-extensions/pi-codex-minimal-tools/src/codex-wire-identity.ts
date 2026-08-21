@@ -1,182 +1,596 @@
-//! Codex wire identity: UUID v7 session/thread/window identifiers and the
-//! sticky-routing turn-state token, matching the Codex CLI's request identity.
-//!
-//! Pi's own session ids are short opaque strings (often 8 hex chars). The
-//! Codex ChatGPT backend expects real UUID-shaped ids in `session-id`,
-//! `thread-id`, `x-codex-window-id`, `prompt_cache_key`, and
-//! `client_metadata`; the CLI generates UUID v7 values. This module derives a
-//! stable UUID v7 identity per (pi session, thread) pair and remembers the
-//! `x-codex-turn-state` sticky-routing token emitted by the backend so later
-//! requests in the same session can replay it.
+import { uuidv7 } from "@earendil-works/pi-ai";
+import {
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
-const WIRE_IDENTITY_CACHE_LIMIT = 1024;
+/**
+ * Persistent Codex identity written by pi-codex-minimal-tools.
+ *
+ * `piSessionId` is only the lookup/binding key for Pi's session file. It is
+ * never emitted on the Codex wire.
+ */
+export interface CodexThreadIdentity {
+	version: 1;
+	piSessionId: string;
+	sessionId: string;
+	threadId: string;
+	windowId: string;
+	firstWindowId: string;
+	previousWindowId?: string;
+	windowNumber: number;
+	parentThreadId?: string;
+	forkedFromThreadId?: string;
+	agentName?: string;
+	subagentKind?: string;
+	lastCompactionEntryId?: string;
+}
 
 export interface CodexWireIdentity {
-	/** Stable UUID v7 for the pi session. */
 	sessionId: string;
-	/** Stable UUID v7 for the thread (defaults to a per-thread value). */
-	threadId: string;
-	/** UUID v7 for the current auto-compact window; rotated on compaction. */
-	windowId: string;
-}
-
-interface CachedThread {
 	threadId: string;
 	windowId: string;
 }
 
-interface CachedSession {
-	sessionId: string;
-	threads: Map<string, CachedThread>;
+export interface CodexTurnIdentity {
+	turnId: string;
+	startedAtMs: number;
+	parentTurnId?: string;
+	rootTurnId?: string;
+	turnState?: string;
 }
 
-const sessionCache = new Map<string, CachedSession>();
-const turnStateCache = new Map<string, string>();
-const installationIdCache = new Map<string, string>();
-
-function randomBytes(count: number): Uint8Array {
-	if (typeof globalThis.crypto?.getRandomValues === "function") {
-		const bytes = new Uint8Array(count);
-		globalThis.crypto.getRandomValues(bytes);
-		return bytes;
-	}
-	const bytes = new Uint8Array(count);
-	for (let index = 0; index < count; index++) {
-		bytes[index] = Math.floor(Math.random() * 256);
-	}
-	return bytes;
+export interface CodexRequestIdentity extends CodexWireIdentity {
+	installationId: string;
+	turnId: string;
+	turnStartedAtMs?: number;
+	requestKind: "turn" | "compaction" | "prewarm";
+	parentThreadId?: string;
+	forkedFromThreadId?: string;
+	parentTurnId?: string;
+	rootTurnId?: string;
+	agentName?: string;
+	subagentKind?: string;
+	turnState?: string;
 }
 
-function uuidBytesToHex(bytes: Uint8Array): string {
-	const hex: string[] = [];
-	for (const byte of bytes) {
-		hex.push(byte.toString(16).padStart(2, "0"));
-	}
-	return [
-		hex.slice(0, 4).join(""),
-		hex.slice(4, 6).join(""),
-		hex.slice(6, 8).join(""),
-		hex.slice(8, 10).join(""),
-		hex.slice(10, 16).join(""),
-	].join("-");
+interface RuntimeSession {
+	identity: CodexThreadIdentity;
+	activeTurn?: CodexTurnIdentity;
+	pendingTurnState?: string;
+	extraThreads: Map<string, CodexThreadIdentity>;
 }
 
-/** RFC 9562 UUID v7: 48-bit millisecond timestamp + random, version 7, variant RFC 4122. */
+interface CodexIdentityRuntime {
+	sessions: Map<string, RuntimeSession>;
+	installationId?: string;
+	installationPath?: string;
+}
+
+const RUNTIME_SYMBOL = Symbol.for("@oai404iao/pi-codex/identity-runtime/v1");
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_V7_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const INSTALLATION_UUID_V4_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function runtime(): CodexIdentityRuntime {
+	const globals = globalThis as typeof globalThis & {
+		[RUNTIME_SYMBOL]?: CodexIdentityRuntime;
+	};
+	if (!globals[RUNTIME_SYMBOL]) {
+		globals[RUNTIME_SYMBOL] = {
+			sessions: new Map(),
+		};
+	}
+	return globals[RUNTIME_SYMBOL];
+}
+
+/** Pi-owned identities are generated as RFC 9562 UUIDv7 values. */
 export function uuidV7(): string {
-	const bytes = randomBytes(16);
-	const timestamp = Date.now();
-	bytes[0] = (timestamp / 0x10000000000) & 0xff;
-	bytes[1] = (timestamp / 0x100000000) & 0xff;
-	bytes[2] = (timestamp / 0x1000000) & 0xff;
-	bytes[3] = (timestamp / 0x10000) & 0xff;
-	bytes[4] = (timestamp / 0x100) & 0xff;
-	bytes[5] = timestamp & 0xff;
-	bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70;
-	bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
-	return uuidBytesToHex(bytes);
+	return uuidv7();
 }
 
 function uuidV4(): string {
-	const bytes = randomBytes(16);
+	if (typeof globalThis.crypto?.randomUUID === "function") {
+		return globalThis.crypto.randomUUID();
+	}
+	const bytes = new Uint8Array(16);
+	if (typeof globalThis.crypto?.getRandomValues === "function") {
+		globalThis.crypto.getRandomValues(bytes);
+	} else {
+		for (let index = 0; index < bytes.length; index++) {
+			bytes[index] = Math.floor(Math.random() * 256);
+		}
+	}
 	bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
 	bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
-	return uuidBytesToHex(bytes);
+	const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function isUuid(value: unknown): value is string {
+	return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+export function isUuidV7(value: unknown): value is string {
+	return typeof value === "string" && UUID_V7_PATTERN.test(value);
 }
 
 /**
- * Stable per-session installation id (UUID v4), mirroring the CLI's
- * `installation_id` file: one opaque id per installation that never changes
- * for the lifetime of the session.
+ * Codex has one installation id for the installation, not one per Pi session.
+ *
+ * It is loaded and repaired synchronously because request payload assembly is
+ * synchronous at this boundary.
  */
-export function codexInstallationIdFor(sessionKey: string): string {
-	let id = installationIdCache.get(sessionKey);
-	if (!id) {
-		id = typeof globalThis.crypto?.randomUUID === "function"
-			? globalThis.crypto.randomUUID()
-			: uuidV4();
-		installationIdCache.set(sessionKey, id);
-	}
-	return id;
+function installationIdPath(): string {
+	return process.env.PI_CODEX_INSTALLATION_ID_PATH
+		?? join(
+			getAgentDir(),
+			"pi-codex-minimal-tools",
+			"installation_id",
+		);
 }
 
-function newCachedSession(): CachedSession {
+export function codexInstallationIdFor(_sessionKey?: string): string {
+	const state = runtime();
+	const path = installationIdPath();
+	if (state.installationId && state.installationPath === path) {
+		return state.installationId;
+	}
+	try {
+		const persisted = readFileSync(path, "utf8").trim();
+		if (INSTALLATION_UUID_V4_PATTERN.test(persisted)) {
+			state.installationId = persisted;
+			state.installationPath = path;
+			return persisted;
+		}
+	} catch {
+		// Missing/unreadable state is repaired below.
+	}
+
+	const generated = uuidV4();
+	try {
+		mkdirSync(dirname(path), { recursive: true });
+		const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+		writeFileSync(temporary, `${generated}\n`, {
+			encoding: "utf8",
+			mode: 0o600,
+		});
+		renameSync(temporary, path);
+	} catch {
+		// Read-only environments retain the installation id for this process.
+	}
+	state.installationId = generated;
+	state.installationPath = path;
+	return state.installationId;
+}
+
+export function setCodexInstallationId(value: string): void {
+	if (!INSTALLATION_UUID_V4_PATTERN.test(value)) {
+		throw new Error("Codex installation id must be a UUIDv4");
+	}
+	runtime().installationId = value;
+	runtime().installationPath = installationIdPath();
+}
+
+function newRootIdentity(piSessionId: string, forkedFromThreadId?: string): CodexThreadIdentity {
+	const threadId = uuidV7();
+	const windowId = uuidV7();
 	return {
-		sessionId: uuidV7(),
-		threads: new Map(),
+		version: 1,
+		piSessionId,
+		sessionId: threadId,
+		threadId,
+		windowId,
+		firstWindowId: windowId,
+		windowNumber: 0,
+		...(forkedFromThreadId ? { forkedFromThreadId } : {}),
+		agentName: "root",
 	};
 }
 
-function ensureSession(sessionKey: string): CachedSession {
-	let session = sessionCache.get(sessionKey);
-	if (!session) {
-		if (sessionCache.size >= WIRE_IDENTITY_CACHE_LIMIT) {
-			sessionCache.clear();
-			turnStateCache.clear();
-		}
-		session = newCachedSession();
-		sessionCache.set(sessionKey, session);
-	}
-	return session;
+export function createCodexRootIdentity(
+	piSessionId: string,
+	options: { forkedFromThreadId?: string } = {},
+): CodexThreadIdentity {
+	return newRootIdentity(piSessionId, options.forkedFromThreadId);
 }
 
-function ensureThread(session: CachedSession, threadKey: string): CachedThread {
-	let thread = session.threads.get(threadKey);
-	if (!thread) {
-		thread = { threadId: uuidV7(), windowId: uuidV7() };
-		session.threads.set(threadKey, thread);
+export function createCodexChildIdentity(
+	piSessionId: string,
+	parent: CodexThreadIdentity,
+	options: {
+		relation: "spawn" | "fork";
+		agentName?: string;
+		subagentKind?: string;
+	},
+): CodexThreadIdentity {
+	const threadId = uuidV7();
+	const windowId = uuidV7();
+	return {
+		version: 1,
+		piSessionId,
+		sessionId: parent.sessionId,
+		threadId,
+		windowId,
+		firstWindowId: windowId,
+		windowNumber: 0,
+		parentThreadId: parent.threadId,
+		...(options.relation === "fork"
+			? { forkedFromThreadId: parent.threadId }
+			: {}),
+		...(options.agentName ? { agentName: options.agentName } : {}),
+		subagentKind: options.subagentKind ?? "collab_spawn",
+	};
+}
+
+function cloneIdentity(identity: CodexThreadIdentity): CodexThreadIdentity {
+	return structuredClone(identity);
+}
+
+export function registerCodexThreadIdentity(identity: CodexThreadIdentity): CodexThreadIdentity {
+	const parsed = parseCodexThreadIdentity(identity);
+	const existing = runtime().sessions.get(parsed.piSessionId);
+	runtime().sessions.set(parsed.piSessionId, {
+		identity: cloneIdentity(parsed),
+		activeTurn: existing?.activeTurn,
+		pendingTurnState: existing?.pendingTurnState,
+		extraThreads: existing?.extraThreads ?? new Map(),
+	});
+	return cloneIdentity(parsed);
+}
+
+export function codexThreadIdentityFor(piSessionId: string | undefined): CodexThreadIdentity | undefined {
+	if (!piSessionId) return undefined;
+	const value = runtime().sessions.get(piSessionId)?.identity;
+	return value ? cloneIdentity(value) : undefined;
+}
+
+function ensureFallbackSession(piSessionId: string): RuntimeSession {
+	let state = runtime().sessions.get(piSessionId);
+	if (!state) {
+		state = {
+			identity: newRootIdentity(piSessionId),
+			extraThreads: new Map(),
+		};
+		runtime().sessions.set(piSessionId, state);
 	}
-	return thread;
+	return state;
 }
 
 /**
- * Resolve the stable UUID v7 wire identity for a (session, thread) pair.
- * Values are generated once and reused for the lifetime of the pair so the
- * backend sees consistent `session-id`/`thread-id`/`x-codex-window-id` values,
- * exactly like the Codex CLI.
+ * Compatibility resolver used by tests and legacy call sites.
+ *
+ * A root Codex thread has `sessionId === threadId`. Additional explicit
+ * thread keys share that root session while receiving their own thread/window.
  */
 export function resolveCodexWireIdentity(
-	sessionKey: string,
+	piSessionId: string,
 	threadKey?: string,
 ): CodexWireIdentity {
-	const session = ensureSession(sessionKey);
-	const thread = ensureThread(session, threadKey ?? sessionKey);
+	const session = ensureFallbackSession(piSessionId);
+	if (
+		!threadKey
+		|| threadKey === piSessionId
+		|| threadKey === session.identity.threadId
+	) {
+		return {
+			sessionId: session.identity.sessionId,
+			threadId: session.identity.threadId,
+			windowId: session.identity.windowId,
+		};
+	}
+	let thread = session.extraThreads.get(threadKey);
+	if (!thread) {
+		const threadId = uuidV7();
+		const windowId = uuidV7();
+		thread = {
+			version: 1,
+			piSessionId,
+			sessionId: session.identity.sessionId,
+			threadId,
+			windowId,
+			firstWindowId: windowId,
+			windowNumber: 0,
+		};
+		session.extraThreads.set(threadKey, thread);
+	}
 	return {
-		sessionId: session.sessionId,
+		sessionId: thread.sessionId,
 		threadId: thread.threadId,
 		windowId: thread.windowId,
 	};
 }
 
+export function rotateCodexWindowId(piSessionId: string, threadKey?: string): void {
+	const session = ensureFallbackSession(piSessionId);
+	const identity =
+		threadKey && threadKey !== piSessionId && threadKey !== session.identity.threadId
+			? session.extraThreads.get(threadKey)
+			: session.identity;
+	if (!identity) {
+		resolveCodexWireIdentity(piSessionId, threadKey);
+		return rotateCodexWindowId(piSessionId, threadKey);
+	}
+	identity.previousWindowId = identity.windowId;
+	identity.windowId = uuidV7();
+	identity.windowNumber += 1;
+}
+
+export function advanceCodexWindow(
+	piSessionId: string,
+	compactionEntryId?: string,
+): CodexThreadIdentity {
+	const state = ensureFallbackSession(piSessionId);
+	if (
+		compactionEntryId
+		&& state.identity.lastCompactionEntryId === compactionEntryId
+	) {
+		return cloneIdentity(state.identity);
+	}
+	state.identity.previousWindowId = state.identity.windowId;
+	state.identity.windowId = uuidV7();
+	state.identity.windowNumber += 1;
+	if (compactionEntryId) {
+		state.identity.lastCompactionEntryId = compactionEntryId;
+	}
+	return cloneIdentity(state.identity);
+}
+
+export function beginCodexTurn(
+	piSessionId: string,
+	options: {
+		parentPiSessionId?: string;
+		turnId?: string;
+		startedAtMs?: number;
+	} = {},
+): CodexTurnIdentity {
+	const state = ensureFallbackSession(piSessionId);
+	if (state.activeTurn) return structuredClone(state.activeTurn);
+
+	const parentTurn = options.parentPiSessionId
+		? runtime().sessions.get(options.parentPiSessionId)?.activeTurn
+		: undefined;
+	const turnId = isUuidV7(options.turnId) ? options.turnId : uuidV7();
+	const turn: CodexTurnIdentity = {
+		turnId,
+		startedAtMs: options.startedAtMs ?? Date.now(),
+		...(parentTurn ? { parentTurnId: parentTurn.turnId } : {}),
+		rootTurnId: parentTurn?.rootTurnId ?? parentTurn?.turnId ?? turnId,
+		...(state.pendingTurnState
+			? { turnState: state.pendingTurnState }
+			: {}),
+	};
+	delete state.pendingTurnState;
+	state.activeTurn = turn;
+	return structuredClone(turn);
+}
+
+export function currentCodexTurn(piSessionId: string | undefined): CodexTurnIdentity | undefined {
+	if (!piSessionId) return undefined;
+	const turn = runtime().sessions.get(piSessionId)?.activeTurn;
+	return turn ? structuredClone(turn) : undefined;
+}
+
+export function endCodexTurn(piSessionId: string, turnId?: string): void {
+	const state = runtime().sessions.get(piSessionId);
+	if (!state?.activeTurn) return;
+	if (turnId && state.activeTurn.turnId !== turnId) return;
+	delete state.activeTurn;
+}
+
+export function codexTurnStateFor(piSessionId: string): string | undefined {
+	return runtime().sessions.get(piSessionId)?.activeTurn?.turnState;
+}
+
+/** Store the first sticky-routing token for the active logical turn only. */
+export function captureCodexTurnState(
+	piSessionId: string,
+	token: string | undefined,
+): void {
+	if (typeof token !== "string" || !token.trim()) return;
+	const state = ensureFallbackSession(piSessionId);
+	if (!state.activeTurn) {
+		if (!state.pendingTurnState) state.pendingTurnState = token.trim();
+		return;
+	}
+	if (state.activeTurn.turnState) return;
+	state.activeTurn.turnState = token.trim();
+}
+
+function metadataString(
+	metadata: Record<string, unknown> | undefined,
+	key: string,
+): string | undefined {
+	const value = metadata?.[key];
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 /**
- * Rotate the auto-compact window id for a (session, thread) pair. Session and
- * thread ids stay stable; only `x-codex-window-id` changes, mirroring the
- * CLI's auto-compact window lifecycle.
+ * Resolve one immutable identity snapshot for an actual provider request.
+ * Valid explicit UUID values are consumed directly; they are never used as
+ * derivation keys.
  */
-export function rotateCodexWindowId(sessionKey: string, threadKey?: string): void {
-	const session = ensureSession(sessionKey);
-	const thread = ensureThread(session, threadKey ?? sessionKey);
-	thread.windowId = uuidV7();
+export function resolveCodexRequestIdentity(
+	piSessionId: string | undefined,
+	metadata: Record<string, unknown> | undefined,
+	requestKind: CodexRequestIdentity["requestKind"] = "turn",
+): CodexRequestIdentity | undefined {
+	const explicitSessionId = metadataString(metadata, "session_id");
+	const explicitThreadId = metadataString(metadata, "thread_id");
+	const explicitWindowId = metadataString(metadata, "window_id")
+		?? metadataString(metadata, "x-codex-window-id");
+	const state = piSessionId ? ensureFallbackSession(piSessionId) : undefined;
+	if (
+		!state
+		&& (!isUuidV7(explicitSessionId) || !isUuidV7(explicitThreadId))
+	) {
+		return undefined;
+	}
+	const identity = state?.identity;
+	const sessionId = isUuidV7(explicitSessionId)
+		? explicitSessionId
+		: identity?.sessionId;
+	const threadId = isUuidV7(explicitThreadId)
+		? explicitThreadId
+		: identity?.threadId;
+	const windowId = isUuidV7(explicitWindowId)
+		? explicitWindowId
+		: identity?.windowId;
+	if (!sessionId || !threadId || !windowId) return undefined;
+
+	let turn = state?.activeTurn;
+	const explicitTurnId = metadataString(metadata, "turn_id");
+	if (isUuidV7(explicitTurnId)) {
+		if (!turn || turn.turnId !== explicitTurnId) {
+			turn = {
+				turnId: explicitTurnId,
+				startedAtMs: Date.now(),
+				rootTurnId: explicitTurnId,
+				...(state?.pendingTurnState
+					? { turnState: state.pendingTurnState }
+					: {}),
+			};
+			if (state) {
+				state.activeTurn = turn;
+				delete state.pendingTurnState;
+			}
+		}
+	} else if (!turn && requestKind !== "prewarm" && piSessionId) {
+		turn = beginCodexTurn(piSessionId);
+	}
+
+	const explicitParentThreadId = metadataString(metadata, "parent_thread_id");
+	const explicitForkedFromThreadId = metadataString(metadata, "forked_from_thread_id");
+	const explicitParentTurnId = metadataString(metadata, "parent_turn_id");
+	const explicitRootTurnId = metadataString(metadata, "root_turn_id");
+	return {
+		installationId: codexInstallationIdFor(),
+		sessionId,
+		threadId,
+		windowId,
+		turnId: turn?.turnId ?? "",
+		...(turn ? { turnStartedAtMs: turn.startedAtMs } : {}),
+		requestKind,
+		...(isUuidV7(explicitParentThreadId)
+			? { parentThreadId: explicitParentThreadId }
+			: identity?.parentThreadId
+				? { parentThreadId: identity.parentThreadId }
+				: {}),
+		...(isUuidV7(explicitForkedFromThreadId)
+			? { forkedFromThreadId: explicitForkedFromThreadId }
+			: identity?.forkedFromThreadId
+				? { forkedFromThreadId: identity.forkedFromThreadId }
+				: {}),
+		...(isUuidV7(explicitParentTurnId)
+			? { parentTurnId: explicitParentTurnId }
+			: turn?.parentTurnId
+				? { parentTurnId: turn.parentTurnId }
+				: {}),
+		...(isUuidV7(explicitRootTurnId)
+			? { rootTurnId: explicitRootTurnId }
+			: turn?.rootTurnId
+				? { rootTurnId: turn.rootTurnId }
+				: {}),
+		...(identity?.agentName ? { agentName: identity.agentName } : {}),
+		...(identity?.subagentKind ? { subagentKind: identity.subagentKind } : {}),
+		...(turn?.turnState ? { turnState: turn.turnState } : {}),
+	};
 }
 
-/** Current sticky-routing turn-state token for a session, if the backend issued one. */
-export function codexTurnStateFor(sessionKey: string): string | undefined {
-	return turnStateCache.get(sessionKey);
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord | undefined {
+	return value && typeof value === "object" && !Array.isArray(value)
+		? value as UnknownRecord
+		: undefined;
 }
 
-/** Remember the sticky-routing token emitted by the backend. */
-export function captureCodexTurnState(sessionKey: string, token: string | undefined): void {
-	if (!sessionKey || typeof token !== "string" || !token.trim()) return;
-	turnStateCache.set(sessionKey, token.trim());
+export function parseCodexThreadIdentity(value: unknown): CodexThreadIdentity {
+	const input = asRecord(value);
+	if (!input || input.version !== 1) {
+		throw new Error("unsupported Codex thread identity version");
+	}
+	for (const field of [
+		"piSessionId",
+		"sessionId",
+		"threadId",
+		"windowId",
+		"firstWindowId",
+	] as const) {
+		if (typeof input[field] !== "string" || !input[field]) {
+			throw new Error(`Codex thread identity ${field} must be a non-empty string`);
+		}
+	}
+	for (const field of [
+		"sessionId",
+		"threadId",
+		"windowId",
+		"firstWindowId",
+		"previousWindowId",
+		"parentThreadId",
+		"forkedFromThreadId",
+	] as const) {
+		if (input[field] !== undefined && !isUuidV7(input[field])) {
+			throw new Error(`Codex thread identity ${field} must be a UUIDv7`);
+		}
+	}
+	if (
+		typeof input.windowNumber !== "number"
+		|| !Number.isSafeInteger(input.windowNumber)
+		|| input.windowNumber < 0
+	) {
+		throw new Error("Codex thread identity windowNumber must be a non-negative integer");
+	}
+	for (const field of [
+		"agentName",
+		"subagentKind",
+		"lastCompactionEntryId",
+	] as const) {
+		if (input[field] !== undefined && typeof input[field] !== "string") {
+			throw new Error(`Codex thread identity ${field} must be a string`);
+		}
+	}
+	return {
+		version: 1,
+		piSessionId: input.piSessionId as string,
+		sessionId: input.sessionId as string,
+		threadId: input.threadId as string,
+		windowId: input.windowId as string,
+		firstWindowId: input.firstWindowId as string,
+		windowNumber: input.windowNumber,
+		...(input.previousWindowId
+			? { previousWindowId: input.previousWindowId as string }
+			: {}),
+		...(input.parentThreadId
+			? { parentThreadId: input.parentThreadId as string }
+			: {}),
+		...(input.forkedFromThreadId
+			? { forkedFromThreadId: input.forkedFromThreadId as string }
+			: {}),
+		...(input.agentName ? { agentName: input.agentName as string } : {}),
+		...(input.subagentKind
+			? { subagentKind: input.subagentKind as string }
+			: {}),
+		...(input.lastCompactionEntryId
+			? { lastCompactionEntryId: input.lastCompactionEntryId as string }
+			: {}),
+	};
 }
 
-/** Forget all derived identity and turn-state state (tests, session teardown). */
 export function resetCodexWireState(): void {
-	sessionCache.clear();
-	turnStateCache.clear();
-	installationIdCache.clear();
+	const state = runtime();
+	state.sessions.clear();
+	delete state.installationId;
+	delete state.installationPath;
 }
 
-/** Current number of cached identities (diagnostics/tests). */
 export function codexWireIdentityCount(): number {
-	return sessionCache.size;
+	return runtime().sessions.size;
 }

@@ -18,8 +18,10 @@ import {
 	ModelRuntime,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { CODEX_IDENTITY_CUSTOM_TYPE } from "@oai404iao/pi-codex-minimal-tools/subagent-inline";
 import { DEFAULT_SETTINGS } from "../src/config.ts";
-import { SubagentCoordinator } from "../src/coordinator.ts";
+import { SubagentCoordinator, AGENT_CUSTOM_TYPE } from "../src/coordinator.ts";
+import { foldDescriptor } from "../src/descriptor.ts";
 
 const roots: string[] = [];
 
@@ -252,6 +254,105 @@ test("one-shot child returns only its own final output and usage", async () => {
 	}
 });
 
+test("OpenAI identity config injects the Codex lifecycle inline", async () => {
+	const { coordinator, parent } = await fixture();
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "codex identity child",
+				prompt: "Inspect it.",
+				run_in_background: false,
+			},
+			{
+				...DEFAULT_SETTINGS,
+				defaultBackground: false,
+				openAIIdentity: true,
+			},
+		);
+		assert.equal(outcome.kind, "foreground");
+		if (outcome.kind !== "foreground") return;
+		assert.ok(outcome.details.sessionFile);
+		const child = SessionManager.open(
+			outcome.details.sessionFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		const childIdentityEntry = [...child.getEntries()]
+			.reverse()
+			.find(
+				(entry) =>
+					entry.type === "custom"
+					&& entry.customType === CODEX_IDENTITY_CUSTOM_TYPE,
+			);
+		assert.equal(childIdentityEntry?.type, "custom");
+		if (childIdentityEntry?.type !== "custom") return;
+		const childIdentity = childIdentityEntry.data as {
+			sessionId: string;
+			threadId: string;
+			parentThreadId?: string;
+		};
+
+		const parentIdentityEntry = [...parent.sessionManager.getEntries()]
+			.reverse()
+			.find(
+				(entry) =>
+					entry.type === "custom"
+					&& entry.customType === CODEX_IDENTITY_CUSTOM_TYPE,
+			);
+		assert.equal(parentIdentityEntry?.type, "custom");
+		if (parentIdentityEntry?.type !== "custom") return;
+		const parentIdentity = parentIdentityEntry.data as {
+			sessionId: string;
+			threadId: string;
+		};
+		assert.equal(parentIdentity.sessionId, parentIdentity.threadId);
+		assert.equal(childIdentity.sessionId, parentIdentity.sessionId);
+		assert.notEqual(childIdentity.threadId, parentIdentity.threadId);
+		assert.equal(childIdentity.parentThreadId, parentIdentity.threadId);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("OpenAI identity config off does not inject the inline lifecycle", async () => {
+	const { coordinator, parent } = await fixture();
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "provider-neutral child",
+				prompt: "Inspect it.",
+				run_in_background: false,
+			},
+			{ ...DEFAULT_SETTINGS, defaultBackground: false, openAIIdentity: false },
+		);
+		assert.equal(outcome.kind, "foreground");
+		if (outcome.kind !== "foreground" || !outcome.details.sessionFile) return;
+		const child = SessionManager.open(
+			outcome.details.sessionFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		assert.equal(
+			child
+				.getEntries()
+				.some(
+					(entry) =>
+						entry.type === "custom"
+						&& entry.customType === CODEX_IDENTITY_CUSTOM_TYPE,
+				),
+			false,
+		);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
 test("synchronized runtime settings materialize presets before discovery", async () => {
 	const { coordinator, parent, agentDir } = await fixture();
 	try {
@@ -290,10 +391,14 @@ test("continuable child settles, becomes ready, and cold-resumes for a later mes
 		);
 		assert.equal(outcome.kind, "continuable");
 		await waitUntil(() => messages.length === 1);
-		const id = outcome.details.id;
+		const id = outcome.details.agentId;
 		const firstList = await coordinator.list(parent, "children");
 		assert.equal(firstList[0]?.kind, "child");
-		if (firstList[0]?.kind === "child") assert.equal(firstList[0].status, "ready");
+		if (firstList[0]?.kind === "child") {
+			assert.equal(firstList[0].status, "ready");
+			assert.equal(firstList[0].agentId, id);
+			assert.equal(firstList[0].parentAgentId, parent.agentId);
+		}
 
 		await coordinator.sendMessage(parent, id, "Inspect one more thing.");
 		await waitUntil(() => messages.length === 2);
@@ -325,12 +430,135 @@ test("interrupt stops only the live activation and preserves its resumable sessi
 			{ ...DEFAULT_SETTINGS, defaultBackground: true },
 		);
 		assert.equal(outcome.kind, "continuable");
-		await coordinator.interrupt(parent, outcome.details.id);
+		await coordinator.interrupt(parent, outcome.details.agentId);
 		await waitUntil(() => messages.length === 1);
 		assert.match(messages[0].content, /was interrupted/);
 		const entries = await coordinator.list(parent, "children");
 		assert.equal(entries[0]?.kind, "child");
 		if (entries[0]?.kind === "child") assert.equal(entries[0].status, "ready");
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("agent ids are a durable namespace distinct from pi session ids", async () => {
+	const { coordinator, parent, messages } = await fixture();
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "id semantics scout",
+				prompt: "Inspect it.",
+				run_in_background: true,
+			},
+			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+		);
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		const { agentId, piSessionId, sessionFile } = outcome.details;
+		assert.match(agentId, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+		assert.ok(piSessionId);
+		assert.ok(sessionFile);
+		assert.notEqual(agentId, piSessionId);
+		assert.notEqual(agentId, parent.agentId);
+		// The persisted parent session gets a durable agent id of its own,
+		// distinct from its pi session (file) id.
+		assert.notEqual(parent.agentId, parent.sessionManager.getSessionId());
+		// The child session file is flushed once its first assistant message
+		// lands; wait for the run to settle before reading it back.
+		await waitUntil(() => messages.length === 1);
+
+		// The child session records its agent id and descriptor, and the
+		// descriptor's parent chain points at the parent's durable agent id.
+		const child = SessionManager.open(
+			sessionFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		const folded = foldDescriptor(child.getEntries());
+		assert.equal(folded.kind, "valid");
+		if (folded.kind === "valid") {
+			assert.equal(folded.descriptor.agentId, agentId);
+			assert.equal(folded.descriptor.parentAgentId, parent.agentId);
+		}
+		const childAgentEntries = child
+			.getEntries()
+			.filter(
+				(entry) =>
+					entry.type === "custom" &&
+					entry.customType === AGENT_CUSTOM_TYPE &&
+					(entry.data as { agentId?: string } | undefined)?.agentId === agentId,
+			);
+		assert.equal(childAgentEntries.length, 1);
+
+		// The parent session persists the same agent id, so a forked or
+		// re-created parent session file keeps the child tree addressable.
+		const parentAgentEntries = parent.sessionManager
+			.getEntries()
+			.filter(
+				(entry) =>
+					entry.type === "custom" &&
+					entry.customType === AGENT_CUSTOM_TYPE &&
+					(entry.data as { agentId?: string } | undefined)?.agentId === parent.agentId,
+			);
+		assert.equal(parentAgentEntries.length, 1);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("resumed children keep their agent id across cold starts", async () => {
+	const { coordinator, parent, messages } = await fixture();
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "resumable scout",
+				prompt: "Inspect it.",
+				run_in_background: true,
+			},
+			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+		);
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		const agentId = outcome.details.agentId;
+		await waitUntil(() => messages.length === 1);
+
+		await coordinator.sendMessage(parent, agentId, "Inspect one more thing.");
+		await waitUntil(() => messages.length === 2);
+		const entries = await coordinator.list(parent, "children");
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind, "child");
+		if (entries[0]?.kind === "child") assert.equal(entries[0].agentId, agentId);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("fork children get a fresh agent id while chaining to the parent agent", async () => {
+	const { coordinator, parent } = await fixture();
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"fork",
+			{
+				agent: "scout",
+				description: "forked scout",
+				prompt: "Inspect it.",
+			},
+			{ ...DEFAULT_SETTINGS, defaultBackground: false },
+		);
+		assert.equal(outcome.kind, "foreground");
+		if (outcome.kind !== "foreground") return;
+		assert.notEqual(outcome.details.agentId, parent.agentId);
+		assert.match(
+			outcome.details.agentId,
+			/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		);
 	} finally {
 		await coordinator.shutdown();
 	}

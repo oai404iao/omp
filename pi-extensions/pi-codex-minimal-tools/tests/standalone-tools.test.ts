@@ -43,6 +43,7 @@ function jwt(): string {
 }
 
 test("standalone web search uses the Codex alpha/search endpoint and auth", async () => withAgentDir(async () => {
+	const turnId = "0198e2c6-7a5b-7c10-9d1e-2f3a4b5c6d7e";
 	const model = {
 		provider: "openai-codex",
 		api: "openai-codex-responses",
@@ -76,19 +77,25 @@ test("standalone web search uses the Codex alpha/search endpoint and auth", asyn
 			},
 		},
 		sessionManager: { getSessionId: () => "session-1" },
-	}, undefined, { turnId: "turn-1" });
+	}, undefined, { turnId });
 
 	assert.equal(requestUrl, "https://chatgpt.example/backend-api/codex/alpha/search");
 	assert.equal(requestHeaders?.get("chatgpt-account-id"), "acct_test");
 	assert.equal(requestHeaders?.get("authorization"), `Bearer ${jwt()}`);
-	assert.equal(requestBody.id, "session-1");
+	assert.match(
+		requestBody.id,
+		/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+	);
 	assert.equal(requestBody.model, "gpt-5.6-sol");
-	assert.deepEqual(JSON.parse(requestHeaders?.get("x-codex-turn-metadata") ?? ""), {
-		session_id: "session-1",
-		thread_id: "session-1",
-		turn_id: "turn-1",
-		model: "gpt-5.6-sol",
-	});
+	assert.deepEqual(
+		JSON.parse(requestHeaders?.get("x-codex-turn-metadata") ?? ""),
+		{
+			session_id: requestBody.id,
+			thread_id: requestBody.id,
+			turn_id: turnId,
+			model: "gpt-5.6-sol",
+		},
+	);
 	assert.equal("input" in requestBody, false);
 	assert.deepEqual(requestBody.commands.search_query, [{
 		q: "latest docs",
@@ -221,6 +228,7 @@ test("standalone image generation uses the active provider Images endpoint and s
 }));
 
 test("standalone web search sends the recent visible conversation tail", async () => withAgentDir(async () => {
+	const turnId = "0198e2c6-7a5b-7c11-9d1e-2f3a4b5c6d7e";
 	const model = {
 		provider: "openai-codex",
 		api: "openai-codex-responses",
@@ -302,7 +310,7 @@ test("standalone web search sends the recent visible conversation tail", async (
 			getSessionId: () => "session-1",
 			getBranch: () => branch,
 		},
-	}, undefined, { turnId: "turn-current" });
+	}, undefined, { turnId });
 
 	assert.deepEqual(requestBody.input, [
 		{
@@ -320,7 +328,7 @@ test("standalone web search sends the recent visible conversation tail", async (
 			role: "user",
 			content: [{ type: "input_text", text: "current user" }],
 			internal_chat_message_metadata_passthrough: {
-				turn_id: "turn-current",
+				turn_id: turnId,
 			},
 		},
 	]);

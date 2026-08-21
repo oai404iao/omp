@@ -9,6 +9,8 @@ export interface SessionView {
 	getSessionDir(): string;
 	getSessionFile(): string | undefined;
 	getSessionId(): string;
+	getEntries(): SessionEntry[];
+	appendCustomEntry(customType: string, data?: unknown): string;
 }
 
 export interface ProviderParent {
