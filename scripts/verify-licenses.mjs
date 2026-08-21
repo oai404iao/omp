@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { readManifest, root } from "./workspaces.mjs";
+import { readManifest, root, workspaces } from "./workspaces.mjs";
 
 const expectedHashes = new Map([
   ["LICENSES/Apache-2.0.txt", "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"],
@@ -150,9 +150,14 @@ const codexReservedTools = text(`${codexDirectory}/src/codex-reserved-tools.ts`)
 const codexReservedProvenancePath =
   `${codexDirectory}/provenance/openai-codex-eb9dceba-reserved-tools.json`;
 const codexReservedProvenance = JSON.parse(text(codexReservedProvenancePath));
+const codexWorkspace = workspaces.find(({ name }) => name === "@oai404iao/pi-codex-minimal-tools");
 check(
-  codexManifest.private === true,
-  "pi-codex-minimal-tools must remain private pending separate compatibility and release approval",
+  codexManifest.private !== true,
+  "pi-codex-minimal-tools must be non-private for its approved npm bootstrap",
+);
+check(
+  codexWorkspace?.releaseStatus === "bootstrap",
+  "pi-codex-minimal-tools must remain on the local-only bootstrap release track",
 );
 check(codexManifest.license === "SEE LICENSE IN LICENSE", "pi-codex-minimal-tools must use its composite LICENSE");
 check(codexLicense.includes("Copyright (c) 2026 oai404iao"), "pi-codex-minimal-tools LICENSE lacks project copyright");
@@ -181,8 +186,9 @@ check(
 );
 check(
   codexNotice.includes("Modified namespace-tool compatibility serialization")
-    && /must not be published until a separate public\s+compatibility and release approval/.test(codexNotice),
-  "pi-codex-minimal-tools notice must retain its source map and private-release guard",
+    && codexNotice.includes("internal Responses Lite path")
+    && /one-time manual npm\s+bootstrap/.test(codexNotice),
+  "pi-codex-minimal-tools notice must retain its source map, Lite warning, and bootstrap guard",
 );
 check(
   codexReservedProvenance.upstream?.repository === codexRepository

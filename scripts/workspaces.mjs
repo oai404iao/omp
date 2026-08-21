@@ -14,7 +14,7 @@ export const workspaces = [
   {
     name: "@oai404iao/pi-codex-minimal-tools",
     directory: "pi-extensions/pi-codex-minimal-tools",
-    releaseStatus: "blocked",
+    releaseStatus: "bootstrap",
   },
   {
     name: "@oai404iao/pi-keep-defaults",

@@ -134,13 +134,15 @@ All future releases require a maintainer to manually dispatch and approve the
 guarded workflow. Their trusted-publisher configuration and
 `NPM_PUBLISH_ENABLED` environment variable are release prerequisites.
 
-`@oai404iao/pi-codex-minimal-tools` and `@oai404iao/pi-tree-continue` are
-private. The Codex package's Apache source map is recorded in
-`pi-extensions/pi-codex-minimal-tools/provenance/`, but its internal
-Responses Lite compatibility and release track still require a dedicated
-reviewed approval. Promote either package only after its documented source,
-compatibility, and release-track gates are complete. A prerelease package
-must also use prerelease SemVer so the workflow selects the `next` dist-tag.
+`@oai404iao/pi-codex-minimal-tools@1.3.0` is a non-private `bootstrap`
+candidate. Its Apache source map is recorded in
+`pi-extensions/pi-codex-minimal-tools/provenance/`; its internal Responses
+Lite compatibility boundary is documented in the package README and notice.
+It remains excluded from guarded GitHub Actions release artifacts until its
+one-time manual npm bootstrap and trusted-publisher setup are complete, then a
+dedicated reviewed change may move it from `bootstrap` to `publishable`.
+`@oai404iao/pi-tree-continue` remains private. A prerelease package must also
+use prerelease SemVer so the workflow selects the `next` dist-tag.
 
 Public and supported-package peer ranges currently require Pi 0.84.2 or
 newer. Update the development baseline, peer ranges, lockfile, compatibility

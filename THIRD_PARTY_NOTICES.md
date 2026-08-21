@@ -36,10 +36,12 @@ preserved in:
 
 The package-level source-attribution record replaces its earlier
 captured-metadata classification at the engineering level; it is not legal
-advice. `pi-codex-minimal-tools` remains private and excluded from npm
-publication until a separate public compatibility and release approval is
-complete. Its Responses Lite path is an internal Codex compatibility layer,
-not an OpenAI-supported public API contract.
+advice. `pi-codex-minimal-tools@1.3.0` is staged only for a one-time manual
+npm bootstrap from a reviewed public `main` commit. It remains excluded from
+guarded GitHub Actions release artifacts until trusted publishing is configured
+and a dedicated activation moves it to the publishable track. Its Responses
+Lite path is an internal Codex compatibility layer, not an OpenAI-supported
+public API contract.
 
 ## oh-my-pi
 

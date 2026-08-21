@@ -30,9 +30,10 @@ test("subagent enters guarded artifacts after bootstrap activation", () => {
   assert(guardedNames.includes("@oai404iao/pi-subagent"));
 });
 
-test("Codex minimal tools stays blocked while its separate public gate is pending", () => {
+test("Codex minimal tools enters local-only bootstrap after its public gate approval", () => {
   const codex = workspaces.find(({ name }) => name === "@oai404iao/pi-codex-minimal-tools");
-  assert.equal(codex?.releaseStatus, "blocked");
+  assert.equal(codex?.releaseStatus, "bootstrap");
   assert(!publishableWorkspaces.some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
   assert(!artifactWorkspaces().some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
+  assert(artifactWorkspaces(true).some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
 });

@@ -99,8 +99,11 @@ published from `0c53bdb9e13b006a23a8da05a01c06f106fa2c10`, with matching tags
 and GitHub Releases. Guarded publishing subsequently released `0.1.3` from
 `16dccb8953b717670c34fe978c79c07d592ca7e2`. Their trusted publishers are
 configured and guarded manual releases are enabled. Only
-`pi-codex-minimal-tools` and `pi-tree-continue` remain private and require
-their separate documented gates.
+`pi-tree-continue` remains private. `pi-codex-minimal-tools@1.3.0` is a
+dedicated non-private bootstrap candidate: it requires an interactive
+one-time publish from reviewed public `main`, trusted-publisher configuration,
+and a separate `bootstrap` → `publishable` activation change before it can
+enter guarded release artifacts.
 
 ## Phase 4 — enable releases
 
