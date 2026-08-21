@@ -29,6 +29,11 @@ The current stable version of both packages is `0.1.3`, published from
 `aae803f4b25603991d9375c602cf35da1df922b0`; its npm `gitHead`, package tag,
 and GitHub Release match that commit.
 
+`@oai404iao/pi-subagent@0.2.0` is public, published from
+`ef42984c0e40ef1f26ead4b4c7d149b21280e66b`; its npm `gitHead` and `latest`
+dist-tag match that commit. Its trusted publisher is configured for guarded
+tag/Release reconciliation and future OIDC releases.
+
 ## One-time GitHub preparation
 
 1. Use the public `oai404iao/omp` repository, which was created without an
@@ -122,15 +127,12 @@ Release eligibility is explicit in two places:
 
 CI rejects mismatches. The guarded release scripts currently allow
 `@oai404iao/pi-external-thinking`, `@oai404iao/pi-keep-defaults`,
-and `@oai404iao/pi-telegram-notify`.
-`pi-external-thinking` is public at `0.1.0`; the latter two are public at
-`0.1.3`. `pi-subagent` requires its one-time `0.2.0` npm bootstrap and
-trusted-publisher setup before a dedicated reviewed change marks it
-`publishable`; only then can the guarded OIDC workflow reconcile its initial
-tag/Release and publish later versions. All future releases require a
-maintainer to manually dispatch and approve the guarded workflow. Their
-trusted-publisher configuration and `NPM_PUBLISH_ENABLED` environment variable
-are release prerequisites.
+`@oai404iao/pi-subagent`, and `@oai404iao/pi-telegram-notify`.
+`pi-external-thinking` is public at `0.1.0`; `pi-subagent` is public at
+`0.2.0`; `pi-keep-defaults` and `pi-telegram-notify` are public at `0.1.3`.
+All future releases require a maintainer to manually dispatch and approve the
+guarded workflow. Their trusted-publisher configuration and
+`NPM_PUBLISH_ENABLED` environment variable are release prerequisites.
 
 `@oai404iao/pi-codex-minimal-tools` and `@oai404iao/pi-tree-continue` are
 private.
