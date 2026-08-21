@@ -24,7 +24,7 @@ export const workspaces = [
   {
     name: "@oai404iao/pi-subagent",
     directory: "pi-extensions/pi-subagent",
-    releaseStatus: "blocked",
+    releaseStatus: "bootstrap",
   },
   {
     name: "@oai404iao/pi-telegram-notify",
@@ -45,3 +45,10 @@ export function readManifest(directory) {
 export const publishableWorkspaces = workspaces.filter(
   ({ releaseStatus }) => releaseStatus === "publishable",
 );
+
+export function artifactWorkspaces(includeBootstrap = false) {
+  return workspaces.filter(
+    ({ releaseStatus }) =>
+      releaseStatus === "publishable" || (includeBootstrap && releaseStatus === "bootstrap"),
+  );
+}

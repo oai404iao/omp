@@ -1,7 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { registry, root } from "./workspaces.mjs";
 
 export const npm = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -81,10 +80,13 @@ export function sha512(path) {
 }
 
 export function releaseNotes(directory, name, version, commit) {
-  const changelogPath = resolve(root, directory, "CHANGELOG.md");
-  if (!existsSync(changelogPath)) return `${name} ${version}\n\nSource commit: \`${commit}\``;
+  const changelog = spawnSync("git", ["show", `${commit}:${directory}/CHANGELOG.md`], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (changelog.status !== 0) return `${name} ${version}\n\nSource commit: \`${commit}\``;
 
-  const lines = readFileSync(changelogPath, "utf8").split(/\r?\n/);
+  const lines = changelog.stdout.split(/\r?\n/);
   const heading = new RegExp(`^##\\s+${version.replaceAll(".", "\\.")}(?:\\s|$)`);
   const start = lines.findIndex((line) => heading.test(line.trim()));
   if (start < 0) return `${name} ${version}\n\nSource commit: \`${commit}\``;

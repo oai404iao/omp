@@ -7,8 +7,9 @@ to Pi's extension and SDK APIs.
 
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 
-> npm identity: `@oai404iao/pi-subagent`. This package remains private pending
-> final public-release approval, so install it from a local checkout.
+> npm identity: `@oai404iao/pi-subagent`. Once the selected version is
+> available on npm, install it from npm; use a local checkout before its
+> bootstrap or when testing unreleased source.
 
 ## Features
 
@@ -35,6 +36,14 @@ Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 Children run through Pi's SDK in the same Node.js process, but each owns a separate `AgentSession`, context window, session file, tool selection, and extension runtime.
 
 ## Install
+
+When the selected version is available on npm:
+
+```bash
+pi install npm:@oai404iao/pi-subagent
+```
+
+Before its npm bootstrap, or for an unreleased local checkout:
 
 ```bash
 pi install /absolute/path/to/pi-extensions/pi-subagent
@@ -343,6 +352,6 @@ The test suite includes provider-boundary, descriptor, configuration, discovery,
 MIT © 2026 oai404iao. See [LICENSE](LICENSE) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-This package remains private pending final public-release approval. Managed
-global-preset synchronization is opt-in through `syncBundledAgents: true`; the
-default reads bundled definitions without writing user files.
+Managed global-preset synchronization is opt-in through
+`syncBundledAgents: true`; the default reads bundled definitions without
+writing user files.

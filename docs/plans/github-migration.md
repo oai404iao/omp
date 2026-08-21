@@ -84,18 +84,21 @@ For all six npm workspaces:
 6. Record the bootstrap commit in npm `gitHead` and create matching tags.
 7. Bind trusted publishing to `publish.yml` and `npm-publish`.
 
-`@oai404iao/pi-external-thinking` now has an audited manifest, tarball
-allowlist, and behavior tests. It remains private until compatibility and
-public-release review is complete. Its upstream attribution and license are
-recorded.
+`@oai404iao/pi-external-thinking` has an audited manifest, tarball allowlist,
+and behavior tests. Its public `0.1.0` bootstrap, package tag, and GitHub
+Release match npm `gitHead`
+`aae803f4b25603991d9375c602cf35da1df922b0`. Its upstream attribution and
+license are recorded. `@oai404iao/pi-subagent` has completed its dedicated
+public-release review and is queued for its separate `0.2.0` bootstrap.
 
 The initial `0.1.2` bootstrap releases for
 `@oai404iao/pi-keep-defaults` and `@oai404iao/pi-telegram-notify` were
 published from `0c53bdb9e13b006a23a8da05a01c06f106fa2c10`, with matching tags
 and GitHub Releases. Guarded publishing subsequently released `0.1.3` from
 `16dccb8953b717670c34fe978c79c07d592ca7e2`. Their trusted publishers are
-configured and guarded manual releases are enabled. The other workspaces set
-`private: true` and require a separate promotion review.
+configured and guarded manual releases are enabled. Only
+`pi-codex-minimal-tools` and `pi-tree-continue` remain private and require
+their separate documented gates.
 
 ## Phase 4 — enable releases
 
