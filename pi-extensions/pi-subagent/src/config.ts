@@ -7,7 +7,6 @@ export const CONFIG_FILE_NAME = "subagent.json";
 
 export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	agentScope: "user",
-	syncBundledAgents: false,
 	maxDepth: 3,
 	enableRunInBackground: true,
 	defaultBackground: true,
@@ -119,13 +118,15 @@ function applyConfig(
 	if (config.syncBundledAgents !== undefined && !options.allowSyncBundledAgents) {
 		throw new Error(`${source}: syncBundledAgents may be configured only in the user-level subagent.json`);
 	}
+	if (config.syncBundledAgents !== undefined) {
+		// Compatibility with 0.2/0.3 configuration files. Bundled templates are
+		// now always initialized on first install/version change, and this
+		// retired switch no longer controls runtime discovery or writes.
+		parseBoolean(config.syncBundledAgents, "syncBundledAgents", source);
+	}
 	return {
 		agentScope:
 			config.agentScope === undefined ? settings.agentScope : parseAgentScope(config.agentScope, source),
-		syncBundledAgents:
-			config.syncBundledAgents === undefined
-				? settings.syncBundledAgents
-				: parseBoolean(config.syncBundledAgents, "syncBundledAgents", source),
 		maxDepth:
 			config.maxDepth === undefined
 				? settings.maxDepth

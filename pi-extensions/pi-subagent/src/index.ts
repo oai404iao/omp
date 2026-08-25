@@ -308,9 +308,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			const sections = [
 				`Mode: ${schedulingMode}`,
 				`OpenAI identity inline: ${sessionSettings.openAIIdentity ? "enabled" : "disabled"}`,
-				sessionSettings.syncBundledAgents
-					? `Bundled presets: synchronized to ${agentSync?.userAgentsDir ?? coordinator.getUserAgentsDir()}`
-					: "Bundled presets: package defaults (no filesystem sync)",
+				agentSync?.diagnostics.length
+					? "Bundled templates: initialization skipped (see diagnostics)"
+					: `Bundled templates: initialization only (${agentSync?.packageVersion ?? "not initialized"})`,
 				`User agent dir: ${agentSync?.userAgentsDir ?? coordinator.getUserAgentsDir()}`,
 				`Agents:\n${formatAgentCatalog(discovery.agents)}`,
 				`Children:\n${coordinator.formatCatalog(entries, "descendants")}`,
@@ -325,9 +325,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
 		sessionSettings = loaded.settings;
-		agentSync = sessionSettings.syncBundledAgents
-			? coordinator.synchronizeBundledAgents()
-			: undefined;
+		agentSync = coordinator.synchronizeBundledAgents();
 		sessionDiscovery = coordinator.discoverAvailableAgents(
 			ctx.cwd,
 			sessionSettings,

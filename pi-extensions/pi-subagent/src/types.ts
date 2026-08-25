@@ -2,7 +2,10 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 
 export type AgentScope = "user" | "project" | "both";
-export type AgentSource = "bundled" | "user" | "project";
+/** Sources that runtime discovery is allowed to activate. */
+export type AgentSource = "user" | "project";
+/** `bundled` is retained only for reading descriptors written by older releases. */
+export type AgentSnapshotSource = AgentSource | "bundled";
 export type ReportDelivery = "wakeup" | "quiet";
 export type SubagentMode = "one-shot" | "continuable";
 export type SubagentProviderName = "spawn" | "fork";
@@ -10,7 +13,6 @@ export type SubagentStopReason = "completed" | "aborted" | "error" | "max-tokens
 
 export interface SubagentSettings {
 	agentScope: AgentScope;
-	syncBundledAgents: boolean;
 	maxDepth: number;
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;
@@ -38,7 +40,7 @@ export interface AgentSnapshot {
 	model?: string;
 	thinking?: ThinkingLevel;
 	systemPrompt: string;
-	source: AgentSource;
+	source: AgentSnapshotSource;
 }
 
 export interface ResolvedModel {
@@ -48,7 +50,6 @@ export interface ResolvedModel {
 
 export interface SubagentRuntimeSnapshot {
 	agentScope: AgentScope;
-	syncBundledAgents: boolean;
 	maxDepth: number;
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;

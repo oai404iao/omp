@@ -20,11 +20,7 @@ import {
 	ModelRuntime,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import {
-	syncBundledAgents,
-	type AgentSyncResult,
-	unmodifiedManagedAgentNames,
-} from "./agent-sync.ts";
+import { syncBundledAgents, type AgentSyncResult } from "./agent-sync.ts";
 import {
 	discoverAgents,
 	formatAgentCatalog,
@@ -246,7 +242,6 @@ function stopReasonHeadline(reason: SubagentStopReason): string {
 function makeRuntimeSettings(descriptor: SubagentDescriptor): SubagentSettings {
 	return {
 		agentScope: descriptor.runtime.agentScope,
-		syncBundledAgents: descriptor.runtime.syncBundledAgents,
 		maxDepth: descriptor.runtime.maxDepth,
 		enableRunInBackground: descriptor.runtime.enableRunInBackground,
 		defaultBackground: descriptor.runtime.defaultBackground,
@@ -319,21 +314,22 @@ export class SubagentCoordinator {
 		settings: SubagentSettings,
 		projectTrusted: boolean,
 	): AgentDiscoveryResult {
-		if (settings.syncBundledAgents && !this.agentSyncResult) {
+		if (!this.agentSyncResult) {
 			this.synchronizeBundledAgents();
 		}
-		const excludeUserAgentNames = settings.syncBundledAgents
-			? undefined
-			: unmodifiedManagedAgentNames(this.agentDir);
-		return discoverAgents({
+		const discovery = discoverAgents({
 			cwd,
 			scope: settings.agentScope,
 			projectTrusted,
-			bundledDir: this.bundledAgentsDir,
 			agentDir: this.agentDir,
-			includeBundled: !settings.syncBundledAgents && settings.agentScope !== "project",
-			excludeUserAgentNames,
 		});
+		return {
+			...discovery,
+			diagnostics: [
+				...(this.agentSyncResult?.diagnostics ?? []),
+				...discovery.diagnostics,
+			],
+		};
 	}
 
 	async parentFromContext(ctx: ExtensionContext): Promise<ParentRef> {
@@ -452,7 +448,6 @@ export class SubagentCoordinator {
 			thinkingLevel,
 			runtime: {
 				agentScope: settings.agentScope,
-				syncBundledAgents: settings.syncBundledAgents,
 				maxDepth: settings.maxDepth,
 				enableRunInBackground: settings.enableRunInBackground,
 				defaultBackground: settings.defaultBackground,

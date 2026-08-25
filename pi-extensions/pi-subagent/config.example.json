@@ -1,7 +1,6 @@
 {
   "$schema": "./config.schema.json",
   "agentScope": "user",
-  "syncBundledAgents": false,
   "maxDepth": 3,
   "enableRunInBackground": true,
   "defaultBackground": true,

@@ -23,13 +23,12 @@ function descriptor(label = "inspect auth"): SubagentDescriptor {
 			tools: ["read", "grep"],
 			thinking: "low",
 			systemPrompt: "Inspect.",
-			source: "bundled",
+			source: "user",
 		},
 		model: { provider: "openai", id: "gpt-5" },
 		thinkingLevel: "low",
 		runtime: {
 			agentScope: "user",
-			syncBundledAgents: false,
 			maxDepth: 3,
 			enableRunInBackground: true,
 			defaultBackground: true,
@@ -68,13 +67,21 @@ test("legacy descriptors default to background-enabled behavior", () => {
 	assert.equal(parsed.runtime.enableRunInBackground, true);
 });
 
-test("legacy descriptors preserve synchronized bundled-agent behavior", () => {
+test("legacy syncBundledAgents snapshots are validated then discarded", () => {
 	const input = descriptor() as SubagentDescriptor & {
-		runtime: Omit<SubagentDescriptor["runtime"], "syncBundledAgents">;
+		runtime: SubagentDescriptor["runtime"] & { syncBundledAgents: boolean };
 	};
-	delete (input.runtime as Partial<SubagentDescriptor["runtime"]>).syncBundledAgents;
+	input.runtime.syncBundledAgents = false;
 	const parsed = parseDescriptor(input);
-	assert.equal(parsed.runtime.syncBundledAgents, true);
+	assert.equal("syncBundledAgents" in parsed.runtime, false);
+});
+
+test("legacy bundled agent snapshots remain readable", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		agent: SubagentDescriptor["agent"] & { source: "bundled" };
+	};
+	input.agent.source = "bundled";
+	assert.equal(parseDescriptor(input).agent.source, "bundled");
 });
 
 test("descriptor folding is last-wins for fork seeds", () => {

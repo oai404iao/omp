@@ -353,7 +353,7 @@ test("OpenAI identity config off does not inject the inline lifecycle", async ()
 	}
 });
 
-test("synchronized runtime settings materialize presets before discovery", async () => {
+test("delegation initializes user templates before runtime discovery", async () => {
 	const { coordinator, parent, agentDir } = await fixture();
 	try {
 		assert.equal(existsSync(join(agentDir, "agents")), false);
@@ -366,7 +366,7 @@ test("synchronized runtime settings materialize presets before discovery", async
 				prompt: "Inspect it.",
 				run_in_background: false,
 			},
-			{ ...DEFAULT_SETTINGS, syncBundledAgents: true, defaultBackground: false },
+			{ ...DEFAULT_SETTINGS, defaultBackground: false },
 		);
 		assert.equal(outcome.kind, "foreground");
 		assert.equal(existsSync(join(agentDir, "agents", "scout.md")), true);

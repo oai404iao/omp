@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, test } from "node:test";
@@ -15,6 +15,7 @@ import {
 	ListAgentsParameters,
 	SendMessageParameters,
 } from "../src/schemas.ts";
+import { syncBundledAgents } from "../src/agent-sync.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pi-subagent-smoke-"));
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -30,6 +31,36 @@ function agentEnum(tool: { parameters: unknown } | undefined): unknown {
 	const properties = (tool?.parameters as { properties?: Record<string, unknown> } | undefined)
 		?.properties;
 	return (properties?.agent as { enum?: unknown } | undefined)?.enum;
+}
+
+async function bindExtensionSession(cwd: string, agentDir: string) {
+	const settingsManager = SettingsManager.inMemory({});
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir,
+		settingsManager,
+		noExtensions: true,
+		additionalExtensionPaths: [join(resolve(import.meta.dirname, ".."), "src", "index.ts")],
+		noSkills: true,
+		noPromptTemplates: true,
+		noThemes: true,
+		noContextFiles: true,
+	});
+	await loader.reload();
+	assert.deepEqual(loader.getExtensions().errors, []);
+	const modelRuntime = await ModelRuntime.create({
+		authPath: join(agentDir, "auth.json"),
+		modelsPath: null,
+	});
+	const { session } = await createAgentSession({
+		cwd,
+		resourceLoader: loader,
+		modelRuntime,
+		settingsManager,
+		sessionManager: SessionManager.inMemory(cwd),
+	});
+	await session.bindExtensions({ mode: "print" });
+	return session;
 }
 
 test("extension loads and registers its model-facing surface", async () => {
@@ -76,50 +107,12 @@ test("extension loads and registers its model-facing surface", async () => {
 			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
 			assert.deepEqual(agentEnum(tool), ["planner", "reviewer", "scout", "worker"]);
 		}
-		assert.equal(existsSync(join(agentDir, "agents")), false);
-		assert.equal(existsSync(join(agentDir, ".pi-subagent")), false);
-	} finally {
-		session.dispose();
-	}
-});
-
-test("explicit syncBundledAgents opt-in materializes managed presets", async () => {
-	const cwd = resolve(import.meta.dirname, "..");
-	const agentDir = join(root, "agent");
-	mkdirSync(agentDir, { recursive: true });
-	writeFileSync(join(agentDir, "subagent.json"), JSON.stringify({ syncBundledAgents: true }));
-	const settingsManager = SettingsManager.inMemory({});
-	const loader = new DefaultResourceLoader({
-		cwd,
-		agentDir,
-		settingsManager,
-		noExtensions: true,
-		additionalExtensionPaths: [join(cwd, "src", "index.ts")],
-		noSkills: true,
-		noPromptTemplates: true,
-		noThemes: true,
-		noContextFiles: true,
-	});
-	await loader.reload();
-	assert.deepEqual(loader.getExtensions().errors, []);
-
-	const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null });
-	const { session } = await createAgentSession({
-		cwd,
-		resourceLoader: loader,
-		modelRuntime,
-		settingsManager,
-		sessionManager: SessionManager.inMemory(cwd),
-	});
-	try {
-		await session.bindExtensions({ mode: "print" });
-		assert.equal(existsSync(join(agentDir, "agents", "planner.md")), true);
+		for (const name of ["planner", "reviewer", "scout", "worker"]) {
+			assert.equal(existsSync(join(agentDir, "agents", `${name}.md`)), true);
+		}
 		assert.equal(existsSync(join(agentDir, ".pi-subagent", "agents-manifest.json")), true);
 	} finally {
 		session.dispose();
-		rmSync(join(agentDir, "agents"), { recursive: true, force: true });
-		rmSync(join(agentDir, ".pi-subagent"), { recursive: true, force: true });
-		rmSync(join(agentDir, "subagent.json"), { force: true });
 	}
 });
 
@@ -322,6 +315,60 @@ test("trusted foreground-only configuration hides background controls", async ()
 					),
 				/foreground-only mode/,
 			);
+		}
+	} finally {
+		session.dispose();
+	}
+});
+
+test("a corrupt initialization manifest does not block user roles", async () => {
+	const cwd = resolve(import.meta.dirname, "..");
+	const agentDir = join(root, "agent");
+	rmSync(agentDir, { recursive: true, force: true });
+	syncBundledAgents({
+		bundledDir: join(cwd, "agents"),
+		agentDir,
+		packageRoot: cwd,
+	});
+	const manifestPath = join(agentDir, ".pi-subagent", "agents-manifest.json");
+	const originalManifest = readFileSync(manifestPath);
+	writeFileSync(manifestPath, "{broken");
+
+	const session = await bindExtensionSession(cwd, agentDir);
+	try {
+		const active = new Set(session.getActiveToolNames());
+		assert.equal(active.has("subagent"), true);
+		assert.deepEqual(
+			agentEnum(session.getAllTools().find((tool) => tool.name === "subagent")),
+			["planner", "reviewer", "scout", "worker"],
+		);
+	} finally {
+		session.dispose();
+		writeFileSync(manifestPath, originalManifest);
+	}
+});
+
+test("same-version deletion of every user role disables delegation", async () => {
+	const cwd = resolve(import.meta.dirname, "..");
+	const agentDir = join(root, "agent");
+	rmSync(agentDir, { recursive: true, force: true });
+	syncBundledAgents({
+		bundledDir: join(cwd, "agents"),
+		agentDir,
+		packageRoot: cwd,
+	});
+	rmSync(join(agentDir, "agents"), { recursive: true, force: true });
+
+	const session = await bindExtensionSession(cwd, agentDir);
+	try {
+		const active = new Set(session.getActiveToolNames());
+		for (const toolName of ["subagent", "subagent_fork"]) {
+			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
+			assert.deepEqual(agentEnum(tool), []);
+			assert.equal(active.has(toolName), false);
+		}
+		for (const name of ["planner", "reviewer", "scout", "worker"]) {
+			assert.equal(existsSync(join(agentDir, "agents", `${name}.md`)), false);
 		}
 	} finally {
 		session.dispose();

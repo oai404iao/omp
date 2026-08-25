@@ -47,7 +47,7 @@ test("global and trusted project settings merge", () => {
 	assert.equal(loaded.settings.inheritExtensions, true);
 	assert.equal(loaded.settings.openAIIdentity, true);
 	assert.equal(loaded.settings.enableRunInBackground, false);
-	assert.equal(loaded.settings.syncBundledAgents, true);
+	assert.equal("syncBundledAgents" in loaded.settings, false);
 	assert.equal(loaded.sources.length, 2);
 });
 
@@ -61,7 +61,7 @@ test("untrusted project configuration is not read", () => {
 
 	const loaded = loadSettings({ cwd: project, projectTrusted: false, agentDir });
 	assert.equal(loaded.settings.maxDepth, 3);
-	assert.equal(loaded.settings.syncBundledAgents, false);
+	assert.equal("syncBundledAgents" in loaded.settings, false);
 	assert.equal(loaded.settings.openAIIdentity, false);
 	assert.deepEqual(loaded.sources, []);
 });
@@ -77,10 +77,14 @@ test("invalid settings fail loud", () => {
 	);
 });
 
-test("syncBundledAgents must be a boolean", () => {
+test("the retired user-level syncBundledAgents setting is validated then ignored", () => {
 	const root = tempRoot();
 	const agentDir = join(root, "agent");
 	mkdirSync(agentDir, { recursive: true });
+	writeFileSync(join(agentDir, "subagent.json"), JSON.stringify({ syncBundledAgents: false }));
+	const loaded = loadSettings({ cwd: root, projectTrusted: false, agentDir });
+	assert.equal("syncBundledAgents" in loaded.settings, false);
+
 	writeFileSync(join(agentDir, "subagent.json"), JSON.stringify({ syncBundledAgents: "yes" }));
 	assert.throws(
 		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
@@ -88,7 +92,7 @@ test("syncBundledAgents must be a boolean", () => {
 	);
 });
 
-test("trusted project configuration cannot enable bundled-agent synchronization", () => {
+test("the retired syncBundledAgents compatibility key remains user-level only", () => {
 	const root = tempRoot();
 	const agentDir = join(root, "agent");
 	const project = join(root, "repo");

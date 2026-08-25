@@ -3,7 +3,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type {
 	AgentScope,
 	AgentSnapshot,
-	AgentSource,
+	AgentSnapshotSource,
 	ReportDelivery,
 	SubagentDescriptor,
 	SubagentMode,
@@ -14,7 +14,7 @@ export const DESCRIPTOR_CUSTOM_TYPE = "pi-subagent/descriptor";
 export const DESCRIPTOR_VERSION = 2;
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-const AGENT_SOURCES = new Set<AgentSource>(["bundled", "user", "project"]);
+const AGENT_SOURCES = new Set<AgentSnapshotSource>(["bundled", "user", "project"]);
 const MODES = new Set<SubagentMode>(["one-shot", "continuable"]);
 const PROVIDERS = new Set<SubagentProviderName>(["spawn", "fork"]);
 const REPORT_DELIVERIES = new Set<ReportDelivery>(["wakeup", "quiet"]);
@@ -97,7 +97,7 @@ function stringArray(value: unknown, field: string): string[] | undefined {
 
 function parseAgent(value: unknown): AgentSnapshot {
 	const input = record(value, "agent");
-	const source = string(input.source, "agent.source") as AgentSource;
+	const source = string(input.source, "agent.source") as AgentSnapshotSource;
 	if (!AGENT_SOURCES.has(source)) throw new Error(`agent.source is unsupported: ${source}`);
 	const thinking = optionalString(input.thinking, "agent.thinking") as ThinkingLevel | undefined;
 	if (thinking && !THINKING_LEVELS.has(thinking)) throw new Error(`agent.thinking is unsupported: ${thinking}`);
@@ -136,6 +136,11 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 	if (!REPORT_DELIVERIES.has(reportDelivery)) {
 		throw new Error(`unsupported runtime.reportDelivery: ${reportDelivery}`);
 	}
+	if (runtime.syncBundledAgents !== undefined) {
+		// Validate, then discard the retired 0.2/0.3 runtime switch. Keeping this
+		// read compatibility allows persisted children to cold-resume.
+		boolean(runtime.syncBundledAgents, "runtime.syncBundledAgents");
+	}
 
 	const createdAt = string(input.createdAt, "createdAt");
 	if (Number.isNaN(Date.parse(createdAt))) throw new Error("createdAt must be an ISO date string");
@@ -162,10 +167,6 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 		thinkingLevel,
 		runtime: {
 			agentScope,
-			syncBundledAgents:
-				runtime.syncBundledAgents === undefined
-					? true
-					: boolean(runtime.syncBundledAgents, "runtime.syncBundledAgents"),
 			maxDepth: safeNatural(runtime.maxDepth, "runtime.maxDepth"),
 			enableRunInBackground:
 				runtime.enableRunInBackground === undefined
