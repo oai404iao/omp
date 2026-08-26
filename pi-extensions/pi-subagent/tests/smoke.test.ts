@@ -11,6 +11,7 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+	FollowupTaskParameters,
 	InterruptParameters,
 	ListAgentsParameters,
 	SendMessageParameters,
@@ -103,6 +104,12 @@ test("extension loads and registers its model-facing surface", async () => {
 			assert.equal(names.has(expected), true, `${expected} should be registered`);
 			assert.equal(active.has(expected), true, `${expected} should be active`);
 		}
+		assert.equal(names.has("followup_task"), true);
+		assert.equal(
+			active.has("followup_task"),
+			false,
+			"legacy protocol should leave followup_task inactive",
+		);
 		for (const toolName of ["subagent", "subagent_fork"]) {
 			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
 			assert.deepEqual(agentEnum(tool), ["planner", "reviewer", "scout", "worker"]);
@@ -185,6 +192,7 @@ test("foreground-only empty catalog preserves SDK tool overrides", async () => {
 		["subagent", parameters],
 		["subagent_fork", parameters],
 		["send_message", SendMessageParameters],
+		["followup_task", FollowupTaskParameters],
 		["interrupt_agent", InterruptParameters],
 		["list_agents", ListAgentsParameters],
 	]);
@@ -192,6 +200,7 @@ test("foreground-only empty catalog preserves SDK tool overrides", async () => {
 		"subagent",
 		"subagent_fork",
 		"send_message",
+		"followup_task",
 		"interrupt_agent",
 		"list_agents",
 	].map((name) => ({
@@ -237,6 +246,7 @@ test("foreground-only empty catalog preserves SDK tool overrides", async () => {
 			"subagent",
 			"subagent_fork",
 			"send_message",
+			"followup_task",
 			"interrupt_agent",
 			"list_agents",
 		]) {
@@ -291,7 +301,12 @@ test("trusted foreground-only configuration hides background controls", async ()
 		const active = new Set(session.getActiveToolNames());
 		assert.equal(active.has("subagent"), true);
 		assert.equal(active.has("subagent_fork"), true);
-		for (const toolName of ["send_message", "interrupt_agent", "list_agents"]) {
+		for (const toolName of [
+			"send_message",
+			"followup_task",
+			"interrupt_agent",
+			"list_agents",
+		]) {
 			assert.equal(active.has(toolName), false);
 		}
 		for (const [toolName, args] of [
@@ -299,6 +314,7 @@ test("trusted foreground-only configuration hides background controls", async ()
 				"send_message",
 				{ subagent_id: "stale-child", message: "follow up" },
 			],
+			["followup_task", { subagent_id: "stale-child" }],
 			["interrupt_agent", { agent_id: "stale-child" }],
 			["list_agents", {}],
 		] as const) {
@@ -316,6 +332,49 @@ test("trusted foreground-only configuration hides background controls", async ()
 				/foreground-only mode/,
 			);
 		}
+	} finally {
+		session.dispose();
+	}
+});
+
+test("mailbox-v2 configuration activates followup_task", async () => {
+	const extensionRoot = resolve(import.meta.dirname, "..");
+	const cwd = join(root, "mailbox-project");
+	const agentDir = join(root, "mailbox-agent");
+	mkdirSync(join(cwd, ".pi"), { recursive: true });
+	writeFileSync(
+		join(cwd, ".pi", "subagent.json"),
+		JSON.stringify({ backgroundProtocol: "mailbox-v2" }),
+	);
+	const settingsManager = SettingsManager.inMemory({}, { projectTrusted: true });
+	const loader = new DefaultResourceLoader({
+		cwd,
+		agentDir,
+		settingsManager,
+		noExtensions: true,
+		additionalExtensionPaths: [join(extensionRoot, "src", "index.ts")],
+		noSkills: true,
+		noPromptTemplates: true,
+		noThemes: true,
+		noContextFiles: true,
+	});
+	await loader.reload();
+	assert.deepEqual(loader.getExtensions().errors, []);
+
+	const modelRuntime = await ModelRuntime.create({
+		authPath: join(agentDir, "auth.json"),
+		modelsPath: null,
+	});
+	const { session } = await createAgentSession({
+		cwd,
+		resourceLoader: loader,
+		modelRuntime,
+		settingsManager,
+		sessionManager: SessionManager.inMemory(cwd),
+	});
+	try {
+		await session.bindExtensions({ mode: "print" });
+		assert.equal(session.getActiveToolNames().includes("followup_task"), true);
 	} finally {
 		session.dispose();
 	}

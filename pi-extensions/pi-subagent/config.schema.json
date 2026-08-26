@@ -46,6 +46,12 @@
       "description": "Maximum number of continuable subagent turns that may execute concurrently within one extension runtime.",
       "default": 4
     },
+    "backgroundProtocol": {
+      "type": "string",
+      "enum": ["legacy", "mailbox-v2"],
+      "description": "Background message protocol. legacy starts or follows a turn from send_message; mailbox-v2 durably enqueues until followup_task explicitly starts one turn.",
+      "default": "legacy"
+    },
     "reportDelivery": {
       "type": "string",
       "enum": ["wakeup", "quiet"],

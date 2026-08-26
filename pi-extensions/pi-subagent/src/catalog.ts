@@ -1,5 +1,6 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { foldDescriptor } from "./descriptor.ts";
+import { foldOwnedMailbox } from "./mailbox.ts";
 import type { SessionView } from "./providers.ts";
 import type { CatalogDiagnostic, SubagentDescriptor } from "./types.ts";
 
@@ -7,6 +8,7 @@ export interface PersistedDescriptor {
 	agentId: string;
 	sessionFile: string;
 	descriptor: SubagentDescriptor;
+	pendingMessages: number;
 }
 
 export interface PersistedCatalog {
@@ -52,10 +54,30 @@ export async function readPersistedCatalog(session: SessionView): Promise<Persis
 					});
 					return;
 				}
+				let pendingMessages = 0;
+				if (folded.descriptor.runtime.backgroundProtocol === "mailbox-v2") {
+					const mailbox = foldOwnedMailbox(manager.getEntries(), {
+						parentAgentId: folded.descriptor.parentAgentId,
+						agentId: folded.descriptor.agentId,
+					});
+					if (mailbox.kind === "corrupt") {
+						diagnostics.push({
+							kind: "diagnostic",
+							piSessionId: manager.getSessionId(),
+							reason: "corrupt",
+							sessionFile: info.path,
+							...(headerParent ? { parentSessionFile: headerParent } : {}),
+							message: `corrupt subagent mailbox: ${mailbox.message}`,
+						});
+						return;
+					}
+					pendingMessages = mailbox.snapshot.pending.length;
+				}
 				descriptors.push({
 					agentId: folded.descriptor.agentId,
 					sessionFile: info.path,
 					descriptor: folded.descriptor,
+					pendingMessages,
 				});
 			} else if (folded.kind === "corrupt") {
 				const headerParent = manager.getHeader()?.parentSession;

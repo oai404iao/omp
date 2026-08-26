@@ -99,6 +99,16 @@ export const SendMessageParameters = Type.Object(
 	{ additionalProperties: false },
 );
 
+export const FollowupTaskParameters = Type.Object(
+	{
+		subagent_id: Type.String({
+			description: "Durable agent id of a direct mailbox-v2 continuable child",
+			minLength: 1,
+		}),
+	},
+	{ additionalProperties: false },
+);
+
 export const InterruptParameters = Type.Object(
 	{
 		agent_id: Type.String({

@@ -14,6 +14,7 @@ import {
 } from "./agents.ts";
 import type { AgentSyncResult } from "./agent-sync.ts";
 import {
+	FollowupTaskParameters,
 	InterruptParameters,
 	ListAgentsParameters,
 	SendMessageParameters,
@@ -79,7 +80,9 @@ function registerDelegationTool(
 			"Independent sibling calls may still execute in parallel."
 		: defaultBackground
 		? "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
-			"Background mode is continuable and returns a durable agent id; use send_message for later FIFO turns. " +
+			(settings.backgroundProtocol === "mailbox-v2"
+				? "Background mode is continuable and returns a durable agent id; use send_message to enqueue, then followup_task to start a later turn. "
+				: "Background mode is continuable and returns a durable agent id; use send_message for later FIFO turns. ") +
 			"Start independent children together in one assistant message."
 		: "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
 			"This tool waits for the result by default; set run_in_background to true to return a durable agent id.";
@@ -206,6 +209,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 	registerForkDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
 	const backgroundControlParameters = new Map<string, unknown>([
 		["send_message", SendMessageParameters],
+		["followup_task", FollowupTaskParameters],
 		["interrupt_agent", InterruptParameters],
 		["list_agents", ListAgentsParameters],
 	]);
@@ -214,23 +218,76 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		name: "send_message",
 		label: "Send Message",
 		description:
-			"Queue a message as a direct continuable child's next FIFO turn. If it is inactive, its persisted session is cold-resumed by agent id. " +
+			"Send a message to a direct continuable child. Legacy children start or join a FIFO turn; mailbox-v2 children only durably enqueue it and require followup_task to execute. " +
 			"This call returns acceptance only, never the child's answer.",
-		promptSnippet: "Send a later FIFO turn to a direct continuable subagent",
+		promptSnippet: "Send or enqueue a message for a direct continuable subagent",
 		executionMode: "parallel",
 		parameters: SendMessageParameters,
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			assertBackgroundControlsEnabled(sessionSettings, "send_message");
 			const parent = await coordinator.parentFromContext(ctx);
-			await coordinator.sendMessage(parent, params.subagent_id, params.message, signal);
+			const delivery = await coordinator.sendMessageWithOutcome(
+				parent,
+				params.subagent_id,
+				params.message,
+				signal,
+			);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `message queued as the next turn for subagent ${params.subagent_id}`,
+						text:
+							delivery.kind === "mailbox-v2"
+								? `message ${delivery.messageId} durably enqueued for subagent ${params.subagent_id}; ${delivery.pendingMessages} pending`
+								: `message queued as the next turn for subagent ${params.subagent_id}`,
 					},
 				],
-				details: { kind: "control", action: "send", agentId: params.subagent_id } satisfies ControlDetails,
+				details: {
+					kind: "control",
+					action: "send",
+					agentId: params.subagent_id,
+					...(delivery.kind === "mailbox-v2"
+						? {
+								messageId: delivery.messageId,
+								pendingMessages: delivery.pendingMessages,
+							}
+						: {}),
+				} satisfies ControlDetails,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "followup_task",
+		label: "Follow-up Task",
+		description:
+			"For a direct mailbox-v2 continuable child, atomically claim its current pending FIFO mailbox and start exactly one scheduled turn. " +
+			"This call returns turn acceptance, not the child's answer.",
+		promptSnippet: "Start one mailbox-v2 child turn from queued messages",
+		executionMode: "parallel",
+		parameters: FollowupTaskParameters,
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			assertBackgroundControlsEnabled(sessionSettings, "followup_task");
+			const parent = await coordinator.parentFromContext(ctx);
+			const outcome = await coordinator.followupTask(
+				parent,
+				params.subagent_id,
+				signal,
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `started turn ${outcome.turnId} for subagent ${params.subagent_id}, claiming ${outcome.claimedMessages} mailbox message${outcome.claimedMessages === 1 ? "" : "s"}`,
+					},
+				],
+				details: {
+					kind: "control",
+					action: "followup",
+					agentId: params.subagent_id,
+					turnId: outcome.turnId,
+					claimedMessages: outcome.claimedMessages,
+				} satisfies ControlDetails,
 			};
 		},
 	});
@@ -308,6 +365,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			const sections = [
 				`Mode: ${schedulingMode}`,
 				`Background concurrency: ${sessionSettings.maxConcurrentBackgroundRuns}`,
+				`Background protocol: ${sessionSettings.backgroundProtocol ?? "legacy"}`,
 				`OpenAI identity inline: ${sessionSettings.openAIIdentity ? "enabled" : "disabled"}`,
 				agentSync?.diagnostics.length
 					? "Bundled templates: initialization skipped (see diagnostics)"
@@ -350,6 +408,26 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		}
 		if (!sessionSettings.enableRunInBackground) {
 			disableOwnedTools(pi, backgroundControlParameters);
+		} else if (sessionSettings.backgroundProtocol !== "mailbox-v2") {
+			let hasMailboxChild = true;
+			try {
+				const parent = await coordinator.parentFromContext(ctx);
+				const entries = await coordinator.list(parent, "descendants");
+				hasMailboxChild = entries.some(
+					(entry) =>
+						entry.kind === "child"
+						&& entry.descriptor.runtime.backgroundProtocol === "mailbox-v2",
+				);
+			} catch {
+				// Keep the control available when catalog inspection fails so a
+				// transient diagnostic cannot strand an existing mailbox child.
+			}
+			if (!hasMailboxChild) {
+				disableOwnedTools(
+					pi,
+					new Map([["followup_task", FollowupTaskParameters]]),
+				);
+			}
 		}
 		if (!agentSyncNotified && agentSync) {
 			agentSyncNotified = true;

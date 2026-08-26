@@ -4,6 +4,7 @@ import type {
 	AgentScope,
 	AgentSnapshot,
 	AgentSnapshotSource,
+	BackgroundProtocol,
 	ReportDelivery,
 	SubagentDescriptor,
 	SubagentMode,
@@ -13,12 +14,14 @@ import type {
 export const DESCRIPTOR_CUSTOM_TYPE = "pi-subagent/descriptor";
 export const DESCRIPTOR_VERSION = 2;
 const LEGACY_MAX_CONCURRENT_BACKGROUND_RUNS = 4;
+const LEGACY_BACKGROUND_PROTOCOL: BackgroundProtocol = "legacy";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const AGENT_SOURCES = new Set<AgentSnapshotSource>(["bundled", "user", "project"]);
 const MODES = new Set<SubagentMode>(["one-shot", "continuable"]);
 const PROVIDERS = new Set<SubagentProviderName>(["spawn", "fork"]);
 const REPORT_DELIVERIES = new Set<ReportDelivery>(["wakeup", "quiet"]);
+const BACKGROUND_PROTOCOLS = new Set<BackgroundProtocol>(["legacy", "mailbox-v2"]);
 const AGENT_SCOPES = new Set<AgentScope>(["user", "project", "both"]);
 const AGENT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 /** UUIDv7 with the standard RFC 9562 variant bits (version 7, variant 10xx). */
@@ -137,6 +140,13 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 	if (!REPORT_DELIVERIES.has(reportDelivery)) {
 		throw new Error(`unsupported runtime.reportDelivery: ${reportDelivery}`);
 	}
+	const backgroundProtocol =
+		runtime.backgroundProtocol === undefined
+			? LEGACY_BACKGROUND_PROTOCOL
+			: string(runtime.backgroundProtocol, "runtime.backgroundProtocol") as BackgroundProtocol;
+	if (!BACKGROUND_PROTOCOLS.has(backgroundProtocol)) {
+		throw new Error(`unsupported runtime.backgroundProtocol: ${backgroundProtocol}`);
+	}
 	if (runtime.syncBundledAgents !== undefined) {
 		// Validate, then discard the retired 0.2/0.3 runtime switch. Keeping this
 		// read compatibility allows persisted children to cold-resume.
@@ -183,6 +193,7 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 							1,
 							Number.MAX_SAFE_INTEGER,
 						),
+			backgroundProtocol,
 			reportDelivery,
 			inheritExtensions: boolean(runtime.inheritExtensions, "runtime.inheritExtensions"),
 			openAIIdentity: boolean(runtime.openAIIdentity, "runtime.openAIIdentity"),

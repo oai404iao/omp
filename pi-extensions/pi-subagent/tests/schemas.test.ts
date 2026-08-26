@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	DelegationParameters,
+	FollowupTaskParameters,
 	ForkDelegationParameters,
 	ForegroundDelegationParameters,
 	delegationParameters,
@@ -53,4 +54,14 @@ test("an explicitly empty catalog produces an empty enum", () => {
 	assert.deepEqual(agentEnum(delegationParameters(true, [])), []);
 	assert.deepEqual(agentEnum(delegationParameters(false, [])), []);
 	assert.deepEqual(agentEnum(forkDelegationParameters([])), []);
+});
+
+test("followup_task accepts only a durable child id", () => {
+	assert.deepEqual(Object.keys(properties(FollowupTaskParameters)), [
+		"subagent_id",
+	]);
+	assert.equal(
+		(FollowupTaskParameters as { additionalProperties?: unknown }).additionalProperties,
+		false,
+	);
 });

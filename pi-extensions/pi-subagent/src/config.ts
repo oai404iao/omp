@@ -1,7 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { AgentScope, ReportDelivery, SubagentSettings } from "./types.ts";
+import type {
+	AgentScope,
+	BackgroundProtocol,
+	ReportDelivery,
+	SubagentSettings,
+} from "./types.ts";
 
 export const CONFIG_FILE_NAME = "subagent.json";
 
@@ -11,6 +16,7 @@ export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	enableRunInBackground: true,
 	defaultBackground: true,
 	maxConcurrentBackgroundRuns: 4,
+	backgroundProtocol: "legacy",
 	reportDelivery: "wakeup",
 	inheritExtensions: false,
 	openAIIdentity: false,
@@ -25,6 +31,7 @@ const CONFIG_KEYS = new Set([
 	"enableRunInBackground",
 	"defaultBackground",
 	"maxConcurrentBackgroundRuns",
+	"backgroundProtocol",
 	"reportDelivery",
 	"inheritExtensions",
 	"openAIIdentity",
@@ -85,6 +92,11 @@ function parseAgentScope(value: unknown, source: string): AgentScope {
 function parseReportDelivery(value: unknown, source: string): ReportDelivery {
 	if (value === "wakeup" || value === "quiet") return value;
 	throw new Error(`${source}: reportDelivery must be "wakeup" or "quiet"`);
+}
+
+function parseBackgroundProtocol(value: unknown, source: string): BackgroundProtocol {
+	if (value === "legacy" || value === "mailbox-v2") return value;
+	throw new Error(`${source}: backgroundProtocol must be "legacy" or "mailbox-v2"`);
 }
 
 function parseBoolean(value: unknown, key: string, source: string): boolean {
@@ -156,6 +168,10 @@ function applyConfig(
 							maximum: Number.MAX_SAFE_INTEGER,
 						},
 					),
+		backgroundProtocol:
+			config.backgroundProtocol === undefined
+				? settings.backgroundProtocol
+				: parseBackgroundProtocol(config.backgroundProtocol, source),
 		reportDelivery:
 			config.reportDelivery === undefined
 				? settings.reportDelivery

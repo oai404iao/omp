@@ -7,6 +7,7 @@ export type AgentSource = "user" | "project";
 /** `bundled` is retained only for reading descriptors written by older releases. */
 export type AgentSnapshotSource = AgentSource | "bundled";
 export type ReportDelivery = "wakeup" | "quiet";
+export type BackgroundProtocol = "legacy" | "mailbox-v2";
 export type SubagentMode = "one-shot" | "continuable";
 export type SubagentProviderName = "spawn" | "fork";
 export type SubagentStopReason = "completed" | "aborted" | "error" | "max-tokens";
@@ -17,6 +18,7 @@ export interface SubagentSettings {
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;
 	maxConcurrentBackgroundRuns: number;
+	backgroundProtocol?: BackgroundProtocol;
 	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
 	openAIIdentity: boolean;
@@ -55,6 +57,7 @@ export interface SubagentRuntimeSnapshot {
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;
 	maxConcurrentBackgroundRuns: number;
+	backgroundProtocol: BackgroundProtocol;
 	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
 	openAIIdentity: boolean;
@@ -123,8 +126,12 @@ export interface DelegationDetails {
 
 export interface ControlDetails {
 	kind: "control";
-	action: "send" | "interrupt" | "list" | "report";
+	action: "send" | "followup" | "interrupt" | "list" | "report";
 	agentId?: string;
+	messageId?: string;
+	turnId?: string;
+	pendingMessages?: number;
+	claimedMessages?: number;
 }
 
 export interface CatalogChild {
@@ -135,6 +142,7 @@ export interface CatalogChild {
 	descriptor: SubagentDescriptor;
 	sessionFile?: string;
 	status: "running" | "idle" | "ready";
+	pendingMessages: number;
 }
 
 export interface CatalogDiagnostic {

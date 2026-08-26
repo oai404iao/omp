@@ -31,6 +31,7 @@ test("global and trusted project settings merge", () => {
 			syncBundledAgents: true,
 			enableRunInBackground: false,
 			maxConcurrentBackgroundRuns: 7,
+			backgroundProtocol: "mailbox-v2",
 			reportDelivery: "quiet",
 			inheritExtensions: true,
 			openAIIdentity: true,
@@ -53,6 +54,7 @@ test("global and trusted project settings merge", () => {
 	assert.equal(loaded.settings.openAIIdentity, true);
 	assert.equal(loaded.settings.enableRunInBackground, false);
 	assert.equal(loaded.settings.maxConcurrentBackgroundRuns, 2);
+	assert.equal(loaded.settings.backgroundProtocol, "mailbox-v2");
 	assert.equal("syncBundledAgents" in loaded.settings, false);
 	assert.equal(loaded.sources.length, 2);
 });
@@ -70,6 +72,7 @@ test("untrusted project configuration is not read", () => {
 	assert.equal("syncBundledAgents" in loaded.settings, false);
 	assert.equal(loaded.settings.openAIIdentity, false);
 	assert.equal(loaded.settings.maxConcurrentBackgroundRuns, 4);
+	assert.equal(loaded.settings.backgroundProtocol, "legacy");
 	assert.deepEqual(loaded.sources, []);
 });
 
@@ -89,6 +92,14 @@ test("invalid settings fail loud", () => {
 	assert.throws(
 		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
 		/maxConcurrentBackgroundRuns must be a safe integer/,
+	);
+	writeFileSync(
+		join(agentDir, "subagent.json"),
+		JSON.stringify({ backgroundProtocol: "mailbox-v3" }),
+	);
+	assert.throws(
+		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
+		/backgroundProtocol must be "legacy" or "mailbox-v2"/,
 	);
 });
 

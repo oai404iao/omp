@@ -33,6 +33,7 @@ function descriptor(label = "inspect auth"): SubagentDescriptor {
 			enableRunInBackground: true,
 			defaultBackground: true,
 			maxConcurrentBackgroundRuns: 4,
+			backgroundProtocol: "legacy",
 			reportDelivery: "wakeup",
 			inheritExtensions: false,
 			openAIIdentity: false,
@@ -80,6 +81,23 @@ test("legacy descriptors receive the default background concurrency limit", () =
 	).maxConcurrentBackgroundRuns;
 	const parsed = parseDescriptor(input);
 	assert.equal(parsed.runtime.maxConcurrentBackgroundRuns, 4);
+});
+
+test("legacy descriptors receive the legacy background protocol", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		runtime: Omit<SubagentDescriptor["runtime"], "backgroundProtocol">;
+	};
+	delete (
+		input.runtime as Partial<SubagentDescriptor["runtime"]>
+	).backgroundProtocol;
+	const parsed = parseDescriptor(input);
+	assert.equal(parsed.runtime.backgroundProtocol, "legacy");
+});
+
+test("mailbox-v2 descriptors retain their protocol snapshot", () => {
+	const input = descriptor();
+	input.runtime.backgroundProtocol = "mailbox-v2";
+	assert.equal(parseDescriptor(input).runtime.backgroundProtocol, "mailbox-v2");
 });
 
 test("legacy syncBundledAgents snapshots are validated then discarded", () => {

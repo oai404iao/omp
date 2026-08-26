@@ -1,7 +1,7 @@
 ---
 name: worker
 description: General-purpose implementation agent with coding tools
-tools: read, grep, find, ls, bash, $mutation, subagent, subagent_fork, send_message, interrupt_agent, list_agents
+tools: read, grep, find, ls, bash, $mutation, subagent, subagent_fork, send_message, followup_task, interrupt_agent, list_agents
 thinking: high
 ---
 
