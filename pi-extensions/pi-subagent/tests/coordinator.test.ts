@@ -20,6 +20,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { CODEX_IDENTITY_CUSTOM_TYPE } from "@oai404iao/pi-codex-minimal-tools/subagent-inline";
 import { DEFAULT_SETTINGS } from "../src/config.ts";
+import {
+	COMPLETION_FAILURE_CUSTOM_TYPE,
+	COMPLETION_UPDATE_CUSTOM_TYPE,
+	readCompletionMailbox,
+} from "../src/completion-mailbox.ts";
 import { SubagentCoordinator, AGENT_CUSTOM_TYPE } from "../src/coordinator.ts";
 import { foldDescriptor } from "../src/descriptor.ts";
 import {
@@ -159,6 +164,54 @@ function reportThenAnswerStream(
 	return stream;
 }
 
+function toolCallStream(
+	model: Model<any>,
+	toolCall: ToolCall,
+): AssistantMessageEventStream {
+	const stream = createAssistantMessageEventStream();
+	queueMicrotask(() => {
+		const partial: AssistantMessage = {
+			role: "assistant",
+			content: [],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					total: 0,
+				},
+			},
+			stopReason: "pending",
+			timestamp: Date.now(),
+		};
+		stream.push({ type: "start", partial });
+		partial.content = [toolCall];
+		stream.push({ type: "toolcall_start", contentIndex: 0, partial });
+		stream.push({
+			type: "toolcall_end",
+			contentIndex: 0,
+			toolCall,
+			partial,
+		});
+		stream.push({
+			type: "done",
+			reason: "toolUse",
+			message: { ...partial, stopReason: "toolUse" },
+		});
+		stream.end();
+	});
+	return stream;
+}
+
 async function fixture(
 	options: {
 		delayMs?: number;
@@ -169,6 +222,12 @@ async function fixture(
 		onRequestContext?: (context: Context) => void;
 		onStreamStart?: () => void;
 		onStreamEnd?: () => void;
+		streamSimple?: (
+			model: Model<any>,
+			context: Context,
+			turn: number,
+			signal: AbortSignal | undefined,
+		) => AssistantMessageEventStream;
 	} = {},
 ) {
 	const root = tempRoot();
@@ -202,6 +261,14 @@ async function fixture(
 			const currentTurn = ++turn;
 			options.onRequestContext?.(context);
 			options.onRequestTools?.((context.tools ?? []).map((tool) => tool.name));
+			if (options.streamSimple) {
+				return options.streamSimple(
+					model,
+					context,
+					currentTurn,
+					streamOptions?.signal,
+				);
+			}
 			return options.reportFirst
 				? reportThenAnswerStream(model, context, currentTurn)
 				: scriptedStream(
@@ -262,6 +329,7 @@ async function fixture(
 		pi,
 		context,
 		modelRuntime,
+		model,
 	};
 }
 
@@ -274,6 +342,36 @@ async function waitUntil(
 		if (Date.now() >= deadline) throw new Error("condition timed out");
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
 	}
+}
+
+async function waitForChildReady(
+	coordinator: SubagentCoordinator,
+	parent: Parameters<SubagentCoordinator["list"]>[0],
+	agentId: string,
+): Promise<void> {
+	await waitUntil(async () => {
+		const entries = await coordinator.list(parent, "children");
+		return entries.some(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.agentId === agentId
+				&& entry.status === "ready",
+		);
+	});
+}
+
+function appendWaitAgentToolResult(
+	parent: Parameters<SubagentCoordinator["list"]>[0],
+	toolCallId: string,
+): void {
+	(parent.sessionManager as SessionManager).appendMessage({
+		role: "toolResult",
+		toolCallId,
+		toolName: "wait_agent",
+		content: [{ type: "text", text: "completion delivered" }],
+		isError: false,
+		timestamp: Date.now(),
+	});
 }
 
 test("one-shot child returns only its own final output and usage", async () => {
@@ -514,9 +612,14 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		);
 		assert.equal(outcome.kind, "continuable");
 		if (outcome.kind !== "continuable") return;
-		await waitUntil(() => messages.length === 1);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
 		const eventCount = eventDetails.length;
 		assert.equal(requestContexts.length, 1);
+		assert.equal(messages.length, 0);
 
 		const [first, second] = await Promise.all([
 			coordinator.sendMessageWithOutcome(
@@ -538,7 +641,7 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 			assert.equal(second.pendingMessages, 2);
 		}
 		assert.equal(requestContexts.length, 1);
-		assert.equal(messages.length, 1);
+		assert.equal(messages.length, 0);
 		assert.equal(eventDetails.length, eventCount);
 
 		const queued = await coordinator.list(parent, "children");
@@ -551,6 +654,7 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		if (child?.kind !== "child") return;
 		assert.equal(child.status, "ready");
 		assert.equal(child.pendingMessages, 2);
+		assert.equal(child.unreadUpdates, 1);
 		assert.match(coordinator.formatCatalog(queued, "children"), /pending=2/);
 		assert.ok(child.sessionFile);
 		const persisted = SessionManager.open(
@@ -582,6 +686,7 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		assert.equal(restartedChild?.kind, "child");
 		if (restartedChild?.kind === "child") {
 			assert.equal(restartedChild.pendingMessages, 2);
+			assert.equal(restartedChild.unreadUpdates, 1);
 		}
 
 		const followup = await restarted.followupTask(
@@ -591,7 +696,12 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		assert.match(followup.turnId, UUID_V7_PATTERN);
 		assert.equal(followup.claimedMessages, 2);
 		await waitUntil(() => requestContexts.length === 2);
-		await waitUntil(() => messages.length === 2);
+		await waitForChildReady(
+			restarted,
+			restartedParent,
+			outcome.details.agentId,
+		);
+		assert.equal(messages.length, 0);
 		const serializedContext = JSON.stringify(requestContexts[1]?.messages);
 		assert.ok(
 			serializedContext.indexOf("First queued request.")
@@ -606,6 +716,7 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		assert.equal(drainedChild?.kind, "child");
 		if (drainedChild?.kind === "child") {
 			assert.equal(drainedChild.pendingMessages, 0);
+			assert.equal(drainedChild.unreadUpdates, 2);
 		}
 		await assert.rejects(
 			() => restarted!.followupTask(restartedParent, outcome.details.agentId),
@@ -613,6 +724,607 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		);
 	} finally {
 		await restarted?.shutdown();
+		await coordinator.shutdown();
+	}
+});
+
+test("mailbox-v2 completion is quiet and wait_agent durably delivers an existing update", async () => {
+	const requestContexts: Context[] = [];
+	const { coordinator, parent, messages } = await fixture({
+		onRequestContext: (requestContext) => requestContexts.push(requestContext),
+	});
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "quiet completion child",
+				prompt: "Initial task.",
+				run_in_background: true,
+			},
+			{
+				...DEFAULT_SETTINGS,
+				backgroundProtocol: "mailbox-v2",
+			},
+		);
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
+		assert.equal(messages.length, 0);
+		assert.equal(requestContexts.length, 1);
+
+		const before = await coordinator.list(parent, "children");
+		const beforeChild = before.find(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.agentId === outcome.details.agentId,
+		);
+		assert.equal(beforeChild?.kind, "child");
+		if (beforeChild?.kind === "child") {
+			assert.equal(beforeChild.pendingMessages, 0);
+			assert.equal(beforeChild.unreadUpdates, 1);
+		}
+		assert.match(coordinator.formatCatalog(before, "children"), /updates=1/);
+
+		const waited = await coordinator.waitAgent(
+			parent,
+			"wait-existing",
+			100,
+		);
+		assert.equal(waited.timedOut, false);
+		assert.equal(waited.updates.length, 1);
+		assert.equal(waited.updates[0]?.childAgentId, outcome.details.agentId);
+		assert.match(waited.updates[0]?.output ?? "", /child answer 1/);
+		assert.equal(waited.unreadUpdates, 0);
+		assert.equal(requestContexts.length, 1);
+
+		// The delivery remains recoverable until Pi persists this tool result.
+		assert.equal(
+			readCompletionMailbox(parent.sessionManager.getEntries(), {
+				parentAgentId: parent.agentId,
+			}).unread.length,
+			1,
+		);
+		appendWaitAgentToolResult(parent, "wait-existing");
+		assert.equal(
+			readCompletionMailbox(parent.sessionManager.getEntries(), {
+				parentAgentId: parent.agentId,
+			}).unread.length,
+			0,
+		);
+		const after = await coordinator.list(parent, "children");
+		const afterChild = after.find(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.agentId === outcome.details.agentId,
+		);
+		if (afterChild?.kind === "child") {
+			assert.equal(afterChild.unreadUpdates, 0);
+		}
+		const timeout = await coordinator.waitAgent(
+			parent,
+			"wait-empty",
+			0,
+		);
+		assert.equal(timeout.timedOut, true);
+		assert.deepEqual(timeout.updates, []);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("mailbox-v2 completion persistence failure emits an explicit error and no false update", async () => {
+	const { coordinator, parent, messages, eventDetails } = await fixture();
+	const manager = parent.sessionManager as SessionManager;
+	const appendCustomEntry = manager.appendCustomEntry.bind(manager);
+	manager.appendCustomEntry = (customType, data) => {
+		if (customType === COMPLETION_UPDATE_CUSTOM_TYPE) {
+			throw new Error("completion storage unavailable");
+		}
+		return appendCustomEntry(customType, data);
+	};
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "failed completion storage",
+				prompt: "Finish once.",
+				run_in_background: true,
+			},
+			{
+				...DEFAULT_SETTINGS,
+				backgroundProtocol: "mailbox-v2",
+			},
+		);
+		assert.equal(outcome.kind, "continuable");
+		await waitUntil(() =>
+			eventDetails.some(
+				(event) => event.name === "pi-subagent:completion-error",
+			),
+		);
+		assert.equal(messages.length, 0);
+		assert.equal(
+			readCompletionMailbox(parent.sessionManager.getEntries(), {
+				parentAgentId: parent.agentId,
+			}).unread.length,
+			0,
+		);
+		const failure = eventDetails.find(
+			(event) => event.name === "pi-subagent:completion-error",
+		)?.data as { error?: string } | undefined;
+		assert.match(failure?.error ?? "", /completion storage unavailable/);
+		if (outcome.kind === "continuable") {
+			await waitForChildReady(
+				coordinator,
+				parent,
+				outcome.details.agentId,
+			);
+			const listed = await coordinator.list(parent, "children");
+			const child = listed.find(
+				(entry) =>
+					entry.kind === "child"
+					&& entry.agentId === outcome.details.agentId,
+			);
+			assert.equal(child?.kind, "child");
+			if (child?.kind === "child" && child.sessionFile) {
+				const persisted = SessionManager.open(
+					child.sessionFile,
+					parent.sessionManager.getSessionDir(),
+					parent.cwd,
+				);
+				assert.equal(
+					persisted
+						.getEntries()
+						.filter(
+							(entry) =>
+								entry.type === "custom"
+								&& entry.customType
+									=== COMPLETION_FAILURE_CUSTOM_TYPE,
+						).length,
+					1,
+				);
+			}
+		}
+	} finally {
+		manager.appendCustomEntry = appendCustomEntry;
+		await coordinator.shutdown();
+	}
+});
+
+test("wait_agent wakes from a durable completion event without polling or starting another turn", async () => {
+	const requestContexts: Context[] = [];
+	const { coordinator, parent, messages, eventDetails } = await fixture({
+		delayMs: 80,
+		onRequestContext: (requestContext) => requestContexts.push(requestContext),
+	});
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "event waiter child",
+				prompt: "Finish after the waiter subscribes.",
+				run_in_background: true,
+			},
+			{
+				...DEFAULT_SETTINGS,
+				backgroundProtocol: "mailbox-v2",
+			},
+		);
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		let settled = false;
+		const waiting = coordinator
+			.waitAgent(parent, "wait-live", 1_000)
+			.then((value) => {
+				settled = true;
+				return value;
+			});
+		await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+		assert.equal(settled, false);
+		await assert.rejects(
+			() => coordinator.waitAgent(parent, "wait-competing", 100),
+			/already waiting/,
+		);
+		const waited = await waiting;
+		assert.equal(waited.timedOut, false);
+		assert.equal(waited.updates.length, 1);
+		assert.equal(waited.updates[0]?.childAgentId, outcome.details.agentId);
+		assert.equal(messages.length, 0);
+		assert.equal(requestContexts.length, 1);
+		assert.equal(
+			eventDetails.filter(
+				(event) => event.name === "pi-subagent:turn-start",
+			).length,
+			1,
+		);
+		appendWaitAgentToolResult(parent, "wait-live");
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("a failed wait_agent delivery can be released and retried in the same runtime", async () => {
+	const { coordinator, parent } = await fixture();
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "retry wait delivery",
+				prompt: "Finish once.",
+				run_in_background: true,
+			},
+			{
+				...DEFAULT_SETTINGS,
+				backgroundProtocol: "mailbox-v2",
+			},
+		);
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
+		const first = await coordinator.waitAgent(
+			parent,
+			"wait-failed-result",
+			0,
+		);
+		assert.equal(first.timedOut, false);
+		await assert.rejects(
+			() => coordinator.waitAgent(parent, "wait-before-release", 0),
+			/awaiting its durable tool result/,
+		);
+		assert.equal(
+			await coordinator.releaseWaitAgentDeliveries(
+				parent,
+				"simulated failed tool result",
+			),
+			1,
+		);
+		const retried = await coordinator.waitAgent(
+			parent,
+			"wait-retried-result",
+			0,
+		);
+		assert.equal(
+			retried.updates[0]?.completionId,
+			first.updates[0]?.completionId,
+		);
+		appendWaitAgentToolResult(parent, "wait-retried-result");
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("wait_agent bounds one oversized head without consuming the next completion", async () => {
+	const { coordinator, parent } = await fixture({
+		streamSimple: (model, _context, turn, signal) =>
+			scriptedStream(
+				model,
+				(turn === 1 ? "A" : "B").repeat(400_000),
+				signal,
+			),
+	});
+	try {
+		const settings = {
+			...DEFAULT_SETTINGS,
+			backgroundProtocol: "mailbox-v2" as const,
+			maxOutputBytes: 1024 * 1024,
+		};
+		const first = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "large first completion",
+				prompt: "Return the first output.",
+				run_in_background: true,
+			},
+			settings,
+		);
+		const second = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "large second completion",
+				prompt: "Return the second output.",
+				run_in_background: true,
+			},
+			settings,
+		);
+		assert.equal(first.kind, "continuable");
+		assert.equal(second.kind, "continuable");
+		if (first.kind !== "continuable" || second.kind !== "continuable") return;
+		await waitForChildReady(coordinator, parent, first.details.agentId);
+		await waitForChildReady(coordinator, parent, second.details.agentId);
+
+		const firstWait = await coordinator.waitAgent(
+			parent,
+			"wait-large-first",
+			0,
+		);
+		assert.equal(firstWait.updates.length, 1);
+		assert.equal(firstWait.updates[0]?.outputTruncated, true);
+		assert.equal(firstWait.unreadUpdates, 1);
+		assert.match(firstWait.updates[0]?.output ?? "", /^A+$/);
+		appendWaitAgentToolResult(parent, "wait-large-first");
+
+		const secondWait = await coordinator.waitAgent(
+			parent,
+			"wait-large-second",
+			0,
+		);
+		assert.equal(secondWait.updates.length, 1);
+		assert.equal(
+			secondWait.updates[0]?.childAgentId,
+			second.details.agentId,
+		);
+		assert.match(secondWait.updates[0]?.output ?? "", /^B+$/);
+		appendWaitAgentToolResult(parent, "wait-large-second");
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("wait_agent timeout and abort leave future completion activity untouched", async () => {
+	const { coordinator, parent } = await fixture();
+	try {
+		const timedOut = await coordinator.waitAgent(
+			parent,
+			"wait-timeout",
+			5,
+		);
+		assert.equal(timedOut.timedOut, true);
+		assert.deepEqual(timedOut.updates, []);
+
+		const abortController = new AbortController();
+		const aborted = coordinator.waitAgent(
+			parent,
+			"wait-abort",
+			1_000,
+			abortController.signal,
+		);
+		abortController.abort(new Error("caller canceled wait"));
+		await assert.rejects(() => aborted, /caller canceled wait/);
+
+		const afterAbort = await coordinator.waitAgent(
+			parent,
+			"wait-after-abort",
+			0,
+		);
+		assert.equal(afterAbort.timedOut, true);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("shutdown rejects and cleans an event-driven wait_agent waiter", async () => {
+	const { coordinator, parent } = await fixture();
+	const waiting = coordinator.waitAgent(
+		parent,
+		"wait-shutdown",
+		30_000,
+	);
+	await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+	const shutdown = coordinator.shutdown();
+	await assert.rejects(() => waiting, /shutting down/);
+	await shutdown;
+});
+
+test("unread mailbox-v2 completion survives coordinator and session reload", async () => {
+	const {
+		coordinator,
+		parent,
+		messages,
+		agentDir,
+		pi,
+		context,
+		model,
+	} = await fixture();
+	let restarted: SubagentCoordinator | undefined;
+	try {
+		(parent.sessionManager as SessionManager).appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "parent checkpoint" }],
+			timestamp: Date.now(),
+		});
+		(parent.sessionManager as SessionManager).appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "checkpointed" }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					total: 0,
+				},
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		});
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "reload completion child",
+				prompt: "Finish before restart.",
+				run_in_background: true,
+			},
+			{
+				...DEFAULT_SETTINGS,
+				backgroundProtocol: "mailbox-v2",
+			},
+		);
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
+		assert.equal(messages.length, 0);
+		const parentFile = parent.sessionManager.getSessionFile();
+		assert.ok(parentFile);
+		await coordinator.shutdown();
+
+		const reopenedParentManager = SessionManager.open(
+			parentFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		const reopenedContext = {
+			...context,
+			sessionManager: reopenedParentManager,
+		} as unknown as ExtensionContext;
+		restarted = new SubagentCoordinator(
+			pi,
+			resolve(import.meta.dirname, "..", "agents"),
+			resolve(import.meta.dirname, ".."),
+			agentDir,
+		);
+		const restartedParent = await restarted.parentFromContext(
+			reopenedContext,
+		);
+		const listed = await restarted.list(restartedParent, "children");
+		const child = listed.find(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.agentId === outcome.details.agentId,
+		);
+		assert.equal(child?.kind, "child");
+		if (child?.kind === "child") assert.equal(child.unreadUpdates, 1);
+		const waited = await restarted.waitAgent(
+			restartedParent,
+			"wait-after-reload",
+			0,
+		);
+		assert.equal(waited.timedOut, false);
+		assert.equal(waited.updates[0]?.childAgentId, outcome.details.agentId);
+	} finally {
+		await restarted?.shutdown();
+		await coordinator.shutdown();
+	}
+});
+
+test("nested wait_agent consumes only direct-child completion from the parent session", async () => {
+	const { coordinator, parent, messages } = await fixture({
+		streamSimple: (model, context, turn, signal) => {
+			const toolResults = context.messages.filter(
+				(message) => message.role === "toolResult",
+			);
+			const hasNestedControls = context.tools?.some(
+				(tool) => tool.name === "wait_agent",
+			);
+			if (!hasNestedControls) {
+				return scriptedStream(
+					model,
+					"grandchild complete",
+					signal,
+				);
+			}
+			const latestToolResult = toolResults.at(-1);
+			if (!latestToolResult) {
+				return toolCallStream(model, {
+					type: "toolCall",
+					id: `nested-subagent-${turn}`,
+					name: "subagent",
+					arguments: {
+						agent: "scout",
+						description: "nested mailbox child",
+						prompt: "Complete nested work.",
+						run_in_background: true,
+					},
+				});
+			}
+			if (latestToolResult.toolName === "subagent") {
+				return toolCallStream(model, {
+					type: "toolCall",
+					id: `nested-wait-${turn}`,
+					name: "wait_agent",
+					arguments: { timeout_ms: 1_000 },
+				});
+			}
+			return scriptedStream(model, "worker consumed grandchild", signal);
+		},
+	});
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "worker",
+				description: "nested mailbox parent",
+				prompt: "Spawn and wait for one direct child.",
+				run_in_background: true,
+			},
+			{
+				...DEFAULT_SETTINGS,
+				backgroundProtocol: "mailbox-v2",
+			},
+		);
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
+		assert.equal(messages.length, 0);
+		const descendants = await coordinator.list(parent, "descendants");
+		const worker = descendants.find(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.agentId === outcome.details.agentId,
+		);
+		const grandchild = descendants.find(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.descriptor.label === "nested mailbox child",
+		);
+		assert.equal(worker?.kind, "child");
+		assert.equal(grandchild?.kind, "child");
+		if (worker?.kind === "child") {
+			assert.equal(worker.unreadUpdates, 1);
+		}
+		if (grandchild?.kind === "child") {
+			assert.equal(grandchild.parentAgentId, outcome.details.agentId);
+			assert.equal(grandchild.unreadUpdates, 0);
+		}
+		const rootWait = await coordinator.waitAgent(
+			parent,
+			"wait-worker-only",
+			0,
+		);
+		assert.equal(rootWait.updates.length, 1);
+		assert.equal(
+			rootWait.updates[0]?.childAgentId,
+			outcome.details.agentId,
+		);
+		appendWaitAgentToolResult(parent, "wait-worker-only");
+	} finally {
 		await coordinator.shutdown();
 	}
 });
@@ -640,7 +1352,11 @@ test("concurrent mailbox-v2 followup_task calls cannot claim or start the same b
 		);
 		assert.equal(outcome.kind, "continuable");
 		if (outcome.kind !== "continuable") return;
-		await waitUntil(() => messages.length === 1);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
 		await coordinator.sendMessage(
 			parent,
 			outcome.details.agentId,
@@ -659,7 +1375,12 @@ test("concurrent mailbox-v2 followup_task calls cannot claim or start the same b
 			attempts.filter((attempt) => attempt.status === "rejected").length,
 			1,
 		);
-		await waitUntil(() => messages.length === 2);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
+		assert.equal(messages.length, 0);
 		assert.equal(requestContexts.length, 2);
 		const listed = await coordinator.list(parent, "children");
 		const child = listed.find(
@@ -734,7 +1455,12 @@ test("mailbox-v2 enqueue waits for a newly accepted child session to become dura
 		const delivery = await enqueue;
 		assert.equal(delivery.kind, "mailbox-v2");
 		assert.equal(requestContexts.length, 1);
-		await waitUntil(() => messages.length === 1);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
+		assert.equal(messages.length, 0);
 		const listed = await coordinator.list(parent, "children");
 		const child = listed.find(
 			(entry) =>
@@ -767,7 +1493,11 @@ test("mailbox-v2 prompt preflight failure leaves the unclaimed batch pending", a
 		);
 		assert.equal(outcome.kind, "continuable");
 		if (outcome.kind !== "continuable") return;
-		await waitUntil(() => messages.length === 1);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
 		await coordinator.sendMessage(
 			parent,
 			outcome.details.agentId,
@@ -841,14 +1571,23 @@ export default function transformMailbox(pi) {
 		);
 		assert.equal(outcome.kind, "continuable");
 		if (outcome.kind !== "continuable") return;
-		await waitUntil(() => messages.length === 1);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
 		await coordinator.sendMessage(
 			parent,
 			outcome.details.agentId,
 			"Transform but consume once.",
 		);
 		await coordinator.followupTask(parent, outcome.details.agentId);
-		await waitUntil(() => messages.length === 2);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
+		assert.equal(messages.length, 0);
 		const listed = await coordinator.list(parent, "children");
 		const child = listed.find(
 			(entry) =>
@@ -892,7 +1631,11 @@ export default function handleMailbox(pi) {
 		);
 		assert.equal(outcome.kind, "continuable");
 		if (outcome.kind !== "continuable") return;
-		await waitUntil(() => messages.length === 1);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
 		await coordinator.sendMessage(
 			parent,
 			outcome.details.agentId,
@@ -952,7 +1695,11 @@ test("interrupting a mailbox-v2 followup while it waits for capacity preserves i
 			settings,
 		);
 		assert.equal(first.kind, "continuable");
-		await waitUntil(() => messages.length === 1);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			first.details.agentId,
+		);
 		const second = await coordinator.delegate(
 			parent,
 			"spawn",
@@ -965,7 +1712,12 @@ test("interrupting a mailbox-v2 followup while it waits for capacity preserves i
 			settings,
 		);
 		assert.equal(second.kind, "continuable");
-		await waitUntil(() => messages.length === 2);
+		await waitForChildReady(
+			coordinator,
+			parent,
+			second.details.agentId,
+		);
+		assert.equal(messages.length, 0);
 		if (first.kind !== "continuable" || second.kind !== "continuable") return;
 
 		await coordinator.sendMessage(
@@ -1709,6 +2461,45 @@ test("continuable child can explicitly report before its independent settlement 
 	}
 });
 
+test("mailbox-v2 keeps explicit report delivery while completion stays quiet", async () => {
+	const { coordinator, parent, messages } = await fixture({ reportFirst: true });
+	try {
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "mailbox reporting scout",
+				prompt: "Report a finding.",
+				run_in_background: true,
+			},
+			{
+				...DEFAULT_SETTINGS,
+				backgroundProtocol: "mailbox-v2",
+				reportDelivery: "wakeup",
+			},
+		);
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		await waitForChildReady(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+		);
+		assert.equal(messages.length, 1);
+		assert.match(messages[0]!.content, /reported:[\s\S]*finding 1/);
+		const listed = await coordinator.list(parent, "children");
+		const child = listed.find(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.agentId === outcome.details.agentId,
+		);
+		if (child?.kind === "child") assert.equal(child.unreadUpdates, 1);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
 test("continuable mode fails loud for an ephemeral parent", async () => {
 	const { coordinator, parent } = await fixture({ persistent: false });
 	try {
@@ -1810,6 +2601,7 @@ test("foreground-only children hide background lifecycle controls", async () => 
 		for (const tool of [
 			"send_message",
 			"followup_task",
+			"wait_agent",
 			"interrupt_agent",
 			"list_agents",
 		]) {
@@ -1827,6 +2619,7 @@ test("foreground-only children hide background lifecycle controls", async () => 
 				{ subagent_id: "stale-child", message: "follow up" },
 			],
 			["followup_task", { subagent_id: "stale-child" }],
+			["wait_agent", { timeout_ms: 0 }],
 			["interrupt_agent", { agent_id: "stale-child" }],
 			["list_agents", {}],
 		] as const) {

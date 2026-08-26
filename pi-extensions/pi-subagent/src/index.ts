@@ -18,6 +18,7 @@ import {
 	InterruptParameters,
 	ListAgentsParameters,
 	SendMessageParameters,
+	WaitAgentParameters,
 	delegationParameters,
 	forkDelegationParameters,
 } from "./schemas.ts";
@@ -81,7 +82,7 @@ function registerDelegationTool(
 		: defaultBackground
 		? "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
 			(settings.backgroundProtocol === "mailbox-v2"
-				? "Background mode is continuable and returns a durable agent id; use send_message to enqueue, then followup_task to start a later turn. "
+				? "Background mode is continuable and returns a durable agent id; use send_message to enqueue, followup_task to start, and wait_agent for quiet completions. "
 				: "Background mode is continuable and returns a durable agent id; use send_message for later FIFO turns. ") +
 			"Start independent children together in one assistant message."
 		: "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
@@ -210,6 +211,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 	const backgroundControlParameters = new Map<string, unknown>([
 		["send_message", SendMessageParameters],
 		["followup_task", FollowupTaskParameters],
+		["wait_agent", WaitAgentParameters],
 		["interrupt_agent", InterruptParameters],
 		["list_agents", ListAgentsParameters],
 	]);
@@ -293,6 +295,42 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
+		name: "wait_agent",
+		label: "Wait Agent",
+		description:
+			"Wait event-driven for unread completion updates from direct mailbox-v2 children. Existing updates return immediately; timeout does not consume later updates.",
+		promptSnippet: "Wait for quiet mailbox-v2 child completion updates",
+		parameters: WaitAgentParameters,
+		async execute(toolCallId, params, signal, _onUpdate, ctx) {
+			assertBackgroundControlsEnabled(sessionSettings, "wait_agent");
+			const parent = await coordinator.parentFromContext(ctx);
+			const outcome = await coordinator.waitAgent(
+				parent,
+				toolCallId,
+				params.timeout_ms,
+				signal,
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: coordinator.formatWaitAgentOutcome(outcome),
+					},
+				],
+				details: {
+					kind: "control",
+					action: "wait",
+					timedOut: outcome.timedOut,
+					completionIds: outcome.updates.map(
+						(update) => update.completionId,
+					),
+					unreadUpdates: outcome.unreadUpdates,
+				} satisfies ControlDetails,
+			};
+		},
+	});
+
+	pi.registerTool({
 		name: "interrupt_agent",
 		label: "Interrupt Agent",
 		description:
@@ -317,7 +355,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		label: "List Agents",
 		description:
 			"List direct continuable children or all descendants. running means an active turn, idle means resident between turns, " +
-			"and ready means persisted and cold-resumable.",
+			"ready means persisted and cold-resumable, and mailbox-v2 children show pending task messages separately from unread completion updates.",
 		promptSnippet: "List continuable child agents and their lifecycle status",
 		parameters: ListAgentsParameters,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -425,7 +463,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			if (!hasMailboxChild) {
 				disableOwnedTools(
 					pi,
-					new Map([["followup_task", FollowupTaskParameters]]),
+					new Map<string, unknown>([
+						["followup_task", FollowupTaskParameters],
+						["wait_agent", WaitAgentParameters],
+					]),
 				);
 			}
 		}
@@ -456,6 +497,14 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				ctx.ui.notify(agentSync.diagnostics.join("\n"), "warning");
 			}
 		}
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		const parent = await coordinator.parentFromContext(ctx);
+		await coordinator.releaseWaitAgentDeliveries(
+			parent,
+			"parent agent turn ended without a durable wait_agent result",
+		);
 	});
 
 	pi.on("session_shutdown", async () => {

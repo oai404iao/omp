@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
 	DelegationParameters,
 	FollowupTaskParameters,
+	WaitAgentParameters,
 	ForkDelegationParameters,
 	ForegroundDelegationParameters,
 	delegationParameters,
@@ -62,6 +63,24 @@ test("followup_task accepts only a durable child id", () => {
 	]);
 	assert.equal(
 		(FollowupTaskParameters as { additionalProperties?: unknown }).additionalProperties,
+		false,
+	);
+});
+
+test("wait_agent exposes only a bounded optional timeout", () => {
+	assert.deepEqual(Object.keys(properties(WaitAgentParameters)), [
+		"timeout_ms",
+	]);
+	const timeout = properties(WaitAgentParameters).timeout_ms as {
+		minimum?: unknown;
+		maximum?: unknown;
+		default?: unknown;
+	};
+	assert.equal(timeout.minimum, 0);
+	assert.equal(timeout.maximum, 120_000);
+	assert.equal(timeout.default, 30_000);
+	assert.equal(
+		(WaitAgentParameters as { additionalProperties?: unknown }).additionalProperties,
 		false,
 	);
 });

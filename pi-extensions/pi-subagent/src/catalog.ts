@@ -1,5 +1,9 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { foldDescriptor } from "./descriptor.ts";
+import {
+	foldCompletionMailbox,
+	unreadCompletionCounts,
+} from "./completion-mailbox.ts";
 import { foldOwnedMailbox } from "./mailbox.ts";
 import type { SessionView } from "./providers.ts";
 import type { CatalogDiagnostic, SubagentDescriptor } from "./types.ts";
@@ -9,6 +13,7 @@ export interface PersistedDescriptor {
 	sessionFile: string;
 	descriptor: SubagentDescriptor;
 	pendingMessages: number;
+	unreadUpdatesByChild: Map<string, number>;
 }
 
 export interface PersistedCatalog {
@@ -73,11 +78,31 @@ export async function readPersistedCatalog(session: SessionView): Promise<Persis
 					}
 					pendingMessages = mailbox.snapshot.pending.length;
 				}
+				let unreadUpdatesByChild = new Map<string, number>();
+				const completions = foldCompletionMailbox(
+					manager.getEntries(),
+					{ parentAgentId: folded.descriptor.agentId },
+				);
+				if (completions.kind === "corrupt") {
+					diagnostics.push({
+						kind: "diagnostic",
+						piSessionId: manager.getSessionId(),
+						reason: "corrupt",
+						sessionFile: info.path,
+						...(headerParent ? { parentSessionFile: headerParent } : {}),
+						message: `corrupt completion mailbox: ${completions.message}`,
+					});
+				} else {
+					unreadUpdatesByChild = unreadCompletionCounts(
+						completions.snapshot,
+					);
+				}
 				descriptors.push({
 					agentId: folded.descriptor.agentId,
 					sessionFile: info.path,
 					descriptor: folded.descriptor,
 					pendingMessages,
+					unreadUpdatesByChild,
 				});
 			} else if (folded.kind === "corrupt") {
 				const headerParent = manager.getHeader()?.parentSession;

@@ -96,6 +96,8 @@ export interface SubagentRunResult {
 	piSessionId?: string;
 	sessionFile?: string;
 	output: string;
+	outputTruncated?: boolean;
+	omittedBytes?: number;
 	stopReason: SubagentStopReason;
 	usage: SubagentUsage;
 }
@@ -126,12 +128,15 @@ export interface DelegationDetails {
 
 export interface ControlDetails {
 	kind: "control";
-	action: "send" | "followup" | "interrupt" | "list" | "report";
+	action: "send" | "followup" | "wait" | "interrupt" | "list" | "report";
 	agentId?: string;
 	messageId?: string;
 	turnId?: string;
 	pendingMessages?: number;
 	claimedMessages?: number;
+	completionIds?: string[];
+	timedOut?: boolean;
+	unreadUpdates?: number;
 }
 
 export interface CatalogChild {
@@ -143,6 +148,7 @@ export interface CatalogChild {
 	sessionFile?: string;
 	status: "running" | "idle" | "ready";
 	pendingMessages: number;
+	unreadUpdates: number;
 }
 
 export interface CatalogDiagnostic {

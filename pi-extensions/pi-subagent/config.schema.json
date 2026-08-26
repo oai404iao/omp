@@ -55,7 +55,7 @@
     "reportDelivery": {
       "type": "string",
       "enum": ["wakeup", "quiet"],
-      "description": "Whether child reports trigger a parent turn or wait for the parent's next turn.",
+      "description": "Whether explicit child reports trigger a parent turn or wait for the parent's next turn. mailbox-v2 completion updates are always quiet.",
       "default": "wakeup"
     },
     "inheritExtensions": {

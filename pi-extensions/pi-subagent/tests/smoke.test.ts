@@ -15,6 +15,7 @@ import {
 	InterruptParameters,
 	ListAgentsParameters,
 	SendMessageParameters,
+	WaitAgentParameters,
 } from "../src/schemas.ts";
 import { syncBundledAgents } from "../src/agent-sync.ts";
 
@@ -110,6 +111,12 @@ test("extension loads and registers its model-facing surface", async () => {
 			false,
 			"legacy protocol should leave followup_task inactive",
 		);
+		assert.equal(names.has("wait_agent"), true);
+		assert.equal(
+			active.has("wait_agent"),
+			false,
+			"legacy protocol should leave wait_agent inactive",
+		);
 		for (const toolName of ["subagent", "subagent_fork"]) {
 			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
 			assert.deepEqual(agentEnum(tool), ["planner", "reviewer", "scout", "worker"]);
@@ -193,6 +200,7 @@ test("foreground-only empty catalog preserves SDK tool overrides", async () => {
 		["subagent_fork", parameters],
 		["send_message", SendMessageParameters],
 		["followup_task", FollowupTaskParameters],
+		["wait_agent", WaitAgentParameters],
 		["interrupt_agent", InterruptParameters],
 		["list_agents", ListAgentsParameters],
 	]);
@@ -201,6 +209,7 @@ test("foreground-only empty catalog preserves SDK tool overrides", async () => {
 		"subagent_fork",
 		"send_message",
 		"followup_task",
+		"wait_agent",
 		"interrupt_agent",
 		"list_agents",
 	].map((name) => ({
@@ -247,6 +256,7 @@ test("foreground-only empty catalog preserves SDK tool overrides", async () => {
 			"subagent_fork",
 			"send_message",
 			"followup_task",
+			"wait_agent",
 			"interrupt_agent",
 			"list_agents",
 		]) {
@@ -304,6 +314,7 @@ test("trusted foreground-only configuration hides background controls", async ()
 		for (const toolName of [
 			"send_message",
 			"followup_task",
+			"wait_agent",
 			"interrupt_agent",
 			"list_agents",
 		]) {
@@ -315,6 +326,7 @@ test("trusted foreground-only configuration hides background controls", async ()
 				{ subagent_id: "stale-child", message: "follow up" },
 			],
 			["followup_task", { subagent_id: "stale-child" }],
+			["wait_agent", { timeout_ms: 0 }],
 			["interrupt_agent", { agent_id: "stale-child" }],
 			["list_agents", {}],
 		] as const) {
@@ -375,6 +387,7 @@ test("mailbox-v2 configuration activates followup_task", async () => {
 	try {
 		await session.bindExtensions({ mode: "print" });
 		assert.equal(session.getActiveToolNames().includes("followup_task"), true);
+		assert.equal(session.getActiveToolNames().includes("wait_agent"), true);
 	} finally {
 		session.dispose();
 	}

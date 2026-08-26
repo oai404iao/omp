@@ -40,6 +40,17 @@ import {
 	type AgentDiscoveryResult,
 } from "./agents.ts";
 import { readPersistedCatalog } from "./catalog.ts";
+import {
+	MAX_COMPLETIONS_PER_DELIVERY,
+	appendCompletionUpdate,
+	appendUndeliveredCompletion,
+	foldCompletionMailbox,
+	readCompletionMailbox,
+	releaseCompletionDeliveries,
+	reserveCompletionDelivery,
+	unreadCompletionCounts,
+	type CompletionUpdate,
+} from "./completion-mailbox.ts";
 import { DESCRIPTOR_CUSTOM_TYPE, foldDescriptor } from "./descriptor.ts";
 import {
 	claimMailboxMessages,
@@ -55,6 +66,9 @@ import {
 	ListAgentsParameters,
 	ReportParameters,
 	SendMessageParameters,
+	WaitAgentParameters,
+	DEFAULT_WAIT_AGENT_TIMEOUT_MS,
+	MAX_WAIT_AGENT_TIMEOUT_MS,
 	delegationParameters,
 	forkDelegationParameters,
 } from "./schemas.ts";
@@ -104,9 +118,11 @@ const AGENT_ID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_TRACE_ITEMS = 100;
 const MAX_TRACE_TEXT = 4000;
+const MAX_WAIT_AGENT_RESULT_BYTES = 256 * 1024;
 const BACKGROUND_CONTROL_TOOLS = new Set([
 	"send_message",
 	"followup_task",
+	"wait_agent",
 	"interrupt_agent",
 	"list_agents",
 ]);
@@ -145,6 +161,13 @@ export type SendMessageOutcome =
 export interface FollowupTaskOutcome {
 	turnId: string;
 	claimedMessages: number;
+}
+
+export interface WaitAgentOutcome {
+	timedOut: boolean;
+	timeoutMs: number;
+	updates: CompletionUpdate[];
+	unreadUpdates: number;
 }
 
 interface ParentRef {
@@ -210,6 +233,13 @@ interface PersistenceGate {
 	readonly settled: boolean;
 }
 
+interface CompletionWaiter {
+	promise: Promise<"activity" | "timeout">;
+	wake(): void;
+	reject(error: Error): void;
+	dispose(): void;
+}
+
 interface CreateActivationOptions {
 	parent: ParentRef;
 	descriptor: SubagentDescriptor;
@@ -246,11 +276,13 @@ interface CatalogRecord {
 	sessionFile?: string;
 	active?: Activation;
 	pendingMessages: number;
+	unreadUpdatesByChild: Map<string, number>;
 }
 
 interface CoordinatorCatalog {
 	records: CatalogRecord[];
 	diagnostics: CatalogEntry[];
+	rootUnreadUpdatesByChild: Map<string, number>;
 }
 
 function runtimeFromRegistry(registry: ModelRegistry): ModelRuntime {
@@ -413,6 +445,24 @@ function mailboxOwner(descriptor: SubagentDescriptor): {
 	};
 }
 
+function completionWaiterKey(parent: ParentRef): string {
+	return `${parent.agentId}:${parent.sessionManager.getSessionId()}`;
+}
+
+function waitTimeout(value: number | undefined): number {
+	const timeoutMs = value ?? DEFAULT_WAIT_AGENT_TIMEOUT_MS;
+	if (
+		!Number.isSafeInteger(timeoutMs)
+		|| timeoutMs < 0
+		|| timeoutMs > MAX_WAIT_AGENT_TIMEOUT_MS
+	) {
+		throw new Error(
+			`timeout_ms must be a safe integer between 0 and ${MAX_WAIT_AGENT_TIMEOUT_MS}`,
+		);
+	}
+	return timeoutMs;
+}
+
 function isPathInside(parent: string, child: string): boolean {
 	const rel = relative(resolve(parent), resolve(child));
 	return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
@@ -445,8 +495,11 @@ export class SubagentCoordinator {
 	private readonly providers = new ProviderRegistry();
 	private readonly active = new Map<string, Activation>();
 	private readonly agentOperations = new AgentOperationQueue();
+	private readonly completionOperations = new AgentOperationQueue();
 	private readonly backgroundRuns = new BackgroundRunLimiter();
 	private readonly admittedOperations = new Set<Promise<unknown>>();
+	private readonly completionWaiters = new Map<string, CompletionWaiter>();
+	private readonly runtimeId = uuidv7();
 	private agentSyncResult: AgentSyncResult | undefined;
 	private draining = false;
 	private shutdownPromise: Promise<void> | undefined;
@@ -1031,6 +1084,309 @@ export class SubagentCoordinator {
 		}
 	}
 
+	async waitAgent(
+		parent: ParentRef,
+		toolCallId: string,
+		timeoutMs?: number,
+		signal?: AbortSignal,
+	): Promise<WaitAgentOutcome> {
+		return this.runAdmittedOperation(() =>
+			this.waitAgentAdmitted(
+				parent,
+				toolCallId,
+				waitTimeout(timeoutMs),
+				signal,
+			),
+		);
+	}
+
+	private async waitAgentAdmitted(
+		parent: ParentRef,
+		toolCallId: string,
+		timeoutMs: number,
+		signal?: AbortSignal,
+	): Promise<WaitAgentOutcome> {
+		if (this.draining) {
+			throw new Error("pi-subagent is shutting down; wait_agent was not accepted");
+		}
+		if (signal?.aborted) throw abortReason(signal);
+		if (!toolCallId.trim() || toolCallId.length > 512) {
+			throw new Error("wait_agent requires a non-empty tool call id of at most 512 characters");
+		}
+		const key = completionWaiterKey(parent);
+		const deadline = Date.now() + timeoutMs;
+		while (true) {
+			let waiter: CompletionWaiter | undefined;
+			const immediate = await this.completionOperations.run(
+				key,
+				async (): Promise<WaitAgentOutcome | undefined> => {
+					if (this.draining) {
+						throw new Error("pi-subagent is shutting down; wait_agent was interrupted");
+					}
+					if (signal?.aborted) throw abortReason(signal);
+					if (this.completionWaiters.has(key)) {
+						throw new Error(
+							`wait_agent is already waiting for direct-child activity on ${parent.agentId}`,
+						);
+					}
+					const snapshot = readCompletionMailbox(
+						parent.sessionManager.getEntries(),
+						{
+							parentAgentId: parent.agentId,
+							activeRuntimeId: this.runtimeId,
+						},
+					);
+					if (snapshot.currentRuntimeReservations.length > 0) {
+						throw new Error(
+							"a previous wait_agent delivery is awaiting its durable tool result",
+						);
+					}
+					if (snapshot.available.length > 0) {
+						return this.reserveWaitAgentOutcome(
+							parent,
+							toolCallId,
+							timeoutMs,
+							snapshot,
+						);
+					}
+					const remaining = Math.max(0, deadline - Date.now());
+					if (remaining === 0) {
+						return {
+							timedOut: true,
+							timeoutMs,
+							updates: [],
+							unreadUpdates: snapshot.unread.length,
+						};
+					}
+					waiter = this.createCompletionWaiter(remaining, signal);
+					this.completionWaiters.set(key, waiter);
+
+					// Append happens before notify, but fold once more after
+					// subscription so no completion can land in the check/register gap.
+					const rechecked = readCompletionMailbox(
+						parent.sessionManager.getEntries(),
+						{
+							parentAgentId: parent.agentId,
+							activeRuntimeId: this.runtimeId,
+						},
+					);
+					if (rechecked.available.length > 0) {
+						try {
+							return this.reserveWaitAgentOutcome(
+								parent,
+								toolCallId,
+								timeoutMs,
+								rechecked,
+							);
+						} finally {
+							this.removeCompletionWaiter(key, waiter);
+							waiter = undefined;
+						}
+					}
+					return undefined;
+				},
+			);
+			if (immediate) return immediate;
+			if (!waiter) {
+				throw new Error("wait_agent failed to establish an activity subscription");
+			}
+			let activity: "activity" | "timeout";
+			try {
+				activity = await waiter.promise;
+			} catch (error) {
+				this.removeCompletionWaiter(key, waiter);
+				throw error;
+			}
+			const afterWake = await this.completionOperations.run(
+				key,
+				async (): Promise<WaitAgentOutcome | undefined> => {
+					try {
+						if (this.draining) {
+							throw new Error(
+								"pi-subagent is shutting down; wait_agent was interrupted",
+							);
+						}
+						if (signal?.aborted) throw abortReason(signal);
+						if (this.completionWaiters.get(key) !== waiter) {
+							throw new Error(
+								"wait_agent lost ownership of its activity subscription",
+							);
+						}
+						const snapshot = readCompletionMailbox(
+							parent.sessionManager.getEntries(),
+							{
+								parentAgentId: parent.agentId,
+								activeRuntimeId: this.runtimeId,
+							},
+						);
+						if (snapshot.currentRuntimeReservations.length > 0) {
+							throw new Error(
+								"a previous wait_agent delivery is awaiting its durable tool result",
+							);
+						}
+						if (snapshot.available.length > 0) {
+							return this.reserveWaitAgentOutcome(
+								parent,
+								toolCallId,
+								timeoutMs,
+								snapshot,
+							);
+						}
+						if (activity === "timeout" || Date.now() >= deadline) {
+							return {
+								timedOut: true,
+								timeoutMs,
+								updates: [],
+								unreadUpdates: snapshot.unread.length,
+							};
+						}
+						return undefined;
+					} finally {
+						this.removeCompletionWaiter(key, waiter!);
+					}
+				},
+			);
+			if (afterWake) return afterWake;
+		}
+	}
+
+	private reserveWaitAgentOutcome(
+		parent: ParentRef,
+		toolCallId: string,
+		timeoutMs: number,
+		snapshot: ReturnType<typeof readCompletionMailbox>,
+	): WaitAgentOutcome {
+		const updates = this.boundedWaitAgentUpdates(snapshot.available);
+		reserveCompletionDelivery(parent.sessionManager, {
+			parentAgentId: parent.agentId,
+			runtimeId: this.runtimeId,
+			toolCallId,
+			completionIds: updates.map((update) => update.completionId),
+		});
+		return {
+			timedOut: false,
+			timeoutMs,
+			updates,
+			unreadUpdates: Math.max(
+				0,
+				snapshot.unread.length - updates.length,
+			),
+		};
+	}
+
+	private boundedWaitAgentUpdates(
+		available: readonly CompletionUpdate[],
+	): CompletionUpdate[] {
+		const updates: CompletionUpdate[] = [];
+		let remainingBytes = MAX_WAIT_AGENT_RESULT_BYTES;
+		for (const update of available) {
+			if (updates.length >= MAX_COMPLETIONS_PER_DELIVERY) break;
+			const metadataBytes = Buffer.byteLength(
+				`completion ${update.completionId}\nchild=${update.childAgentId} turn=${update.turnId} stop=${update.stopReason}\n`,
+				"utf8",
+			) + 256;
+			const fullBytes =
+				metadataBytes + Buffer.byteLength(update.output, "utf8");
+			if (updates.length > 0 && fullBytes > remainingBytes) break;
+			const outputBudget = Math.max(0, remainingBytes - metadataBytes);
+			const truncated = truncateUtf8(update.output, outputBudget);
+			updates.push({
+				...update,
+				output: truncated.text,
+				...(truncated.truncated || update.outputTruncated
+					? {
+							outputTruncated: true,
+							omittedBytes:
+								(update.omittedBytes ?? 0)
+								+ truncated.omittedBytes,
+						}
+					: {}),
+			});
+			remainingBytes = Math.max(
+				0,
+				remainingBytes
+					- metadataBytes
+					- Buffer.byteLength(truncated.text, "utf8"),
+			);
+			if (truncated.truncated) break;
+		}
+		return updates;
+	}
+
+	async releaseWaitAgentDeliveries(
+		parent: ParentRef,
+		reason: string,
+	): Promise<number> {
+		const key = completionWaiterKey(parent);
+		return this.completionOperations.run(key, async () =>
+			releaseCompletionDeliveries(parent.sessionManager, {
+				parentAgentId: parent.agentId,
+				runtimeId: this.runtimeId,
+				reason,
+			}),
+		);
+	}
+
+	private createCompletionWaiter(
+		timeoutMs: number,
+		signal?: AbortSignal,
+	): CompletionWaiter {
+		let settled = false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let resolvePromise!: (activity: "activity" | "timeout") => void;
+		let rejectPromise!: (error: Error) => void;
+		const promise = new Promise<"activity" | "timeout">(
+			(resolve, reject) => {
+				resolvePromise = resolve;
+				rejectPromise = reject;
+			},
+		);
+		const onAbort = () => {
+			if (settled) return;
+			settled = true;
+			if (timer) clearTimeout(timer);
+			rejectPromise(abortReason(signal!));
+		};
+		if (signal) signal.addEventListener("abort", onAbort, { once: true });
+		timer = setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			if (signal) signal.removeEventListener("abort", onAbort);
+			resolvePromise("timeout");
+		}, timeoutMs);
+		timer.unref?.();
+		const dispose = () => {
+			if (timer) clearTimeout(timer);
+			if (signal) signal.removeEventListener("abort", onAbort);
+		};
+		return {
+			promise,
+			wake: () => {
+				if (settled) return;
+				settled = true;
+				dispose();
+				resolvePromise("activity");
+			},
+			reject: (error) => {
+				if (settled) return;
+				settled = true;
+				dispose();
+				rejectPromise(error);
+			},
+			dispose,
+		};
+	}
+
+	private removeCompletionWaiter(
+		key: string,
+		waiter: CompletionWaiter,
+	): void {
+		if (this.completionWaiters.get(key) === waiter) {
+			this.completionWaiters.delete(key);
+		}
+		waiter.dispose();
+	}
+
 	async interrupt(parent: ParentRef, targetId: string): Promise<void> {
 		return this.runAdmittedOperation(() =>
 			this.interruptAdmitted(parent, targetId),
@@ -1080,6 +1436,12 @@ export class SubagentCoordinator {
 				...(record.sessionFile ? { sessionFile: record.sessionFile } : {}),
 				status: record.active ? catalogStatus(record.active.controlState) : "ready",
 				pendingMessages: record.pendingMessages,
+				unreadUpdates:
+					record.descriptor.parentAgentId === parent.agentId
+						? (catalog.rootUnreadUpdatesByChild.get(record.agentId) ?? 0)
+						: (byId
+								.get(record.descriptor.parentAgentId)
+								?.unreadUpdatesByChild.get(record.agentId) ?? 0),
 			});
 		}
 		children.sort(
@@ -1143,6 +1505,9 @@ export class SubagentCoordinator {
 	async shutdown(): Promise<void> {
 		if (this.shutdownPromise) return this.shutdownPromise;
 		this.draining = true;
+		this.rejectCompletionWaiters(
+			new Error("pi-subagent is shutting down"),
+		);
 		this.shutdownPromise = this.performShutdown();
 		return this.shutdownPromise;
 	}
@@ -1151,6 +1516,7 @@ export class SubagentCoordinator {
 		this.backgroundRuns.close();
 		await this.abortActiveRuns();
 		await this.agentOperations.waitForIdle();
+		await this.completionOperations.waitForIdle();
 		await this.abortActiveRuns();
 		await this.waitForAdmittedOperations();
 		await this.agentOperations.waitForIdle();
@@ -1167,6 +1533,15 @@ export class SubagentCoordinator {
 			await this.disposeActivation(activation).catch(() => {});
 		}
 		await this.agentOperations.waitForIdle();
+		await this.completionOperations.waitForIdle();
+	}
+
+	private rejectCompletionWaiters(error: Error): void {
+		for (const [key, waiter] of this.completionWaiters) {
+			this.completionWaiters.delete(key);
+			waiter.reject(error);
+			waiter.dispose();
+		}
 	}
 
 	private async abortActiveRuns(): Promise<void> {
@@ -1328,6 +1703,41 @@ export class SubagentCoordinator {
 			},
 		});
 
+		const wait = defineTool({
+			name: "wait_agent",
+			label: "Wait Agent",
+			description:
+				"Wait event-driven for unread completion updates from direct mailbox-v2 children. This does not start a child or occupy a background scheduler slot.",
+			parameters: WaitAgentParameters,
+			execute: async (id, params, signal) => {
+				assertBackgroundControlEnabled("wait_agent");
+				const activation = getActivation();
+				const outcome = await this.waitAgent(
+					this.parentForActivation(activation),
+					id,
+					params.timeout_ms,
+					signal,
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: this.formatWaitAgentOutcome(outcome),
+						},
+					],
+					details: {
+						kind: "control",
+						action: "wait",
+						timedOut: outcome.timedOut,
+						completionIds: outcome.updates.map(
+							(update) => update.completionId,
+						),
+						unreadUpdates: outcome.unreadUpdates,
+					} satisfies ControlDetails,
+				};
+			},
+		});
+
 		const interrupt = defineTool({
 			name: "interrupt_agent",
 			label: "Interrupt Agent",
@@ -1349,7 +1759,7 @@ export class SubagentCoordinator {
 			name: "list_agents",
 			label: "List Agents",
 			description:
-				"List direct continuable children or all descendants as running, idle, or ready (persisted and resumable).",
+				"List direct continuable children or all descendants as running, idle, or ready, with separate mailbox task and completion counts.",
 			parameters: ListAgentsParameters,
 			execute: async (_id, params) => {
 				assertBackgroundControlEnabled("list_agents");
@@ -1381,7 +1791,7 @@ export class SubagentCoordinator {
 			},
 		});
 
-		return [spawn, fork, send, followup, interrupt, list, report];
+		return [spawn, fork, send, followup, wait, interrupt, list, report];
 	}
 
 	outcomeToolResult(outcome: DelegationOutcome): AgentToolResult<DelegationDetails> {
@@ -1417,11 +1827,38 @@ export class SubagentCoordinator {
 					scope === "descendants" ? ` parent=${entry.parentAgentId} depth=${entry.depth}` : "";
 				const mailbox =
 					entry.descriptor.runtime.backgroundProtocol === "mailbox-v2"
-						? ` pending=${entry.pendingMessages}`
+						? ` pending=${entry.pendingMessages} updates=${entry.unreadUpdates}`
 						: "";
 				return `${entry.agentId} [${entry.status}]${mailbox}${location} — ${entry.descriptor.label} (${entry.descriptor.agent.name})`;
 			})
 			.join("\n");
+	}
+
+	formatWaitAgentOutcome(outcome: WaitAgentOutcome): string {
+		if (outcome.timedOut) {
+			return `wait_agent timed out after ${outcome.timeoutMs}ms with no completion updates`;
+		}
+		const updates = outcome.updates.map((update) => {
+			const output = update.output.trim() || "(no output)";
+			const truncation = update.outputTruncated
+				? `\n[Completion output truncated${
+						update.omittedBytes !== undefined
+							? `; ${update.omittedBytes} bytes omitted`
+							: ""
+					}.]`
+				: "";
+			return [
+				`completion ${update.completionId}`,
+				`child=${update.childAgentId} turn=${update.turnId} stop=${update.stopReason}`,
+				`${output}${truncation}`,
+			].join("\n");
+		});
+		if (outcome.unreadUpdates > 0) {
+			updates.push(
+				`${outcome.unreadUpdates} additional completion update${outcome.unreadUpdates === 1 ? "" : "s"} remain unread`,
+			);
+		}
+		return updates.join("\n\n");
 	}
 
 	private resolveModel(parent: ParentRef, agent: AgentDefinition): Model<any> {
@@ -1588,7 +2025,10 @@ export class SubagentCoordinator {
 					}
 					if (
 						descriptor.runtime.backgroundProtocol !== "mailbox-v2"
-						&& tool === "followup_task"
+						&& (
+							tool === "followup_task"
+							|| tool === "wait_agent"
+						)
 					) {
 						return false;
 					}
@@ -1934,10 +2374,55 @@ export class SubagentCoordinator {
 		if (result.stopReason !== "completed") {
 			activation.runtime.session.clearQueue();
 		}
-		if (activation.startedTurnIds.delete(result.turnId)) {
+		const turnStarted = activation.startedTurnIds.delete(result.turnId);
+		if (turnStarted) {
 			this.emitTurnEnd(activation, result);
 		}
 		activation.pendingSettlement = result;
+		if (
+			turnStarted
+			&& activation.published
+			&& activation.descriptor.mode === "continuable"
+			&& activation.descriptor.runtime.backgroundProtocol === "mailbox-v2"
+		) {
+			try {
+				appendCompletionUpdate(activation.parent.sessionManager, {
+					parentAgentId: activation.descriptor.parentAgentId,
+					childAgentId: activation.agentId,
+					result,
+				});
+			} catch (error) {
+				activation.lastError = errorText(error);
+				let durableFallback = false;
+				try {
+					appendUndeliveredCompletion(
+						activation.runtime.session.sessionManager,
+						{
+							parentAgentId:
+								activation.descriptor.parentAgentId,
+							childAgentId: activation.agentId,
+							result,
+							error: activation.lastError,
+						},
+					);
+					durableFallback = true;
+				} catch {
+					// The explicit event below remains the final observable path
+					// when both parent delivery and child fallback persistence fail.
+				}
+				this.pi.events.emit("pi-subagent:completion-error", {
+					runId: activation.runId,
+					turnId: result.turnId,
+					agentId: activation.agentId,
+					parentAgentId: activation.descriptor.parentAgentId,
+					error: activation.lastError,
+					durableFallback,
+				});
+			}
+			this.completionWaiters
+				.get(completionWaiterKey(activation.parent))
+				?.wake();
+		}
 		this.emitUpdate(activation, result);
 		if (activation.descriptor.mode === "one-shot") {
 			this.emitEnd(activation, result);
@@ -1963,7 +2448,11 @@ export class SubagentCoordinator {
 		if (!result || activation.ownedChildren.size > 0) return;
 		activation.finalizing = true;
 		activation.finalizePromise = (async () => {
-			if (!activation.suppressSettlement && !this.draining) {
+			if (
+				activation.descriptor.runtime.backgroundProtocol !== "mailbox-v2"
+				&& !activation.suppressSettlement
+				&& !this.draining
+			) {
 				await this.deliverSettlement(activation, result).catch((error) => {
 					activation.lastError = errorText(error);
 				});
@@ -1980,19 +2469,7 @@ export class SubagentCoordinator {
 		const closing = truncated.text.trim()
 			? `Its closing message:\n\n${truncated.text}`
 			: "It left no closing message.";
-		let continuation =
-			"and will do no further work unless you send it more.";
-		if (activation.descriptor.runtime.backgroundProtocol === "mailbox-v2") {
-			const pending = readMailbox(
-				activation.runtime.session.sessionManager.getEntries(),
-				mailboxOwner(activation.descriptor),
-			).pending.length;
-			continuation =
-				pending > 0
-					? `and has ${pending} pending mailbox message${pending === 1 ? "" : "s"}; call followup_task to start its next turn.`
-					: "and will do no further work until you enqueue with send_message and then call followup_task.";
-		}
-		const content = `Background subagent ${activation.agentId} ${stopReasonHeadline(result.stopReason)} ${continuation}\n\n${closing}${
+		const content = `Background subagent ${activation.agentId} ${stopReasonHeadline(result.stopReason)} and will do no further work unless you send it more.\n\n${closing}${
 			truncated.truncated ? `\n\n[Closing message truncated; ${truncated.omittedBytes} bytes omitted.]` : ""
 		}`;
 		await activation.parent.deliver(
@@ -2070,6 +2547,12 @@ export class SubagentCoordinator {
 						sessionFile ? ` Full output: ${sessionFile}` : " Full output remains in the active child session."
 					}]`
 				: truncated.text,
+			...(truncated.truncated
+				? {
+						outputTruncated: true,
+						omittedBytes: truncated.omittedBytes,
+					}
+				: {}),
 			stopReason,
 			usage: structuredClone(activation.usage),
 		};
@@ -2088,6 +2571,15 @@ export class SubagentCoordinator {
 				text: formatToolArguments(event.toolName, event.args as Record<string, unknown>),
 			});
 			this.emitUpdate(activation);
+			return;
+		}
+		if (event.type === "agent_end") {
+			void this.releaseWaitAgentDeliveries(
+				this.parentForActivation(activation),
+				"parent agent turn ended without a durable wait_agent result",
+			).catch((error) => {
+				activation.lastError = errorText(error);
+			});
 			return;
 		}
 		if (event.type !== "message_end") return;
@@ -2250,6 +2742,18 @@ export class SubagentCoordinator {
 	private async disposeActivation(activation: Activation): Promise<void> {
 		if (activation.disposed) return;
 		activation.disposed = true;
+		const waiterKey = completionWaiterKey(
+			this.parentForActivation(activation),
+		);
+		const waiter = this.completionWaiters.get(waiterKey);
+		if (waiter) {
+			this.removeCompletionWaiter(waiterKey, waiter);
+			waiter.reject(
+				new Error(
+					`parent subagent ${activation.agentId} was disposed while wait_agent was pending`,
+				),
+			);
+		}
 		activation.persistenceGate.reject(
 			new Error(
 				`subagent ${activation.agentId} ended before its session became durable`,
@@ -2319,12 +2823,36 @@ export class SubagentCoordinator {
 				descriptor: item.descriptor,
 				sessionFile: item.sessionFile,
 				pendingMessages: item.pendingMessages,
+				unreadUpdatesByChild: new Map(item.unreadUpdatesByChild),
 			});
 		}
 		const activeSessionIds = new Set(
 			[...this.active.values()].map((activation) => activation.runtime.session.sessionId),
 		);
 		const activeDiagnostics: CatalogEntry[] = [];
+		const rootCompletions = foldCompletionMailbox(
+			parent.sessionManager.getEntries(),
+			{ parentAgentId: parent.agentId },
+		);
+		const rootUnreadUpdatesByChild =
+			rootCompletions.kind === "valid"
+				? unreadCompletionCounts(rootCompletions.snapshot)
+				: new Map<string, number>();
+		if (rootCompletions.kind === "corrupt") {
+			const parentFile = parent.sessionManager.getSessionFile();
+			activeDiagnostics.push({
+				kind: "diagnostic",
+				piSessionId: parent.sessionManager.getSessionId(),
+				reason: "corrupt",
+				...(parentFile
+					? {
+							sessionFile: parentFile,
+							parentSessionFile: parentFile,
+						}
+					: {}),
+				message: `corrupt completion mailbox: ${rootCompletions.message}`,
+			});
+		}
 		for (const activation of this.active.values()) {
 			if (activation.descriptor.cwd !== parent.cwd) continue;
 			let pendingMessages = 0;
@@ -2351,6 +2879,25 @@ export class SubagentCoordinator {
 					continue;
 				}
 			}
+			const completions = foldCompletionMailbox(
+				activation.runtime.session.sessionManager.getEntries(),
+				{ parentAgentId: activation.agentId },
+			);
+			if (completions.kind === "corrupt") {
+				activeDiagnostics.push({
+					kind: "diagnostic",
+					piSessionId: activation.runtime.session.sessionId,
+					reason: "corrupt",
+					...(activation.runtime.session.sessionFile
+						? { sessionFile: activation.runtime.session.sessionFile }
+						: {}),
+					...(activation.descriptor.parentSessionFile
+						? { parentSessionFile: activation.descriptor.parentSessionFile }
+						: {}),
+					message: `corrupt completion mailbox: ${completions.message}`,
+				});
+				continue;
+			}
 			records.set(activation.agentId, {
 				agentId: activation.agentId,
 				descriptor: activation.descriptor,
@@ -2359,6 +2906,9 @@ export class SubagentCoordinator {
 					: {}),
 				active: activation,
 				pendingMessages,
+				unreadUpdatesByChild: unreadCompletionCounts(
+					completions.snapshot,
+				),
 			});
 		}
 		return {
@@ -2369,6 +2919,7 @@ export class SubagentCoordinator {
 				),
 				...activeDiagnostics,
 			],
+			rootUnreadUpdatesByChild,
 		};
 	}
 

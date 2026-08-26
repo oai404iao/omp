@@ -109,6 +109,24 @@ export const FollowupTaskParameters = Type.Object(
 	{ additionalProperties: false },
 );
 
+export const DEFAULT_WAIT_AGENT_TIMEOUT_MS = 30_000;
+export const MAX_WAIT_AGENT_TIMEOUT_MS = 120_000;
+
+export const WaitAgentParameters = Type.Object(
+	{
+		timeout_ms: Type.Optional(
+			Type.Integer({
+				description:
+					"Maximum event-driven wait in milliseconds before returning a timeout",
+				minimum: 0,
+				maximum: MAX_WAIT_AGENT_TIMEOUT_MS,
+				default: DEFAULT_WAIT_AGENT_TIMEOUT_MS,
+			}),
+		),
+	},
+	{ additionalProperties: false },
+);
+
 export const InterruptParameters = Type.Object(
 	{
 		agent_id: Type.String({
