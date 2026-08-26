@@ -16,6 +16,7 @@ export interface SubagentSettings {
 	maxDepth: number;
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;
+	maxConcurrentBackgroundRuns: number;
 	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
 	openAIIdentity: boolean;
@@ -53,6 +54,7 @@ export interface SubagentRuntimeSnapshot {
 	maxDepth: number;
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;
+	maxConcurrentBackgroundRuns: number;
 	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
 	openAIIdentity: boolean;
@@ -87,6 +89,7 @@ export interface SubagentUsage extends Usage {
 
 export interface SubagentRunResult {
 	agentId: string;
+	turnId: string;
 	piSessionId?: string;
 	sessionFile?: string;
 	output: string;
@@ -103,6 +106,7 @@ export interface TraceItem {
 export interface DelegationDetails {
 	kind: "delegation";
 	agentId: string;
+	turnId?: string;
 	piSessionId?: string;
 	provider: SubagentProviderName;
 	mode: SubagentMode;

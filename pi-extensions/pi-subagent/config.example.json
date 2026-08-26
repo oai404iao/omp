@@ -4,6 +4,7 @@
   "maxDepth": 3,
   "enableRunInBackground": true,
   "defaultBackground": true,
+  "maxConcurrentBackgroundRuns": 4,
   "reportDelivery": "wakeup",
   "inheritExtensions": false,
   "openAIIdentity": false,

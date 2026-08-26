@@ -307,6 +307,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 					: "foreground-first";
 			const sections = [
 				`Mode: ${schedulingMode}`,
+				`Background concurrency: ${sessionSettings.maxConcurrentBackgroundRuns}`,
 				`OpenAI identity inline: ${sessionSettings.openAIIdentity ? "enabled" : "disabled"}`,
 				agentSync?.diagnostics.length
 					? "Bundled templates: initialization skipped (see diagnostics)"
@@ -324,6 +325,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx) => {
 		const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
+		coordinator.configureBackgroundRuns(
+			loaded.settings.maxConcurrentBackgroundRuns,
+		);
 		sessionSettings = loaded.settings;
 		agentSync = coordinator.synchronizeBundledAgents();
 		sessionDiscovery = coordinator.discoverAvailableAgents(

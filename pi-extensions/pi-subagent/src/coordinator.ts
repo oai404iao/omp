@@ -22,6 +22,19 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { syncBundledAgents, type AgentSyncResult } from "./agent-sync.ts";
 import {
+	catalogStatus,
+	closeAgent,
+	createAgentControlState,
+	currentAgentTurnId,
+	delegationStatus,
+	finishAgentTurn,
+	interruptAgentTurn,
+	queueAgentTurn,
+	setAgentResidency,
+	startAgentTurn,
+	type AgentControlState,
+} from "./agent-state.ts";
+import {
 	discoverAgents,
 	formatAgentCatalog,
 	type AgentDiscoveryResult,
@@ -51,6 +64,11 @@ import {
 	ProviderRegistry,
 	SpawnProvider,
 } from "./providers.ts";
+import {
+	AgentOperationQueue,
+	BackgroundRunLimiter,
+	type BackgroundRunPermit,
+} from "./scheduler.ts";
 import { buildToolCeiling, resolveToolPolicy } from "./tool-policy.ts";
 import {
 	snapshotAgent,
@@ -132,12 +150,14 @@ interface Activation {
 	runtime: AgentSessionRuntime;
 	seedMessageCount: number;
 	epochMessageStart: number;
-	status: DelegationDetails["status"];
+	controlState: AgentControlState;
 	trace: TraceItem[];
 	streamedText: string;
 	usage: ReturnType<typeof emptyUsage>;
+	startedTurnIds: Set<string>;
 	ownedChildren: Set<string>;
 	currentRun?: Promise<SubagentRunResult>;
+	currentMessageGate?: Promise<void>;
 	pendingSettlement?: SubagentRunResult;
 	unsubscribe?: () => void;
 	onUpdate?: (details: DelegationDetails) => void;
@@ -145,6 +165,8 @@ interface Activation {
 	suppressSettlement: boolean;
 	finalizing: boolean;
 	finalizePromise?: Promise<void>;
+	holdsBackgroundSlot: boolean;
+	turnAbortController?: AbortController;
 	disposed: boolean;
 	lastError?: string;
 }
@@ -155,6 +177,17 @@ interface CreateActivationOptions {
 	prepared: PreparedChildSession;
 	isNew: boolean;
 	onUpdate?: (details: DelegationDetails) => void;
+}
+
+interface StartPromptOptions {
+	detachAtAcceptance: boolean;
+	waitForCapacity: boolean;
+}
+
+interface PendingPromptStart {
+	activation: Activation;
+	accepted: Promise<void>;
+	coldPrepared?: PreparedChildSession;
 }
 
 interface CatalogRecord {
@@ -189,6 +222,36 @@ function runtimeFromRegistry(registry: ModelRegistry): ModelRuntime {
 
 function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function abortReason(signal: AbortSignal): Error {
+	return signal.reason instanceof Error
+		? signal.reason
+		: new Error(signal.reason ? String(signal.reason) : "operation aborted");
+}
+
+function waitForPromise<T>(
+	promise: Promise<T>,
+	signal?: AbortSignal,
+): Promise<T> {
+	if (!signal) return promise;
+	if (signal.aborted) return Promise.reject(abortReason(signal));
+	return new Promise<T>((resolvePromise, rejectPromise) => {
+		const abort = () => {
+			rejectPromise(abortReason(signal));
+		};
+		signal.addEventListener("abort", abort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", abort);
+				resolvePromise(value);
+			},
+			(error) => {
+				signal.removeEventListener("abort", abort);
+				rejectPromise(error);
+			},
+		);
+	});
 }
 
 /**
@@ -245,6 +308,7 @@ function makeRuntimeSettings(descriptor: SubagentDescriptor): SubagentSettings {
 		maxDepth: descriptor.runtime.maxDepth,
 		enableRunInBackground: descriptor.runtime.enableRunInBackground,
 		defaultBackground: descriptor.runtime.defaultBackground,
+		maxConcurrentBackgroundRuns: descriptor.runtime.maxConcurrentBackgroundRuns,
 		reportDelivery: descriptor.runtime.reportDelivery,
 		inheritExtensions: descriptor.runtime.inheritExtensions,
 		openAIIdentity: descriptor.runtime.openAIIdentity,
@@ -283,8 +347,12 @@ async function loadCodexIdentityInlineExtension(
 export class SubagentCoordinator {
 	private readonly providers = new ProviderRegistry();
 	private readonly active = new Map<string, Activation>();
+	private readonly agentOperations = new AgentOperationQueue();
+	private readonly backgroundRuns = new BackgroundRunLimiter();
+	private readonly admittedOperations = new Set<Promise<unknown>>();
 	private agentSyncResult: AgentSyncResult | undefined;
 	private draining = false;
+	private shutdownPromise: Promise<void> | undefined;
 
 	constructor(
 		private readonly pi: ExtensionAPI,
@@ -307,6 +375,10 @@ export class SubagentCoordinator {
 
 	getUserAgentsDir(): string {
 		return join(this.agentDir, "agents");
+	}
+
+	configureBackgroundRuns(limit: number): void {
+		this.backgroundRuns.configure(limit);
 	}
 
 	discoverAvailableAgents(
@@ -371,6 +443,28 @@ export class SubagentCoordinator {
 		onUpdate?: (details: DelegationDetails) => void,
 		agentDiscovery?: AgentDiscoveryResult,
 	): Promise<DelegationOutcome> {
+		return this.runAdmittedOperation(() =>
+			this.delegateAdmitted(
+				parent,
+				providerName,
+				input,
+				settings,
+				signal,
+				onUpdate,
+				agentDiscovery,
+			),
+		);
+	}
+
+	private async delegateAdmitted(
+		parent: ParentRef,
+		providerName: SubagentProviderName,
+		input: DelegationInput,
+		settings: SubagentSettings,
+		signal?: AbortSignal,
+		onUpdate?: (details: DelegationDetails) => void,
+		agentDiscovery?: AgentDiscoveryResult,
+	): Promise<DelegationOutcome> {
 		if (this.draining) throw new Error("pi-subagent is shutting down; no new delegation was accepted");
 		const provider = this.providers.get(providerName);
 		if (
@@ -426,6 +520,10 @@ export class SubagentCoordinator {
 		const model = this.resolveModel(parent, agent);
 		const thinkingLevel = agent.thinking ?? parent.thinkingLevel;
 		const prepared = await provider.prepare(parent, mode);
+		if (this.draining) {
+			await prepared.rollback();
+			throw new Error("pi-subagent is shutting down; no new delegation was accepted");
+		}
 		parent.agentId = ensureAgentId(parent.sessionManager);
 		const openAIIdentityEnabled =
 			settings.openAIIdentity && isOpenAIResponsesModel(model);
@@ -451,6 +549,7 @@ export class SubagentCoordinator {
 				maxDepth: settings.maxDepth,
 				enableRunInBackground: settings.enableRunInBackground,
 				defaultBackground: settings.defaultBackground,
+				maxConcurrentBackgroundRuns: settings.maxConcurrentBackgroundRuns,
 				reportDelivery: settings.reportDelivery,
 				inheritExtensions: settings.inheritExtensions,
 				openAIIdentity: openAIIdentityEnabled,
@@ -482,10 +581,16 @@ export class SubagentCoordinator {
 				isNew: true,
 				onUpdate,
 			});
+			if (this.draining) {
+				throw new Error("pi-subagent is shutting down; no new delegation was accepted");
+			}
 			if (mode === "continuable" && parent.activation) {
 				parent.activation.ownedChildren.add(activation.agentId);
 			}
-			const started = this.startPrompt(activation, input.prompt, signal, mode === "continuable");
+			const started = this.startPrompt(activation, input.prompt, signal, {
+				detachAtAcceptance: mode === "continuable",
+				waitForCapacity: !parent.activation?.holdsBackgroundSlot,
+			});
 			await started.accepted;
 			if (mode === "continuable") {
 				activation.onUpdate = undefined;
@@ -509,13 +614,57 @@ export class SubagentCoordinator {
 	}
 
 	async sendMessage(parent: ParentRef, childId: string, message: string, signal?: AbortSignal): Promise<void> {
+		return this.runAdmittedOperation(() =>
+			this.sendMessageAdmitted(parent, childId, message, signal),
+		);
+	}
+
+	private async sendMessageAdmitted(
+		parent: ParentRef,
+		childId: string,
+		message: string,
+		signal?: AbortSignal,
+	): Promise<void> {
 		if (this.draining) throw new Error("pi-subagent is shutting down; message was not delivered");
+		const pending = await this.agentOperations.run(childId, () =>
+			this.sendMessageSerialized(parent, childId, message, signal),
+		);
+		if (!pending) return;
+		try {
+			await pending.accepted;
+		} catch (error) {
+			if (pending.coldPrepared && !pending.activation.published) {
+				await this.agentOperations.run(childId, async () => {
+					if (this.active.get(childId) !== pending.activation) return;
+					pending.activation.suppressSettlement = true;
+					await this.rollbackActivation(
+						pending.activation,
+						pending.coldPrepared!,
+					);
+				});
+			}
+			throw error;
+		}
+	}
+
+	private async sendMessageSerialized(
+		parent: ParentRef,
+		childId: string,
+		message: string,
+		signal?: AbortSignal,
+	): Promise<PendingPromptStart | undefined> {
+		if (this.draining) {
+			throw new Error("pi-subagent is shutting down; message was not delivered");
+		}
 		let activation = this.active.get(childId);
 		let coldPrepared: PreparedChildSession | undefined;
-		if (activation?.finalizing && activation.finalizePromise) {
-			await activation.finalizePromise;
-			activation = undefined;
+		if (activation?.pendingSettlement && !activation.currentRun) {
+			await this.finalizeContinuableLocked(activation);
+			if (activation.disposed || this.active.get(childId) !== activation) {
+				activation = undefined;
+			}
 		}
+		if (activation?.disposed) activation = undefined;
 
 		if (!activation) {
 			const located = await this.findPersistedChild(parent, childId);
@@ -548,13 +697,37 @@ export class SubagentCoordinator {
 		const session = activation.runtime.session;
 		if (activation.currentRun || session.isStreaming) {
 			if (signal?.aborted) throw signal.reason ?? new Error("message delivery aborted");
+			if (activation.controlState.turn.state === "queued") {
+				if (!activation.currentMessageGate) {
+					throw new Error(
+						`subagent ${activation.agentId} is queued but has no message gate`,
+					);
+				}
+				return {
+					activation,
+					accepted: waitForPromise(
+						activation.currentMessageGate,
+						signal,
+					).then(() => {
+						if (signal?.aborted) throw abortReason(signal);
+						return session.followUp(message);
+					}),
+				};
+			}
 			await session.followUp(message);
 			return;
 		}
 
 		try {
-			const started = this.startPrompt(activation, message, signal, true);
-			await started.accepted;
+			const started = this.startPrompt(activation, message, signal, {
+				detachAtAcceptance: true,
+				waitForCapacity: !parent.activation?.holdsBackgroundSlot,
+			});
+			return {
+				activation,
+				accepted: started.accepted,
+				...(coldPrepared ? { coldPrepared } : {}),
+			};
 		} catch (error) {
 			if (coldPrepared && !activation.published) {
 				activation.suppressSettlement = true;
@@ -565,18 +738,37 @@ export class SubagentCoordinator {
 	}
 
 	async interrupt(parent: ParentRef, targetId: string): Promise<void> {
-		const target = this.active.get(targetId);
-		if (!target) return;
-		if (!(await this.isDescendantOf(parent, target.descriptor))) {
-			throw new Error(`subagent ${targetId} is not a live descendant of ${parent.agentId}`);
-		}
-		target.status = "failed";
-		void target.runtime.session.abort().catch((error) => {
-			target.lastError = errorText(error);
+		return this.runAdmittedOperation(() =>
+			this.interruptAdmitted(parent, targetId),
+		);
+	}
+
+	private async interruptAdmitted(parent: ParentRef, targetId: string): Promise<void> {
+		await this.agentOperations.run(targetId, async () => {
+			const target = this.active.get(targetId);
+			if (!target) return;
+			if (!(await this.isDescendantOf(parent, target.descriptor))) {
+				throw new Error(`subagent ${targetId} is not a live descendant of ${parent.agentId}`);
+			}
+			interruptAgentTurn(target.controlState);
+			this.emitUpdate(target);
+			target.turnAbortController?.abort(
+				new Error(`subagent ${targetId} was interrupted`),
+			);
+			void target.runtime.session.abort().catch((error) => {
+				target.lastError = errorText(error);
+			});
 		});
 	}
 
 	async list(parent: ParentRef, scope: "children" | "descendants"): Promise<CatalogEntry[]> {
+		return this.runAdmittedOperation(() => this.listAdmitted(parent, scope));
+	}
+
+	private async listAdmitted(
+		parent: ParentRef,
+		scope: "children" | "descendants",
+	): Promise<CatalogEntry[]> {
 		const catalog = await this.catalogRecords(parent);
 		const records = catalog.records;
 		const byId = new Map(records.map((record) => [record.agentId, record]));
@@ -592,11 +784,7 @@ export class SubagentCoordinator {
 				depth: distance,
 				descriptor: record.descriptor,
 				...(record.sessionFile ? { sessionFile: record.sessionFile } : {}),
-				status: record.active
-					? record.active.currentRun || record.active.runtime.session.isStreaming
-						? "running"
-						: "idle"
-					: "ready",
+				status: record.active ? catalogStatus(record.active.controlState) : "ready",
 			});
 		}
 		children.sort(
@@ -614,6 +802,10 @@ export class SubagentCoordinator {
 	}
 
 	async report(child: Activation, output: string): Promise<void> {
+		return this.runAdmittedOperation(() => this.reportAdmitted(child, output));
+	}
+
+	private async reportAdmitted(child: Activation, output: string): Promise<void> {
 		if (child.descriptor.mode !== "continuable") {
 			throw new Error("report is available only to continuable subagents");
 		}
@@ -634,19 +826,69 @@ export class SubagentCoordinator {
 		);
 	}
 
+	private runAdmittedOperation<T>(operation: () => Promise<T>): Promise<T> {
+		if (this.draining) {
+			return Promise.reject(new Error("pi-subagent is shutting down"));
+		}
+		const promise = operation();
+		this.admittedOperations.add(promise);
+		const remove = () => {
+			this.admittedOperations.delete(promise);
+		};
+		void promise.then(remove, remove);
+		return promise;
+	}
+
+	private async waitForAdmittedOperations(): Promise<void> {
+		while (this.admittedOperations.size > 0) {
+			await Promise.allSettled([...this.admittedOperations]);
+		}
+	}
+
 	async shutdown(): Promise<void> {
-		if (this.draining) return;
+		if (this.shutdownPromise) return this.shutdownPromise;
 		this.draining = true;
+		this.shutdownPromise = this.performShutdown();
+		return this.shutdownPromise;
+	}
+
+	private async performShutdown(): Promise<void> {
+		this.backgroundRuns.close();
+		await this.abortActiveRuns();
+		await this.agentOperations.waitForIdle();
+		await this.abortActiveRuns();
+		await this.waitForAdmittedOperations();
+		await this.agentOperations.waitForIdle();
+		await this.abortActiveRuns();
 		const activations = [...this.active.values()];
-		for (const activation of activations) activation.suppressSettlement = true;
 		await Promise.allSettled(
-			activations.map(async (activation) => {
-				if (!activation.runtime.session.isIdle) await activation.runtime.session.abort();
-			}),
+			activations
+				.map((activation) => activation.currentRun)
+				.filter(
+					(run): run is Promise<SubagentRunResult> => run !== undefined,
+				),
 		);
 		for (const activation of activations.sort((left, right) => right.descriptor.depth - left.descriptor.depth)) {
 			await this.disposeActivation(activation).catch(() => {});
 		}
+		await this.agentOperations.waitForIdle();
+	}
+
+	private async abortActiveRuns(): Promise<void> {
+		const activations = [...this.active.values()];
+		for (const activation of activations) {
+			activation.suppressSettlement = true;
+			activation.turnAbortController?.abort(
+				new Error("pi-subagent is shutting down"),
+			);
+		}
+		await Promise.allSettled(
+			activations.map(async (activation) => {
+				if (!activation.runtime.session.isIdle) {
+					await activation.runtime.session.abort();
+				}
+			}),
+		);
 	}
 
 	createChildToolDefinitions(
@@ -1040,17 +1282,23 @@ export class SubagentCoordinator {
 				runtime,
 				seedMessageCount: options.prepared.seedMessageCount,
 				epochMessageStart: runtime.session.messages.length,
-				status: "starting",
+				controlState: createAgentControlState(),
 				trace: [],
 				streamedText: "",
 				usage: emptyUsage(),
+				startedTurnIds: new Set(),
 				ownedChildren: new Set(),
 				onUpdate: options.onUpdate,
 				published: false,
 				suppressSettlement: false,
 				finalizing: false,
+				holdsBackgroundSlot: false,
 				disposed: false,
 			};
+			const existing = this.active.get(activation.agentId);
+			if (existing && !existing.disposed) {
+				throw new Error(`subagent ${activation.agentId} already has a resident runtime`);
+			}
 			activation.unsubscribe = runtime.session.subscribe((event) => this.observe(activation!, event));
 			this.active.set(activation.agentId, activation);
 			return activation;
@@ -1060,16 +1308,32 @@ export class SubagentCoordinator {
 		}
 	}
 
+	private async acquireBackgroundRun(
+		activation: Activation,
+		signal: AbortSignal | undefined,
+		waitForCapacity: boolean,
+	): Promise<BackgroundRunPermit | undefined> {
+		if (activation.descriptor.mode !== "continuable") return undefined;
+		const permit = await this.backgroundRuns.acquire({
+			...(signal ? { signal } : {}),
+			waitForCapacity,
+		});
+		activation.holdsBackgroundSlot = true;
+		return permit;
+	}
+
 	private startPrompt(
 		activation: Activation,
 		prompt: string,
 		signal: AbortSignal | undefined,
-		detachAtAcceptance: boolean,
+		options: StartPromptOptions,
 	): { accepted: Promise<void>; result: Promise<SubagentRunResult> } {
 		if (activation.currentRun) throw new Error(`subagent ${activation.agentId} is already running`);
 		if (signal?.aborted) throw signal.reason ?? new Error("subagent start aborted");
 		activation.pendingSettlement = undefined;
-		activation.status = "running";
+		this.resetTurnCapture(activation);
+		const turnId = uuidv7();
+		queueAgentTurn(activation.controlState, turnId);
 		this.emitUpdate(activation);
 
 		let resolveAccepted!: () => void;
@@ -1079,23 +1343,47 @@ export class SubagentCoordinator {
 			resolveAccepted = resolvePromise;
 			rejectAccepted = rejectPromise;
 		});
+		activation.currentMessageGate = accepted;
+		const clearCurrentMessageGate = () => {
+			if (activation.currentMessageGate === accepted) {
+				activation.currentMessageGate = undefined;
+			}
+		};
+		void accepted.then(clearCurrentMessageGate, clearCurrentMessageGate);
+		const turnAbortController = new AbortController();
+		activation.turnAbortController = turnAbortController;
 		const abort = () => {
+			turnAbortController.abort(
+				signal?.reason ?? new Error(`subagent turn ${turnId} was aborted`),
+			);
 			void activation.runtime.session.abort().catch(() => {});
 		};
 		if (signal) signal.addEventListener("abort", abort, { once: true });
 
 		const core = (async (): Promise<SubagentRunResult> => {
+			let permit: BackgroundRunPermit | undefined;
 			try {
+				permit = await this.acquireBackgroundRun(
+					activation,
+					turnAbortController.signal,
+					options.waitForCapacity,
+				);
+				startAgentTurn(activation.controlState, turnId);
+				activation.startedTurnIds.add(turnId);
+				this.emitTurnStart(activation, turnId);
+				this.emitUpdate(activation);
 				await activation.runtime.session.prompt(prompt, {
 					preflightResult: (success) => {
 						if (acceptedSettled) return;
 						acceptedSettled = true;
 						if (success) {
 							this.publish(activation);
-							if (detachAtAcceptance && signal) signal.removeEventListener("abort", abort);
+							if (options.detachAtAcceptance && signal) signal.removeEventListener("abort", abort);
 							resolveAccepted();
 						} else {
-							activation.suppressSettlement = true;
+							if (!activation.published) {
+								activation.suppressSettlement = true;
+							}
 							rejectAccepted(new Error("subagent prompt was rejected before acceptance"));
 						}
 					},
@@ -1103,23 +1391,32 @@ export class SubagentCoordinator {
 				if (!acceptedSettled) {
 					acceptedSettled = true;
 					this.publish(activation);
-					if (detachAtAcceptance && signal) signal.removeEventListener("abort", abort);
+					if (options.detachAtAcceptance && signal) signal.removeEventListener("abort", abort);
 					resolveAccepted();
 				}
-				return this.collectResult(activation, "completed");
+				return this.collectResult(activation, turnId, "completed");
 			} catch (error) {
 				activation.lastError = errorText(error);
 				if (!acceptedSettled) {
 					acceptedSettled = true;
-					activation.suppressSettlement = true;
+					if (!activation.published) {
+						activation.suppressSettlement = true;
+					}
 					rejectAccepted(error instanceof Error ? error : new Error(String(error)));
 				}
-				const fallback = signal?.aborted ? "aborted" : "error";
-				const result = this.collectResult(activation, fallback);
+				const fallback = turnAbortController.signal.aborted ? "aborted" : "error";
+				const result = this.collectResult(activation, turnId, fallback);
 				if (!result.output) result.output = activation.lastError;
 				return result;
 			} finally {
 				if (signal) signal.removeEventListener("abort", abort);
+				if (activation.turnAbortController === turnAbortController) {
+					activation.turnAbortController = undefined;
+				}
+				if (permit) {
+					activation.holdsBackgroundSlot = false;
+					permit.release();
+				}
 			}
 		})();
 
@@ -1142,23 +1439,68 @@ export class SubagentCoordinator {
 	): void {
 		if (activation.currentRun || activation.disposed) return;
 		activation.pendingSettlement = undefined;
-		activation.status = "running";
-		const core = Promise.resolve()
-			.then(() =>
-				activation.runtime.session.sendCustomMessage(
+		this.resetTurnCapture(activation);
+		const turnId = uuidv7();
+		queueAgentTurn(activation.controlState, turnId);
+		this.emitUpdate(activation);
+		const turnAbortController = new AbortController();
+		activation.turnAbortController = turnAbortController;
+		let resolveMessageGate!: () => void;
+		let rejectMessageGate!: (error: Error) => void;
+		let messageGateSettled = false;
+		const messageGate = new Promise<void>((resolvePromise, rejectPromise) => {
+			resolveMessageGate = resolvePromise;
+			rejectMessageGate = rejectPromise;
+		});
+		activation.currentMessageGate = messageGate;
+		void messageGate.catch(() => {});
+		const core = (async (): Promise<SubagentRunResult> => {
+			let permit: BackgroundRunPermit | undefined;
+			try {
+				permit = await this.acquireBackgroundRun(
+					activation,
+					turnAbortController.signal,
+					true,
+				);
+				startAgentTurn(activation.controlState, turnId);
+				activation.startedTurnIds.add(turnId);
+				this.emitTurnStart(activation, turnId);
+				this.emitUpdate(activation);
+				messageGateSettled = true;
+				resolveMessageGate();
+				await activation.runtime.session.sendCustomMessage(
 					{ customType, content, display: true, details },
 					{ triggerTurn: true, deliverAs: "followUp" },
-				),
-			)
-			.then(
-				() => this.collectResult(activation, "completed"),
-				(error) => {
-					activation.lastError = errorText(error);
-					const result = this.collectResult(activation, "error");
-					if (!result.output) result.output = activation.lastError ?? "";
-					return result;
-				},
-			);
+				);
+				return this.collectResult(activation, turnId, "completed");
+			} catch (error) {
+				activation.lastError = errorText(error);
+				if (!messageGateSettled) {
+					messageGateSettled = true;
+					rejectMessageGate(
+						error instanceof Error ? error : new Error(String(error)),
+					);
+				}
+				const result = this.collectResult(
+					activation,
+					turnId,
+					turnAbortController.signal.aborted ? "aborted" : "error",
+				);
+				if (!result.output) result.output = activation.lastError;
+				return result;
+			} finally {
+				if (activation.turnAbortController === turnAbortController) {
+					activation.turnAbortController = undefined;
+				}
+				if (activation.currentMessageGate === messageGate) {
+					activation.currentMessageGate = undefined;
+				}
+				if (permit) {
+					activation.holdsBackgroundSlot = false;
+					permit.release();
+				}
+			}
+		})();
 		let lifecycle!: Promise<SubagentRunResult>;
 		lifecycle = core.then(async (result) => {
 			if (activation.currentRun === lifecycle) activation.currentRun = undefined;
@@ -1170,7 +1512,13 @@ export class SubagentCoordinator {
 	}
 
 	private async runFinished(activation: Activation, result: SubagentRunResult): Promise<void> {
-		activation.status = result.stopReason === "completed" ? "completed" : "failed";
+		finishAgentTurn(activation.controlState, result.turnId, result.stopReason);
+		if (result.stopReason !== "completed") {
+			activation.runtime.session.clearQueue();
+		}
+		if (activation.startedTurnIds.delete(result.turnId)) {
+			this.emitTurnEnd(activation, result);
+		}
 		activation.pendingSettlement = result;
 		this.emitUpdate(activation, result);
 		if (activation.descriptor.mode === "one-shot") {
@@ -1179,7 +1527,6 @@ export class SubagentCoordinator {
 		}
 		if (activation.suppressSettlement || this.draining) return;
 		if (activation.ownedChildren.size > 0) {
-			activation.status = "waiting";
 			this.emitUpdate(activation, result);
 			return;
 		}
@@ -1187,6 +1534,12 @@ export class SubagentCoordinator {
 	}
 
 	private async finalizeContinuable(activation: Activation): Promise<void> {
+		await this.agentOperations.run(activation.agentId, () =>
+			this.finalizeContinuableLocked(activation),
+		);
+	}
+
+	private async finalizeContinuableLocked(activation: Activation): Promise<void> {
 		if (activation.finalizing || activation.disposed || activation.currentRun) return;
 		const result = activation.pendingSettlement;
 		if (!result || activation.ownedChildren.size > 0) return;
@@ -1261,7 +1614,17 @@ export class SubagentCoordinator {
 		};
 	}
 
-	private collectResult(activation: Activation, fallback: SubagentStopReason): SubagentRunResult {
+	private resetTurnCapture(activation: Activation): void {
+		activation.epochMessageStart = activation.runtime.session.messages.length;
+		activation.streamedText = "";
+		activation.usage = emptyUsage();
+	}
+
+	private collectResult(
+		activation: Activation,
+		turnId: string,
+		fallback: SubagentStopReason,
+	): SubagentRunResult {
 		const messages = activation.runtime.session.messages;
 		const output = finalAssistantText(messages, activation.epochMessageStart, activation.streamedText);
 		const stopReason = finalStopReason(messages, activation.epochMessageStart, fallback);
@@ -1269,6 +1632,7 @@ export class SubagentCoordinator {
 		const sessionFile = activation.runtime.session.sessionFile;
 		return {
 			agentId: activation.agentId,
+			turnId,
 			piSessionId: activation.runtime.session.sessionId,
 			...(sessionFile ? { sessionFile } : {}),
 			output: truncated.truncated
@@ -1346,17 +1710,49 @@ export class SubagentCoordinator {
 		});
 	}
 
+	private emitTurnStart(activation: Activation, turnId: string): void {
+		this.pi.events.emit("pi-subagent:turn-start", {
+			runId: activation.runId,
+			turnId,
+			agentId: activation.agentId,
+			piSessionId: activation.runtime.session.sessionId,
+			parentAgentId: activation.descriptor.parentAgentId,
+			provider: activation.descriptor.provider,
+			mode: activation.descriptor.mode,
+		});
+	}
+
+	private emitTurnEnd(activation: Activation, result: SubagentRunResult): void {
+		this.pi.events.emit("pi-subagent:turn-end", {
+			runId: activation.runId,
+			turnId: result.turnId,
+			agentId: activation.agentId,
+			piSessionId: activation.runtime.session.sessionId,
+			parentAgentId: activation.descriptor.parentAgentId,
+			provider: activation.descriptor.provider,
+			mode: activation.descriptor.mode,
+			stopReason: result.stopReason,
+			output: result.output,
+		});
+	}
+
 	private detailsOf(activation: Activation, result?: SubagentRunResult): DelegationDetails {
 		return {
 			kind: "delegation",
 			agentId: activation.agentId,
+			...(currentAgentTurnId(activation.controlState)
+				? { turnId: currentAgentTurnId(activation.controlState) }
+				: {}),
 			piSessionId: activation.runtime.session.sessionId,
 			provider: activation.descriptor.provider,
 			mode: activation.descriptor.mode,
 			agent: activation.descriptor.agent.name,
 			label: activation.descriptor.label,
 			depth: activation.descriptor.depth,
-			status: activation.status,
+			status: delegationStatus(
+				activation.controlState,
+				activation.ownedChildren.size > 0,
+			),
 			...(activation.runtime.session.sessionFile
 				? { sessionFile: activation.runtime.session.sessionFile }
 				: {}),
@@ -1398,6 +1794,8 @@ export class SubagentCoordinator {
 	private async disposeActivation(activation: Activation): Promise<void> {
 		if (activation.disposed) return;
 		activation.disposed = true;
+		setAgentResidency(activation.controlState, "unloaded");
+		if (activation.descriptor.mode === "one-shot") closeAgent(activation.controlState);
 		activation.unsubscribe?.();
 		activation.unsubscribe = undefined;
 		if (!activation.runtime.session.isIdle) await activation.runtime.session.abort().catch(() => {});

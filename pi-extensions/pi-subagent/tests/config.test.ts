@@ -30,6 +30,7 @@ test("global and trusted project settings merge", () => {
 			maxDepth: 5,
 			syncBundledAgents: true,
 			enableRunInBackground: false,
+			maxConcurrentBackgroundRuns: 7,
 			reportDelivery: "quiet",
 			inheritExtensions: true,
 			openAIIdentity: true,
@@ -37,7 +38,11 @@ test("global and trusted project settings merge", () => {
 	);
 	writeFileSync(
 		join(root, "repo", ".pi", "subagent.json"),
-		JSON.stringify({ maxDepth: 2, agentScope: "both" }),
+		JSON.stringify({
+			maxDepth: 2,
+			agentScope: "both",
+			maxConcurrentBackgroundRuns: 2,
+		}),
 	);
 
 	const loaded = loadSettings({ cwd: project, projectTrusted: true, agentDir });
@@ -47,6 +52,7 @@ test("global and trusted project settings merge", () => {
 	assert.equal(loaded.settings.inheritExtensions, true);
 	assert.equal(loaded.settings.openAIIdentity, true);
 	assert.equal(loaded.settings.enableRunInBackground, false);
+	assert.equal(loaded.settings.maxConcurrentBackgroundRuns, 2);
 	assert.equal("syncBundledAgents" in loaded.settings, false);
 	assert.equal(loaded.sources.length, 2);
 });
@@ -63,6 +69,7 @@ test("untrusted project configuration is not read", () => {
 	assert.equal(loaded.settings.maxDepth, 3);
 	assert.equal("syncBundledAgents" in loaded.settings, false);
 	assert.equal(loaded.settings.openAIIdentity, false);
+	assert.equal(loaded.settings.maxConcurrentBackgroundRuns, 4);
 	assert.deepEqual(loaded.sources, []);
 });
 
@@ -74,6 +81,14 @@ test("invalid settings fail loud", () => {
 	assert.throws(
 		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
 		/maxDepth must be a safe integer/,
+	);
+	writeFileSync(
+		join(agentDir, "subagent.json"),
+		JSON.stringify({ maxConcurrentBackgroundRuns: 0 }),
+	);
+	assert.throws(
+		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
+		/maxConcurrentBackgroundRuns must be a safe integer/,
 	);
 });
 

@@ -30,6 +30,7 @@ Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 - **Nested delegation** with an absolute persisted depth limit
 - **Dynamic agent-name enums** generated from the effective user/project catalog
 - **Parallel-safe delegation**: multiple `subagent` calls in one assistant message may overlap
+- **Bounded background execution** with per-agent cold-resume serialization
 - **Composable tool ceilings** that preserve model/extension tool decisions
 - **Usage accounting, streaming progress, output caps, and custom TUI rendering**
 
@@ -233,6 +234,7 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
   "maxDepth": 3,
   "enableRunInBackground": true,
   "defaultBackground": true,
+  "maxConcurrentBackgroundRuns": 4,
   "reportDelivery": "wakeup",
   "inheritExtensions": false,
   "openAIIdentity": false,
@@ -246,6 +248,7 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 | `maxDepth` | `3` | Absolute delegation depth; a top-level Pi session is depth 0. |
 | `enableRunInBackground` | `true` | Enable continuable background children and their model-facing lifecycle controls. Set `false` for strict foreground-only mode. |
 | `defaultBackground` | `true` | Default scheduling for fresh `subagent` calls when background execution is enabled. |
+| `maxConcurrentBackgroundRuns` | `4` | Maximum continuable subagent turns executing at once in one extension runtime. Additional top-level runs wait in FIFO order; nested work fails at capacity instead of deadlocking its parent turn. |
 | `reportDelivery` | `wakeup` | `wakeup` starts/queues a parent turn; `quiet` waits for the parent's next turn. |
 | `inheritExtensions` | `false` | Load other Pi extensions in child runtimes. This package filters itself out; explicit agent tool ceilings still apply. |
 | `openAIIdentity` | `false` | For OpenAI Responses child models, inject only the named `pi-codex-minimal-tools` identity lifecycle inline. Codex Session/Thread/Turn/Window ids remain owned and serialized by that package. |
@@ -321,6 +324,15 @@ even when a parent session is forked or re-created. When an activation settles:
 4. `send_message` can cold-resume that same session for another FIFO turn.
 
 A child can explicitly call `report` before settlement. Reports and settlement notices are separate by design.
+
+Continuable turns share a bounded scheduler. Calls targeting the same durable
+agent are serialized so concurrent messages cannot create multiple cold
+runtimes for one child session. Every scheduler-admitted run has a stable
+`turnId` in delegation details and the paired `pi-subagent:turn-start` /
+`pi-subagent:turn-end` events. FIFO follow-ups accepted while that
+`AgentSession` is already running remain part of the same admitted run.
+Existing `pi-subagent:start` / `pi-subagent:end` events continue to describe
+the wider activation lifecycle.
 
 ### Fork boundary
 

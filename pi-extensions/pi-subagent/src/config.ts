@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	maxDepth: 3,
 	enableRunInBackground: true,
 	defaultBackground: true,
+	maxConcurrentBackgroundRuns: 4,
 	reportDelivery: "wakeup",
 	inheritExtensions: false,
 	openAIIdentity: false,
@@ -23,6 +24,7 @@ const CONFIG_KEYS = new Set([
 	"maxDepth",
 	"enableRunInBackground",
 	"defaultBackground",
+	"maxConcurrentBackgroundRuns",
 	"reportDelivery",
 	"inheritExtensions",
 	"openAIIdentity",
@@ -142,6 +144,18 @@ function applyConfig(
 			config.defaultBackground === undefined
 				? settings.defaultBackground
 				: parseBoolean(config.defaultBackground, "defaultBackground", source),
+		maxConcurrentBackgroundRuns:
+			config.maxConcurrentBackgroundRuns === undefined
+				? settings.maxConcurrentBackgroundRuns
+				: parseInteger(
+						config.maxConcurrentBackgroundRuns,
+						"maxConcurrentBackgroundRuns",
+						source,
+						{
+							minimum: 1,
+							maximum: Number.MAX_SAFE_INTEGER,
+						},
+					),
 		reportDelivery:
 			config.reportDelivery === undefined
 				? settings.reportDelivery

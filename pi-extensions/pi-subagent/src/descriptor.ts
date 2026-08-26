@@ -12,6 +12,7 @@ import type {
 
 export const DESCRIPTOR_CUSTOM_TYPE = "pi-subagent/descriptor";
 export const DESCRIPTOR_VERSION = 2;
+const LEGACY_MAX_CONCURRENT_BACKGROUND_RUNS = 4;
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const AGENT_SOURCES = new Set<AgentSnapshotSource>(["bundled", "user", "project"]);
@@ -173,6 +174,15 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 					? true
 					: boolean(runtime.enableRunInBackground, "runtime.enableRunInBackground"),
 			defaultBackground: boolean(runtime.defaultBackground, "runtime.defaultBackground"),
+			maxConcurrentBackgroundRuns:
+				runtime.maxConcurrentBackgroundRuns === undefined
+					? LEGACY_MAX_CONCURRENT_BACKGROUND_RUNS
+					: boundedInteger(
+							runtime.maxConcurrentBackgroundRuns,
+							"runtime.maxConcurrentBackgroundRuns",
+							1,
+							Number.MAX_SAFE_INTEGER,
+						),
 			reportDelivery,
 			inheritExtensions: boolean(runtime.inheritExtensions, "runtime.inheritExtensions"),
 			openAIIdentity: boolean(runtime.openAIIdentity, "runtime.openAIIdentity"),

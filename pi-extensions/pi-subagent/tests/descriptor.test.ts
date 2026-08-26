@@ -32,6 +32,7 @@ function descriptor(label = "inspect auth"): SubagentDescriptor {
 			maxDepth: 3,
 			enableRunInBackground: true,
 			defaultBackground: true,
+			maxConcurrentBackgroundRuns: 4,
 			reportDelivery: "wakeup",
 			inheritExtensions: false,
 			openAIIdentity: false,
@@ -65,6 +66,20 @@ test("legacy descriptors default to background-enabled behavior", () => {
 	delete (input.runtime as Partial<SubagentDescriptor["runtime"]>).enableRunInBackground;
 	const parsed = parseDescriptor(input);
 	assert.equal(parsed.runtime.enableRunInBackground, true);
+});
+
+test("legacy descriptors receive the default background concurrency limit", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		runtime: Omit<
+			SubagentDescriptor["runtime"],
+			"maxConcurrentBackgroundRuns"
+		>;
+	};
+	delete (
+		input.runtime as Partial<SubagentDescriptor["runtime"]>
+	).maxConcurrentBackgroundRuns;
+	const parsed = parseDescriptor(input);
+	assert.equal(parsed.runtime.maxConcurrentBackgroundRuns, 4);
 });
 
 test("legacy syncBundledAgents snapshots are validated then discarded", () => {
