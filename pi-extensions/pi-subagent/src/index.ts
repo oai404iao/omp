@@ -76,18 +76,18 @@ function registerDelegationTool(
 	const { enableRunInBackground, defaultBackground } = settings;
 	const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
 	const description = !enableRunInBackground
-		? "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
+		? "Delegate a complete task to a named child path with selectable completed-turn context. " +
 			"This foreground-only tool waits for the child and returns its final answer. " +
 			"Independent sibling calls may still execute in parallel."
 		: defaultBackground
-		? "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
+		? "Delegate a complete task to a named child path with selectable completed-turn context. " +
 			(settings.backgroundProtocol === "mailbox-v2"
-				? "Background mode is continuable and returns a durable agent id; use send_message to enqueue, followup_task to start, and wait_agent for quiet completions. "
-				: "Background mode is continuable and returns a durable agent id; use send_message for later FIFO turns. ") +
+				? "Background mode is continuable and returns a readable path plus durable id; use send_message to enqueue, followup_task to start, and wait_agent for quiet completions. "
+				: "Background mode is continuable and returns a readable path plus durable id; use send_message for later FIFO turns. ") +
 			"Start independent children together in one assistant message."
-		: "Delegate a complete standalone task to a fresh child with its own Pi session and context. " +
-			"This tool waits for the result by default; set run_in_background to true to return a durable agent id.";
-	const promptGuidelines = !enableRunInBackground
+		: "Delegate a complete task to a named child path with selectable completed-turn context. " +
+			"This tool waits for the result by default; set run_in_background to true to return a readable path plus durable id.";
+	const promptGuidelines = (!enableRunInBackground
 		? [
 				"Use subagent for focused independent work and give it a complete standalone prompt.",
 				"This subagent tool is foreground-only: every call waits for and returns the child's final answer.",
@@ -103,14 +103,17 @@ function registerDelegationTool(
 					"Use subagent for focused independent work and give it a complete standalone prompt.",
 					"Subagent calls wait for the result by default; request background mode only when work can continue independently.",
 					"Independent subagent calls can still be issued together in one assistant message and execute in parallel.",
-				];
+				]).concat([
+					"Set task_name when a stable readable path will help later control calls; otherwise a name is generated from description.",
+					"Use fresh context by default and request all_completed or last_n_completed only when parent history materially helps.",
+				]);
 	const parameters = delegationParameters(enableRunInBackground, agentNames);
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description,
 		promptSnippet: enableRunInBackground
-			? "Delegate focused independent work to fresh child agents"
+			? "Delegate focused work to named child agents"
 			: "Run focused independent work in foreground child agents",
 		promptGuidelines,
 		executionMode: "parallel",
@@ -154,13 +157,16 @@ function registerForkDelegationTool(
 	agentDiscovery?: AgentDiscoveryResult,
 ): unknown {
 	const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
-	const parameters = forkDelegationParameters(agentNames);
+	const parameters = forkDelegationParameters(
+		agentNames,
+		settings.enableRunInBackground,
+	);
 	pi.registerTool({
 		name: "subagent_fork",
 		label: "Subagent Fork",
 		description:
-			"Delegate a one-shot task to a child seeded with all completed turns in this conversation. " +
-			"The current in-flight tool-calling turn is excluded. Use this when the child needs parent history.",
+			"Delegate a task to a child seeded with all completed turns in this conversation. " +
+			"The current in-flight tool-calling turn is excluded. It is foreground by default; request background mode for a continuable fork.",
 		promptSnippet: "Delegate context-dependent work to a child seeded with completed turns",
 		promptGuidelines: [
 			"Use subagent_fork only when completed conversation history materially helps the delegated task.",
@@ -240,14 +246,15 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 						type: "text",
 						text:
 							delivery.kind === "mailbox-v2"
-								? `message ${delivery.messageId} durably enqueued for subagent ${params.subagent_id}; ${delivery.pendingMessages} pending`
-								: `message queued as the next turn for subagent ${params.subagent_id}`,
+								? `message ${delivery.messageId} durably enqueued for ${delivery.taskPath}; ${delivery.pendingMessages} pending`
+								: `message queued as the next turn for ${delivery.taskPath}`,
 					},
 				],
 				details: {
 					kind: "control",
 					action: "send",
-					agentId: params.subagent_id,
+					agentId: delivery.agentId,
+					taskPath: delivery.taskPath,
 					...(delivery.kind === "mailbox-v2"
 						? {
 								messageId: delivery.messageId,
@@ -280,13 +287,14 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				content: [
 					{
 						type: "text",
-						text: `started turn ${outcome.turnId} for subagent ${params.subagent_id}, claiming ${outcome.claimedMessages} mailbox message${outcome.claimedMessages === 1 ? "" : "s"}`,
+						text: `started turn ${outcome.turnId} for ${outcome.taskPath}, claiming ${outcome.claimedMessages} mailbox message${outcome.claimedMessages === 1 ? "" : "s"}`,
 					},
 				],
 				details: {
 					kind: "control",
 					action: "followup",
-					agentId: params.subagent_id,
+					agentId: outcome.agentId,
+					taskPath: outcome.taskPath,
 					turnId: outcome.turnId,
 					claimedMessages: outcome.claimedMessages,
 				} satisfies ControlDetails,
@@ -342,10 +350,18 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			assertBackgroundControlsEnabled(sessionSettings, "interrupt_agent");
 			const parent = await coordinator.parentFromContext(ctx);
-			await coordinator.interrupt(parent, params.agent_id);
+			const outcome = await coordinator.interruptWithOutcome(
+				parent,
+				params.agent_id,
+			);
 			return {
-				content: [{ type: "text", text: `interrupt requested for agent ${params.agent_id}` }],
-				details: { kind: "control", action: "interrupt", agentId: params.agent_id } satisfies ControlDetails,
+				content: [{ type: "text", text: `interrupt requested for ${outcome.taskPath}` }],
+				details: {
+					kind: "control",
+					action: "interrupt",
+					agentId: outcome.agentId,
+					taskPath: outcome.taskPath,
+				} satisfies ControlDetails,
 			};
 		},
 	});
@@ -403,6 +419,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			const sections = [
 				`Mode: ${schedulingMode}`,
 				`Background concurrency: ${sessionSettings.maxConcurrentBackgroundRuns}`,
+				`Idle runtime LRU: ${sessionSettings.maxIdleRuntimes}`,
 				`Background protocol: ${sessionSettings.backgroundProtocol ?? "legacy"}`,
 				`OpenAI identity inline: ${sessionSettings.openAIIdentity ? "enabled" : "disabled"}`,
 				agentSync?.diagnostics.length
@@ -423,6 +440,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
 		coordinator.configureBackgroundRuns(
 			loaded.settings.maxConcurrentBackgroundRuns,
+		);
+		await coordinator.configureIdleRuntimes(
+			loaded.settings.maxIdleRuntimes,
 		);
 		sessionSettings = loaded.settings;
 		agentSync = coordinator.synchronizeBundledAgents();

@@ -4,7 +4,14 @@ import type { DelegationDetails, ParentMessageDetails } from "./types.ts";
 import { formatUsage } from "./result.ts";
 
 export function renderDelegationCall(
-	args: { agent?: string; description?: string; prompt?: string; run_in_background?: boolean },
+	args: {
+		agent?: string;
+		task_name?: string;
+		description?: string;
+		prompt?: string;
+		run_in_background?: boolean;
+		context?: { mode?: string };
+	},
 	theme: {
 		fg(color: any, text: string): string;
 		bold(text: string): string;
@@ -13,17 +20,20 @@ export function renderDelegationCall(
 ): Text {
 	const mode =
 		provider === "fork"
-			? "fork · foreground"
+			? args.run_in_background === true
+				? "fork · background"
+				: "fork · foreground"
 			: args.run_in_background === false
-				? "spawn · foreground"
+				? `${args.context?.mode ?? "fresh"} · foreground`
 				: args.run_in_background === true
-					? "spawn · background"
-					: "spawn · configured default";
+					? `${args.context?.mode ?? "fresh"} · background`
+					: `${args.context?.mode ?? "fresh"} · configured default`;
 	let text =
 		theme.fg("toolTitle", theme.bold(provider === "fork" ? "subagent_fork " : "subagent ")) +
 		theme.fg("accent", args.agent ?? "…") +
 		theme.fg("muted", ` [${mode}]`);
 	if (args.description) text += `\n  ${theme.fg("dim", args.description)}`;
+	if (args.task_name) text += `\n  ${theme.fg("dim", `path: ${args.task_name}`)}`;
 	return new Text(text, 0, 0);
 }
 
@@ -37,6 +47,10 @@ export function renderDelegationResult(
 	},
 ): Text | Container {
 	if (!details) return new Text(content || "(no output)", 0, 0);
+	const taskPath = details.taskPath || details.agentId;
+	const contextMode =
+		details.context?.mode
+		?? (details.provider === "fork" ? "all_completed" : "fresh");
 	const running = options.isPartial || details.status === "starting" || details.status === "running";
 	const icon = running
 		? theme.fg("warning", "◌")
@@ -45,8 +59,8 @@ export function renderDelegationResult(
 			: theme.fg("success", "✓");
 	const header = `${icon} ${theme.fg("toolTitle", theme.bold(details.agent))} ${theme.fg(
 		"muted",
-		`[${details.provider}/${details.mode}]`,
-	)} ${theme.fg("dim", details.agentId)}`;
+		`[${details.provider}/${details.mode}/${contextMode}]`,
+	)} ${theme.fg("accent", taskPath)} ${theme.fg("dim", details.agentId)}`;
 
 	if (!options.expanded) {
 		const lines = [header, theme.fg("muted", details.label)];
@@ -102,7 +116,10 @@ export function renderParentMessage(
 		theme.fg("accent", icon) +
 			" " +
 			theme.fg("toolTitle", theme.bold(`subagent ${kind}`)) +
-			theme.fg("muted", ` ${details?.childAgentId ?? "unknown"}${label}`),
+			theme.fg(
+				"muted",
+				` ${details?.taskPath ?? details?.childAgentId ?? "unknown"}${label}`,
+			),
 		outputPad,
 		0,
 	);

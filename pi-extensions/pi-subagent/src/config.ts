@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	enableRunInBackground: true,
 	defaultBackground: true,
 	maxConcurrentBackgroundRuns: 4,
+	maxIdleRuntimes: 0,
 	backgroundProtocol: "legacy",
 	reportDelivery: "wakeup",
 	inheritExtensions: false,
@@ -31,6 +32,7 @@ const CONFIG_KEYS = new Set([
 	"enableRunInBackground",
 	"defaultBackground",
 	"maxConcurrentBackgroundRuns",
+	"maxIdleRuntimes",
 	"backgroundProtocol",
 	"reportDelivery",
 	"inheritExtensions",
@@ -165,6 +167,18 @@ function applyConfig(
 						source,
 						{
 							minimum: 1,
+							maximum: Number.MAX_SAFE_INTEGER,
+						},
+					),
+		maxIdleRuntimes:
+			config.maxIdleRuntimes === undefined
+				? settings.maxIdleRuntimes
+				: parseInteger(
+						config.maxIdleRuntimes,
+						"maxIdleRuntimes",
+						source,
+						{
+							minimum: 0,
 							maximum: Number.MAX_SAFE_INTEGER,
 						},
 					),

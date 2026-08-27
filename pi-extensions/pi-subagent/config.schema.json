@@ -36,7 +36,7 @@
     },
     "defaultBackground": {
       "type": "boolean",
-      "description": "Default run mode for the fresh spawn provider when background execution is enabled. Ignored in foreground-only mode.",
+      "description": "Default run mode for subagent calls when background execution is enabled. subagent_fork remains foreground unless explicitly requested.",
       "default": true
     },
     "maxConcurrentBackgroundRuns": {
@@ -45,6 +45,13 @@
       "maximum": 9007199254740991,
       "description": "Maximum number of continuable subagent turns that may execute concurrently within one extension runtime.",
       "default": 4
+    },
+    "maxIdleRuntimes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Maximum settled continuable child runtimes retained in the process-wide idle LRU. Zero unloads immediately.",
+      "default": 0
     },
     "backgroundProtocol": {
       "type": "string",

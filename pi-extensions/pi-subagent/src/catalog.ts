@@ -10,6 +10,7 @@ import type { CatalogDiagnostic, SubagentDescriptor } from "./types.ts";
 
 export interface PersistedDescriptor {
 	agentId: string;
+	piSessionId: string;
 	sessionFile: string;
 	descriptor: SubagentDescriptor;
 	pendingMessages: number;
@@ -99,6 +100,7 @@ export async function readPersistedCatalog(session: SessionView): Promise<Persis
 				}
 				descriptors.push({
 					agentId: folded.descriptor.agentId,
+					piSessionId: manager.getSessionId(),
 					sessionFile: info.path,
 					descriptor: folded.descriptor,
 					pendingMessages,

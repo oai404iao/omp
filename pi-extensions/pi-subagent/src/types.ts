@@ -11,6 +11,15 @@ export type BackgroundProtocol = "legacy" | "mailbox-v2";
 export type SubagentMode = "one-shot" | "continuable";
 export type SubagentProviderName = "spawn" | "fork";
 export type SubagentStopReason = "completed" | "aborted" | "error" | "max-tokens";
+export type ContextInheritance =
+	| { mode: "fresh" }
+	| { mode: "all_completed" }
+	| { mode: "last_n_completed"; completedTurns: number };
+
+export interface SubagentTask {
+	name: string;
+	path: string;
+}
 
 export interface SubagentSettings {
 	agentScope: AgentScope;
@@ -18,6 +27,7 @@ export interface SubagentSettings {
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;
 	maxConcurrentBackgroundRuns: number;
+	maxIdleRuntimes: number;
 	backgroundProtocol?: BackgroundProtocol;
 	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
@@ -57,6 +67,7 @@ export interface SubagentRuntimeSnapshot {
 	enableRunInBackground: boolean;
 	defaultBackground: boolean;
 	maxConcurrentBackgroundRuns: number;
+	maxIdleRuntimes: number;
 	backgroundProtocol: BackgroundProtocol;
 	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
@@ -64,8 +75,7 @@ export interface SubagentRuntimeSnapshot {
 	maxOutputBytes: number;
 }
 
-export interface SubagentDescriptor {
-	version: 2;
+interface SubagentDescriptorBase {
 	mode: SubagentMode;
 	provider: SubagentProviderName;
 	label: string;
@@ -85,6 +95,20 @@ export interface SubagentDescriptor {
 	thinkingLevel: ThinkingLevel;
 	runtime: SubagentRuntimeSnapshot;
 }
+
+export interface SubagentDescriptorV2 extends SubagentDescriptorBase {
+	version: 2;
+}
+
+export interface SubagentDescriptorV3 extends SubagentDescriptorBase {
+	version: 3;
+	task: SubagentTask;
+	context: ContextInheritance;
+}
+
+export type SubagentDescriptor =
+	| SubagentDescriptorV2
+	| SubagentDescriptorV3;
 
 export interface SubagentUsage extends Usage {
 	turns: number;
@@ -111,10 +135,12 @@ export interface TraceItem {
 export interface DelegationDetails {
 	kind: "delegation";
 	agentId: string;
+	taskPath: string;
 	turnId?: string;
 	piSessionId?: string;
 	provider: SubagentProviderName;
 	mode: SubagentMode;
+	context: ContextInheritance;
 	agent: string;
 	label: string;
 	depth: number;
@@ -130,6 +156,7 @@ export interface ControlDetails {
 	kind: "control";
 	action: "send" | "followup" | "wait" | "interrupt" | "list" | "report";
 	agentId?: string;
+	taskPath?: string;
 	messageId?: string;
 	turnId?: string;
 	pendingMessages?: number;
@@ -143,6 +170,8 @@ export interface CatalogChild {
 	kind: "child";
 	agentId: string;
 	parentAgentId: string;
+	taskPath: string;
+	parentTaskPath: string;
 	depth: number;
 	descriptor: SubagentDescriptor;
 	sessionFile?: string;
@@ -165,6 +194,7 @@ export type CatalogEntry = CatalogChild | CatalogDiagnostic;
 export interface ParentMessageDetails {
 	kind: "report" | "settled";
 	childAgentId: string;
+	taskPath?: string;
 	label: string;
 	stopReason?: SubagentStopReason;
 	truncated?: boolean;

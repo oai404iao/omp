@@ -51,7 +51,12 @@ import {
 	unreadCompletionCounts,
 	type CompletionUpdate,
 } from "./completion-mailbox.ts";
-import { DESCRIPTOR_CUSTOM_TYPE, foldDescriptor } from "./descriptor.ts";
+import {
+	DESCRIPTOR_CUSTOM_TYPE,
+	DESCRIPTOR_VERSION,
+	descriptorContext,
+	foldDescriptor,
+} from "./descriptor.ts";
 import {
 	claimMailboxMessages,
 	commitMailboxClaim,
@@ -94,11 +99,23 @@ import {
 } from "./scheduler.ts";
 import { buildToolCeiling, resolveToolPolicy } from "./tool-policy.ts";
 import {
+	ROOT_TASK_PATH,
+	descriptorTaskPath,
+	isAgentId,
+	numberedTaskName,
+	resolveTaskPath,
+	slugTaskName,
+	taskPath,
+	validateTaskName,
+} from "./task-path.ts";
+import {
 	snapshotAgent,
 	type AgentDefinition,
 	type CatalogChild,
+	type CatalogDiagnostic,
 	type CatalogEntry,
 	type ControlDetails,
+	type ContextInheritance,
 	type DelegationDetails,
 	type ParentMessageDetails,
 	type SubagentDescriptor,
@@ -141,9 +158,14 @@ const REPORT_PROMPT = [
 
 export interface DelegationInput {
 	agent: string;
+	task_name?: string;
 	description: string;
 	prompt: string;
 	run_in_background?: boolean;
+	context?: {
+		mode: ContextInheritance["mode"];
+		completed_turns?: number;
+	};
 }
 
 export type DelegationOutcome =
@@ -151,16 +173,26 @@ export type DelegationOutcome =
 	| { kind: "foreground"; details: DelegationDetails; result: SubagentRunResult };
 
 export type SendMessageOutcome =
-	| { kind: "legacy" }
+	| { kind: "legacy"; agentId: string; taskPath: string }
 	| {
 			kind: "mailbox-v2";
+			agentId: string;
+			taskPath: string;
 			messageId: string;
 			pendingMessages: number;
 		};
 
 export interface FollowupTaskOutcome {
+	agentId: string;
+	taskPath: string;
 	turnId: string;
 	claimedMessages: number;
+}
+
+export interface InterruptOutcome {
+	agentId: string;
+	taskPath: string;
+	active: boolean;
 }
 
 export interface WaitAgentOutcome {
@@ -168,10 +200,12 @@ export interface WaitAgentOutcome {
 	timeoutMs: number;
 	updates: CompletionUpdate[];
 	unreadUpdates: number;
+	taskPaths: Record<string, string>;
 }
 
 interface ParentRef {
 	agentId: string;
+	taskPath: string;
 	depth: number;
 	cwd: string;
 	sessionManager: SessionView;
@@ -201,6 +235,7 @@ interface Activation {
 	streamedText: string;
 	usage: ReturnType<typeof emptyUsage>;
 	startedTurnIds: Set<string>;
+	silentSettlementTurnIds: Set<string>;
 	pendingMailboxClaims: Set<string>;
 	userMessageGates: Map<string, UserMessageGate>;
 	ownedChildren: Set<string>;
@@ -210,14 +245,17 @@ interface Activation {
 	unsubscribe?: () => void;
 	onUpdate?: (details: DelegationDetails) => void;
 	published: boolean;
+	everPublished: boolean;
 	suppressSettlement: boolean;
 	finalizing: boolean;
-	finalizePromise?: Promise<void>;
+	finalizePromise?: Promise<boolean>;
 	holdsBackgroundSlot: boolean;
 	turnAbortController?: AbortController;
 	persistenceGate: PersistenceGate;
 	disposed: boolean;
 	lastError?: string;
+	ownerActivation?: Activation;
+	lastUsedSequence: number;
 }
 
 interface UserMessageGate {
@@ -231,6 +269,7 @@ interface PersistenceGate {
 	resolve(): void;
 	reject(error: Error): void;
 	readonly settled: boolean;
+	readonly state: "pending" | "fulfilled" | "rejected";
 }
 
 interface CompletionWaiter {
@@ -263,7 +302,12 @@ interface PendingPromptStart {
 }
 
 type SerializedSendMessageOutcome =
-	| { kind: "legacy"; pending?: PendingPromptStart }
+	| {
+			kind: "legacy";
+			agentId: string;
+			taskPath: string;
+			pending?: PendingPromptStart;
+		}
 	| Extract<SendMessageOutcome, { kind: "mailbox-v2" }>;
 
 interface PendingFollowupStart extends PendingPromptStart {
@@ -272,11 +316,25 @@ interface PendingFollowupStart extends PendingPromptStart {
 
 interface CatalogRecord {
 	agentId: string;
+	piSessionId: string;
+	taskPath: string;
 	descriptor: SubagentDescriptor;
 	sessionFile?: string;
 	active?: Activation;
 	pendingMessages: number;
 	unreadUpdatesByChild: Map<string, number>;
+}
+
+interface ResolvedTarget {
+	agentId: string;
+	taskPath: string;
+	record?: CatalogRecord;
+}
+
+interface ReservedTask {
+	name: string;
+	path: string;
+	release(): void;
 }
 
 interface CoordinatorCatalog {
@@ -337,17 +395,22 @@ function waitForPromise<T>(
 	});
 }
 
-function createPersistenceGate(session: Pick<SessionView, "getEntries">): PersistenceGate {
-	let settled = session
+function createPersistenceGate(
+	session: Pick<SessionView, "getEntries">,
+	requireNewAssistant: boolean,
+): PersistenceGate {
+	const alreadyDurable = !requireNewAssistant && session
 		.getEntries()
 		.some(
 			(entry) =>
 				entry.type === "message"
 				&& entry.message.role === "assistant",
 		);
+	let state: PersistenceGate["state"] =
+		alreadyDurable ? "fulfilled" : "pending";
 	let resolvePromise!: () => void;
 	let rejectPromise!: (error: Error) => void;
-	const promise = settled
+	const promise = alreadyDurable
 		? Promise.resolve()
 		: new Promise<void>((resolve, reject) => {
 				resolvePromise = resolve;
@@ -357,17 +420,20 @@ function createPersistenceGate(session: Pick<SessionView, "getEntries">): Persis
 	return {
 		promise,
 		resolve: () => {
-			if (settled) return;
-			settled = true;
+			if (state !== "pending") return;
+			state = "fulfilled";
 			resolvePromise();
 		},
 		reject: (error) => {
-			if (settled) return;
-			settled = true;
+			if (state !== "pending") return;
+			state = "rejected";
 			rejectPromise(error);
 		},
 		get settled() {
-			return settled;
+			return state !== "pending";
+		},
+		get state() {
+			return state;
 		},
 	};
 }
@@ -427,12 +493,57 @@ function makeRuntimeSettings(descriptor: SubagentDescriptor): SubagentSettings {
 		enableRunInBackground: descriptor.runtime.enableRunInBackground,
 		defaultBackground: descriptor.runtime.defaultBackground,
 		maxConcurrentBackgroundRuns: descriptor.runtime.maxConcurrentBackgroundRuns,
+		maxIdleRuntimes: descriptor.runtime.maxIdleRuntimes,
 		backgroundProtocol: descriptor.runtime.backgroundProtocol,
 		reportDelivery: descriptor.runtime.reportDelivery,
 		inheritExtensions: descriptor.runtime.inheritExtensions,
 		openAIIdentity: descriptor.runtime.openAIIdentity,
 		maxOutputBytes: descriptor.runtime.maxOutputBytes,
 	};
+}
+
+function delegationContext(
+	providerName: SubagentProviderName,
+	input: DelegationInput,
+): ContextInheritance {
+	if (providerName === "fork") {
+		if (input.context !== undefined) {
+			throw new Error(
+				"subagent_fork always uses all_completed context; use subagent for another context policy",
+			);
+		}
+		return { mode: "all_completed" };
+	}
+	const context = input.context;
+	if (!context) return { mode: "fresh" };
+	if (context.mode === "last_n_completed") {
+		if (
+			!Number.isSafeInteger(context.completed_turns)
+			|| context.completed_turns === undefined
+			|| context.completed_turns < 1
+			|| context.completed_turns > 100
+		) {
+			throw new Error(
+				"context.completed_turns must be an integer between 1 and 100 for last_n_completed",
+			);
+		}
+		return {
+			mode: context.mode,
+			completedTurns: context.completed_turns,
+		};
+	}
+	if (
+		context.mode !== "fresh"
+		&& context.mode !== "all_completed"
+	) {
+		throw new Error(`unsupported context mode: ${String(context.mode)}`);
+	}
+	if (context.completed_turns !== undefined) {
+		throw new Error(
+			"context.completed_turns is available only for last_n_completed",
+		);
+	}
+	return { mode: context.mode };
 }
 
 function mailboxOwner(descriptor: SubagentDescriptor): {
@@ -496,10 +607,14 @@ export class SubagentCoordinator {
 	private readonly active = new Map<string, Activation>();
 	private readonly agentOperations = new AgentOperationQueue();
 	private readonly completionOperations = new AgentOperationQueue();
+	private readonly idleRuntimeOperations = new AgentOperationQueue();
 	private readonly backgroundRuns = new BackgroundRunLimiter();
 	private readonly admittedOperations = new Set<Promise<unknown>>();
 	private readonly completionWaiters = new Map<string, CompletionWaiter>();
+	private readonly reservedTaskPaths = new Set<string>();
 	private readonly runtimeId = uuidv7();
+	private idleRuntimeLimit = 0;
+	private activationSequence = 0;
 	private agentSyncResult: AgentSyncResult | undefined;
 	private draining = false;
 	private shutdownPromise: Promise<void> | undefined;
@@ -529,6 +644,14 @@ export class SubagentCoordinator {
 
 	configureBackgroundRuns(limit: number): void {
 		this.backgroundRuns.configure(limit);
+	}
+
+	async configureIdleRuntimes(limit: number): Promise<void> {
+		if (!Number.isSafeInteger(limit) || limit < 0) {
+			throw new Error("maxIdleRuntimes must be a non-negative safe integer");
+		}
+		this.idleRuntimeLimit = limit;
+		await this.trimIdleRuntimes();
 	}
 
 	discoverAvailableAgents(
@@ -562,6 +685,9 @@ export class SubagentCoordinator {
 			agentId: readAgentId(ctx.sessionManager) ?? ensureAgentId(
 				ctx.sessionManager as unknown as SessionView,
 			),
+			taskPath: descriptor
+				? descriptorTaskPath(descriptor)
+				: ROOT_TASK_PATH,
 			depth: descriptor?.depth ?? 0,
 			cwd: ctx.cwd,
 			// ExtensionContext narrows the live SessionManager to a read-only
@@ -616,9 +742,11 @@ export class SubagentCoordinator {
 		agentDiscovery?: AgentDiscoveryResult,
 	): Promise<DelegationOutcome> {
 		if (this.draining) throw new Error("pi-subagent is shutting down; no new delegation was accepted");
-		const provider = this.providers.get(providerName);
+		const context = delegationContext(providerName, input);
+		const resolvedProviderName: SubagentProviderName =
+			context.mode === "fresh" ? "spawn" : "fork";
+		const provider = this.providers.get(resolvedProviderName);
 		if (
-			providerName === "spawn" &&
 			!settings.enableRunInBackground &&
 			input.run_in_background === true
 		) {
@@ -627,8 +755,10 @@ export class SubagentCoordinator {
 			);
 		}
 		const runInBackground =
-			providerName === "spawn" && settings.enableRunInBackground
-				? (input.run_in_background ?? settings.defaultBackground)
+			settings.enableRunInBackground
+				? providerName === "fork"
+					? (input.run_in_background ?? false)
+					: (input.run_in_background ?? settings.defaultBackground)
 				: false;
 		const mode: SubagentMode = runInBackground ? "continuable" : "one-shot";
 		if (mode === "continuable" && !provider.supportsContinuable) {
@@ -669,62 +799,74 @@ export class SubagentCoordinator {
 
 		const model = this.resolveModel(parent, agent);
 		const thinkingLevel = agent.thinking ?? parent.thinkingLevel;
-		const prepared = await provider.prepare(parent, mode);
-		if (this.draining) {
-			await prepared.rollback();
-			throw new Error("pi-subagent is shutting down; no new delegation was accepted");
-		}
 		parent.agentId = ensureAgentId(parent.sessionManager);
-		const openAIIdentityEnabled =
-			settings.openAIIdentity && isOpenAIResponsesModel(model);
-		const descriptor: SubagentDescriptor = {
-			version: 2,
-			mode,
-			provider: providerName,
-			label: input.description.trim(),
-			agentId: uuidv7(),
-			parentAgentId: parent.agentId,
-			parentPiSessionId: parent.sessionManager.getSessionId(),
-			...(parent.sessionManager.getSessionFile()
-				? { parentSessionFile: parent.sessionManager.getSessionFile() }
-				: {}),
-			depth,
-			cwd: parent.cwd,
-			createdAt: new Date().toISOString(),
-			agent: snapshotAgent(agent),
-			model: { provider: model.provider, id: model.id },
-			thinkingLevel,
-			runtime: {
-				agentScope: settings.agentScope,
-				maxDepth: settings.maxDepth,
-				enableRunInBackground: settings.enableRunInBackground,
-				defaultBackground: settings.defaultBackground,
-				maxConcurrentBackgroundRuns: settings.maxConcurrentBackgroundRuns,
-				backgroundProtocol: settings.backgroundProtocol ?? "legacy",
-				reportDelivery: settings.reportDelivery,
-				inheritExtensions: settings.inheritExtensions,
-				openAIIdentity: openAIIdentityEnabled,
-				maxOutputBytes: settings.maxOutputBytes,
-			},
-		};
-		prepared.sessionManager.appendCustomEntry(AGENT_CUSTOM_TYPE, {
-			agentId: descriptor.agentId,
-		});
-		prepared.sessionManager.appendCustomEntry(LINEAGE_CUSTOM_TYPE, {
-			version: 1,
-			agentId: descriptor.agentId,
-			parentAgentId: descriptor.parentAgentId,
-			parentPiSessionId: descriptor.parentPiSessionId,
-			relation: descriptor.provider,
-			agentName: descriptor.agent.name,
-			openAIIdentity: openAIIdentityEnabled,
-			...(descriptor.parentSessionFile
-				? { parentSessionFile: descriptor.parentSessionFile }
-				: {}),
-		});
-
+		const reservedTask = await this.reserveTask(
+			parent,
+			input.task_name,
+			input.description,
+		);
+		let prepared: PreparedChildSession | undefined;
 		let activation: Activation | undefined;
+		let keepTaskReservation = false;
 		try {
+			prepared = await provider.prepare(parent, mode, context);
+			if (this.draining) {
+				throw new Error("pi-subagent is shutting down; no new delegation was accepted");
+			}
+			const openAIIdentityEnabled =
+				settings.openAIIdentity && isOpenAIResponsesModel(model);
+			const descriptor: SubagentDescriptor = {
+				version: DESCRIPTOR_VERSION,
+				mode,
+				provider: resolvedProviderName,
+				label: input.description.trim(),
+				agentId: uuidv7(),
+				parentAgentId: parent.agentId,
+				parentPiSessionId: parent.sessionManager.getSessionId(),
+				...(parent.sessionManager.getSessionFile()
+					? { parentSessionFile: parent.sessionManager.getSessionFile() }
+					: {}),
+				depth,
+				cwd: parent.cwd,
+				createdAt: new Date().toISOString(),
+				agent: snapshotAgent(agent),
+				model: { provider: model.provider, id: model.id },
+				thinkingLevel,
+				task: {
+					name: reservedTask.name,
+					path: reservedTask.path,
+				},
+				context,
+				runtime: {
+					agentScope: settings.agentScope,
+					maxDepth: settings.maxDepth,
+					enableRunInBackground: settings.enableRunInBackground,
+					defaultBackground: settings.defaultBackground,
+					maxConcurrentBackgroundRuns: settings.maxConcurrentBackgroundRuns,
+					maxIdleRuntimes: settings.maxIdleRuntimes,
+					backgroundProtocol: settings.backgroundProtocol ?? "legacy",
+					reportDelivery: settings.reportDelivery,
+					inheritExtensions: settings.inheritExtensions,
+					openAIIdentity: openAIIdentityEnabled,
+					maxOutputBytes: settings.maxOutputBytes,
+				},
+			};
+			prepared.sessionManager.appendCustomEntry(AGENT_CUSTOM_TYPE, {
+				agentId: descriptor.agentId,
+			});
+			prepared.sessionManager.appendCustomEntry(LINEAGE_CUSTOM_TYPE, {
+				version: 1,
+				agentId: descriptor.agentId,
+				parentAgentId: descriptor.parentAgentId,
+				parentPiSessionId: descriptor.parentPiSessionId,
+				relation: descriptor.provider,
+				agentName: descriptor.agent.name,
+				taskPath: descriptor.task.path,
+				openAIIdentity: openAIIdentityEnabled,
+				...(descriptor.parentSessionFile
+					? { parentSessionFile: descriptor.parentSessionFile }
+					: {}),
+			});
 			activation = await this.createActivation({
 				parent,
 				descriptor,
@@ -736,13 +878,14 @@ export class SubagentCoordinator {
 				throw new Error("pi-subagent is shutting down; no new delegation was accepted");
 			}
 			if (mode === "continuable" && parent.activation) {
-				parent.activation.ownedChildren.add(activation.agentId);
+				this.acquireParentOwnership(activation, parent);
 			}
 			const started = this.startPrompt(activation, input.prompt, signal, {
 				detachAtAcceptance: mode === "continuable",
 				waitForCapacity: !parent.activation?.holdsBackgroundSlot,
 			});
 			await started.accepted;
+			keepTaskReservation = true;
 			if (mode === "continuable") {
 				activation.onUpdate = undefined;
 				return { kind: "continuable", details: this.detailsOf(activation) };
@@ -754,13 +897,15 @@ export class SubagentCoordinator {
 			await this.disposeActivation(activation);
 			return { kind: "foreground", details, result };
 		} catch (error) {
-			if (activation && !activation.published) {
+			if (activation && prepared && !activation.published) {
 				activation.suppressSettlement = true;
 				await this.rollbackActivation(activation, prepared);
-			} else if (!activation) {
+			} else if (!activation && prepared) {
 				await prepared.rollback();
 			}
 			throw error;
+		} finally {
+			if (!keepTaskReservation) reservedTask.release();
 		}
 	}
 
@@ -791,18 +936,19 @@ export class SubagentCoordinator {
 		signal?: AbortSignal,
 	): Promise<SendMessageOutcome> {
 		if (this.draining) throw new Error("pi-subagent is shutting down; message was not delivered");
-		const delivery = await this.agentOperations.run(childId, () =>
-			this.sendMessageSerialized(parent, childId, message, signal),
+		const target = await this.resolveTarget(parent, childId);
+		const delivery = await this.agentOperations.run(target.agentId, () =>
+			this.sendMessageSerialized(parent, target.agentId, message, signal),
 		);
 		if (delivery.kind === "mailbox-v2") return delivery;
 		const pending = delivery.pending;
-		if (!pending) return { kind: "legacy" };
+		if (!pending) return delivery;
 		try {
 			await pending.accepted;
 		} catch (error) {
 			if (pending.coldPrepared && !pending.activation.published) {
-				await this.agentOperations.run(childId, async () => {
-					if (this.active.get(childId) !== pending.activation) return;
+				await this.agentOperations.run(target.agentId, async () => {
+					if (this.active.get(target.agentId) !== pending.activation) return;
 					pending.activation.suppressSettlement = true;
 					await this.rollbackActivation(
 						pending.activation,
@@ -812,7 +958,11 @@ export class SubagentCoordinator {
 			}
 			throw error;
 		}
-		return { kind: "legacy" };
+		return {
+			kind: "legacy",
+			agentId: delivery.agentId,
+			taskPath: delivery.taskPath,
+		};
 	}
 
 	private async sendMessageSerialized(
@@ -828,6 +978,7 @@ export class SubagentCoordinator {
 		let coldPrepared: PreparedChildSession | undefined;
 		if (activation?.disposed) activation = undefined;
 		if (activation) {
+			this.touchActivation(activation);
 			this.assertContinuableDirectChild(parent, activation.descriptor);
 			if (activation.descriptor.runtime.backgroundProtocol === "mailbox-v2") {
 				if (signal?.aborted) throw abortReason(signal);
@@ -847,6 +998,8 @@ export class SubagentCoordinator {
 				);
 				return {
 					kind: "mailbox-v2",
+					agentId: childId,
+					taskPath: descriptorTaskPath(activation.descriptor),
 					messageId: enqueued.message.messageId,
 					pendingMessages: enqueued.pendingMessages,
 				};
@@ -876,6 +1029,8 @@ export class SubagentCoordinator {
 				});
 				return {
 					kind: "mailbox-v2",
+					agentId: childId,
+					taskPath: descriptorTaskPath(located.descriptor),
 					messageId: enqueued.message.messageId,
 					pendingMessages: enqueued.pendingMessages,
 				};
@@ -891,10 +1046,11 @@ export class SubagentCoordinator {
 				prepared: coldPrepared,
 				isNew: false,
 			});
-			if (parent.activation) parent.activation.ownedChildren.add(activation.agentId);
+			this.acquireParentOwnership(activation, parent);
 		} else {
 			this.assertContinuableDirectChild(parent, activation.descriptor);
 		}
+		const resolvedPath = descriptorTaskPath(activation.descriptor);
 
 		const session = activation.runtime.session;
 		if (activation.currentRun || session.isStreaming) {
@@ -907,6 +1063,8 @@ export class SubagentCoordinator {
 				}
 				return {
 					kind: "legacy",
+					agentId: childId,
+					taskPath: resolvedPath,
 					pending: {
 						activation,
 						accepted: waitForPromise(
@@ -920,16 +1078,23 @@ export class SubagentCoordinator {
 				};
 			}
 			await session.followUp(message);
-			return { kind: "legacy" };
+			return {
+				kind: "legacy",
+				agentId: childId,
+				taskPath: resolvedPath,
+			};
 		}
 
 		try {
+			this.acquireParentOwnership(activation, parent);
 			const started = this.startPrompt(activation, message, signal, {
 				detachAtAcceptance: true,
 				waitForCapacity: !parent.activation?.holdsBackgroundSlot,
 			});
 			return {
 				kind: "legacy",
+				agentId: childId,
+				taskPath: resolvedPath,
 				pending: {
 					activation,
 					accepted: started.accepted,
@@ -963,15 +1128,16 @@ export class SubagentCoordinator {
 		if (this.draining) {
 			throw new Error("pi-subagent is shutting down; follow-up task was not started");
 		}
-		const pending = await this.agentOperations.run(childId, () =>
-			this.followupTaskSerialized(parent, childId, signal),
+		const target = await this.resolveTarget(parent, childId);
+		const pending = await this.agentOperations.run(target.agentId, () =>
+			this.followupTaskSerialized(parent, target.agentId, signal),
 		);
 		try {
 			await pending.accepted;
 		} catch (error) {
 			if (pending.coldPrepared && !pending.activation.published) {
-				await this.agentOperations.run(childId, async () => {
-					if (this.active.get(childId) !== pending.activation) return;
+				await this.agentOperations.run(target.agentId, async () => {
+					if (this.active.get(target.agentId) !== pending.activation) return;
 					pending.activation.suppressSettlement = true;
 					await this.rollbackActivation(
 						pending.activation,
@@ -1000,6 +1166,7 @@ export class SubagentCoordinator {
 		let coldPrepared: PreparedChildSession | undefined;
 
 		if (activation) {
+			this.touchActivation(activation);
 			descriptor = activation.descriptor;
 			this.assertContinuableDirectChild(parent, descriptor);
 			manager = activation.runtime.session.sessionManager;
@@ -1046,10 +1213,11 @@ export class SubagentCoordinator {
 				prepared: coldPrepared,
 				isNew: false,
 			});
-			if (parent.activation) parent.activation.ownedChildren.add(activation.agentId);
+			this.acquireParentOwnership(activation, parent);
 		}
 
 		try {
+			this.acquireParentOwnership(activation, parent);
 			const started = this.startPrompt(activation, "", signal, {
 				detachAtAcceptance: true,
 				waitForCapacity: !parent.activation?.holdsBackgroundSlot,
@@ -1071,6 +1239,8 @@ export class SubagentCoordinator {
 				accepted: started.accepted,
 				...(coldPrepared ? { coldPrepared } : {}),
 				outcome: {
+					agentId: childId,
+					taskPath: descriptorTaskPath(descriptor),
 					turnId: started.turnId,
 					claimedMessages: batch.length,
 				},
@@ -1090,14 +1260,41 @@ export class SubagentCoordinator {
 		timeoutMs?: number,
 		signal?: AbortSignal,
 	): Promise<WaitAgentOutcome> {
-		return this.runAdmittedOperation(() =>
-			this.waitAgentAdmitted(
+		return this.runAdmittedOperation(async () => {
+			const outcome = await this.waitAgentAdmitted(
 				parent,
 				toolCallId,
 				waitTimeout(timeoutMs),
 				signal,
-			),
-		);
+			);
+			if (outcome.updates.length === 0) {
+				return { ...outcome, taskPaths: {} };
+			}
+			let paths = new Map<string, string>();
+			try {
+				const catalog = await this.catalogRecords(parent);
+				paths = new Map(
+					catalog.records.map((record) => [
+						record.agentId,
+						record.taskPath,
+					]),
+				);
+			} catch {
+				// Completion delivery is already durably reserved. Readable
+				// path enrichment is cosmetic and must not turn that delivery
+				// into a failed tool call.
+			}
+			return {
+				...outcome,
+				taskPaths: Object.fromEntries(
+					outcome.updates.map((update) => [
+						update.childAgentId,
+						paths.get(update.childAgentId)
+							?? update.childAgentId,
+					]),
+				),
+			};
+		});
 	}
 
 	private async waitAgentAdmitted(
@@ -1156,6 +1353,7 @@ export class SubagentCoordinator {
 							timeoutMs,
 							updates: [],
 							unreadUpdates: snapshot.unread.length,
+							taskPaths: {},
 						};
 					}
 					waiter = this.createCompletionWaiter(remaining, signal);
@@ -1238,6 +1436,7 @@ export class SubagentCoordinator {
 								timeoutMs,
 								updates: [],
 								unreadUpdates: snapshot.unread.length,
+								taskPaths: {},
 							};
 						}
 						return undefined;
@@ -1271,6 +1470,7 @@ export class SubagentCoordinator {
 				0,
 				snapshot.unread.length - updates.length,
 			),
+			taskPaths: {},
 		};
 	}
 
@@ -1388,26 +1588,64 @@ export class SubagentCoordinator {
 	}
 
 	async interrupt(parent: ParentRef, targetId: string): Promise<void> {
+		await this.interruptWithOutcome(parent, targetId);
+	}
+
+	async interruptWithOutcome(
+		parent: ParentRef,
+		targetId: string,
+	): Promise<InterruptOutcome> {
 		return this.runAdmittedOperation(() =>
 			this.interruptAdmitted(parent, targetId),
 		);
 	}
 
-	private async interruptAdmitted(parent: ParentRef, targetId: string): Promise<void> {
-		await this.agentOperations.run(targetId, async () => {
-			const target = this.active.get(targetId);
-			if (!target) return;
-			if (!(await this.isDescendantOf(parent, target.descriptor))) {
-				throw new Error(`subagent ${targetId} is not a live descendant of ${parent.agentId}`);
+	private async interruptAdmitted(
+		parent: ParentRef,
+		targetId: string,
+	): Promise<InterruptOutcome> {
+		const resolved = await this.resolveTarget(parent, targetId, {
+			allowUnknownId: true,
+		});
+		return this.agentOperations.run(resolved.agentId, async () => {
+			if (
+				resolved.record
+				&& !(await this.isDescendantOf(
+					parent,
+					resolved.record.descriptor,
+				))
+			) {
+				throw new Error(
+					`subagent ${resolved.taskPath} is not a descendant of ${parent.taskPath}`,
+				);
 			}
+			const target = this.active.get(resolved.agentId);
+			if (!target) {
+				return {
+					agentId: resolved.agentId,
+					taskPath: resolved.taskPath,
+					active: false,
+				};
+			}
+			if (!(await this.isDescendantOf(parent, target.descriptor))) {
+				throw new Error(
+					`subagent ${resolved.taskPath} is not a live descendant of ${parent.taskPath}`,
+				);
+			}
+			this.touchActivation(target);
 			interruptAgentTurn(target.controlState);
 			this.emitUpdate(target);
 			target.turnAbortController?.abort(
-				new Error(`subagent ${targetId} was interrupted`),
+				new Error(`subagent ${resolved.taskPath} was interrupted`),
 			);
 			void target.runtime.session.abort().catch((error) => {
 				target.lastError = errorText(error);
 			});
+			return {
+				agentId: resolved.agentId,
+				taskPath: descriptorTaskPath(target.descriptor),
+				active: true,
+			};
 		});
 	}
 
@@ -1431,6 +1669,12 @@ export class SubagentCoordinator {
 				kind: "child",
 				agentId: record.agentId,
 				parentAgentId: record.descriptor.parentAgentId,
+				taskPath: record.taskPath,
+				parentTaskPath:
+					record.descriptor.parentAgentId === parent.agentId
+						? parent.taskPath
+						: (byId.get(record.descriptor.parentAgentId)?.taskPath
+							?? record.descriptor.parentAgentId),
 				depth: distance,
 				descriptor: record.descriptor,
 				...(record.sessionFile ? { sessionFile: record.sessionFile } : {}),
@@ -1467,7 +1711,8 @@ export class SubagentCoordinator {
 			throw new Error("report is available only to continuable subagents");
 		}
 		const truncated = truncateUtf8(output, child.descriptor.runtime.maxOutputBytes);
-		const content = `Background subagent ${child.agentId} reported:\n\n${truncated.text}${
+		const readablePath = descriptorTaskPath(child.descriptor);
+		const content = `Background subagent ${readablePath} (${child.agentId}) reported:\n\n${truncated.text}${
 			truncated.truncated ? `\n\n[Report truncated; ${truncated.omittedBytes} bytes omitted.]` : ""
 		}`;
 		await child.parent.deliver(
@@ -1476,6 +1721,7 @@ export class SubagentCoordinator {
 			{
 				kind: "report",
 				childAgentId: child.agentId,
+				taskPath: readablePath,
 				label: child.descriptor.label,
 				...(truncated.truncated ? { truncated: true } : {}),
 			},
@@ -1516,6 +1762,7 @@ export class SubagentCoordinator {
 		this.backgroundRuns.close();
 		await this.abortActiveRuns();
 		await this.agentOperations.waitForIdle();
+		await this.idleRuntimeOperations.waitForIdle();
 		await this.completionOperations.waitForIdle();
 		await this.abortActiveRuns();
 		await this.waitForAdmittedOperations();
@@ -1533,6 +1780,7 @@ export class SubagentCoordinator {
 			await this.disposeActivation(activation).catch(() => {});
 		}
 		await this.agentOperations.waitForIdle();
+		await this.idleRuntimeOperations.waitForIdle();
 		await this.completionOperations.waitForIdle();
 	}
 
@@ -1586,12 +1834,12 @@ export class SubagentCoordinator {
 			name: "subagent",
 			label: "Subagent",
 			description:
-				"Delegate a standalone task to a fresh child in an isolated session. " +
+				"Delegate a standalone task to a named child path, with optional completed-turn context inheritance. " +
 				(!enableRunInBackground
 					? "This foreground-only instance always waits for the result."
 					: defaultBackground
-						? "It runs in the background by default and returns a durable id."
-						: "It waits for the result by default; background mode returns a durable id."),
+						? "It runs in the background by default and returns a readable path plus durable id."
+						: "It waits for the result by default; background mode returns a readable path plus durable id."),
 			parameters: delegationParameters(enableRunInBackground, agentNames),
 			execute: async (_id, params, signal, onUpdate) => {
 				const activation = getActivation();
@@ -1612,8 +1860,11 @@ export class SubagentCoordinator {
 			name: "subagent_fork",
 			label: "Subagent Fork",
 			description:
-				"Delegate a one-shot task to a child seeded with completed turns from this conversation.",
-			parameters: forkDelegationParameters(agentNames),
+				"Delegate a task to a child seeded with all completed turns from this conversation. It is foreground by default and can be explicitly continuable.",
+			parameters: forkDelegationParameters(
+				agentNames,
+				enableRunInBackground,
+			),
 			execute: async (_id, params, signal, onUpdate) => {
 				const activation = getActivation();
 				const outcome = await this.delegate(
@@ -1652,14 +1903,15 @@ export class SubagentCoordinator {
 							type: "text",
 							text:
 								delivery.kind === "mailbox-v2"
-									? `message ${delivery.messageId} durably enqueued for subagent ${params.subagent_id}; ${delivery.pendingMessages} pending`
-									: `message queued as the next turn for subagent ${params.subagent_id}`,
+									? `message ${delivery.messageId} durably enqueued for ${delivery.taskPath}; ${delivery.pendingMessages} pending`
+									: `message queued as the next turn for ${delivery.taskPath}`,
 						},
 					],
 					details: {
 						kind: "control",
 						action: "send",
-						agentId: params.subagent_id,
+						agentId: delivery.agentId,
+						taskPath: delivery.taskPath,
 						...(delivery.kind === "mailbox-v2"
 							? {
 									messageId: delivery.messageId,
@@ -1689,13 +1941,14 @@ export class SubagentCoordinator {
 					content: [
 						{
 							type: "text",
-							text: `started turn ${outcome.turnId} for subagent ${params.subagent_id}, claiming ${outcome.claimedMessages} mailbox message${outcome.claimedMessages === 1 ? "" : "s"}`,
+							text: `started turn ${outcome.turnId} for ${outcome.taskPath}, claiming ${outcome.claimedMessages} mailbox message${outcome.claimedMessages === 1 ? "" : "s"}`,
 						},
 					],
 					details: {
 						kind: "control",
 						action: "followup",
-						agentId: params.subagent_id,
+						agentId: outcome.agentId,
+						taskPath: outcome.taskPath,
 						turnId: outcome.turnId,
 						claimedMessages: outcome.claimedMessages,
 					} satisfies ControlDetails,
@@ -1747,10 +2000,18 @@ export class SubagentCoordinator {
 			execute: async (_id, params) => {
 				assertBackgroundControlEnabled("interrupt_agent");
 				const activation = getActivation();
-				await this.interrupt(this.parentForActivation(activation), params.agent_id);
+				const outcome = await this.interruptWithOutcome(
+					this.parentForActivation(activation),
+					params.agent_id,
+				);
 				return {
-					content: [{ type: "text", text: `interrupt requested for agent ${params.agent_id}` }],
-					details: { kind: "control", action: "interrupt", agentId: params.agent_id } satisfies ControlDetails,
+					content: [{ type: "text", text: `interrupt requested for ${outcome.taskPath}` }],
+					details: {
+						kind: "control",
+						action: "interrupt",
+						agentId: outcome.agentId,
+						taskPath: outcome.taskPath,
+					} satisfies ControlDetails,
 				};
 			},
 		});
@@ -1786,7 +2047,12 @@ export class SubagentCoordinator {
 				await this.report(activation, params.output);
 				return {
 					content: [{ type: "text", text: `report accepted by the agent that started you` }],
-					details: { kind: "control", action: "report", agentId: activation.agentId } satisfies ControlDetails,
+				details: {
+					kind: "control",
+					action: "report",
+					agentId: activation.agentId,
+					taskPath: descriptorTaskPath(activation.descriptor),
+				} satisfies ControlDetails,
 				};
 			},
 		});
@@ -1797,7 +2063,12 @@ export class SubagentCoordinator {
 	outcomeToolResult(outcome: DelegationOutcome): AgentToolResult<DelegationDetails> {
 		if (outcome.kind === "continuable") {
 			return {
-				content: [{ type: "text", text: `started subagent ${outcome.details.agentId}` }],
+				content: [
+					{
+						type: "text",
+						text: `started subagent ${outcome.details.taskPath} (${outcome.details.agentId})`,
+					},
+				],
 				details: outcome.details,
 			};
 		}
@@ -1824,12 +2095,14 @@ export class SubagentCoordinator {
 					return `${entry.piSessionId} [diagnostic: ${entry.reason}]`;
 				}
 				const location =
-					scope === "descendants" ? ` parent=${entry.parentAgentId} depth=${entry.depth}` : "";
+					scope === "descendants"
+						? ` parent=${entry.parentTaskPath} depth=${entry.depth}`
+						: "";
 				const mailbox =
 					entry.descriptor.runtime.backgroundProtocol === "mailbox-v2"
 						? ` pending=${entry.pendingMessages} updates=${entry.unreadUpdates}`
 						: "";
-				return `${entry.agentId} [${entry.status}]${mailbox}${location} — ${entry.descriptor.label} (${entry.descriptor.agent.name})`;
+				return `${entry.taskPath} [${entry.status}]${mailbox}${location} — ${entry.descriptor.label} (${entry.descriptor.agent.name}) id=${entry.agentId}`;
 			})
 			.join("\n");
 	}
@@ -1840,6 +2113,13 @@ export class SubagentCoordinator {
 		}
 		const updates = outcome.updates.map((update) => {
 			const output = update.output.trim() || "(no output)";
+			const fullPath =
+				outcome.taskPaths[update.childAgentId]
+				?? update.childAgentId;
+			const readablePath =
+				fullPath.length > 200
+					? `${fullPath.slice(0, 199)}…`
+					: fullPath;
 			const truncation = update.outputTruncated
 				? `\n[Completion output truncated${
 						update.omittedBytes !== undefined
@@ -1849,7 +2129,7 @@ export class SubagentCoordinator {
 				: "";
 			return [
 				`completion ${update.completionId}`,
-				`child=${update.childAgentId} turn=${update.turnId} stop=${update.stopReason}`,
+				`child=${readablePath} id=${update.childAgentId} turn=${update.turnId} stop=${update.stopReason}`,
 				`${output}${truncation}`,
 			].join("\n");
 		});
@@ -2081,17 +2361,21 @@ export class SubagentCoordinator {
 				streamedText: "",
 				usage: emptyUsage(),
 				startedTurnIds: new Set(),
+				silentSettlementTurnIds: new Set(),
 				pendingMailboxClaims: new Set(),
 				userMessageGates: new Map(),
 				ownedChildren: new Set(),
 				onUpdate: options.onUpdate,
 				published: false,
+				everPublished: false,
 				suppressSettlement: false,
 				finalizing: false,
 				holdsBackgroundSlot: false,
 				persistenceGate: createPersistenceGate(
 					runtime.session.sessionManager,
+					options.isNew,
 				),
+				lastUsedSequence: ++this.activationSequence,
 				disposed: false,
 			};
 			const existing = this.active.get(activation.agentId);
@@ -2129,6 +2413,7 @@ export class SubagentCoordinator {
 	): { turnId: string; accepted: Promise<void>; result: Promise<SubagentRunResult> } {
 		if (activation.currentRun) throw new Error(`subagent ${activation.agentId} is already running`);
 		if (signal?.aborted) throw signal.reason ?? new Error("subagent start aborted");
+		this.touchActivation(activation);
 		activation.pendingSettlement = undefined;
 		this.resetTurnCapture(activation);
 		const turnId = uuidv7();
@@ -2176,7 +2461,8 @@ export class SubagentCoordinator {
 			if (acceptedSettled) return;
 			acceptedSettled = true;
 			activation.userMessageGates.delete(turnId);
-			if (!activation.published) {
+			activation.silentSettlementTurnIds.add(turnId);
+			if (!activation.published && !activation.everPublished) {
 				activation.suppressSettlement = true;
 			}
 			rejectAccepted(error);
@@ -2381,6 +2667,7 @@ export class SubagentCoordinator {
 		activation.pendingSettlement = result;
 		if (
 			turnStarted
+			&& !activation.silentSettlementTurnIds.has(result.turnId)
 			&& activation.published
 			&& activation.descriptor.mode === "continuable"
 			&& activation.descriptor.runtime.backgroundProtocol === "mailbox-v2"
@@ -2437,39 +2724,74 @@ export class SubagentCoordinator {
 	}
 
 	private async finalizeContinuable(activation: Activation): Promise<void> {
-		await this.agentOperations.run(activation.agentId, () =>
+		const retained = await this.agentOperations.run(activation.agentId, () =>
 			this.finalizeContinuableLocked(activation),
 		);
+		if (retained) {
+			await this.trimIdleRuntimes(activation.agentId);
+		}
 	}
 
-	private async finalizeContinuableLocked(activation: Activation): Promise<void> {
-		if (activation.finalizing || activation.disposed || activation.currentRun) return;
+	private async finalizeContinuableLocked(activation: Activation): Promise<boolean> {
+		if (activation.finalizing || activation.disposed || activation.currentRun) {
+			return false;
+		}
 		const result = activation.pendingSettlement;
-		if (!result || activation.ownedChildren.size > 0) return;
+		if (!result || activation.ownedChildren.size > 0) return false;
 		activation.finalizing = true;
-		activation.finalizePromise = (async () => {
-			if (
-				activation.descriptor.runtime.backgroundProtocol !== "mailbox-v2"
-				&& !activation.suppressSettlement
-				&& !this.draining
-			) {
-				await this.deliverSettlement(activation, result).catch((error) => {
-					activation.lastError = errorText(error);
-				});
+		const finalizePromise = (async (): Promise<boolean> => {
+			let retained = false;
+			try {
+				const silentSettlement =
+					activation.silentSettlementTurnIds.has(result.turnId);
+				if (
+					activation.descriptor.runtime.backgroundProtocol !== "mailbox-v2"
+					&& !silentSettlement
+					&& !activation.suppressSettlement
+					&& !this.draining
+				) {
+					await this.deliverSettlement(activation, result).catch((error) => {
+						activation.lastError = errorText(error);
+					});
+				}
+				this.emitEnd(activation, result);
+				activation.silentSettlementTurnIds.delete(result.turnId);
+				activation.pendingSettlement = undefined;
+				if (this.shouldRetainIdleRuntime(activation)) {
+					activation.published = false;
+					activation.runId = uuidv7();
+					await this.releaseParentOwnership(activation);
+					this.touchActivation(activation);
+					retained = true;
+				} else {
+					await this.disposeActivation(activation);
+					await this.releaseParentOwnership(activation);
+				}
+			} finally {
+				if (!activation.disposed) {
+					activation.finalizing = false;
+				}
 			}
-			this.emitEnd(activation, result);
-			await this.disposeActivation(activation);
-			await this.releaseParentOwnership(activation);
+			return retained;
 		})();
-		await activation.finalizePromise;
+		activation.finalizePromise = finalizePromise;
+		try {
+			return await finalizePromise;
+		} finally {
+			if (activation.finalizePromise === finalizePromise) {
+				activation.finalizePromise = undefined;
+			}
+			if (!activation.disposed) activation.finalizing = false;
+		}
 	}
 
 	private async deliverSettlement(activation: Activation, result: SubagentRunResult): Promise<void> {
+		const readablePath = descriptorTaskPath(activation.descriptor);
 		const truncated = truncateUtf8(result.output, activation.descriptor.runtime.maxOutputBytes);
 		const closing = truncated.text.trim()
 			? `Its closing message:\n\n${truncated.text}`
 			: "It left no closing message.";
-		const content = `Background subagent ${activation.agentId} ${stopReasonHeadline(result.stopReason)} and will do no further work unless you send it more.\n\n${closing}${
+		const content = `Background subagent ${readablePath} (${activation.agentId}) ${stopReasonHeadline(result.stopReason)} and will do no further work unless you send it more.\n\n${closing}${
 			truncated.truncated ? `\n\n[Closing message truncated; ${truncated.omittedBytes} bytes omitted.]` : ""
 		}`;
 		await activation.parent.deliver(
@@ -2478,6 +2800,7 @@ export class SubagentCoordinator {
 			{
 				kind: "settled",
 				childAgentId: activation.agentId,
+				taskPath: readablePath,
 				label: activation.descriptor.label,
 				stopReason: result.stopReason,
 				...(truncated.truncated ? { truncated: true } : {}),
@@ -2489,6 +2812,7 @@ export class SubagentCoordinator {
 	private parentForActivation(activation: Activation): ParentRef {
 		return {
 			agentId: activation.agentId,
+			taskPath: descriptorTaskPath(activation.descriptor),
 			depth: activation.descriptor.depth,
 			cwd: activation.descriptor.cwd,
 			sessionManager: activation.runtime.session.sessionManager,
@@ -2634,13 +2958,16 @@ export class SubagentCoordinator {
 	private publish(activation: Activation): void {
 		if (activation.published) return;
 		activation.published = true;
+		activation.everPublished = true;
 		this.pi.events.emit("pi-subagent:start", {
 			runId: activation.runId,
 			agentId: activation.agentId,
+			taskPath: descriptorTaskPath(activation.descriptor),
 			piSessionId: activation.runtime.session.sessionId,
 			parentAgentId: activation.descriptor.parentAgentId,
 			provider: activation.descriptor.provider,
 			mode: activation.descriptor.mode,
+			context: descriptorContext(activation.descriptor),
 		});
 	}
 
@@ -2649,6 +2976,7 @@ export class SubagentCoordinator {
 		this.pi.events.emit("pi-subagent:end", {
 			runId: activation.runId,
 			agentId: activation.agentId,
+			taskPath: descriptorTaskPath(activation.descriptor),
 			piSessionId: activation.runtime.session.sessionId,
 			parentAgentId: activation.descriptor.parentAgentId,
 			provider: activation.descriptor.provider,
@@ -2663,6 +2991,7 @@ export class SubagentCoordinator {
 			runId: activation.runId,
 			turnId,
 			agentId: activation.agentId,
+			taskPath: descriptorTaskPath(activation.descriptor),
 			piSessionId: activation.runtime.session.sessionId,
 			parentAgentId: activation.descriptor.parentAgentId,
 			provider: activation.descriptor.provider,
@@ -2675,6 +3004,7 @@ export class SubagentCoordinator {
 			runId: activation.runId,
 			turnId: result.turnId,
 			agentId: activation.agentId,
+			taskPath: descriptorTaskPath(activation.descriptor),
 			piSessionId: activation.runtime.session.sessionId,
 			parentAgentId: activation.descriptor.parentAgentId,
 			provider: activation.descriptor.provider,
@@ -2688,12 +3018,14 @@ export class SubagentCoordinator {
 		return {
 			kind: "delegation",
 			agentId: activation.agentId,
+			taskPath: descriptorTaskPath(activation.descriptor),
 			...(currentAgentTurnId(activation.controlState)
 				? { turnId: currentAgentTurnId(activation.controlState) }
 				: {}),
 			piSessionId: activation.runtime.session.sessionId,
 			provider: activation.descriptor.provider,
 			mode: activation.descriptor.mode,
+			context: descriptorContext(activation.descriptor),
 			agent: activation.descriptor.agent.name,
 			label: activation.descriptor.label,
 			depth: activation.descriptor.depth,
@@ -2772,8 +3104,9 @@ export class SubagentCoordinator {
 	}
 
 	private async releaseParentOwnership(activation: Activation): Promise<void> {
-		const owner = activation.parent.activation;
+		const owner = activation.ownerActivation;
 		if (!owner) return;
+		activation.ownerActivation = undefined;
 		owner.ownedChildren.delete(activation.agentId);
 		if (
 			!owner.currentRun &&
@@ -2781,7 +3114,99 @@ export class SubagentCoordinator {
 			owner.pendingSettlement &&
 			owner.descriptor.mode === "continuable"
 		) {
-			await this.finalizeContinuable(owner);
+			void this.finalizeContinuable(owner).catch((error) => {
+				owner.lastError = errorText(error);
+			});
+		}
+	}
+
+	private acquireParentOwnership(
+		activation: Activation,
+		parent: ParentRef,
+	): void {
+		if (
+			activation.ownerActivation
+			&& activation.ownerActivation !== parent.activation
+		) {
+			throw new Error(
+				`subagent ${descriptorTaskPath(activation.descriptor)} is still owned by another resident parent`,
+			);
+		}
+		activation.parent = parent;
+		if (!parent.activation) return;
+		parent.activation.ownedChildren.add(activation.agentId);
+		activation.ownerActivation = parent.activation;
+	}
+
+	private touchActivation(activation: Activation): void {
+		activation.lastUsedSequence = ++this.activationSequence;
+	}
+
+	private shouldRetainIdleRuntime(activation: Activation): boolean {
+		return (
+			this.idleRuntimeLimit > 0
+			&& !this.draining
+			&& activation.descriptor.mode === "continuable"
+			&& !activation.disposed
+			&& !activation.currentRun
+			&& activation.runtime.session.isIdle
+			&& activation.ownedChildren.size === 0
+			&& activation.pendingMailboxClaims.size === 0
+			&& activation.persistenceGate.state !== "rejected"
+		);
+	}
+
+	private isEvictableIdleRuntime(activation: Activation): boolean {
+		return (
+			!activation.disposed
+			&& !activation.finalizing
+			&& activation.descriptor.mode === "continuable"
+			&& !activation.currentRun
+			&& !activation.pendingSettlement
+			&& activation.runtime.session.isIdle
+			&& activation.ownedChildren.size === 0
+			&& activation.pendingMailboxClaims.size === 0
+			&& !activation.ownerActivation
+		);
+	}
+
+	private async trimIdleRuntimes(protectedAgentId?: string): Promise<void> {
+		await this.idleRuntimeOperations.run("idle-runtime-lru", async () =>
+			this.trimIdleRuntimesLocked(protectedAgentId),
+		);
+	}
+
+	private async trimIdleRuntimesLocked(
+		protectedAgentId?: string,
+	): Promise<void> {
+		while (true) {
+			const retained = [...this.active.values()].filter(
+				(activation) =>
+					activation.agentId === protectedAgentId
+						? this.shouldRetainIdleRuntime(activation)
+						: this.isEvictableIdleRuntime(activation),
+			);
+			if (retained.length <= this.idleRuntimeLimit) return;
+			const candidate = retained
+				.filter(
+					(activation) =>
+						activation.agentId !== protectedAgentId
+						&& this.isEvictableIdleRuntime(activation),
+				)
+				.sort(
+					(left, right) =>
+						left.lastUsedSequence - right.lastUsedSequence
+						|| left.agentId.localeCompare(right.agentId),
+				)[0];
+			if (!candidate) return;
+			await this.agentOperations.run(candidate.agentId, async () => {
+				if (
+					this.active.get(candidate.agentId) === candidate
+					&& this.isEvictableIdleRuntime(candidate)
+				) {
+					await this.disposeActivation(candidate);
+				}
+			});
 		}
 	}
 
@@ -2805,6 +3230,281 @@ export class SubagentCoordinator {
 		this.assertDirectParent(parent, descriptor);
 	}
 
+	private treeRootAgentId(
+		agentId: string,
+		byId: ReadonlyMap<string, CatalogRecord>,
+	): string {
+		let current = agentId;
+		const visited = new Set<string>();
+		while (true) {
+			if (visited.has(current)) {
+				throw new Error("subagent descriptor lineage contains a cycle");
+			}
+			visited.add(current);
+			const record = byId.get(current);
+			if (!record) return current;
+			current = record.descriptor.parentAgentId;
+		}
+	}
+
+	private async reserveTask(
+		parent: ParentRef,
+		requestedName: string | undefined,
+		label: string,
+	): Promise<ReservedTask> {
+		const catalog = await this.catalogRecords(parent);
+		const usedPaths = new Set(
+			catalog.records
+				.filter(
+					(record) =>
+						record.descriptor.parentAgentId === parent.agentId,
+				)
+				.map((record) => record.taskPath),
+		);
+		const reserve = (name: string): ReservedTask | undefined => {
+			const path = taskPath(parent.taskPath, name);
+			const reservationKey = `${parent.agentId}:${path}`;
+			if (
+				usedPaths.has(path)
+				|| this.reservedTaskPaths.has(reservationKey)
+			) {
+				return undefined;
+			}
+			this.reservedTaskPaths.add(reservationKey);
+			let released = false;
+			return {
+				name,
+				path,
+				release: () => {
+					if (released) return;
+					released = true;
+					this.reservedTaskPaths.delete(reservationKey);
+				},
+			};
+		};
+
+		if (requestedName !== undefined) {
+			const name = validateTaskName(requestedName);
+			const reserved = reserve(name);
+			if (!reserved) {
+				throw new Error(
+					`task path ${taskPath(parent.taskPath, name)} is already in use`,
+				);
+			}
+			return reserved;
+		}
+
+		const base = slugTaskName(label);
+		const initial = reserve(base);
+		if (initial) return initial;
+		for (let ordinal = 2; ordinal < Number.MAX_SAFE_INTEGER; ordinal++) {
+			const candidate = reserve(numberedTaskName(base, ordinal));
+			if (candidate) return candidate;
+		}
+		throw new Error(`could not allocate a readable child path under ${parent.taskPath}`);
+	}
+
+	private async resolveTarget(
+		parent: ParentRef,
+		target: string,
+		options: { allowUnknownId?: boolean } = {},
+	): Promise<ResolvedTarget> {
+		const catalog = await this.catalogRecords(parent);
+		const byId = new Map(
+			catalog.records.map((record) => [record.agentId, record]),
+		);
+		if (isAgentId(target)) {
+			const record = byId.get(target);
+			if (record) {
+				return {
+					agentId: record.agentId,
+					taskPath: record.taskPath,
+					record,
+				};
+			}
+			if (options.allowUnknownId) {
+				return {
+					agentId: target,
+					taskPath: target,
+				};
+			}
+			return {
+				agentId: target,
+				taskPath: target,
+			};
+		}
+
+		const path = resolveTaskPath(parent.taskPath, target);
+		const rootAgentId = this.treeRootAgentId(parent.agentId, byId);
+		const matches = this.reachableTreeRecords(rootAgentId, byId).filter(
+			(record) => record.taskPath === path,
+		);
+		if (matches.length === 0) {
+			throw new Error(`unknown subagent task path: ${path}`);
+		}
+		if (matches.length > 1) {
+			throw new Error(
+				`ambiguous subagent task path ${path}; use a durable agent id`,
+			);
+		}
+		const record = matches[0]!;
+		return {
+			agentId: record.agentId,
+			taskPath: record.taskPath,
+			record,
+		};
+	}
+
+	private reachableTreeRecords(
+		rootAgentId: string,
+		byId: ReadonlyMap<string, CatalogRecord>,
+	): CatalogRecord[] {
+		const paths = new Map<string, string>([
+			[rootAgentId, ROOT_TASK_PATH],
+		]);
+		const depths = new Map<string, number>([[rootAgentId, 0]]);
+		const reachable: CatalogRecord[] = [];
+		const pending = new Set(byId.values());
+		let progressed = true;
+		while (progressed) {
+			progressed = false;
+			for (const record of [...pending]) {
+				const parentPath = paths.get(
+					record.descriptor.parentAgentId,
+				);
+				const parentDepth = depths.get(
+					record.descriptor.parentAgentId,
+				);
+				if (parentPath === undefined || parentDepth === undefined) {
+					continue;
+				}
+				if (record.descriptor.version === 3) {
+					let expectedPath: string;
+					try {
+						expectedPath = taskPath(
+							parentPath,
+							record.descriptor.task.name,
+						);
+					} catch {
+						pending.delete(record);
+						progressed = true;
+						continue;
+					}
+					if (
+						record.taskPath !== expectedPath
+						|| record.descriptor.depth !== parentDepth + 1
+					) {
+						pending.delete(record);
+						progressed = true;
+						continue;
+					}
+				}
+				pending.delete(record);
+				reachable.push(record);
+				paths.set(record.agentId, record.taskPath);
+				depths.set(record.agentId, record.descriptor.depth);
+				progressed = true;
+			}
+		}
+		return reachable;
+	}
+
+	private catalogTopologyDiagnostics(
+		records: readonly CatalogRecord[],
+	): CatalogDiagnostic[] {
+		const byId = new Map(
+			records.map((record) => [record.agentId, record]),
+		);
+		const problems = new Map<string, string>();
+		for (const record of records) {
+			if (record.descriptor.version !== 3) continue;
+			const parent = byId.get(record.descriptor.parentAgentId);
+			if (parent) {
+				let expectedPath: string | undefined;
+				try {
+					expectedPath = taskPath(
+						parent.taskPath,
+						record.descriptor.task.name,
+					);
+				} catch {
+					problems.set(
+						record.agentId,
+						"descriptor task path cannot be joined to its parent",
+					);
+				}
+				if (
+					expectedPath !== undefined
+					&& (
+						record.taskPath !== expectedPath
+					|| record.descriptor.depth
+						!== parent.descriptor.depth + 1
+					)
+				) {
+					problems.set(
+						record.agentId,
+						"descriptor task path or depth does not match its parent",
+					);
+				}
+			} else if (
+				record.descriptor.depth === 1
+				&& record.taskPath
+					!== taskPath(
+						ROOT_TASK_PATH,
+						record.descriptor.task.name,
+					)
+			) {
+				problems.set(
+					record.agentId,
+					"root child task path does not match its task name",
+				);
+			}
+		}
+
+		for (const start of records) {
+			const chain: string[] = [];
+			const indexes = new Map<string, number>();
+			let current: CatalogRecord | undefined = start;
+			while (current) {
+				const existing = indexes.get(current.agentId);
+				if (existing !== undefined) {
+					for (const agentId of chain.slice(existing)) {
+						problems.set(
+							agentId,
+							"descriptor lineage contains a cycle",
+						);
+					}
+					break;
+				}
+				indexes.set(current.agentId, chain.length);
+				chain.push(current.agentId);
+				current = byId.get(current.descriptor.parentAgentId);
+			}
+		}
+
+		return [...problems]
+			.map(([agentId, message]) => {
+				const record = byId.get(agentId)!;
+				return {
+					kind: "diagnostic" as const,
+					piSessionId: record.piSessionId,
+					reason: "corrupt" as const,
+					...(record.sessionFile
+						? { sessionFile: record.sessionFile }
+						: {}),
+					...(record.descriptor.parentSessionFile
+						? {
+								parentSessionFile:
+									record.descriptor.parentSessionFile,
+							}
+						: {}),
+					message,
+				};
+			})
+			.sort((left, right) =>
+				left.piSessionId.localeCompare(right.piSessionId),
+			);
+	}
+
 	private async findPersistedChild(
 		parent: ParentRef,
 		childId: string,
@@ -2820,6 +3520,8 @@ export class SubagentCoordinator {
 		for (const item of persisted.descriptors) {
 			records.set(item.agentId, {
 				agentId: item.agentId,
+				piSessionId: item.piSessionId,
+				taskPath: descriptorTaskPath(item.descriptor),
 				descriptor: item.descriptor,
 				sessionFile: item.sessionFile,
 				pendingMessages: item.pendingMessages,
@@ -2900,6 +3602,8 @@ export class SubagentCoordinator {
 			}
 			records.set(activation.agentId, {
 				agentId: activation.agentId,
+				piSessionId: activation.runtime.session.sessionId,
+				taskPath: descriptorTaskPath(activation.descriptor),
 				descriptor: activation.descriptor,
 				...(activation.runtime.session.sessionFile
 					? { sessionFile: activation.runtime.session.sessionFile }
@@ -2911,13 +3615,15 @@ export class SubagentCoordinator {
 				),
 			});
 		}
+		const catalogRecords = [...records.values()];
 		return {
-			records: [...records.values()],
+			records: catalogRecords,
 			diagnostics: [
 				...persisted.diagnostics.filter(
 					(diagnostic) => !activeSessionIds.has(diagnostic.piSessionId),
 				),
 				...activeDiagnostics,
+				...this.catalogTopologyDiagnostics(catalogRecords),
 			],
 			rootUnreadUpdatesByChild,
 		};

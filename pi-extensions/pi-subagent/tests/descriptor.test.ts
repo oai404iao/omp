@@ -33,11 +33,28 @@ function descriptor(label = "inspect auth"): SubagentDescriptor {
 			enableRunInBackground: true,
 			defaultBackground: true,
 			maxConcurrentBackgroundRuns: 4,
+			maxIdleRuntimes: 0,
 			backgroundProtocol: "legacy",
 			reportDelivery: "wakeup",
 			inheritExtensions: false,
 			openAIIdentity: false,
 			maxOutputBytes: 51200,
+		},
+	};
+}
+
+function currentDescriptor(): SubagentDescriptor {
+	const legacy = descriptor();
+	return {
+		...legacy,
+		version: 3,
+		task: {
+			name: "inspect-auth",
+			path: "/root/inspect-auth",
+		},
+		context: {
+			mode: "last_n_completed",
+			completedTurns: 2,
 		},
 	};
 }
@@ -58,6 +75,32 @@ test("descriptor parser returns a detached validated value", () => {
 	const parsed = parseDescriptor(input);
 	assert.deepEqual(parsed, input);
 	assert.notEqual(parsed.agent.tools, input.agent.tools);
+});
+
+test("v3 descriptors persist readable paths and context policy", () => {
+	const input = currentDescriptor();
+	const parsed = parseDescriptor(input);
+	assert.deepEqual(parsed, input);
+	assert.equal(parsed.version, 3);
+	if (parsed.version !== 3 || input.version !== 3) return;
+	assert.notEqual(parsed.task, input.task);
+	assert.notEqual(parsed.context, input.context);
+});
+
+test("v3 descriptors reject inconsistent paths and context", () => {
+	const wrongPath = currentDescriptor();
+	if (wrongPath.version !== 3) return;
+	wrongPath.task.path = "/root/another-name";
+	assert.throws(() => parseDescriptor(wrongPath), /must end with task.name/);
+
+	const wrongContext = currentDescriptor() as SubagentDescriptor & {
+		context: { mode: "fresh"; completedTurns: number };
+	};
+	wrongContext.context = { mode: "fresh", completedTurns: 2 };
+	assert.throws(
+		() => parseDescriptor(wrongContext),
+		/available only for last_n_completed/,
+	);
 });
 
 test("legacy descriptors default to background-enabled behavior", () => {
@@ -81,6 +124,16 @@ test("legacy descriptors receive the default background concurrency limit", () =
 	).maxConcurrentBackgroundRuns;
 	const parsed = parseDescriptor(input);
 	assert.equal(parsed.runtime.maxConcurrentBackgroundRuns, 4);
+});
+
+test("legacy descriptors receive a disabled idle runtime cache", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		runtime: Omit<SubagentDescriptor["runtime"], "maxIdleRuntimes">;
+	};
+	delete (
+		input.runtime as Partial<SubagentDescriptor["runtime"]>
+	).maxIdleRuntimes;
+	assert.equal(parseDescriptor(input).runtime.maxIdleRuntimes, 0);
 });
 
 test("legacy descriptors receive the legacy background protocol", () => {

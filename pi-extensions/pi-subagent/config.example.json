@@ -5,6 +5,7 @@
   "enableRunInBackground": true,
   "defaultBackground": true,
   "maxConcurrentBackgroundRuns": 4,
+  "maxIdleRuntimes": 0,
   "backgroundProtocol": "legacy",
   "reportDelivery": "wakeup",
   "inheritExtensions": false,
