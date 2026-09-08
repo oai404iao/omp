@@ -11,26 +11,24 @@ import {
 	type ModelLike,
 	type NativeMutationToolName,
 } from "./capabilities.js";
-import {
-	registerOpenAIResponsesProviders,
-	type OpenAIResponsesProviderController,
-} from "./provider-shim.js";
-import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
-import { configPath, loadSettings, settingsDiagnostics } from "./settings.js";
+import { resolveCodexRequestProfile } from "./codex-request-profile.js";
+import { registerOpenAIResponsesProviders } from "./extension/register.js";
+import { registerFastMode, resolveFastModeServiceTier } from "./fast-mode.js";
+import { glyphs } from "./glyphs.js";
 import {
 	modelCatalogDiagnostics,
 	modelsPath,
 	resolveModelProfile,
 } from "./model-catalog/catalog.js";
 import { loadModelSettings } from "./model-catalog/runtime.js";
+import { registerNativeCompaction } from "./native-compaction.js";
+import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
+import type { OpenAIResponsesProviderController } from "./providers/openai-codex/types.js";
+import { configPath, loadSettings, settingsDiagnostics } from "./settings.js";
 import { createApplyPatchToolDefinition } from "./tools/apply-patch.js";
 import { createImageGenerationToolDefinition } from "./tools/image-generation.js";
-import { createWebSearchToolDefinition } from "./tools/web-search.js";
 import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInput } from "./tools/view-image.js";
-import { glyphs } from "./glyphs.js";
-import { resolveCodexRequestProfile } from "./codex-request-profile.js";
-import { registerNativeCompaction } from "./native-compaction.js";
-import { registerFastMode, resolveFastModeServiceTier } from "./fast-mode.js";
+import { createWebSearchToolDefinition } from "./tools/web-search.js";
 
 const INSTALL_SYMBOL = Symbol.for("pi-codex-minimal-tools.installed");
 

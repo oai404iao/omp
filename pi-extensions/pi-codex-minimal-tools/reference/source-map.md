@@ -166,3 +166,22 @@ upstream parameter declarations are generated from Rust types.
 
 The public built-in guide is included for protocol comparison. It is not
 evidence that the analyzed Codex CLI uses `tools:[{"type":"apply_patch"}]`.
+
+## Local implementation map
+
+The upstream revisions and evidence above are unchanged by the internal module
+split. `src/provider-shim.ts` and `src/providers/openai-responses-shared.ts`
+retain their old exports as compatibility facades; follow these owners when
+auditing or modifying the implementation:
+
+| Concern | Local owner under `src/` |
+| --- | --- |
+| Request body, Lite, headers and identity metadata | `providers/openai-codex/{request-body,lite,headers,request-metadata}.ts` |
+| SSE and WebSocket transport | `providers/openai-codex/{sse,websocket-connection,websocket-events,websocket-session,websocket-stream}.ts` |
+| Continuation, prewarm and retries | `providers/openai-codex/{continuation,prewarm,retry}.ts` |
+| Remote compaction checkpoint and requests | `adapter/compaction/` |
+| Replay items, history and signatures | `providers/responses/{items,history,messages,signatures,tool-identity}.ts` |
+| Responses stream state, citations and usage | `providers/responses/{stream,stream-state,text-renderer,usage}.ts` |
+| Image persistence and preview | `tools/image-generation/{storage,preview}.ts` |
+| Web-search activity and rendering | `tools/web-search/{activity,render}.ts` |
+| Pi lifecycle composition | `extension/register.ts` |

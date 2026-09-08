@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { readManifest, registry, root, workspaces } from "./workspaces.mjs";
 
@@ -160,6 +160,13 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
   if (!packOutput) continue;
 
   const packedPaths = new Set(packOutput.files.map((file) => normalizePackagePath(file.path)));
+  if (expectedName === "@oai404iao/pi-codex-minimal-tools") {
+    for (const path of readdirSync(resolve(root, directory, "src"), { recursive: true })) {
+      if (!path.endsWith(".ts")) continue;
+      const runtimePath = `src/${normalizePackagePath(path)}`;
+      if (!packedPaths.has(runtimePath)) report(`${manifest.name}: tarball is missing runtime module ${runtimePath}`);
+    }
+  }
   for (const required of [
     "package.json",
     "README.md",
@@ -190,6 +197,8 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
     if (
       path === "tsconfig.json"
       || /^(?:test|tests|reference)\//.test(path)
+      || /(^|\/)AGENTS\.md$/i.test(path)
+      || /^docs\/(?:audits|plans)\//.test(path)
     ) {
       report(`${manifest.name}: development-only path would be published: ${path}`);
     }

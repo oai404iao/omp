@@ -24,6 +24,13 @@ Package checks include each extension's typecheck and tests where present.
 inspects the exact npm tarball file list and verifies every Pi extension entry
 point and runtime asset is included.
 
+`check:architecture` checks Codex local module edges (including type imports),
+compatibility-facade back-edges, layer restrictions, and 400-line source budgets.
+Existing oversized modules have reviewed ceilings in
+`scripts/codex-architecture.json`; reduce/remove exceptions rather than growing
+them. The dev-only `typescript-ast` alias provides the TypeScript 5.9 compiler
+API for syntax parsing, without replacing the workspace TypeScript 7 compiler.
+
 ## Changesets
 
 Add a changeset when a pull request changes a package's behavior, public

@@ -1,26 +1,25 @@
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { supportsImageInput, type ModelLike } from "./capabilities.js";
-import { frameGlyphs, glyphs, treeGlyph } from "./glyphs.js";
-import { listResolvedModelProfiles } from "./model-catalog/catalog.js";
-import { loadSettings } from "./settings.js";
-import { loadModelSettings } from "./model-catalog/runtime.js";
-import { standaloneImageGeneration } from "./tools/image-generation.js";
-import {
-	buildGeneratedImageDisplayText,
-	IMAGE_SAVE_DISPLAY_MESSAGE_TYPE,
-	saveOpenAICodexGeneratedImage,
-	type SavedGeneratedImage,
-} from "./provider-shim.js";
-import { projectRoot } from "./utils/images.js";
 import {
 	buildCodexJsonHeaders,
 	hasCodexRequestAuth,
 } from "./codex-http.js";
+import { frameGlyphs, glyphs, treeGlyph } from "./glyphs.js";
+import { listResolvedModelProfiles } from "./model-catalog/catalog.js";
+import { loadModelSettings } from "./model-catalog/runtime.js";
 import { setProviderGeneratedHeader } from "./provider-headers.js";
+import { loadSettings } from "./settings.js";
+import { standaloneImageGeneration } from "./tools/image-generation.js";
+import {
+	buildGeneratedImageDisplayText,
+	saveOpenAICodexGeneratedImage,
+} from "./tools/image-generation/storage.js";
+import { IMAGE_SAVE_DISPLAY_MESSAGE_TYPE, type SavedGeneratedImage } from "./tools/image-generation/types.js";
+import { projectRoot } from "./utils/images.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const BACKGROUND_IMAGE_INSTRUCTIONS = "Generate or edit images with the hosted image_generation tool. Use the user's prompt and any provided reference images. Return the image_generation_call result.";

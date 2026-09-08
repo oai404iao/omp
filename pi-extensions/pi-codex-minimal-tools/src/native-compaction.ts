@@ -1,3 +1,4 @@
+import type { Api, AssistantMessage, Context, Model, ThinkingLevel, Tool } from "@earendil-works/pi-ai";
 import type {
 	CompactionEntry,
 	ExtensionAPI,
@@ -7,16 +8,13 @@ import type {
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
-import type { Api, AssistantMessage, Context, Model, ThinkingLevel, Tool } from "@earendil-works/pi-ai";
+import { sanitizeNativeCompactionOutput } from "./adapter/compaction/checkpoint.js";
+import { requestOpenAINativeCompaction } from "./adapter/compaction/request.js";
 import type { ModelLike } from "./capabilities.js";
-import { loadModelSettings } from "./model-catalog/runtime.js";
-import { resolveModelProfile } from "./model-catalog/catalog.js";
 import { hasCodexRequestAuth } from "./codex-http.js";
-import {
-	requestOpenAINativeCompaction,
-	sanitizeNativeCompactionOutput,
-	type OpenAIResponsesProviderController,
-} from "./provider-shim.js";
+import { resolveModelProfile } from "./model-catalog/catalog.js";
+import { loadModelSettings } from "./model-catalog/runtime.js";
+import type { OpenAIResponsesProviderController } from "./providers/openai-codex/types.js";
 import {
 	type CodexMinimalToolsSettings,
 } from "./settings.js";

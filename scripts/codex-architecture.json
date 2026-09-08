@@ -1,0 +1,32 @@
+{
+  "maxLines": 400,
+  "facades": [
+    "provider-shim.ts",
+    "providers/openai-responses-shared.ts"
+  ],
+  "forbidden": [
+    { "from": "providers/responses/", "to": "extension/" },
+    { "from": "providers/responses/", "to": "providers/openai-codex/" },
+    { "from": "providers/responses/", "to": "tools/" },
+    { "from": "providers/openai-codex/", "to": "extension/" },
+    { "from": "adapter/compaction/", "to": "extension/" }
+  ],
+  "exceptions": {
+    "model-catalog/catalog.ts": {
+      "maxLines": 636,
+      "reason": "Existing catalog resolver/schema boundary; split independently from transport relocation."
+    },
+    "codex-wire-identity.ts": {
+      "maxLines": 596,
+      "reason": "Existing shared identity persistence state; ownership contract precedes further extraction."
+    },
+    "background-image-generation.ts": {
+      "maxLines": 574,
+      "reason": "Existing job lifecycle; split with the optional image capability seam."
+    },
+    "tools/web-search.ts": {
+      "maxLines": 554,
+      "reason": "Existing standalone reserved endpoint tool; split request/response/rendering before packaging."
+    }
+  }
+}
