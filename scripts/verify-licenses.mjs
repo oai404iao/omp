@@ -107,6 +107,27 @@ function check(condition, message) {
   if (!condition) errors.push(message);
 }
 
+for (const packageName of ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"]) {
+  const directory = `pi-extensions/${packageName}`;
+  for (const file of ["LICENSE", "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "provenance/openai-codex-eb9dceba-reserved-tools.json"]) {
+    check(read(`${directory}/${file}`).equals(read(`pi-extensions/pi-codex-minimal-tools/${file}`)),
+      `${packageName}: ${file} must retain the reviewed source/license snapshot`);
+  }
+  check(text(`${directory}/THIRD_PARTY_NOTICES.md`).includes(codexRevision), `${packageName}: missing pinned source notice`);
+}
+check(
+  read("pi-extensions/pi-codex-core/src/providers/codex-apply-patch.lark").equals(
+    read("pi-extensions/pi-codex-minimal-tools/src/providers/codex-apply-patch.lark")),
+  "the core grammar must match the verified legacy compatibility asset",
+);
+for (const file of ["config.schema.json", "models.schema.json"]) {
+  check(read(`pi-extensions/pi-codex-runtime/${file}`).equals(read(`pi-extensions/pi-codex-minimal-tools/${file}`)),
+    `${file}: legacy schema URL must mirror the canonical runtime schema`);
+}
+check(read("pi-extensions/pi-codex-runtime/src/model-catalog/default-models.json").equals(
+  read("pi-extensions/pi-codex-minimal-tools/src/model-catalog/default-models.json")),
+  "legacy default catalog must mirror its canonical runtime owner");
+
 for (const [path, expected] of expectedHashes) {
   const actual = createHash("sha256").update(read(path)).digest("hex");
   check(actual === expected, `${path}: expected sha256 ${expected}, found ${actual}`);
@@ -146,7 +167,7 @@ const codexDirectory = "pi-extensions/pi-codex-minimal-tools";
 const codexManifest = readManifest(codexDirectory);
 const codexLicense = text(`${codexDirectory}/LICENSE`);
 const codexNotice = text(`${codexDirectory}/THIRD_PARTY_NOTICES.md`);
-const codexReservedTools = text(`${codexDirectory}/src/codex-reserved-tools.ts`);
+const codexReservedTools = text("pi-extensions/pi-codex-runtime/src/codex-reserved-tools.ts");
 const codexReservedProvenancePath =
   `${codexDirectory}/provenance/openai-codex-eb9dceba-reserved-tools.json`;
 const codexReservedProvenance = JSON.parse(text(codexReservedProvenancePath));
@@ -175,7 +196,7 @@ check(
 );
 for (const path of ["src/patch/parser.ts", "src/patch/apply.ts"]) {
   check(
-    text(`${codexDirectory}/${path}`).includes("Substantially modified TypeScript adaptation"),
+    text(`pi-extensions/pi-codex-core/${path}`).includes("Substantially modified TypeScript adaptation"),
     `pi-codex-minimal-tools/${path} lacks its source modification notice`,
   );
 }
@@ -184,6 +205,12 @@ check(
     && codexReservedTools.includes("Modified TypeScript compatibility serialization"),
   "pi-codex-minimal-tools reserved-tool serialization lacks its Apache modification notice",
 );
+for (const file of ["web-search.ts", "image-generation.ts", "types.ts"]) {
+  const source = text(`pi-extensions/pi-codex-runtime/src/reserved-tools/${file}`);
+  check(source.includes("SPDX-License-Identifier: Apache-2.0") && source.includes(codexRevision)
+    && source.includes("Modified TypeScript compatibility serialization"),
+  `reserved-tools/${file}: missing Apache/provenance modification notice`);
+}
 check(
   codexNotice.includes("Modified namespace-tool compatibility serialization")
     && codexNotice.includes("internal Responses Lite path")

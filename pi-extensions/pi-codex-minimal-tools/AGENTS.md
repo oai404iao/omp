@@ -5,24 +5,26 @@ Model-profiled Pi Responses extension. Read `README.md` for user configuration,
 
 ## Layout and ownership
 
-- `src/index.ts`: tool activation and command composition.
+- `src/index.ts`: compatible composition of the three capability factories.
 - `src/extension/register.ts`: legacy composition of provider runtime and presentation.
-- `src/extension/provider-runtime.ts`: provider/identity/session registration with
+- Other old source paths are now compatibility forwards. Follow
+  `scripts/codex-source-owners.json` to the implementation owner; do not add code here.
+- Core's `src/extension/provider-runtime.ts`: provider/identity/session registration with
   optional presentation injection; no direct or transitive tool implementations.
-- `src/extension/startup-prewarm.ts`: generation-scoped prewarm tasks; reset
+- Core's `src/extension/startup-prewarm.ts`: generation-scoped prewarm tasks; reset
   releases prewarm waiters, invalidates late authentication results and aborts
   speculative requests. The auth API itself may not cooperate with cancellation.
-- `src/providers/openai-codex/`: transport, request headers/body, WS cache,
+- Core's `src/providers/openai-codex/`: transport, request headers/body, WS cache,
   continuation, prewarm, retry, capture, and usage.
-- `src/providers/responses/`: replay items/signatures/history, stream state,
+- Runtime's `src/providers/responses/`: replay items/signatures/history, stream state,
   citation rendering, and usage. It must not depend on Codex transport or tools.
-- `src/adapter/compaction/`: native checkpoint and remote request protocols.
-- `src/tools/{image-generation,web-search}/`: persistence/preview, display lifecycle
+- Core's `src/adapter/compaction/`: native checkpoint and remote request protocols.
+- Imagegen/web-search's `src/tools/`: persistence/preview, display lifecycle
   and response-local observers. Transport must not import these modules.
-- `src/providers/openai-codex/stream-effects.ts`: internal observer contract;
+- Runtime's `src/providers/openai-codex/stream-effects.ts`: internal observer contract;
   no presentation effects are installed by the transport itself.
-- `src/model-catalog/`: validated profile selection; unknown models remain native.
-- `src/codex-wire-identity.ts`: shared wire identity; `src/subagent-inline.ts`
+- Runtime's `src/model-catalog/`: validated profiles; unknown models remain native.
+- Runtime's `src/codex-wire-identity.ts`: shared identity; `src/subagent-inline.ts`
   remains the supported npm integration subpath.
 - `tests/support/`: provider harness and loopback WebSocket server/codec.
 - `provenance/`: immutable upstream fingerprints, checked by root license scripts.
@@ -33,6 +35,7 @@ Model-profiled Pi Responses extension. Read `README.md` for user configuration,
 npm ci --ignore-scripts
 npm run check -w @oai404iao/pi-codex-minimal-tools
 npm run check:architecture
+npm run test:codex-packages
 npm run ci
 ```
 
@@ -56,7 +59,8 @@ sockets, restore environment/fetch/timers, and reset identity state.
    release locks, Pi baseline, or default tool behavior in a mechanical refactor.
 7. `AGENTS.md`, tests and `reference/` are maintenance-only, excluded from tarballs.
    The staged package-split design lives in root `docs/plans/codex-boundaries.md`;
-   planned packages are not existing installable capabilities.
+   new packages are locally installable private/blocked tarballs, not npm releases.
+   See `docs/codex-packages.md` for broker ABI/version restrictions and test limits.
 8. Capture image display ownership before starting request I/O. Clearing the
    display invalidates old sinks and cancels pending flush timers; a late result
    must not appear in the replacement session. Already-started file writes are

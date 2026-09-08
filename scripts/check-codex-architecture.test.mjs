@@ -94,6 +94,34 @@ test("a neutral intermediary cannot hide a forbidden capability dependency", () 
   });
 });
 
+test("workspace edges require exported paths and exact declared runtime dependencies", () => {
+  const core = { name: "@test/core", version: "1.0.0", exports: { ".": "./src/index.ts" } };
+  const runtime = { name: "@test/runtime", version: "1.0.0", exports: { ".": "./src/index.ts" } };
+  const matrix = {
+    ...policy, sourceRoots: ["core/src", "runtime/src"],
+    packageRoots: { "@test/core": "core", "@test/runtime": "runtime" },
+  };
+  const files = {
+    "core/package.json": JSON.stringify(core),
+    "runtime/package.json": JSON.stringify(runtime),
+    "core/src/index.ts": 'import "@test/runtime";',
+    "runtime/src/index.ts": "export {};",
+  };
+  withSources(files, dir => assert.match(checkArchitecture(dir, matrix).errors[0], /exact runtime dependency/));
+  core.dependencies = { "@test/runtime": "1.0.0" };
+  files["core/package.json"] = JSON.stringify(core);
+  withSources(files, dir => assert.deepEqual(checkArchitecture(dir, matrix).errors, []));
+  files["core/src/index.ts"] = 'import "@test/runtime/private";';
+  withSources(files, dir => assert.match(checkArchitecture(dir, matrix).errors[0], /not exported/));
+  files["core/src/index.ts"] = 'import "../../runtime/src/index.js";';
+  withSources(files, dir => assert.match(checkArchitecture(dir, matrix).errors[0], /cross-package imports/));
+  files["core/src/index.ts"] = "export {};";
+  matrix.packageDependencies = { "@test/core": ["@test/runtime"] };
+  core.optionalDependencies = { "@test/hidden-capability": "1.0.0" };
+  files["core/package.json"] = JSON.stringify(core);
+  withSources(files, dir => assert.match(checkArchitecture(dir, matrix).errors[0], /forbidden installed package dependency/));
+});
+
 test("line budgets reject growth, undocumented exceptions and obsolete exceptions", () => {
   withSources({ "a.ts": "// a\n// b\n// c\n// d\n" }, (directory) => {
     assert.match(checkArchitecture(directory, policy).errors[0], /4 lines exceeds 3/);

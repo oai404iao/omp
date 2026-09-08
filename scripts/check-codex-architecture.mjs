@@ -1,10 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript-ast";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-export const codexSource = resolve(root, "pi-extensions/pi-codex-minimal-tools/src");
+export const codexSource = resolve(root, "pi-extensions");
 const policyPath = resolve(root, "scripts/codex-architecture.json");
 
 export function moduleReferences(text, filename = "module.ts") {
@@ -78,11 +78,44 @@ function sources(directory) {
 }
 
 export function checkArchitecture(directory, policy) {
-  const files = sources(directory);
+  const files = policy.sourceRoots
+    ? policy.sourceRoots.flatMap(path => sources(resolve(directory, path)))
+    : sources(directory);
   const known = new Set(files);
   const graph = new Map();
   const errors = [];
   const measured = {};
+  const packageRoots = policy.packageRoots ?? {};
+  const manifests = new Map(Object.entries(packageRoots).map(([name, path]) =>
+    [name, JSON.parse(readFileSync(resolve(directory, path, "package.json"), "utf8"))]));
+  const ownerOf = path => Object.keys(packageRoots).find(name =>
+    path.startsWith(`${resolve(directory, packageRoots[name])}${sep}`));
+  const scopes = [...new Set(Object.keys(packageRoots).filter(name => name.startsWith("@")).map(name => `${name.split("/")[0]}/`))];
+  for (const [name, manifest] of manifests) {
+    const permitted = policy.packageDependencies?.[name];
+    if (!permitted) continue;
+    for (const dependency of Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies, ...manifest.peerDependencies })) {
+      if (scopes.some(scope => dependency.startsWith(scope)) && !permitted.includes(dependency)) {
+        errors.push(`${name}: forbidden installed package dependency on ${dependency}`);
+      }
+    }
+  }
+  const workspaceTarget = (specifier) => {
+    const name = [...manifests.keys()].find(name => specifier === name || specifier.startsWith(`${name}/`));
+    if (!name) return undefined;
+    const key = specifier === name ? "." : `.${specifier.slice(name.length)}`;
+    const exports = manifests.get(name).exports ?? {};
+    let path = exports[key];
+    if (!path) {
+      for (const [pattern, template] of Object.entries(exports)) {
+        if (!pattern.endsWith("*") || !key.startsWith(pattern.slice(0, -1))) continue;
+        path = template.replace("*", key.slice(pattern.length - 1));
+        break;
+      }
+    }
+    if (typeof path !== "string") return null;
+    return resolve(directory, packageRoots[name], path);
+  };
   const localName = (path) => relative(directory, path).replaceAll("\\", "/");
   for (const file of files) {
     const name = localName(file);
@@ -99,16 +132,31 @@ export function checkArchitecture(directory, policy) {
     if (lines > limit) errors.push(`${name}: ${lines} lines exceeds ${limit}`);
     const dependencies = new Set();
     for (const specifier of moduleReferences(text, file)) {
-      if (!specifier.startsWith(".")) continue;
-      const target = resolve(dirname(file), specifier.replace(/\.(?:m?js|tsx?)$/, ".ts"));
+      const target = specifier.startsWith(".")
+        ? resolve(dirname(file), specifier.replace(/\.(?:m?js|tsx?)$/, ".ts"))
+        : workspaceTarget(specifier);
+      if (target === undefined) continue;
+      if (target === null) {
+        errors.push(`${name}: workspace import is not exported: ${specifier}`);
+        continue;
+      }
       if (!known.has(target)) {
         // JSON/grammar assets are checked by typecheck and pack:check.
         if (!/\.(json|lark)$/.test(specifier)) errors.push(`${name}: unresolved local module ${specifier}`);
         continue;
       }
       dependencies.add(target);
+      const importer = ownerOf(file);
+      const imported = ownerOf(target);
+      if (importer && imported && importer !== imported) {
+        if (specifier.startsWith(".")) errors.push(`${name}: cross-package imports must use exports: ${specifier}`);
+        const pin = manifests.get(importer).dependencies?.[imported];
+        if (pin !== manifests.get(imported).version) {
+          errors.push(`${name}: ${imported} needs an exact runtime dependency, not an implicit workspace hoist`);
+        }
+      }
       const targetName = localName(target);
-      if (policy.facades.includes(targetName)) {
+      if (policy.facades.includes(targetName) && !policy.facades.includes(name)) {
         errors.push(`${name}: implementation imports compatibility facade ${targetName}`);
       }
       for (const rule of policy.forbidden ?? []) {

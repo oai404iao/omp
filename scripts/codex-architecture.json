@@ -1,39 +1,205 @@
 {
   "maxLines": 400,
+  "packageDependencies": {
+    "@oai404iao/pi-codex-runtime": [],
+    "@oai404iao/pi-codex-core": ["@oai404iao/pi-codex-runtime"],
+    "@oai404iao/pi-codex-web-search": ["@oai404iao/pi-codex-runtime"],
+    "@oai404iao/pi-codex-imagegen": ["@oai404iao/pi-codex-runtime"],
+    "@oai404iao/pi-codex-minimal-tools": [
+      "@oai404iao/pi-codex-runtime", "@oai404iao/pi-codex-core",
+      "@oai404iao/pi-codex-web-search", "@oai404iao/pi-codex-imagegen"
+    ]
+  },
+  "sourceRoots": [
+    "pi-codex-minimal-tools/src",
+    "pi-codex-runtime/src",
+    "pi-codex-core/src",
+    "pi-codex-web-search/src",
+    "pi-codex-imagegen/src"
+  ],
+  "packageRoots": {
+    "@oai404iao/pi-codex-minimal-tools": "pi-codex-minimal-tools",
+    "@oai404iao/pi-codex-runtime": "pi-codex-runtime",
+    "@oai404iao/pi-codex-core": "pi-codex-core",
+    "@oai404iao/pi-codex-web-search": "pi-codex-web-search",
+    "@oai404iao/pi-codex-imagegen": "pi-codex-imagegen"
+  },
   "facades": [
-    "provider-shim.ts",
-    "providers/openai-responses-shared.ts"
+    "pi-codex-minimal-tools/src/activation.ts",
+    "pi-codex-minimal-tools/src/adapter/compaction/checkpoint.ts",
+    "pi-codex-minimal-tools/src/adapter/compaction/collect.ts",
+    "pi-codex-minimal-tools/src/adapter/compaction/http.ts",
+    "pi-codex-minimal-tools/src/adapter/compaction/request.ts",
+    "pi-codex-minimal-tools/src/adapter/compaction/transport.ts",
+    "pi-codex-minimal-tools/src/adapter/compaction/websocket.ts",
+    "pi-codex-minimal-tools/src/background-image-generation.ts",
+    "pi-codex-minimal-tools/src/capabilities.ts",
+    "pi-codex-minimal-tools/src/codex-http.ts",
+    "pi-codex-minimal-tools/src/codex-identity-extension.ts",
+    "pi-codex-minimal-tools/src/codex-request-profile.ts",
+    "pi-codex-minimal-tools/src/codex-reserved-tools.ts",
+    "pi-codex-minimal-tools/src/codex-wire-identity.ts",
+    "pi-codex-minimal-tools/src/extension/prewarm-snapshot.ts",
+    "pi-codex-minimal-tools/src/extension/provider-presentation.ts",
+    "pi-codex-minimal-tools/src/extension/provider-runtime.ts",
+    "pi-codex-minimal-tools/src/extension/startup-prewarm.ts",
+    "pi-codex-minimal-tools/src/fast-mode.ts",
+    "pi-codex-minimal-tools/src/glyphs.ts",
+    "pi-codex-minimal-tools/src/model-catalog/catalog.ts",
+    "pi-codex-minimal-tools/src/model-catalog/runtime.ts",
+    "pi-codex-minimal-tools/src/model-catalog/types.ts",
+    "pi-codex-minimal-tools/src/native-compaction.ts",
+    "pi-codex-minimal-tools/src/patch/apply.ts",
+    "pi-codex-minimal-tools/src/patch/parser.ts",
+    "pi-codex-minimal-tools/src/patch/render.ts",
+    "pi-codex-minimal-tools/src/provider-headers.ts",
+    "pi-codex-minimal-tools/src/provider-native-tools.ts",
+    "pi-codex-minimal-tools/src/provider-shim.ts",
+    "pi-codex-minimal-tools/src/providers/codex-apply-patch-tool.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/cache-key.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/captured-stream.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/constants.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/continuation.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/errors.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/events.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/headers.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/lite.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/message.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/prewarm.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/proxy.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/reasoning.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/request-body.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/request-context.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/request-metadata.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/retry.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/runtime.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/sse.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/stream-effects.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/stream.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/types.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/urls.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/usage.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/websocket-connection.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/websocket-events.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/websocket-session.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/websocket-socket.ts",
+    "pi-codex-minimal-tools/src/providers/openai-codex/websocket-stream.ts",
+    "pi-codex-minimal-tools/src/providers/openai-responses-shared.ts",
+    "pi-codex-minimal-tools/src/providers/responses/citations.ts",
+    "pi-codex-minimal-tools/src/providers/responses/history.ts",
+    "pi-codex-minimal-tools/src/providers/responses/items.ts",
+    "pi-codex-minimal-tools/src/providers/responses/markdown.ts",
+    "pi-codex-minimal-tools/src/providers/responses/messages.ts",
+    "pi-codex-minimal-tools/src/providers/responses/signatures.ts",
+    "pi-codex-minimal-tools/src/providers/responses/stream-state.ts",
+    "pi-codex-minimal-tools/src/providers/responses/stream.ts",
+    "pi-codex-minimal-tools/src/providers/responses/text-renderer.ts",
+    "pi-codex-minimal-tools/src/providers/responses/text.ts",
+    "pi-codex-minimal-tools/src/providers/responses/tool-identity.ts",
+    "pi-codex-minimal-tools/src/providers/responses/tools.ts",
+    "pi-codex-minimal-tools/src/providers/responses/types.ts",
+    "pi-codex-minimal-tools/src/providers/responses/usage.ts",
+    "pi-codex-minimal-tools/src/settings.ts",
+    "pi-codex-minimal-tools/src/subagent-inline.ts",
+    "pi-codex-minimal-tools/src/tools/apply-patch.ts",
+    "pi-codex-minimal-tools/src/tools/image-generation/capture.ts",
+    "pi-codex-minimal-tools/src/tools/image-generation/display.ts",
+    "pi-codex-minimal-tools/src/tools/image-generation/preview.ts",
+    "pi-codex-minimal-tools/src/tools/image-generation/storage.ts",
+    "pi-codex-minimal-tools/src/tools/image-generation/types.ts",
+    "pi-codex-minimal-tools/src/tools/image-generation.ts",
+    "pi-codex-minimal-tools/src/tools/view-image.ts",
+    "pi-codex-minimal-tools/src/tools/web-search/activity.ts",
+    "pi-codex-minimal-tools/src/tools/web-search/capture.ts",
+    "pi-codex-minimal-tools/src/tools/web-search/render.ts",
+    "pi-codex-minimal-tools/src/tools/web-search.ts",
+    "pi-codex-minimal-tools/src/utils/images.ts",
+    "pi-codex-minimal-tools/src/utils/theme.ts"
   ],
   "forbidden": [
-    { "from": "providers/responses/", "to": "extension/" },
-    { "from": "providers/responses/", "to": "providers/openai-codex/" },
-    { "from": "providers/responses/", "to": "tools/" },
-    { "from": "providers/openai-codex/", "to": "extension/" },
-    { "from": "providers/openai-codex/", "to": "tools/" },
-    { "from": "adapter/compaction/", "to": "extension/" }
+    {
+      "from": "pi-codex-runtime/src/",
+      "to": "pi-codex-minimal-tools/src/"
+    },
+    {
+      "from": "pi-codex-runtime/src/",
+      "to": "pi-codex-core/src/"
+    },
+    {
+      "from": "pi-codex-runtime/src/",
+      "to": "pi-codex-web-search/src/"
+    },
+    {
+      "from": "pi-codex-runtime/src/",
+      "to": "pi-codex-imagegen/src/"
+    },
+    {
+      "from": "pi-codex-core/src/",
+      "to": "pi-codex-minimal-tools/src/"
+    },
+    {
+      "from": "pi-codex-core/src/",
+      "to": "pi-codex-web-search/src/"
+    },
+    {
+      "from": "pi-codex-core/src/",
+      "to": "pi-codex-imagegen/src/"
+    },
+    {
+      "from": "pi-codex-web-search/src/",
+      "to": "pi-codex-minimal-tools/src/"
+    },
+    {
+      "from": "pi-codex-web-search/src/",
+      "to": "pi-codex-core/src/"
+    },
+    {
+      "from": "pi-codex-web-search/src/",
+      "to": "pi-codex-imagegen/src/"
+    },
+    {
+      "from": "pi-codex-imagegen/src/",
+      "to": "pi-codex-minimal-tools/src/"
+    },
+    {
+      "from": "pi-codex-imagegen/src/",
+      "to": "pi-codex-core/src/"
+    },
+    {
+      "from": "pi-codex-imagegen/src/",
+      "to": "pi-codex-web-search/src/"
+    },
+    {
+      "from": "pi-codex-core/src/providers/",
+      "to": "pi-codex-core/src/extension/"
+    }
   ],
   "forbiddenReachable": [
-    { "from": "extension/provider-runtime.ts", "to": "tools/" },
-    { "from": "extension/provider-runtime.ts", "to": "utils/images.ts" },
-    { "from": "extension/provider-runtime.ts", "to": "utils/theme.ts" },
-    { "from": "extension/provider-runtime.ts", "to": "extension/register.ts" }
+    {
+      "from": "pi-codex-core/src/extension/provider-runtime.ts",
+      "to": "pi-codex-imagegen/src/"
+    },
+    {
+      "from": "pi-codex-core/src/extension/provider-runtime.ts",
+      "to": "pi-codex-web-search/src/"
+    },
+    {
+      "from": "pi-codex-core/src/extension/provider-runtime.ts",
+      "to": "pi-codex-minimal-tools/src/"
+    }
   ],
   "exceptions": {
-    "model-catalog/catalog.ts": {
+    "pi-codex-runtime/src/model-catalog/catalog.ts": {
       "maxLines": 636,
       "reason": "Existing catalog resolver/schema boundary; split independently from transport relocation."
     },
-    "codex-wire-identity.ts": {
+    "pi-codex-runtime/src/codex-wire-identity.ts": {
       "maxLines": 596,
       "reason": "Existing shared identity persistence state; ownership contract precedes further extraction."
     },
-    "background-image-generation.ts": {
+    "pi-codex-imagegen/src/background-image-generation.ts": {
       "maxLines": 574,
       "reason": "Existing job lifecycle; split with the optional image capability seam."
-    },
-    "tools/web-search.ts": {
-      "maxLines": 554,
-      "reason": "Existing standalone reserved endpoint tool; split request/response/rendering before packaging."
     }
   }
 }

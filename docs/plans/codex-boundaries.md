@@ -46,7 +46,7 @@
 不能简单让 web-search/imagegen `depend` 旧全集包：这会把被卸载的高风险
 能力又传递安装回来，也会造成 provider 重复注册。
 
-目标包（尚未创建或发布）：
+目标包（S3 已创建；新增四包仍 private/blocked，未发布）：
 
 | 包 | 所有权 | dependencies | Pi peers |
 |---|---|---|---|
@@ -54,28 +54,33 @@
 | `@oai404iao/pi-codex-core` | transport、patch/view-image、compaction、identity hooks | runtime 精确版本 | AI / coding-agent / TUI |
 | `@oai404iao/pi-codex-web-search` | reserved web endpoint、工具、activity | runtime 精确版本；**不依赖 core** | 实际使用的 Pi peers |
 | `@oai404iao/pi-codex-imagegen` | reserved image endpoint、background jobs、保存/展示 | runtime 精确版本；**不依赖 core / web-search** | 实际使用的 Pi peers |
-| `@oai404iao/pi-codex-minimal-tools` | 保留旧安装入口与默认行为的兼容 bundle | core、web-search、imagegen 精确版本 | 保留已有 peers |
+| `@oai404iao/pi-codex-minimal-tools` | 保留旧安装入口与默认行为的兼容 bundle | runtime 及三个 capability 精确版本（旧 facade 需直接访问 runtime） | 保留已有 peers |
 
 runtime 是纯库，不声明 `pi.extensions`，不能成为另一个 god package。
 若不需要共享某一实现，应留在能力包中而不是提前塞入 runtime。
 图方向为 bundle → capability → runtime；capability 之间不互相依赖。
 先保留旧包名，不同时再创建第二个功能相同的 bundle。
 
-文件迁移候选：
+已落实的迁移（完整历史路径表见 `scripts/codex-source-owners.json`）：
 
 - `tools/web-search.ts` + `tools/web-search/*` → web-search；
 - `tools/image-generation.ts`、`background-image-generation.ts`、
   `tools/image-generation/*` → imagegen；
-- `utils/images.ts` 中 view-image 也使用的操作先分解，不能整文件归 imagegen；
+- 实际导入图核对发现 `view-image` 不依赖 `utils/images.ts`，因此后者整体
+  归 imagegen；移除 image storage 对 core 的 dynamic-import helper 的隐藏依赖；
 - `codex-http.ts`、`provider-headers.ts`、request-profile/catalog 和 wire identity
-  → runtime；schema 按实际设置所有权拆分，旧配置由 bundle 兼容读取；
-- `codex-reserved-tools.ts` 分成单工具协议资产，保留每份 Apache notice、
-  revision 和 fingerprint；不得复制两份后独立漂移。
+  → runtime；共同 catalog/settings schema 由 runtime 唯一管理，bundle
+  保留字节一致的 schema/default-catalog 镜像，避免建立互相漂移的新配置路径；
+- `codex-reserved-tools.ts` 的每种能力分为 runtime 内独立的
+  `reserved-tools/{web-search,image-generation}.ts` 资产，共享类型和组合函数；
+  保留 Apache notice、revision 和 fingerprint，不把协议证据复制进能力客户端；
+- web 工具的本地参数 schema 单独归 web 包，移除原 554 行例外。
 
 ## Seam 与 identity
 
 - runtime 拥有 Codex wire `SessionId / ThreadId / TurnId` 的生成、持久化映射
-  和请求语义；core 安装生命周期 hook；subagent 仅提供父子关系和任务生命周期。
+  和请求语义；首个能力包通过共享服务安装生命周期 hook，独立工具不要求
+  core；subagent 仅提供父子关系和任务生命周期。
 - `pi-subagent` 不复制 Codex wire 生成规则，不因不同上游取证 revision
   而强行改写已有行为。先给 `subagent-inline` 写契约，再做兼容转发。
 - capability 注册须版本化、幂等且与加载顺序无关；用 Pi event bus
@@ -197,13 +202,52 @@ streamSimple：同步捕获当前会话的展示 sink
 - 新增 `calm-codex-lifecycles` patch changeset；未改 package/lock、Pi 基线、
   release locks、发布 workflow 或主工作区 subagent 修改。
 
+### S3：实现与隔离验证
+
+- 四个新包为 `0.1.0-alpha.0`、private/blocked；runtime 无自动注册入口。
+  旧包默认入口为 11 行组合，旧模块保留纯转发，`./subagent-inline` 不变。
+- Broker 通过同步 Pi event-bus 探测，要求 ABI v1 和同一 runtime 版本。
+  不以模块全局对象或 ExtensionAPI wrapper 相等为前提；不同物理安装根
+  中的模块副本也可去重。工具、provider、命令、renderer 和 identity hooks
+  各有唯一所有者。混用不同 runtime 版本明确失败，避免 catalog 随顺序变化。
+- Activation/presentation lifecycle 由首个能力包统一安装，core 仅连接
+  stream effects；不再在 core 重复安装展示 clear/flush。shutdown 关闭探测，
+  flush/clear 展示并取消后台任务；core 仍负责 prewarm reset / WS 关闭。
+- 独立能力通过 Pi auth 调用 catalog 支持的 standalone 端点。没有 core
+  时 hosted 能力不自动启用，显式调用明确报错；图片既有显式 fallback 保留。
+- 架构检查覆盖五包全部类型、动态和 re-export 边，并校验 exports、
+  精确运行时依赖和禁止的 manifest optional/peer 边。保留行数只降预算。
+- 保留三个 schema/catalog 兼容镜像、patch grammar、Apache LICENSE/NOTICE、
+  provenance 和最终 namespace JSON 指纹；补五包归属文档和 README。
+- `npm run test:codex-packages` 的 17 组组合实际 npm 安装本地 Codex
+  tarball、使用 Pi 0.84.2 loader，并覆盖缺少认证、假 HTTP、独立物理根、
+  重复安装、逆序与 shutdown/reload。独立断言安装闭包不含未请求能力。
+  外部 Pi/transport 依赖仍从锁定安装以 file link 提供，并非全 registry/
+  无链接生产安装验收；未访问真实账号和收费端点。
+- 正向/逆向会话组合单测还覆盖旧配置、禁用能力、未知模型、new/fork、
+  无 UI、abort、迟到图片和未安装 imagegen 时不持久化图像；原 replay、
+  background abort 和 transport 回归保留在旧包测试中，通过 facade 测新 owner。
+- Changesets 3 默认跳过 private 包，导致 public bundle 的依赖树无效。
+  显式启用 private 版本跟踪但禁用 tag；新增五包 changeset，不修改 npm
+  资格。发布产物准备在任何打包/registry 操作前拒绝 private/blocked
+  传递依赖，包括旧 bundle；未更改已有发布资格、bootstrap allowlist 或 locks。
+- 重复安装支持针对本工作树的 broker-enabled 兼容 bundle，不是无法参与
+  握手的未改写历史 monolith tarball。不得宣称后者能与新包透明混装。
+- 最终干净安装及完整 CI 通过：474 项 node:test（Codex 277，其中组合
+  回归 27），另有 17 组真实 Pi-loader tarball 组合；191 个 TS 模块无环/
+  禁止依赖，十包 pack、许可证和 changeset status 通过。既有依赖版本、
+  Pi 0.84.2、release locks 和主工作区均未修改；未运行 version/publish。
+  发布预备命令负向测试按预期拒绝 bundle → private runtime，未产生产物。
+  S2 记录的 subagent flaky 未在本轮修复，一次通过不代表它已消失。
+
 ### 剩余工作（不能标记为已完成）
 
-- S3/S4：新 npm 包、独立安装能力、幂等 broker、聚合精确 pin 脚本和
-  隔离消费者安装矩阵尚未实施；上面的名字/映射是目标设计，不是已发布接口。
+- S4：当前已有初始精确 pin 和离线隔离消费者；递归 pin/changeset 联动脚本、
+  发布产物依赖顺序、无外部链接的生产消费者与 bootstrap 批准尚未完成。
+  不得把当前私有 tarball 验证描述为 npm 已发布或生产 registry 组合已验收。
 - S5：尚未升级 Pi 或宣称 0.85.x 验证通过，floor/target 双基线待单独实施。
-- 四个历史模块保留明确行数预算：catalog 636、wire identity 596、
-  background image 574、standalone web-search 554。预算不自动扩张；
+- 三个历史模块保留明确行数预算：catalog 636、wire identity 596、
+  background image 574。预算不自动扩张；
   后续按归属拆分时同步降低或删除例外。
 - 新的包级 `AGENTS.md` 和本计划均为维护文档；pack 检查禁止发布
   AGENTS、tests、reference 及 `docs/audits|plans`，并核对 Codex 全部 TS

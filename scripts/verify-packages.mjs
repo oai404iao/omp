@@ -68,7 +68,7 @@ function parsePackOutput(name, stdout) {
   }
 }
 
-for (const { name: expectedName, directory, releaseStatus } of workspaces) {
+for (const { name: expectedName, directory, releaseStatus, kind } of workspaces) {
   const manifest = readManifest(directory);
 
   if (!["blocked", "bootstrap", "publishable"].includes(releaseStatus)) {
@@ -92,7 +92,7 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
   if (typeof manifest.license !== "string" || manifest.license.length === 0) {
     report(`${manifest.name}: package.json must declare a license identifier`);
   }
-  if (!Array.isArray(manifest.keywords) || !manifest.keywords.includes("pi-package")) {
+  if (kind !== "library" && (!Array.isArray(manifest.keywords) || !manifest.keywords.includes("pi-package"))) {
     report(`${manifest.name}: keywords must include pi-package`);
   }
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
@@ -100,8 +100,11 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
   } else if (!manifest.files.includes("LICENSE")) {
     report(`${manifest.name}: files allowlist must explicitly include LICENSE`);
   }
-  if (!Array.isArray(manifest.pi?.extensions) || manifest.pi.extensions.length === 0) {
+  if (kind !== "library" && (!Array.isArray(manifest.pi?.extensions) || manifest.pi.extensions.length === 0)) {
     report(`${manifest.name}: pi.extensions must contain at least one entry`);
+  }
+  if (kind === "library" && manifest.pi?.extensions?.length) {
+    report(`${manifest.name}: runtime library must not auto-register Pi extensions`);
   }
   const exactPiPeerRange = exactPiPeerPackages.has(manifest.name);
   const expectedPiPeerRange = exactPiPeerRange ? testedPiVersion : `>=${testedPiVersion}`;
@@ -124,10 +127,10 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
     }
   }
   if (
-    manifest.name === "@oai404iao/pi-codex-minimal-tools"
+    manifest.name === "@oai404iao/pi-codex-core"
     && manifest.dependencies?.undici !== "^8.10.0"
   ) {
-    report("@oai404iao/pi-codex-minimal-tools: undici must remain on the audited ^8.10.0 baseline");
+    report("@oai404iao/pi-codex-core: undici must remain on the audited ^8.10.0 baseline");
   }
   if (
     manifest.publishConfig?.access !== "public"
@@ -160,7 +163,7 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
   if (!packOutput) continue;
 
   const packedPaths = new Set(packOutput.files.map((file) => normalizePackagePath(file.path)));
-  if (expectedName === "@oai404iao/pi-codex-minimal-tools") {
+  if (expectedName.startsWith("@oai404iao/pi-codex-")) {
     for (const path of readdirSync(resolve(root, directory, "src"), { recursive: true })) {
       if (!path.endsWith(".ts")) continue;
       const runtimePath = `src/${normalizePackagePath(path)}`;
@@ -175,7 +178,7 @@ for (const { name: expectedName, directory, releaseStatus } of workspaces) {
   ]) {
     if (!packedPaths.has(required)) report(`${manifest.name}: tarball is missing ${required}`);
   }
-  for (const extension of manifest.pi.extensions ?? []) {
+  for (const extension of manifest.pi?.extensions ?? []) {
     const entry = normalizePackagePath(extension);
     if (!packedPaths.has(entry)) {
       report(`${manifest.name}: Pi extension entry ${entry} is not present in the tarball`);

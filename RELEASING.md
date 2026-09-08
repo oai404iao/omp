@@ -1,5 +1,18 @@
 # Releasing
 
+## Codex split-stage guard
+
+The four new Codex workspaces are private/blocked. Changesets tracks their
+versions (`privatePackages.version: true`) but does not tag them; neither setting
+changes npm eligibility. The existing bundle now depends on these workspaces,
+so artifact preparation rejects that dependency closure before staging or
+registry requests, including when `--include-bootstrap` is supplied.
+
+Do not bypass this gate by ignoring the bundle or changing release locks.
+S4 must verify recursive exact-pin changesets, dependency-ordered artifacts and
+no-links production consumers before separately reviewed bootstrap approval.
+See [Codex composition](docs/codex-packages.md) for S3's offline tarball-test limits.
+
 ## Current state
 
 Guarded npm publication is enabled:

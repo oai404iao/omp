@@ -13,6 +13,7 @@ import {
 } from "./release-utils.mjs";
 import { normalizePackagePath, tarballFacingChangedPaths } from "./recovery-guard.mjs";
 import { artifactWorkspaces, readManifest, registry, root } from "./workspaces.mjs";
+import { assertReleaseDependencies } from "./release-dependencies.mjs";
 
 const outputDirectory = resolve(root, "release-artifacts");
 const stagingDirectory = resolve(outputDirectory, ".staging");
@@ -22,6 +23,7 @@ if (arguments_.some((argument) => argument !== "--include-bootstrap")) {
   throw new Error("usage: prepare-release-artifacts.mjs [--include-bootstrap]");
 }
 const includeBootstrap = arguments_.includes("--include-bootstrap");
+assertReleaseDependencies(artifactWorkspaces(includeBootstrap));
 if (includeBootstrap && process.env.GITHUB_ACTIONS === "true") {
   throw new Error("bootstrap artifacts must be prepared from a reviewed local checkout, not GitHub Actions");
 }

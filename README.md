@@ -13,7 +13,7 @@ Gitea remote is retained as a migration backup.
 
 ## Packages
 
-All six npm workspace packages use the `@oai404iao` scope. Scope naming does
+All ten npm workspace packages use the `@oai404iao` scope. Scope naming does
 not change the private/public eligibility below.
 
 | Package | Version | Release track |
@@ -24,11 +24,20 @@ not change the private/public eligibility below.
 | `@oai404iao/pi-subagent` | `0.2.0` | public; guarded manual releases enabled |
 | `@oai404iao/pi-telegram-notify` | `0.1.3` | public; guarded manual releases enabled |
 | `@oai404iao/pi-tree-continue` | `0.1.0` | private; blocked pending a public Pi continuation API |
+| `@oai404iao/pi-codex-runtime` | `0.1.0-alpha.0` | private; blocked S3 library |
+| `@oai404iao/pi-codex-core` | `0.1.0-alpha.0` | private; blocked S3 capability |
+| `@oai404iao/pi-codex-web-search` | `0.1.0-alpha.0` | private; blocked S3 capability |
+| `@oai404iao/pi-codex-imagegen` | `0.1.0-alpha.0` | private; blocked S3 capability |
 
-The six scoped npm packages use independent versions.
+The scoped npm packages use independent versions.
 `pi-external-thinking` is public at `0.1.0`; its upstream attribution and
 compatibility review are recorded. `pi-subagent` is public at `0.2.0`; its
 DeepSeek Harness provenance and compatibility review are recorded.
+
+The four split Codex rows show checkout versions, not npm releases.
+This checkout's compatibility bundle cannot enter release artifacts until its
+private dependencies are approved. See [Codex composition](docs/codex-packages.md)
+for package boundaries, local tarball tests and remaining release gates.
 
 > **Codex 1.3.0 documentation note:** the package README and notice inside the
 > immutable `1.3.0` tarball are bootstrap-stage snapshots and retain

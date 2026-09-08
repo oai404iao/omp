@@ -5,9 +5,12 @@ catalog instead of model-name heuristics.
 
 Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 
-> npm identity: `@oai404iao/pi-codex-minimal-tools`. Version `1.3.0` is
-> prepared for a one-time manually authenticated npm bootstrap from a reviewed
-> public `main` commit.
+> npm identity stays `@oai404iao/pi-codex-minimal-tools`. This checkout composes
+> core, web-search and imagegen through a shared runtime. The four new packages
+> remain private/blocked, so this bundle cannot enter release artifacts yet.
+> Previously published tarballs are unchanged. See
+> [package composition](../../docs/codex-packages.md) for local installation tests
+> and version/lifecycle restrictions; this is not a new npm release.
 
 > **Compatibility boundary:** Responses Lite uses an internal Codex request
 > shape. This package pins and tests a compatibility serialization for exact

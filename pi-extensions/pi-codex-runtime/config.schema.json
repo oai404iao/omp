@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unpkg.com/@oai404iao/pi-codex-minimal-tools@1/config.schema.json",
+  "title": "@oai404iao/pi-codex-minimal-tools configuration",
+  "description": "Configuration for the @oai404iao/pi-codex-minimal-tools Pi extension.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL used by editors for validation and completion.",
+      "default": "https://unpkg.com/@oai404iao/pi-codex-minimal-tools@1/config.schema.json"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Enable this package's tools, provider shim, compaction hooks, and commands.",
+      "default": true
+    },
+    "glyphStyle": {
+      "type": "string",
+      "description": "Glyph style used by the extension UI.",
+      "enum": ["unicode", "ascii"],
+      "default": "unicode"
+    },
+    "autoEnable": {
+      "type": "boolean",
+      "description": "Automatically activate enabled package tools on supported models.",
+      "default": true
+    },
+    "nativeProviderTools": {
+      "type": "boolean",
+      "description": "Deprecated compatibility override. Move per-model hosted tool behavior to extension models.json.",
+      "deprecated": true,
+      "default": true
+    },
+    "openaiTransport": {
+      "type": "string",
+      "description": "Deprecated compatibility override. Move per-model Responses transport to extension models.json.",
+      "deprecated": true,
+      "enum": ["sse", "websocket", "websocket-cached", "auto"],
+      "default": "sse"
+    },
+    "openaiWebSocketPrewarm": {
+      "type": "boolean",
+      "description": "Deprecated compatibility override. Move per-model one-shot session-startup WebSocket prewarm behavior to extension models.json.",
+      "deprecated": true,
+      "default": true
+    },
+    "fastMode": {
+      "type": "boolean",
+      "description": "Global user toggle for the Fast service tier declared by the active model profile.",
+      "default": false
+    },
+    "compactionMode": {
+      "type": "string",
+      "description": "Deprecated compatibility override. Move per-model compaction behavior to extension models.json.",
+      "deprecated": true,
+      "enum": ["pi", "responses", "responses-compact"],
+      "default": "pi"
+    },
+    "requestProfile": {
+      "type": "object",
+      "description": "Deprecated compatibility override. Move Responses mode, reasoning summary, prompt placement, patch transport, and tool capabilities to extension models.json.",
+      "deprecated": true,
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "responsesMode": {
+          "type": "string",
+          "description": "Responses protocol mode. Lite requires an endpoint that implements the Codex Responses Lite contract.",
+          "enum": ["standard", "lite"],
+          "default": "standard"
+        },
+        "reasoningSummary": {
+          "type": "string",
+          "description": "Deprecated compatibility override for the reasoning summary mode. Move this to responses.reasoningSummary in the per-model catalog.",
+          "enum": ["auto", "concise", "detailed", "none"],
+          "default": "auto"
+        },
+        "systemPromptPlacement": {
+          "type": "string",
+          "description": "Where Standard Responses places Pi's system prompt. Responses Lite always uses a developer message.",
+          "enum": ["instructions", "developer"],
+          "default": "instructions"
+        },
+        "patchTransport": {
+          "type": "string",
+          "description": "Transport for apply_patch: a JSON function tool or the Codex freeform custom tool.",
+          "enum": ["function", "custom"],
+          "default": "function"
+        },
+        "supportsHostedTools": {
+          "type": "boolean",
+          "description": "Enable hosted-tool activation and request rewriting. Responses Lite always disables hosted tools.",
+          "default": true
+        },
+        "supportsParallelTools": {
+          "type": "boolean",
+          "description": "Enable parallel tool calls in provider requests. Responses Lite always disables parallel tools.",
+          "default": true
+        }
+      }
+    },
+    "apiKeyMode": {
+      "type": "boolean",
+      "description": "Deprecated compatibility override. Move the endpoint/auth shape to responses.endpoint in extension models.json.",
+      "deprecated": true,
+      "default": false
+    },
+    "imageGeneration": {
+      "type": "boolean",
+      "description": "Deprecated compatibility override. Move per-model image-generation support to extension models.json.",
+      "deprecated": true,
+      "default": true
+    },
+    "webSearchEnabled": {
+      "type": "boolean",
+      "description": "Deprecated compatibility override. Move per-model web-search support to extension models.json.",
+      "deprecated": true,
+      "default": false
+    },
+    "imageOutputDir": {
+      "type": "string",
+      "description": "Directory for generated images. Relative paths resolve against the workspace root.",
+      "minLength": 1,
+      "pattern": "\\S",
+      "default": ".pi/openai-codex-images"
+    },
+    "imageModel": {
+      "type": "string",
+      "description": "Image model used by standalone generation, hosted image tool rewriting, and direct fallback.",
+      "enum": ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"],
+      "default": "gpt-image-2"
+    },
+    "directImageApiFallback": {
+      "type": "boolean",
+      "description": "Allow direct OpenAI Images API generation when native Codex generation is unavailable.",
+      "default": false
+    },
+    "viewImage": {
+      "type": "boolean",
+      "description": "Deprecated compatibility override. Move per-model view_image support to extension models.json.",
+      "deprecated": true,
+      "default": false
+    },
+    "viewImageWorkspaceOnly": {
+      "type": "boolean",
+      "description": "Reject view_image paths outside the active workspace.",
+      "default": false
+    },
+    "applyPatchEnabled": {
+      "type": "boolean",
+      "description": "Deprecated compatibility override. Move per-model apply_patch support to extension models.json.",
+      "deprecated": true,
+      "default": true
+    },
+    "additionalModelIds": {
+      "type": "array",
+      "description": "Deprecated compatibility allowlist. Add exact per-model entries to extension models.json instead.",
+      "deprecated": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[^\\s/]+/\\S+$"
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "deferApplyPatchRendering": {
+      "type": "boolean",
+      "description": "Use Pi's fallback tool renderer instead of the built-in streaming filesystem preview.",
+      "default": false
+    }
+  }
+}

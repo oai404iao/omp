@@ -1,10 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { OpenAIResponsesProviderController } from "../providers/openai-codex/types.js";
-import { createImageCapture } from "../tools/image-generation/capture.js";
-import { createImageDisplay } from "../tools/image-generation/display.js";
-import { createWebSearchCapture } from "../tools/web-search/capture.js";
-import { registerWebSearchActivityRenderer } from "../tools/web-search/render.js";
-import { registerResponsesProviderRuntime } from "./provider-runtime.js";
+import type { OpenAIResponsesProviderController } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
+import { createImageCapture } from "@oai404iao/pi-codex-imagegen/internal/tools/image-generation/capture";
+import { createImageDisplay } from "@oai404iao/pi-codex-imagegen/internal/tools/image-generation/display";
+import { createWebSearchCapture } from "@oai404iao/pi-codex-web-search/internal/tools/web-search/capture";
+import { registerWebSearchActivityRenderer } from "@oai404iao/pi-codex-web-search/internal/tools/web-search/render";
+import { registerResponsesProviderRuntime } from "@oai404iao/pi-codex-core/internal/extension/provider-runtime";
 
 export function registerOpenAIResponsesProviders(
 	pi: ExtensionAPI,

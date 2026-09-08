@@ -43,10 +43,10 @@
     "typebox": "*"
   },
   "dependencies": {
-    "https-proxy-agent": "^9.1.0",
-    "socks-proxy-agent": "^10.1.0",
-    "undici": "^8.10.0",
-    "ws": "^8.21.1"
+    "@oai404iao/pi-codex-runtime": "0.1.0-alpha.0",
+    "@oai404iao/pi-codex-core": "0.1.0-alpha.0",
+    "@oai404iao/pi-codex-web-search": "0.1.0-alpha.0",
+    "@oai404iao/pi-codex-imagegen": "0.1.0-alpha.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.84.2",
