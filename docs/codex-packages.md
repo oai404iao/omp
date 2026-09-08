@@ -104,10 +104,14 @@ reversed order, separate physical runtime copies and shutdown/reload. Standalone
 auth/HTTP are deterministic fixtures; there are no real credentials or endpoints.
 
 Every Codex dependency in those consumers comes from a tarball and cannot resolve
-back to workspace source. **External** Pi/transport dependencies are offline local
-file links to the locked installation; this is not yet an all-registry/no-links
-production install test. The node_modules capability closure is independently
-asserted, not inferred as correct from manifests.
+back to workspace source. S4 installs external Pi/transport dependencies from
+the root lock's exact registry tarballs using offline production `npm ci`.
+The test projects only the production/host-peer closure, preserving nested
+dependency versions and checksums, and checks that even executable symlinks
+stay inside the consumer. It imports the consumer's own Pi loader, not the
+workspace loader. The node_modules capability closure is independently asserted.
+Local Codex tarballs substitute for still-unpublished registry versions: this
+does not claim successful npm bootstrap or real endpoint/account access.
 
 Unit tests additionally exercise activation, unknown/disabled models, legacy
 configuration, new/fork, no UI, abort, late image results and old replay fixtures.
@@ -122,6 +126,11 @@ registry access if a selected bundle transitively requires a private/blocked
 workspace. Existing eligibility entries, bootstrap allowlist and release locks
 are unchanged.
 
-S4 still owns recursive pin/changeset propagation, dependency-ordered release
-artifacts, and no-links production consumers. S5 independently verifies a named
-Pi 0.85.x target while retaining the 0.84.2 floor.
+S4 supplies `changeset:sync`, CI coverage checking and the guarded
+`changeset:version` wrapper. Generated consumer changesets recurse through hard
+and optional workspace dependencies; exact-pin changes require a consumer bump.
+The publication pipeline independently validates dependency order, artifacts,
+eligibility and dependency visibility, stopping downstream publication on failure.
+
+Bootstrap approval and actual publication remain manual/unperformed.
+S5 independently verifies a named Pi 0.85.x target while retaining the 0.84.2 floor.

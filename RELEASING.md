@@ -9,9 +9,24 @@ so artifact preparation rejects that dependency closure before staging or
 registry requests, including when `--include-bootstrap` is supplied.
 
 Do not bypass this gate by ignoring the bundle or changing release locks.
-S4 must verify recursive exact-pin changesets, dependency-ordered artifacts and
-no-links production consumers before separately reviewed bootstrap approval.
-See [Codex composition](docs/codex-packages.md) for S3's offline tarball-test limits.
+S4 implements recursive exact-pin changesets, dependency-ordered artifacts and
+no-links production consumers. These tests do not approve bootstrap, change the
+allowlist, or verify real account/registry publication. See
+[Codex composition](docs/codex-packages.md) for the tested boundaries.
+
+Use `npm run changeset:sync` after authoring a changeset. Its generated consumer
+changeset covers `dependencies` and `optionalDependencies` recursively, including
+subagent's optional dependency on the compatibility bundle. The release-PR
+workflow already calls `npm run changeset:version`; that wrapper preserves exact
+pins and rejects pin changes without a corresponding consumer version bump.
+Only temporary fixtures are versioned in its tests.
+
+Artifact preparation and publication both apply a stable dependency-first order.
+Every workspace dependency must be present in the batch, including a recovery
+candidate for an already-published dependency. The publisher validates the whole
+batch before any registry write, then verifies each exact version's gitHead and
+integrity before proceeding to dependents. Failure stops subsequent publication;
+final reconciliation still gates all tag creation.
 
 ## Current state
 

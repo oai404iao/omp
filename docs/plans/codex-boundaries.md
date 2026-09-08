@@ -240,11 +240,53 @@ streamSimple：同步捕获当前会话的展示 sink
   发布预备命令负向测试按预期拒绝 bundle → private runtime，未产生产物。
   S2 记录的 subagent flaky 未在本轮修复，一次通过不代表它已消失。
 
+### S4：版本联动、产物顺序与无链接消费者
+
+- 在同一工作树基于 `28aa6238` 实施。未修改任何 capability 运行时行为、
+  workspace 版本、既有依赖版本、Pi 基线、发布资格或 release locks。
+- `workspace-versioning.mjs` 通过 Changesets 的已锁定 reader 读取待发布条目；
+  新增 `changeset:sync` / `changeset:check`，递归生成消费者 patch changeset，
+  已有显式 changeset 优先，生成结果幂等。覆盖 hard 与 optional dependency，
+  包括 subagent → bundle；检查不误把“版本提交中已消费全部 changesets”当错误。
+- `changeset:version` 包装实际 Changesets version，并严格回填新版本精确 pin；
+  消费者未 bump 时拒绝修改 pin。真实 CLI 测试只在临时 Git 仓库生成版本，
+  验证 runtime-only patch 传播到三能力、bundle 与 subagent，且私有状态不变。
+  另覆盖多次 prerelease 与 pre exit，忽略已消费的 pre/ 条目，并为后续
+  自动 changeset 使用不同 ID，避免覆盖先前 prerelease 消费者记录。
+  发布 PR 工作流已有 wrapper 调用，因此不需要更改 workflow 或授权。
+- artifact 准备按依赖拓扑稳定排序；publish 端重新校验资格、闭包和顺序，
+  在首次写 registry 前检查整批 tarball hash / package identity / 依赖声明。
+  recover 节点也记录 SHA-512；每个节点核实 registry gitHead/integrity 后才
+  继续消费者。发布失败或内容不一致阻断后续 publish，并继续禁止批次打 tag。
+- 隔离消费者改为投影根锁的 production/host-peer 依赖闭包，保留嵌套依赖
+  的实际版本。全部执行 `npm ci --offline --ignore-scripts --omit=dev`，
+  外部依赖来自锁定 registry tarball，Codex 来自本地产物；遍历确保无外部
+  symlink，并导入消费者自己的 Pi loader。17 组组合通过，不再链接工作区
+  node_modules。测试框架不属于消费者运行时；服务端仍为假 HTTP/认证。
+- 发现 Pi 自带 shrinkwrap 导入的六个条目有固定 URL/version 但缺少 integrity。
+  从同 URL/version 的既有锁条目或已缓存 npm dist 元数据核对恢复 SHA-512；
+  未升级依赖。版本 wrapper 的锁刷新保留这些已审查 hash，遇到不明或冲突
+  内容拒绝猜测；没有建立第二个锁文件或修改 release locks。
+- 新增纯版本/锁图测试及实际 publisher 的假 npm/git 测试，覆盖逆序批次、
+  optional 边、损坏的后置产物在任何 publish 前失败、private 包拒绝、
+  发布失败/registry hash 错误后的下游阻断和 recover 不重复发布。
+- S3 编写的四份新包 `AGENTS.md` 被本机全局 Git ignore 排除，未进入
+  S3 提交；本阶段明确将这些任务所有的维护文档纳入版本控制并同步验证命令，
+  不修改全局 ignore，也不将它们放入 npm tarball。
+- 最终干净安装与完整 CI 通过：488 项 node:test、17 组无外部链接的
+  production tarball / Pi-loader 组合，191 个 TS 模块架构检查及十包
+  license/pack 检查通过，changeset status 正常。常规与 bootstrap 产物准备
+  均在 bundle → private runtime 处按预期失败，未创建 release-artifacts。
+  工作树中的 workspace/既有依赖版本全部不变，Pi 仍为 0.84.2。
+  本阶段仅修改基础设施、测试和维护文档，未改变 tarball 内容，因此不额外
+  添加包 changeset；S3 的待发布 changeset 保留。subagent 已记录 flaky
+  仍未修复，主工作区用户修改保持原样。
+
 ### 剩余工作（不能标记为已完成）
 
-- S4：当前已有初始精确 pin 和离线隔离消费者；递归 pin/changeset 联动脚本、
-  发布产物依赖顺序、无外部链接的生产消费者与 bootstrap 批准尚未完成。
-  不得把当前私有 tarball 验证描述为 npm 已发布或生产 registry 组合已验收。
+- 人工 bootstrap、npm 名称/账号资格和真实发布仍未执行；新包保持
+  private/blocked。Codex 仍以本地 tarball 替代未发布 registry 版本。
+  不得把无链接安装验证称作已经发布，也不能绕开当前 bundle 依赖门禁。
 - S5：尚未升级 Pi 或宣称 0.85.x 验证通过，floor/target 双基线待单独实施。
 - 三个历史模块保留明确行数预算：catalog 636、wire identity 596、
   background image 574。预算不自动扩张；

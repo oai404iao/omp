@@ -40,7 +40,22 @@ configuration, dependencies, or published documentation:
 
 ```bash
 npm run changeset
+npm run changeset:sync
 ```
+
+`changeset:sync` maintains `.changeset/workspace-dependent-releases*.md` for
+recursive consumers of changed workspace dependencies, including optional
+dependencies. Existing explicit consumer changesets take precedence; do not edit
+the generated files by hand. Prerelease iterations use distinct IDs to preserve
+consumed history in `.changeset/pre/`. `changeset:check` verifies coverage and exact pins in CI.
+`changeset:version` runs this synchronization, Changesets, exact-pin repair with
+consumer-bump validation, and root-lock refresh. Do not invoke bare Changesets
+versioning in the release workflow.
+
+`test:codex-packages` uses offline production `npm ci` against a projected root
+lock: Codex packages come from local tarballs, external dependencies from locked
+registry tarballs, with no external symlinks. It runs each consumer's Pi loader.
+Run `npm ci --ignore-scripts` first to populate the normal npm tarball cache.
 
 Infrastructure-only, test-only, and repository documentation changes do not
 need a changeset unless they alter a published package.

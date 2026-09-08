@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { root, readManifest } from "./workspaces.mjs";
+import { isolatedConsumerLock } from "./isolated-consumer-lock.mjs";
 
 // This integration probe is intentionally pinned to the workspace Pi floor.
-const piRoot = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
-const { loadExtensions } = await import(pathToFileURL(join(piRoot, "core/extensions/loader.js")).href);
-const { createEventBus } = await import(pathToFileURL(join(piRoot, "core/event-bus.js")).href);
 const prefix = "@oai404iao/";
 const names = ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools"];
 const manifests = new Map(names.map(name => [prefix + name, readManifest(`pi-extensions/${name}`)]));
@@ -33,18 +30,13 @@ function npm(args, cwd) {
   return result.stdout;
 }
 
-function externalRoot(name, from) {
-  const require = createRequire(join(root, from, "package.json"));
-  let entry;
-  try { entry = require.resolve(name); }
-  catch { entry = fileURLToPath(import.meta.resolve(name)); }
-  let path = dirname(entry);
-  while (path !== dirname(path)) {
-    const manifest = join(path, "package.json");
-    if (existsSync(manifest) && JSON.parse(readFileSync(manifest, "utf8")).name === name) return path;
-    path = dirname(path);
+function assertContainedTree(path, consumer) {
+  for (const entry of readdirSync(path)) {
+    const file = join(path, entry);
+    const stat = lstatSync(file);
+    if (stat.isSymbolicLink()) assert.ok(realpathSync(file).startsWith(`${consumer}/`), `external link: ${file}`);
+    else if (stat.isDirectory()) assertContainedTree(file, consumer);
   }
-  throw new Error(`Cannot locate pinned host dependency: ${name}`);
 }
 
 function closure(requested) {
@@ -68,17 +60,12 @@ function install(label, requested) {
   }
   assert.deepEqual([...included].sort(), [...expected].map(name => prefix + name).sort(),
     "a capability dependency would reinstall an unrequested capability");
-  const dependencies = Object.fromEntries([...included].map(name => [name, `file:${packed.get(name)}`]));
-  for (const name of included) {
-    const manifest = manifests.get(name);
-    for (const dep of Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies })) {
-      if (!manifests.has(dep)) dependencies[dep] = `file:${externalRoot(dep, `pi-extensions/${name.slice(prefix.length)}`)}`;
-    }
-  }
-  writeFileSync(join(path, "package.json"), JSON.stringify({ name: `fixture-${label}`, private: true, dependencies }));
-  // Only external host/transport dependencies are local file links. Every
-  // Codex dependency is actually npm-installed from a fresh packed archive.
-  npm(["install", "--offline", "--ignore-scripts", "--legacy-peer-deps", "--install-links=false"], path);
+  const consumer = isolatedConsumerLock(`fixture-${label}`, included, manifests, packed,
+    JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")));
+  writeFileSync(join(path, "package.json"), JSON.stringify(consumer.manifest));
+  writeFileSync(join(path, "package-lock.json"), JSON.stringify(consumer.lock));
+  npm(["ci", "--offline", "--ignore-scripts", "--legacy-peer-deps", "--omit=dev"], path);
+  assertContainedTree(join(path, "node_modules"), path);
   assert.deepEqual(readdirSync(join(path, "node_modules/@oai404iao")).sort(), [...included].map(n => n.slice(prefix.length)).sort());
   for (const name of included) {
     assert.ok(realpathSync(join(path, "node_modules", name)).startsWith(path), `${name} leaked from the workspace`);
@@ -101,8 +88,10 @@ function install(label, requested) {
   return path;
 }
 
-async function load(label, paths, expectedTools, core, bus = createEventBus()) {
+async function load(label, paths, expectedTools, core, bus) {
   const cwd = consumers.get(label);
+  const piRoot = join(cwd, "node_modules/@earendil-works/pi-coding-agent/dist");
+  const { loadExtensions } = await import(pathToFileURL(join(piRoot, "core/extensions/loader.js")).href);
   const result = await loadExtensions(paths, cwd, bus);
   assert.deepEqual(result.errors, []);
   const tools = result.extensions.flatMap(extension => [...extension.tools.keys()]);
@@ -154,7 +143,7 @@ try {
   mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
   for (const name of names) {
     const [result] = JSON.parse(npm(["pack", "--json", "--ignore-scripts", "--pack-destination", directory], join(root, "pi-extensions", name)));
-    packed.set(prefix + name, join(directory, result.filename));
+    packed.set(prefix + name, { path: join(directory, result.filename), integrity: result.integrity });
   }
   const matrix = [
     ["runtime", ["pi-codex-runtime"], [], false],
@@ -179,10 +168,13 @@ try {
   const bundle = join(consumers.get("bundle"), "node_modules", prefix + "pi-codex-minimal-tools/src/index.ts");
   const web = join(consumers.get("web"), "node_modules", prefix + "pi-codex-web-search/src/index.ts");
   const allTools = ["apply_patch", "view_image", "web_search", "image_generation"];
+  const { createEventBus } = await import(pathToFileURL(join(
+    consumers.get("bundle"), "node_modules/@earendil-works/pi-coding-agent/dist/core/event-bus.js",
+  )).href);
   const bus = createEventBus();
   await load("bundle", [bundle, web], allTools, true, bus);
   await load("bundle", [web, bundle], allTools, true, bus); // Same bus after shutdown/reload.
-  console.log(`✓ Codex: ${checks} real Pi-loader tarball combinations; standalone auth/HTTP fixtures; no workspace capability leakage`);
+  console.log(`✓ Codex: ${checks} production tarball/Pi-loader combinations; locked offline npm ci; no external links or capability leakage`);
 } finally {
   globalThis.fetch = previousFetch;
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

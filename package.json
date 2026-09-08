@@ -34,21 +34,24 @@
     "audit:history": "bash scripts/audit-public-history.sh",
     "changeset": "changeset",
     "changeset:status": "changeset status --verbose",
-    "changeset:version": "changeset version && npm install --package-lock-only --ignore-scripts",
+    "changeset:version": "node scripts/workspace-versioning.mjs version",
+    "changeset:sync": "node scripts/workspace-versioning.mjs sync",
+    "changeset:check": "node scripts/workspace-versioning.mjs check",
     "check": "npm run check --workspaces --if-present",
     "check:architecture": "node scripts/check-codex-architecture.mjs",
     "test:architecture": "node --test scripts/check-codex-architecture.test.mjs scripts/release-dependencies.test.mjs",
-    "ci": "npm run check:architecture && npm run test:architecture && npm run check && npm run test:release-scripts && npm run license:check && npm run pack:check && npm run test:codex-packages",
+    "ci": "npm run changeset:check && npm run check:architecture && npm run test:architecture && npm run check && npm run test:release-scripts && npm run license:check && npm run pack:check && npm run test:codex-packages",
     "test:codex-packages": "node scripts/verify-codex-installations.mjs",
     "license:check": "node scripts/verify-licenses.mjs",
     "pack:check": "node scripts/verify-packages.mjs",
     "release:artifacts": "node scripts/prepare-release-artifacts.mjs",
     "release:bootstrap-artifacts": "node scripts/prepare-release-artifacts.mjs --include-bootstrap",
     "release:preflight": "node scripts/release-preflight.mjs",
-    "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs"
+    "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "3.0.0",
+    "@changesets/read": "1.0.0",
     "typescript-ast": "npm:typescript@5.9.3"
   }
 }
