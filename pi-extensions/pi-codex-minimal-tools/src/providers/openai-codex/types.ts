@@ -49,21 +49,6 @@ export interface WebSocketPrewarmRequest {
 	connectTimeoutMs?: number;
 }
 
-type StartupPrewarmStatus = "pending" | "ready" | "failed";
-
-export interface StartupPrewarmState {
-	status: StartupPrewarmStatus;
-	promise: Promise<void>;
-	abortController: AbortController;
-}
-
-export interface SessionStartupPrewarmTask {
-	generation: number;
-	modelIdentity: string;
-	promise: Promise<void>;
-	abortController: AbortController;
-}
-
 export interface WebSocketRequestMetadata {
 	/** Legacy Pi session lookup key used by exported test helpers. */
 	sessionId?: string;

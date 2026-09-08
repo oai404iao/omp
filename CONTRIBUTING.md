@@ -25,7 +25,9 @@ inspects the exact npm tarball file list and verifies every Pi extension entry
 point and runtime asset is included.
 
 `check:architecture` checks Codex local module edges (including type imports),
-compatibility-facade back-edges, layer restrictions, and 400-line source budgets.
+compatibility-facade back-edges, direct/transitive layer restrictions, and
+400-line source budgets. The provider runtime must not reach tool implementations
+or local image/theme utilities through an intermediary module.
 Existing oversized modules have reviewed ceilings in
 `scripts/codex-architecture.json`; reduce/remove exceptions rather than growing
 them. The dev-only `typescript-ast` alias provides the TypeScript 5.9 compiler

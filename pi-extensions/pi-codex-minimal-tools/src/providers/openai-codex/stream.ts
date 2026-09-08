@@ -6,10 +6,10 @@ import { captureCodexTurnState, resolveCodexRequestIdentity } from "../../codex-
 import { applyFastModeServiceTier } from "../../fast-mode.js";
 import { loadModelSettings } from "../../model-catalog/runtime.js";
 import { rewriteNativeOpenAiTools } from "../../provider-native-tools.js";
-import { type SavedGeneratedImage } from "../../tools/image-generation/types.js";
 import { collectHistoricalCitationSources, collectWebSearchCitationSources } from "../responses/citations.js";
 import { webSocketFallbackKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";
+import type { ProviderStreamEffects } from "./stream-effects.js";
 import { BASE_DELAY_MS, MAX_RETRIES } from "./constants.js";
 import { NonRetryableProviderError, isRetryableError, parseErrorResponse, withHttpStatusPrefix } from "./errors.js";
 import { applyConfiguredResponsesFeatureHeaders, buildSSEHeaders, buildWebSocketHeaders, headersToRecord, providerHeadersToHeaders } from "./headers.js";
@@ -31,11 +31,10 @@ export function createCodexStream<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
 	options: SimpleStreamOptions | undefined,
-	deps: {
+	deps: ProviderStreamEffects & {
 		getCurrentCwd: () => string;
 		getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
 		getStartupPrewarm?: (sessionId: string, model: Model<Api>) => Promise<void> | undefined;
-		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
 	},
 ): AssistantMessageEventStream {
 	const stream = createAssistantMessageEventStream();

@@ -8,7 +8,11 @@ export function codexJwt(): string {
 	return `header.${payload}.signature`;
 }
 
-export function createProviderHarness(options?: { snapshotTools?: boolean }) {
+export function createProviderHarness(options?: {
+	snapshotTools?: boolean;
+	register?: typeof registerOpenAIResponsesProviders;
+	cwd?: string;
+}) {
 	const providers: Record<string, any> = {};
 	const handlers: Record<string, Array<(event: any, ctx?: any) => Promise<void> | void>> = {};
 	const messages: any[] = [];
@@ -26,7 +30,7 @@ export function createProviderHarness(options?: { snapshotTools?: boolean }) {
 			getThinkingLevel: () => "medium",
 		} : {}),
 	};
-	registerOpenAIResponsesProviders(pi as any, { getCurrentCwd: () => process.cwd() });
+	(options?.register ?? registerOpenAIResponsesProviders)(pi as any, { getCurrentCwd: () => options?.cwd ?? process.cwd() });
 	assert.ok(providers["openai-codex"]);
 	assert.ok(providers.openai);
 	return { providers, handlers, messages, renderers };

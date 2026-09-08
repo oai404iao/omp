@@ -9,7 +9,14 @@
     { "from": "providers/responses/", "to": "providers/openai-codex/" },
     { "from": "providers/responses/", "to": "tools/" },
     { "from": "providers/openai-codex/", "to": "extension/" },
+    { "from": "providers/openai-codex/", "to": "tools/" },
     { "from": "adapter/compaction/", "to": "extension/" }
+  ],
+  "forbiddenReachable": [
+    { "from": "extension/provider-runtime.ts", "to": "tools/" },
+    { "from": "extension/provider-runtime.ts", "to": "utils/images.ts" },
+    { "from": "extension/provider-runtime.ts", "to": "utils/theme.ts" },
+    { "from": "extension/provider-runtime.ts", "to": "extension/register.ts" }
   ],
   "exceptions": {
     "model-catalog/catalog.ts": {

@@ -182,6 +182,7 @@ auditing or modifying the implementation:
 | Remote compaction checkpoint and requests | `adapter/compaction/` |
 | Replay items, history and signatures | `providers/responses/{items,history,messages,signatures,tool-identity}.ts` |
 | Responses stream state, citations and usage | `providers/responses/{stream,stream-state,text-renderer,usage}.ts` |
-| Image persistence and preview | `tools/image-generation/{storage,preview}.ts` |
-| Web-search activity and rendering | `tools/web-search/{activity,render}.ts` |
-| Pi lifecycle composition | `extension/register.ts` |
+| Optional stream effects | `providers/openai-codex/stream-effects.ts` |
+| Image capture, persistence and display lifecycle | `tools/image-generation/{capture,storage,display,preview}.ts` |
+| Web-search capture, activity and rendering | `tools/web-search/{capture,activity,render}.ts` |
+| Pi lifecycle composition and prewarm ownership | `extension/{register,provider-runtime,startup-prewarm}.ts` |

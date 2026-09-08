@@ -6,13 +6,21 @@ Model-profiled Pi Responses extension. Read `README.md` for user configuration,
 ## Layout and ownership
 
 - `src/index.ts`: tool activation and command composition.
-- `src/extension/register.ts`: Pi provider and lifecycle registration.
+- `src/extension/register.ts`: legacy composition of provider runtime and presentation.
+- `src/extension/provider-runtime.ts`: provider/identity/session registration with
+  optional presentation injection; no direct or transitive tool implementations.
+- `src/extension/startup-prewarm.ts`: generation-scoped prewarm tasks; reset
+  releases prewarm waiters, invalidates late authentication results and aborts
+  speculative requests. The auth API itself may not cooperate with cancellation.
 - `src/providers/openai-codex/`: transport, request headers/body, WS cache,
   continuation, prewarm, retry, capture, and usage.
 - `src/providers/responses/`: replay items/signatures/history, stream state,
   citation rendering, and usage. It must not depend on Codex transport or tools.
 - `src/adapter/compaction/`: native checkpoint and remote request protocols.
-- `src/tools/{image-generation,web-search}/`: persistence/preview and activity.
+- `src/tools/{image-generation,web-search}/`: persistence/preview, display lifecycle
+  and response-local observers. Transport must not import these modules.
+- `src/providers/openai-codex/stream-effects.ts`: internal observer contract;
+  no presentation effects are installed by the transport itself.
 - `src/model-catalog/`: validated profile selection; unknown models remain native.
 - `src/codex-wire-identity.ts`: shared wire identity; `src/subagent-inline.ts`
   remains the supported npm integration subpath.
@@ -49,6 +57,13 @@ sockets, restore environment/fetch/timers, and reset identity state.
 7. `AGENTS.md`, tests and `reference/` are maintenance-only, excluded from tarballs.
    The staged package-split design lives in root `docs/plans/codex-boundaries.md`;
    planned packages are not existing installable capabilities.
+8. Capture image display ownership before starting request I/O. Clearing the
+   display invalidates old sinks and cancels pending flush timers; a late result
+   must not appear in the replacement session. Already-started file writes are
+   not cancellable; abort suppresses new persistence and completion notifications.
+9. Observers see normalized events after continuation capture, before replay
+   parsing. Allocate their state per response attempt, await observation, and
+   leave wire items untouched. Swallow only explicitly best-effort failures.
 
 ## Code Comments Rules (Strict)
 

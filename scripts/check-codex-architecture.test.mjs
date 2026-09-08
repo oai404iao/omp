@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { checkArchitecture, findCycles, moduleReferences } from "./check-codex-architecture.mjs";
+import { checkArchitecture, findCycles, moduleReferences, reachablePath } from "./check-codex-architecture.mjs";
 
 test("module references include type, dynamic and re-export edges, not comments or strings", () => {
   assert.deepEqual(moduleReferences(`
@@ -26,6 +26,12 @@ test("cycle detection accepts diamonds and rejects cycles including self-imports
   ])), []);
   assert.deepEqual(findCycles(new Map([["a", ["b"]], ["b", ["a"]]])), [["a", "b", "a"]]);
   assert.deepEqual(findCycles(new Map([["a", ["a"]]])), [["a", "a"]]);
+});
+
+test("reachability checks report indirect paths and terminate on cycles", () => {
+  const graph = new Map([["core", ["shared"]], ["shared", ["core", "image"]], ["image", []]]);
+  assert.deepEqual(reachablePath(graph, "core", name => name === "image"), ["core", "shared", "image"]);
+  assert.equal(reachablePath(graph, "core", name => name === "missing"), undefined);
 });
 
 function withSources(files, callback) {
@@ -72,6 +78,19 @@ test("missing modules and forbidden layer edges fail closed", () => {
 test("compatibility facades cannot accumulate implementation or singleton state", () => {
   withSources({ "facade.ts": "export const cache = new Map();\n" }, (directory) => {
     assert.ok(checkArchitecture(directory, policy).errors.some(e => e.includes("only re-exports")));
+  });
+});
+
+test("a neutral intermediary cannot hide a forbidden capability dependency", () => {
+  withSources({
+    "core.ts": 'import "./shared.js";',
+    "shared.ts": 'export * from "./tools/image.js";',
+    "tools/image.ts": "export {};",
+  }, directory => {
+    const { errors } = checkArchitecture(directory, {
+      ...policy, forbiddenReachable: [{ from: "core.ts", to: "tools/" }],
+    });
+    assert.deepEqual(errors, ["forbidden dependency path: core.ts -> shared.ts -> tools/image.ts"]);
   });
 });
 

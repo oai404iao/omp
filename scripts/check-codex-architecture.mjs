@@ -54,6 +54,22 @@ export function findCycles(graph) {
   return cycles;
 }
 
+export function reachablePath(graph, start, matches) {
+  const queue = [[start]];
+  const seen = new Set([start]);
+  for (let index = 0; index < queue.length; index++) {
+    const path = queue[index];
+    for (const next of graph.get(path.at(-1)) ?? []) {
+      if (seen.has(next)) continue;
+      const nextPath = [...path, next];
+      if (matches(next)) return nextPath;
+      seen.add(next);
+      queue.push(nextPath);
+    }
+  }
+  return undefined;
+}
+
 function sources(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = resolve(directory, entry.name);
@@ -109,6 +125,13 @@ export function checkArchitecture(directory, policy) {
     if (!exception.reason) errors.push(`${name}: exception needs an ownership/reduction rationale`);
   }
   for (const cycle of findCycles(graph)) errors.push(`cycle: ${cycle.map(localName).join(" -> ")}`);
+  for (const rule of policy.forbiddenReachable ?? []) {
+    for (const file of files) {
+      if (!localName(file).startsWith(rule.from)) continue;
+      const path = reachablePath(graph, file, (target) => localName(target).startsWith(rule.to));
+      if (path) errors.push(`forbidden dependency path: ${path.map(localName).join(" -> ")}`);
+    }
+  }
   return { errors, measured, graph };
 }
 
@@ -118,6 +141,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.error(result.errors.join("\n"));
     process.exitCode = 1;
   } else {
-    console.log(`✓ Codex: ${result.graph.size} modules; no local import cycles or facade back-edges; line budgets hold`);
+    console.log(`✓ Codex: ${result.graph.size} modules; no cycles, facade back-edges or forbidden capability paths; line budgets hold`);
   }
 }

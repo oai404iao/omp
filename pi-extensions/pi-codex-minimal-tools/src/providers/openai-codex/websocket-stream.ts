@@ -1,8 +1,8 @@
 import { type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
-import { type SavedGeneratedImage } from "../../tools/image-generation/types.js";
 import { type CitationSource, type WebSearchCitationSource } from "../responses/types.js";
 import { webSocketCacheKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";
+import type { ProviderStreamEffects } from "./stream-effects.js";
 import { WEBSOCKET_CONNECT_TIMEOUT_MS, WEBSOCKET_SEND_TIMEOUT_MS } from "./constants.js";
 import { buildCachedWebSocketRequestBody, prepareWebSocketRequestBodyForWire } from "./continuation.js";
 import { withWebSocketRequestMetadata } from "./request-metadata.js";
@@ -20,9 +20,7 @@ export async function processWebSocketStream<TApi extends Api>(
 	model: Model<TApi>,
 	onStart: () => void,
 	options: SimpleStreamOptions | undefined,
-	deps: {
-		onImageSaved?: (savedImage: SavedGeneratedImage, imageData: { data: string; mimeType: string }) => void;
-	},
+	deps: ProviderStreamEffects,
 	cwd: string,
 	requestPrompt: string | undefined,
 	webSearchCitationSources: ReadonlyArray<WebSearchCitationSource>,

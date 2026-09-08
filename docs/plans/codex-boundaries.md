@@ -111,7 +111,7 @@ core+image、全组合、旧包+能力包重复装；交换顺序并执行 reloa
   `scripts/check-codex-architecture.mjs` 已接入根 CI，并有 6 项自身测试。
 - 兼容性：原有 Codex 227 项测试保持通过，新增 2 项旧导出集合/实现身份测试；
   提取复用的 provider harness 和 WebSocket server/frame fixtures。
-- 最终锁文件的干净 `npm ci --ignore-scripts && npm run ci` 通过，共
+- S1 最终锁文件的干净 `npm ci --ignore-scripts && npm run ci` 通过，共
   420 项测试，另有所有 workspace 类型检查、license 和 pack 检查。
   `npm run changeset:status` 确认本次 Codex patch changeset；
   未运行 version/publish，既有 subagent changesets 未改动。
@@ -122,11 +122,83 @@ core+image、全组合、旧包+能力包重复装；交换顺序并执行 reloa
   AST 依赖检查；各 workspace 仍用 TypeScript 7.0.2。锁定的 Pi
   0.84.2 及所有已有运行时依赖版本未升级。
 
+### S2：已完成
+
+基于 `bad628e7` 继续同一工作树，保持旧导出集合、工具默认值、配置、
+identity 和协议 revision 不变。本阶段不新增 npm exports 或依赖。
+
+已落地的所有权：
+
+- `extension/register.ts` 从 368 行缩至 36 行，只组合旧入口的默认能力。
+- `extension/provider-runtime.ts` 拥有 provider 注册和 Pi lifecycle hooks；
+  可不注入 presentation 使用。架构检查禁止它直接或间接依赖 `tools/`、
+  图片/主题工具以及旧的组合入口。
+- `extension/startup-prewarm.ts` 拥有 prewarm generation、任务、认证等待、
+  AbortController 和超时清理；传输的 WS cache 仍保持原有单一所有权。
+- `tools/image-generation/display.ts` 拥有展示队列、flush timer、preview cache
+  和展示 sink 的 generation；`capture.ts` 拥有图片保存的 best-effort 策略。
+- `tools/web-search/capture.ts` 拥有每个 response attempt 的 activity 状态
+  和 text signature；不把展示逻辑留在传输编排里。
+- `providers/openai-codex/stream-effects.ts` 定义内部 observer 契约，
+  `extension/provider-presentation.ts` 定义内部展示生命周期契约。
+  它们是下一阶段的注入边界，**不是**已发布的跨包 broker 协议。
+
+请求处理顺序：
+
+```text
+streamSimple：同步捕获当前会话的展示 sink
+  → 传输请求 / 必要时等待 prewarm
+  → 每个 response attempt 创建自己的 observer
+  → 规范化 SSE / WS 事件
+  → 捕获 continuation items
+  → await 可选 observer（默认：图片捕获 → 搜索 activity）
+  → Responses replay / stream parser
+```
+
+会话开始顺序为 prewarm reset → provider 选择 → 展示 clear → prewarm start；
+关闭顺序为 prewarm reset → 展示 flush → WS close → 展示 clear。
+普通完成在 agent_end 调度一次 flush，保留 FIFO、原消息类型和
+`triggerTurn: false`。
+
+随生命周期拆分修复并测试：
+
+- 同步 flush 会取消原来的 timer，防止旧 timer 提前 flush 新会话的队列。
+- clear 使旧请求的展示 sink 失效；即便响应在会话切换后才到达，也不显示
+  到新会话。sink 必须在请求开始时捕获，不能在收到响应后才捕获。
+- abort 阻止后续图片保存和保存完成通知；保存失败仍不丢弃 provider replay。
+- speculative prewarm 的认证/请求构造失败不再泄漏未处理的 Promise rejection；
+  已取消或旧 generation 的失败不能写入 transport fallback 状态。
+- reset 会立即释放等待 prewarm 的调用方，不必等尚未完成的认证返回；
+  底层认证 API 不保证配合取消，迟到的结果/异常仍被消费且不能打开旧连接。
+
+限制：会话 clear 本身只使展示 sink 失效，不是磁盘取消信号，也不回滚
+已保存文件。调用方仍需 abort 请求；已开始的文件写入没有取消 API。
+不注入搜索 observer 时不会生成搜索 activity/text signature；读取已有
+历史 signature 的 replay 逻辑保持原样。独立搜索包的 observer 自动组合
+属于 S3，不应把内部裸 runtime 当作已经完成的独立用户产品。
+
+验收：
+
+- 原有 229 项 Codex 测试保持通过，新增 17 项测试；覆盖无 presentation 的
+  SSE/WS、native image/compaction continuation 与 replay、observer 顺序/
+  错误收尾/并发隔离、迟到图片通知、timer 取消及 pending-auth prewarm reset。
+- 架构检查新增传递依赖路径检查及 2 项自身测试；92 个 TS 模块无环，
+  没有工具实现绕经共享模块回流到 provider runtime；新文件均 ≤400 行。
+- 最终完整 `npm run ci` 通过，共 439 项测试（Codex 246）；所有 workspace 类型检查、
+  许可证和六包 tarball 检查通过。Pi 0.84.2 离线显式入口加载 smoke 退出 0。
+- 干净安装后的一次完整 CI 在未改动的 subagent 并发测试
+  `mailbox-v2 send_message only persists FIFO work until followup_task starts one turn`
+  失败：`tests/coordinator.test.ts:1640` 的 `first.pendingMessages` 为 2，
+  期望 1。当前工作树该单测独立复跑 5 次，2 次失败；对 `bad628e7`
+  做只读 `git archive` 源码快照、使用相同已锁定依赖，并将 workspace
+  包链接指向快照，在原 cwd 复跑 10 次也有 1 次同样失败（临时 cwd 的
+  另 5 次通过）。随后完整 CI 438 项通过。本阶段保留该既有不稳定性
+  的记录，不修改 subagent，也不把一次复跑通过等同于已经修复。
+- 新增 `calm-codex-lifecycles` patch changeset；未改 package/lock、Pi 基线、
+  release locks、发布 workflow 或主工作区 subagent 修改。
+
 ### 剩余工作（不能标记为已完成）
 
-- S2：registration 中的 startup prewarm 和 image display 队列仍由
-  同一个工厂闭包持有；将其拆成独立生命周期服务，再做 capability 注入。
-  当前 `captured-stream.ts` 仍直接调用图片存储，尚不能声称 core 无 image 依赖。
 - S3/S4：新 npm 包、独立安装能力、幂等 broker、聚合精确 pin 脚本和
   隔离消费者安装矩阵尚未实施；上面的名字/映射是目标设计，不是已发布接口。
 - S5：尚未升级 Pi 或宣称 0.85.x 验证通过，floor/target 双基线待单独实施。
