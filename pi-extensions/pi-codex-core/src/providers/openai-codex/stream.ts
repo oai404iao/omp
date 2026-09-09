@@ -5,7 +5,7 @@ import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal
 import { captureCodexTurnState, resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { applyFastModeServiceTier } from "../../fast-mode.js";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
-import { rewriteNativeOpenAiTools } from "../../provider-native-tools.js";
+import { rewriteNativeOpenAiTools, type NativeToolRewriteOptions } from "../../provider-native-tools.js";
 import { collectHistoricalCitationSources, collectWebSearchCitationSources } from "@oai404iao/pi-codex-runtime/internal/providers/responses/citations";
 import { webSocketFallbackKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";
@@ -31,7 +31,7 @@ export function createCodexStream<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
 	options: SimpleStreamOptions | undefined,
-	deps: ProviderStreamEffects & {
+	deps: ProviderStreamEffects & Pick<NativeToolRewriteOptions, "ownsNativeTool"> & {
 		getCurrentCwd: () => string;
 		getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
 		getStartupPrewarm?: (sessionId: string, model: Model<Api>) => Promise<void> | undefined;
@@ -75,13 +75,14 @@ export function createCodexStream<TApi extends Api>(
 				"turn",
 			);
 			let body = applyFastModeServiceTier(
-				buildRequestBody(model, context, requestProfile, options),
+				buildRequestBody(model, context, requestProfile, { ...options, ownsNativeTool: deps.ownsNativeTool }),
 				settings,
 				model,
 			);
 			if (settings.nativeProviderTools) {
 				const webSearch = settings.modelProfile.effective.tools.webSearch;
 				body = rewriteNativeOpenAiTools(body, {
+					ownsNativeTool: deps.ownsNativeTool,
 					imageModel: settings.imageModel,
 					imageGeneration: settings.imageGenerationImplementation ?? false,
 					webSearch: settings.webSearchEnabled && webSearch

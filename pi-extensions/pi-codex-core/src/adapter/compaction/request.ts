@@ -15,11 +15,13 @@ import { compactUrl } from "../../providers/openai-codex/urls.js";
 import { buildCodexCompactionCheckpoint, compactionItems, sanitizeNativeCompactionOutput } from "./checkpoint.js";
 import { postJsonWithRetries } from "./http.js";
 import { requestCodexCompactionTriggerWithTransport } from "./transport.js";
+import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 
 export async function requestOpenAINativeCompaction(
 	model: Model<Api>,
 	context: Context,
 	options: {
+		ownsNativeTool?: NativeToolOwnership;
 		mode: "responses" | "responses-compact";
 		apiKey: string;
 		headers?: ProviderHeaders;
@@ -54,6 +56,7 @@ export async function requestOpenAINativeCompaction(
 		"compaction",
 	);
 	let body = applyFastModeServiceTier(buildRequestBody(model, context, profile, {
+		ownsNativeTool: options.ownsNativeTool,
 		apiKey: options.apiKey,
 		headers: options.headers,
 		signal: options.signal,
@@ -63,6 +66,7 @@ export async function requestOpenAINativeCompaction(
 	if (settings.nativeProviderTools) {
 		const webSearch = settings.modelProfile?.effective.tools.webSearch;
 		body = rewriteNativeOpenAiTools(body, {
+			ownsNativeTool: options.ownsNativeTool,
 			imageModel: settings.imageModel,
 			imageGeneration: settings.imageGenerationImplementation ?? false,
 			webSearch: settings.webSearchEnabled

@@ -354,6 +354,7 @@ export function registerNativeCompaction(
 			const sessionId = ctx.sessionManager.getSessionId();
 			const context = await buildNativeCompactionContext(pi, event, ctx, model);
 			const output = await requestOpenAINativeCompaction(model, context, {
+				ownsNativeTool: providerController?.ownsNativeTool,
 				mode,
 				apiKey: auth.apiKey ?? "",
 				headers: auth.headers,

@@ -58,7 +58,10 @@ export interface WebSocketRequestMetadata {
 	identity?: CodexRequestIdentity;
 }
 
+export type NativeToolOwnership = (name: "web_search" | "image_generation") => boolean;
+
 export interface OpenAIResponsesProviderController {
+	ownsNativeTool?: NativeToolOwnership;
 	getCurrentTurnId(sessionId: string | undefined): string | undefined;
 	getRequestIdentity?(
 		sessionId: string | undefined,

@@ -14,11 +14,11 @@ import { createStartupPrewarmLifecycle } from "./startup-prewarm.js";
 
 export function registerResponsesProviderRuntime(
 	pi: ExtensionAPI,
-	options: { getCurrentCwd: () => string },
+	options: { getCurrentCwd: () => string; ownsNativeTool?: OpenAIResponsesProviderController["ownsNativeTool"] },
 	presentation?: ProviderPresentation,
 ): OpenAIResponsesProviderController {
 	installCodexIdentityLifecycle(pi);
-	const prewarm = createStartupPrewarmLifecycle(pi);
+	const prewarm = createStartupPrewarmLifecycle(pi, options.ownsNativeTool);
 	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: Context, streamOptions?: SimpleStreamOptions) => {
 		const settings = loadModelSettings(model, options.getCurrentCwd());
 		if (
@@ -31,6 +31,7 @@ export function registerResponsesProviderRuntime(
 				: streamSimpleOpenAIResponses(model as Model<"openai-responses">, context, streamOptions);
 		}
 		return createCodexStream(model, context, streamOptions, {
+			ownsNativeTool: options.ownsNativeTool,
 			...presentation?.streamEffects(),
 			getCurrentCwd: options.getCurrentCwd,
 			getCurrentTurnId: (sessionId) => currentCodexTurn(sessionId)?.turnId,
@@ -89,6 +90,7 @@ export function registerResponsesProviderRuntime(
 	presentation?.registerRenderers();
 
 	return {
+		ownsNativeTool: options.ownsNativeTool,
 		getCurrentTurnId(sessionId) {
 			return currentCodexTurn(sessionId)?.turnId;
 		},

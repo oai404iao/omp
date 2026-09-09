@@ -75,6 +75,23 @@ function createBroker(): CodexBroker & { close(): void } {
 	};
 }
 
+function isCompatible(candidate: CodexBroker): boolean {
+	return candidate?.version === 1 && candidate.runtimeVersion === CODEX_RUNTIME_VERSION
+		&& typeof candidate.claim === "function"
+		&& typeof candidate.addPresentation === "function"
+		&& typeof candidate.tools?.get === "function"
+		&& typeof candidate.tools?.set === "function"
+		&& typeof candidate.closed === "boolean"
+		&& typeof candidate.coreEnabled === "boolean"
+		&& ["clear", "flush", "scheduleFlush", "registerRenderers", "streamEffects"].every(
+			name => typeof (candidate.presentation as unknown as Record<string, unknown>)?.[name] === "function",
+		);
+}
+
+function incompatibleBroker(): Error {
+	return new Error(`Incompatible or duplicate Codex capability broker: requires ABI v1 and runtime ${CODEX_RUNTIME_VERSION}`);
+}
+
 /**
  * Pi gives each extension a separate API/module root. Synchronous event-bus
  * discovery shares the v1 service across those roots; no module-global registry
@@ -83,31 +100,25 @@ function createBroker(): CodexBroker & { close(): void } {
  */
 export function getCodexBroker(pi: ExtensionAPI): CodexBroker {
 	const api = pi as ExtensionAPI & { [CACHE]?: CodexBroker };
-	if (api[CACHE] && !api[CACHE].closed) return api[CACHE];
+	const cached = api[CACHE];
+	if (cached && cached.closed !== true) {
+		// Different runtime copies can receive the same API object.
+		if (!isCompatible(cached)) throw incompatibleBroker();
+		return cached;
+	}
 	let found: CodexBroker | undefined;
 	let incompatible = false;
 	pi.events?.emit(CODEX_BROKER_CHANNEL, {
 		version: 1,
 		accept(candidate: CodexBroker) {
-			if (
-				candidate?.version !== 1 || candidate.runtimeVersion !== CODEX_RUNTIME_VERSION
-				|| typeof candidate.claim !== "function"
-				|| typeof candidate.addPresentation !== "function"
-				|| typeof candidate.tools?.get !== "function"
-				|| typeof candidate.tools?.set !== "function"
-				|| typeof candidate.closed !== "boolean"
-				|| typeof candidate.coreEnabled !== "boolean"
-				|| ["clear", "flush", "scheduleFlush", "registerRenderers", "streamEffects"].some(
-					name => typeof (candidate.presentation as unknown as Record<string, unknown>)?.[name] !== "function",
-				)
-			) incompatible = true;
+			if (!isCompatible(candidate)) incompatible = true;
 			else if (!candidate.closed) {
 				if (found && found !== candidate) incompatible = true;
 				found = candidate;
 			}
 		},
 	});
-	if (incompatible) throw new Error(`Incompatible or duplicate Codex capability broker: requires ABI v1 and runtime ${CODEX_RUNTIME_VERSION}`);
+	if (incompatible) throw incompatibleBroker();
 	if (found) return (api[CACHE] = found);
 	const broker = createBroker();
 	const unsubscribe = pi.events?.on(CODEX_BROKER_CHANNEL, value => {

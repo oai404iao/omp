@@ -4,6 +4,8 @@ import { dirname } from "node:path";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import core from "@oai404iao/pi-codex-core";
+import { buildRequestBody } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/request-body";
+import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import web from "@oai404iao/pi-codex-web-search";
 import image from "@oai404iao/pi-codex-imagegen";
 import { getOpenAICodexLatestImagePath } from "@oai404iao/pi-codex-imagegen/internal/tools/image-generation/storage";
@@ -152,10 +154,84 @@ test("mixed runtime versions fail closed instead of making catalog ownership loa
 		} finally { host.dispose(); }
 	}));
 
+for (const override of [{ runtimeVersion: "0.0.0" }, { version: 2 }, { tools: undefined }]) {
+	test(`cached broker still validates compatibility: ${JSON.stringify(override)}`, () =>
+		withCompositionDirectory(async directory => {
+			const host = createCompositionHost(directory);
+			const api = host.api();
+			const broker = getCodexBroker(api);
+			try {
+				Object.defineProperty(api, Symbol.for("@oai404iao/pi-codex/broker/v1"), {
+					value: { ...broker, ...override }, writable: true, configurable: true,
+				});
+				assert.throws(() => image(api), /requires ABI v1 and runtime/);
+				assert.equal(host.tools.size, 0);
+				assert.equal(host.providers.size, 0);
+			} finally {
+				await host.emit("session_shutdown");
+				host.dispose();
+			}
+		}));
+}
+
 const imageEvent = {
 	type: "response.output_item.done",
 	item: { type: "image_generation_call", id: "late-image", result: "AQ==", output_format: "png" },
 };
+
+for (const capability of [undefined, web, image]) {
+	test(`core rewrites only installed capability placeholders (${capability?.name ?? "none"})`, () =>
+		withCompositionDirectory(async directory => {
+			const host = createCompositionHost(directory);
+			try {
+				core(host.api());
+				capability?.(host.api());
+				host.ctx.model = compositionModel("gpt-5.5", "openai-codex");
+				const handler = host.handlers.get("before_provider_request")![0]!;
+				const tools = ["web_search", "image_generation"].map(name => ({
+					type: "function", name, parameters: { type: "object" },
+				}));
+				const payload = { tools };
+				const result = await handler({ payload }, host.ctx);
+				if (!capability) assert.equal(result, undefined);
+				const actual = result?.tools ?? tools;
+				for (let index = 0; index < tools.length; index++) {
+					if (host.tools.has(tools[index]!.name)) {
+						assert.notEqual(actual[index].type, "function");
+					} else {
+						assert.equal(actual[index], tools[index], "uninstalled names belong to other extensions");
+					}
+				}
+				assert.ok(payload.tools.every(tool => tool.type === "function"));
+				const context = {
+					messages: [],
+					tools: tools.map(tool => ({ ...tool, description: "fixture" })),
+				};
+				let captured: any;
+				const stream = host.providers.get("openai-codex").streamSimple(host.ctx.model, context, {
+					apiKey: "fixture-only",
+					headers: { "chatgpt-account-id": "fixture-account" },
+					onPayload(body: unknown) {
+						captured = body;
+						throw new Error("fixture stopped before I/O");
+					},
+				});
+				assert.match((await stream.result()).errorMessage, /fixture stopped before I\/O/);
+				for (let index = 0; index < tools.length; index++) {
+					assert.equal(captured.tools[index].type === "function", !host.tools.has(tools[index]!.name));
+				}
+				const lite = buildRequestBody(host.ctx.model, context, resolveCodexRequestProfile({ responsesMode: "lite" }), {
+					ownsNativeTool: name => host.tools.has(name),
+				});
+				const namespaces = (lite.input[0] as any).tools;
+				const functions = namespaces.find((ns: any) => ns.name === "functions")?.tools ?? [];
+				assert.deepEqual(functions.map((tool: any) => tool.name), tools.filter(tool => !host.tools.has(tool.name)).map(tool => tool.name));
+			} finally {
+				await host.emit("session_shutdown");
+				host.dispose();
+			}
+		}));
+}
 
 test("composed capture keeps old sinks invalid after session replacement and honors abort", () =>
 	withCompositionDirectory(async directory => {

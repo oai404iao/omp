@@ -201,11 +201,12 @@ function registerCoreTools(pi: ExtensionAPI): void {
 export default function codexCore(pi: ExtensionAPI): void {
 	const broker = ensureCodexServices(pi);
 	if (!broker.claim("package:core")) return;
+	const ownsNativeTool = (name: "web_search" | "image_generation") => broker.tools.has(name);
 	let currentCwd = process.cwd();
 	pi.on("session_start", (_event, ctx) => { currentCwd = ctx.cwd; });
 	pi.on("model_select", (_event, ctx) => { currentCwd = ctx.cwd; });
 	if (loadSettings(currentCwd).enabled) {
-		const controller = registerResponsesProviderRuntime(pi, { getCurrentCwd: () => currentCwd }, {
+		const controller = registerResponsesProviderRuntime(pi, { getCurrentCwd: () => currentCwd, ownsNativeTool }, {
 			// Shared services own presentation hooks even when core is absent.
 			clear() {}, flush() {}, scheduleFlush() {}, registerRenderers() {},
 			streamEffects: () => broker.presentation.streamEffects(),
@@ -240,6 +241,7 @@ export default function codexCore(pi: ExtensionAPI): void {
 		const capabilities = computeToolCapabilities(contextModel(ctx), settings);
 		const webSearch = profile.effective.tools.webSearch;
 		const result = rewriteNativeOpenAiTools(event.payload, {
+			ownsNativeTool,
 			imageModel: settings.imageModel,
 			imageGeneration: modelSettings.imageGenerationImplementation ?? false,
 			webSearch: capabilities.web_search.enabled

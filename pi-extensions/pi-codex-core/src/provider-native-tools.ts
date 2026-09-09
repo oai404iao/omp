@@ -1,4 +1,5 @@
 import { createCodexReservedNamespaceTool } from "@oai404iao/pi-codex-runtime/internal/codex-reserved-tools";
+import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 
 export interface NativeToolRewriteResult<T = unknown> {
 	payload: T;
@@ -6,6 +7,7 @@ export interface NativeToolRewriteResult<T = unknown> {
 }
 
 export interface NativeToolRewriteOptions {
+	ownsNativeTool?: NativeToolOwnership;
 	imageModel?: string;
 	imageGeneration?: boolean | "hosted" | "standalone";
 	webSearch?: boolean | {
@@ -43,6 +45,8 @@ export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewri
 	const tools = payload.tools.map((candidate) => {
 		if (!isRecord(candidate)) return candidate;
 		const name = toolName(candidate);
+		if ((name === "web_search" || name === "image_generation")
+			&& options.ownsNativeTool?.(name) === false) return candidate;
 		if (name === "image_generation" && options.imageGeneration !== false) {
 			rewritten.push(name);
 			if (options.imageGeneration === "standalone") {

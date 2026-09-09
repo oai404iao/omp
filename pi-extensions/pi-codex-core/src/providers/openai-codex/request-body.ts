@@ -9,7 +9,7 @@ import { convertResponsesTools } from "@oai404iao/pi-codex-runtime/internal/prov
 import { CODEX_TOOL_CALL_PROVIDERS, WEB_SEARCH_RESULTS_INCLUDE, WEB_SEARCH_SOURCES_INCLUDE } from "./constants.js";
 import { stripResponsesLiteImageDetails } from "./lite.js";
 import { clampCodexThinkingLevel, clampReasoningEffort } from "./reasoning.js";
-import { type ResponsesBody } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
+import { type ResponsesBody, type NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 
 function hasNativeWebSearchTool(body: ResponsesBody): boolean {
 	return Array.isArray(body.tools) && body.tools.some((tool) => Boolean(tool) && typeof tool === "object" && (tool as { type?: unknown }).type === "web_search");
@@ -22,7 +22,7 @@ export function ensureWebSearchDetailsIncluded(body: ResponsesBody): void {
 	if (missing.length > 0) body.include = [...include, ...missing];
 }
 
-export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, profile: CodexRequestProfile, options?: SimpleStreamOptions): ResponsesBody {
+export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: Context, profile: CodexRequestProfile, options?: SimpleStreamOptions & { ownsNativeTool?: NativeToolOwnership }): ResponsesBody {
 	const requestIdentity = resolveCodexRequestIdentity(
 		options?.sessionId,
 		options?.metadata as Record<string, unknown> | undefined,
@@ -47,7 +47,8 @@ export function buildRequestBody<TApi extends Api>(model: Model<TApi>, context: 
 		}>();
 		for (const tool of tools as Array<Record<string, unknown>>) {
 			if (typeof tool.name !== "string") continue;
-			if (tool.name === "web_search" || tool.name === "image_generation") {
+			if ((tool.name === "web_search" || tool.name === "image_generation")
+				&& options?.ownsNativeTool?.(tool.name) !== false) {
 				const reserved = createCodexReservedNamespaceTool(tool.name);
 				namespaces.set(reserved.name, reserved);
 				continue;

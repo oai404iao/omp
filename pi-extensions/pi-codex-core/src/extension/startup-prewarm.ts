@@ -16,6 +16,7 @@ import { isWebSocketUpgradeRejectedError } from "../providers/openai-codex/retry
 import { resolveResponsesWebSocketUrl } from "../providers/openai-codex/urls.js";
 import { websocketHttpFallbackSessions, websocketSessionCache } from "../providers/openai-codex/websocket-session.js";
 import { startupPrewarmSnapshot, type StartupPrewarmSnapshot } from "./prewarm-snapshot.js";
+import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 
 interface StartupPrewarmState {
 	status: "pending" | "ready" | "failed";
@@ -44,7 +45,7 @@ function settleSpeculativeTask(task: Promise<void>, signal: AbortSignal): Promis
 	});
 }
 
-export function createStartupPrewarmLifecycle(pi: ExtensionAPI) {
+export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?: NativeToolOwnership) {
 	const startupPrewarms = new Map<string, StartupPrewarmState>();
 	const sessionStartupPrewarmTasks = new Map<string, SessionStartupPrewarmTask>();
 	let sessionGeneration = 0;
@@ -109,6 +110,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI) {
 				messages: [],
 				tools: snapshot.tools,
 			}, profile, {
+				ownsNativeTool,
 				apiKey: auth.apiKey,
 				headers: auth.headers,
 				sessionId,
@@ -120,6 +122,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI) {
 		if (settings.nativeProviderTools) {
 			const webSearch = settings.modelProfile.effective.tools.webSearch;
 			body = rewriteNativeOpenAiTools(body, {
+				ownsNativeTool,
 				imageModel: settings.imageModel,
 				imageGeneration: settings.imageGenerationImplementation ?? false,
 				webSearch: settings.webSearchEnabled && webSearch
