@@ -10,6 +10,7 @@ Independent image capability, using runtime without core or web-search.
   generation-bound sinks, queues/timers and rendering.
 - `src/utils/images.ts`: direct image API and image utilities; no core import.
 - `src/background-image-generation.ts`: cancellable background job ownership.
+- `src/background-image-jobs.ts`: instance-owned status, timers and abort generations.
 
 ## Constraints
 

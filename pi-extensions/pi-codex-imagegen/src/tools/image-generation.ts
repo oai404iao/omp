@@ -168,6 +168,7 @@ export async function standaloneImageGeneration(
 	signal?: AbortSignal,
 	invocation: StandaloneImageGenerationInvocation = {},
 ) {
+	signal?.throwIfAborted();
 	const callId = invocation.callId ?? "standalone";
 	const turnId = invocation.turnId ?? randomUUID();
 	const model = ctx.model;
@@ -178,6 +179,7 @@ export async function standaloneImageGeneration(
 		throw new Error("Provide only one of referenced_image_paths or num_last_images_to_include.");
 	}
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	signal?.throwIfAborted();
 	if (!auth.ok) throw new Error(auth.error);
 	if (!hasCodexRequestAuth({
 		modelHeaders: model.headers,
@@ -189,6 +191,7 @@ export async function standaloneImageGeneration(
 		? recentConversationImageUrls(ctx, input.num_last_images_to_include)
 		: await referencedImageUrls(ctx.cwd, input.referenced_image_paths ?? []);
 	const edit = images.length > 0;
+	signal?.throwIfAborted();
 	const response = await fetch(
 		resolveCodexApiEndpoint(
 			model.baseUrl,
@@ -216,12 +219,14 @@ export async function standaloneImageGeneration(
 			signal,
 		},
 	);
+	signal?.throwIfAborted();
 	if (!response.ok) {
 		throw new Error(`Standalone image generation failed: HTTP ${response.status}: ${await response.text()}`);
 	}
 	const result = await response.json() as {
 		data?: Array<{ b64_json?: string }>;
 	};
+	signal?.throwIfAborted();
 	const base64 = result.data?.[0]?.b64_json;
 	if (!base64) throw new Error("Standalone image generation returned no image data.");
 	const saved = await saveBase64Image({
@@ -232,6 +237,7 @@ export async function standaloneImageGeneration(
 		responseId: settings.imageModel,
 		settings,
 	});
+	signal?.throwIfAborted();
 	return {
 		content: [
 			{ type: "image", data: base64, mimeType: "image/png" },

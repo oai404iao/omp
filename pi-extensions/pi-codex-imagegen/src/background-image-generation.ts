@@ -1,6 +1,6 @@
 import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { supportsImageInput, type ModelLike } from "@oai404iao/pi-codex-runtime/internal/capabilities";
@@ -8,7 +8,7 @@ import {
 	buildCodexJsonHeaders,
 	hasCodexRequestAuth,
 } from "@oai404iao/pi-codex-runtime/internal/codex-http";
-import { frameGlyphs, glyphs, treeGlyph } from "@oai404iao/pi-codex-runtime/internal/glyphs";
+import { createBackgroundImageJobs, panelBranch } from "./background-image-jobs.js";
 import { listResolvedModelProfiles } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { setProviderGeneratedHeader } from "@oai404iao/pi-codex-runtime/internal/provider-headers";
@@ -23,24 +23,7 @@ import { projectRoot } from "./utils/images.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const BACKGROUND_IMAGE_INSTRUCTIONS = "Generate or edit images with the hosted image_generation tool. Use the user's prompt and any provided reference images. Return the image_generation_call result.";
-const IMAGE_GEN_STATUS_KEY = "codex-image-gen";
 const IMAGE_GEN_ERROR_MESSAGE_TYPE = "codex-image-generation-error";
-const PANEL_BAR_COLOR = "borderAccent";
-const PANEL_TITLE_COLOR = "customMessageLabel";
-const PANEL_RULE_COLOR = "muted";
-const PANEL_CARD_PADDING_X = 1;
-
-interface ActiveImageJob {
-	id: string;
-	startedAt: number;
-	prompt: string;
-	referenceCount: number;
-	imageModel: string;
-}
-
-const activeImageJobs = new Map<string, ActiveImageJob>();
-let activeStatusCtx: ExtensionCommandContext | undefined;
-let statusTimer: ReturnType<typeof setInterval> | undefined;
 
 export interface ParsedImageGenCommand {
 	prompt: string;
@@ -162,109 +145,6 @@ function isSupportedImagePathToken(token: string): boolean {
 	return /\.(?:png|jpe?g|webp)$/i.test(normalized);
 }
 
-function padAnsi(text: string, width: number): string {
-	const truncated = truncateToWidth(text, width, "");
-	return `${truncated}${" ".repeat(Math.max(0, width - visibleWidth(truncated)))}`;
-}
-
-function panelFrameContentWidth(width: number): number {
-	return Math.max(1, width - 2 - PANEL_CARD_PADDING_X * 2);
-}
-
-function panelFrame(lines: string[], width: number, theme: Theme): string[] {
-	const safeWidth = Math.max(1, width);
-	if (safeWidth < 8) return lines.map((line) => truncateToWidth(line, safeWidth, ""));
-	const inner = Math.max(1, safeWidth - 2);
-	const contentWidth = panelFrameContentWidth(safeWidth);
-	const border = (text: string) => theme.fg(PANEL_BAR_COLOR, text);
-	const frame = frameGlyphs();
-	return [
-		`${border(frame.tl)}${border(frame.h.repeat(inner))}${border(frame.tr)}`,
-		...lines.map((line) => `${border(frame.v)}${" ".repeat(PANEL_CARD_PADDING_X)}${padAnsi(line, contentWidth)}${" ".repeat(PANEL_CARD_PADDING_X)}${border(frame.v)}`),
-		`${border(frame.bl)}${border(frame.h.repeat(inner))}${border(frame.br)}`,
-	].map((line) => truncateToWidth(line, safeWidth, ""));
-}
-
-function panelBranch(theme: Theme, branch: "├" | "└" | "│"): string {
-	return theme.fg(PANEL_RULE_COLOR, treeGlyph(branch));
-}
-
-function renderStatusHeader(jobs: ActiveImageJob[], theme: Theme): string {
-	const oldest = jobs[0];
-	const elapsed = oldest ? Math.max(0, Math.round((Date.now() - oldest.startedAt) / 1000)) : 0;
-	const imageModels = [...new Set(jobs.map((job) => job.imageModel))];
-	const modelText = imageModels.length === 1 ? imageModels[0] : `${imageModels.length} models`;
-	const refs = jobs.reduce((total, job) => total + job.referenceCount, 0);
-	const refText = refs > 0 ? ` · ${refs} ref${refs === 1 ? "" : "s"}` : "";
-	return `${theme.fg(PANEL_TITLE_COLOR, theme.bold("Image Generation"))} ${theme.fg("muted", `${jobs.length} running · ${modelText}${refText} · ${elapsed}s`)}`;
-}
-
-function renderJobLines(theme: Theme, width: number): string[] {
-	const jobs = Array.from(activeImageJobs.values()).sort((a, b) => a.startedAt - b.startedAt);
-	if (jobs.length === 0) return [];
-	const dot = theme.fg("dim", glyphs().dot);
-	const lines = [renderStatusHeader(jobs, theme)];
-	const shown = jobs.slice(0, 4);
-	for (const [index, job] of shown.entries()) {
-		const ageSeconds = Math.max(0, Math.round((Date.now() - job.startedAt) / 1000));
-		const isLast = index === shown.length - 1 && jobs.length <= shown.length;
-		const refs = job.referenceCount > 0 ? `${dot}${theme.fg("dim", `${job.referenceCount} ref${job.referenceCount === 1 ? "" : "s"}`)}` : "";
-		const promptWidth = Math.max(16, width - 36);
-		lines.push(`${panelBranch(theme, isLast ? "└" : "├")}${theme.fg("accent", glyphs().bullet.trim())} ${theme.fg("accent", truncateToWidth(job.prompt, promptWidth, glyphs().ellipsis))}${dot}${theme.fg("muted", job.imageModel)}${refs}${dot}${theme.fg("dim", `${ageSeconds}s`)}`);
-	}
-	const hidden = jobs.length - shown.length;
-	if (hidden > 0) lines.push(`${panelBranch(theme, "└")}${theme.fg("muted", `${glyphs().ellipsis} ${hidden} more`)}`);
-	return panelFrame(lines, width, theme);
-}
-
-function createImageGenWidgetFactory(): (_tui: unknown, theme: Theme) => Component {
-	return (_tui, theme) => ({
-		invalidate() {},
-		render(width: number): string[] {
-			return renderJobLines(theme, width);
-		},
-	});
-}
-
-function ensureStatusTimer(): void {
-	if (statusTimer) return;
-	statusTimer = setInterval(() => {
-		if (!activeStatusCtx || activeImageJobs.size === 0) {
-			if (statusTimer) clearInterval(statusTimer);
-			statusTimer = undefined;
-			return;
-		}
-		updateImageGenStatus(activeStatusCtx);
-	}, 1000);
-	statusTimer.unref?.();
-}
-
-function updateImageGenStatus(ctx: ExtensionCommandContext): void {
-	activeStatusCtx = ctx;
-	const count = activeImageJobs.size;
-	ctx.ui.setStatus(IMAGE_GEN_STATUS_KEY, count > 0 ? `image-gen ${count}` : undefined);
-	ctx.ui.setWidget(IMAGE_GEN_STATUS_KEY, count > 0 ? createImageGenWidgetFactory() : undefined, { placement: "aboveEditor" });
-	if (count > 0) ensureStatusTimer();
-}
-
-function startImageJob(ctx: ExtensionCommandContext, parsed: ParsedImageGenCommand, imageModel: string): ActiveImageJob {
-	const job: ActiveImageJob = {
-		id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-		startedAt: Date.now(),
-		prompt: parsed.prompt,
-		referenceCount: parsed.imagePaths.length,
-		imageModel,
-	};
-	activeImageJobs.set(job.id, job);
-	updateImageGenStatus(ctx);
-	return job;
-}
-
-function finishImageJob(ctx: ExtensionCommandContext, jobId: string): void {
-	activeImageJobs.delete(jobId);
-	updateImageGenStatus(ctx);
-}
-
 export function parseImageGenCommandArgs(input: string): ParsedImageGenCommand {
 	const imagePaths: string[] = [];
 	const promptParts: string[] = [];
@@ -347,26 +227,36 @@ export function buildBackgroundImageRequest(options: {
 	};
 }
 
-async function* parseSseEvents(response: Response): AsyncIterable<Record<string, unknown>> {
+async function* parseSseEvents(response: Response, signal: AbortSignal): AsyncIterable<Record<string, unknown>> {
 	if (!response.body) return;
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
 	let buffer = "";
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		buffer += decoder.decode(value, { stream: true });
-		let boundary: number;
-		while ((boundary = buffer.indexOf("\n\n")) >= 0) {
-			const raw = buffer.slice(0, boundary);
-			buffer = buffer.slice(boundary + 2);
-			for (const line of raw.split(/\r?\n/)) {
-				if (!line.startsWith("data:")) continue;
-				const data = line.slice(5).trim();
-				if (!data || data === "[DONE]") continue;
-				yield JSON.parse(data) as Record<string, unknown>;
+	const cancel = () => { void reader.cancel(signal.reason).catch(() => {}); };
+	signal.addEventListener("abort", cancel, { once: true });
+	if (signal.aborted) cancel();
+	try {
+		while (true) {
+			signal.throwIfAborted();
+			const { done, value } = await reader.read();
+			signal.throwIfAborted();
+			if (done) break;
+			buffer += decoder.decode(value, { stream: true });
+			let boundary: number;
+			while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+				const raw = buffer.slice(0, boundary);
+				buffer = buffer.slice(boundary + 2);
+				for (const line of raw.split(/\r?\n/)) {
+					if (!line.startsWith("data:")) continue;
+					const data = line.slice(5).trim();
+					if (!data || data === "[DONE]") continue;
+					yield JSON.parse(data) as Record<string, unknown>;
+				}
 			}
 		}
+	} finally {
+		signal.removeEventListener("abort", cancel);
+		reader.releaseLock();
 	}
 }
 
@@ -429,7 +319,8 @@ function renderImageGenError(details: ImageGenerationErrorDetails, theme: Theme)
 	};
 }
 
-async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionCommandContext, parsed: ParsedImageGenCommand): Promise<void> {
+async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionCommandContext, parsed: ParsedImageGenCommand, signal: AbortSignal): Promise<void> {
+	signal.throwIfAborted();
 	const model = selectCodexImageModel(ctx.model as ModelLike | undefined, ctx.modelRegistry as ModelRegistryLike | undefined) as Model<Api> | undefined;
 	if (!model) throw new Error("No image-capable model with an enabled model catalog profile is available.");
 	const settings = loadModelSettings(model as ModelLike, ctx.cwd);
@@ -442,7 +333,8 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 			cwd: ctx.cwd,
 			model,
 			modelRegistry: ctx.modelRegistry,
-		}, settings, undefined, { callId: "standalone" });
+		}, settings, signal, { callId: "standalone" });
+		signal.throwIfAborted();
 		const saved = result.details.saved;
 		const workspaceRoot = projectRoot(ctx.cwd);
 		const relativePath = relative(workspaceRoot, saved.path);
@@ -470,6 +362,7 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 		return;
 	}
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	signal.throwIfAborted();
 	if (!auth.ok) throw new Error(auth.error);
 	if (!hasCodexRequestAuth({
 		modelHeaders: model.headers,
@@ -478,6 +371,7 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 		throw new Error(`No request authentication is configured for ${model.provider}.`);
 	}
 	const referenceImages = await Promise.all(parsed.imagePaths.map((path) => loadReferenceImage(ctx.cwd, path)));
+	signal.throwIfAborted();
 	const body = buildBackgroundImageRequest({
 		prompt: parsed.prompt,
 		referenceImages,
@@ -485,6 +379,7 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 		imageModel: settings.imageModel,
 	});
 	const response = await fetch(resolveCodexUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode }), {
+		signal,
 		method: "POST",
 		headers: buildHeaders(model, {
 			apiKey: auth.apiKey,
@@ -492,11 +387,12 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 		}, { apiKeyMode: settings.apiKeyMode }),
 		body: JSON.stringify(body),
 	});
+	signal.throwIfAborted();
 	if (!response.ok) throw new Error(`Codex image generation failed: ${response.status} ${await response.text()}`);
 	const results: CodexImageResult[] = [];
 	let responseId: string | undefined;
 	let lastResponse: Record<string, unknown> | undefined;
-	for await (const event of parseSseEvents(response)) {
+	for await (const event of parseSseEvents(response, signal)) {
 		if (event.type === "response.created" && event.response && typeof event.response === "object") {
 			lastResponse = event.response as Record<string, unknown>;
 			const id = (event.response as { id?: unknown }).id;
@@ -512,6 +408,7 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 	if (results.length === 0) throw new Error(summarizeNonImageResponse(lastResponse));
 	const savedImages = [];
 	for (const result of results) {
+		signal.throwIfAborted();
 		savedImages.push(await saveOpenAICodexGeneratedImage(ctx.cwd, {
 			responseId,
 			callId: result.id,
@@ -521,6 +418,7 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 			revisedPrompt: result.revisedPrompt ?? parsed.prompt,
 		}));
 	}
+	signal.throwIfAborted();
 	pi.sendMessage({
 		customType: IMAGE_SAVE_DISPLAY_MESSAGE_TYPE,
 		content: [{ type: "text", text: buildGeneratedImageDisplayText(savedImages[0], { expanded: false }) }],
@@ -530,6 +428,9 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 }
 
 export function registerBackgroundImageGenerationCommand(pi: ExtensionAPI): void {
+	const jobs = createBackgroundImageJobs();
+	pi.on("session_start", (_event, ctx) => jobs.reset(ctx));
+	pi.on("session_shutdown", (_event, ctx) => jobs.reset(ctx));
 	pi.registerMessageRenderer<ImageGenerationErrorDetails>(IMAGE_GEN_ERROR_MESSAGE_TYPE, (message, _options, theme) => {
 		const rawContent = typeof message.content === "string"
 			? message.content
@@ -555,10 +456,11 @@ export function registerBackgroundImageGenerationCommand(pi: ExtensionAPI): void
 				return;
 			}
 			const settings = loadSettings(ctx.cwd);
-			const job = startImageJob(ctx, parsed, settings.imageModel);
+			const job = jobs.start(ctx, parsed, settings.imageModel);
 			ctx.ui.notify(`Queued image generation with ${settings.imageModel}${parsed.imagePaths.length ? ` (${parsed.imagePaths.length} reference image${parsed.imagePaths.length === 1 ? "" : "s"})` : ""}.`, "info");
-			void runBackgroundImageGeneration(pi, ctx, parsed)
+			void runBackgroundImageGeneration(pi, ctx, parsed, job.signal)
 				.catch((error) => {
+					if (!job.isCurrent()) return;
 					const message = error instanceof Error ? error.message : String(error);
 					pi.sendMessage({
 						customType: IMAGE_GEN_ERROR_MESSAGE_TYPE,
@@ -567,7 +469,8 @@ export function registerBackgroundImageGenerationCommand(pi: ExtensionAPI): void
 						details: { message, prompt: parsed.prompt, imageModel: settings.imageModel, referenceCount: parsed.imagePaths.length } satisfies ImageGenerationErrorDetails,
 					}, { triggerTurn: false });
 				})
-				.finally(() => finishImageJob(ctx, job.id));
+				.finally(() => job.finish())
+				.catch(() => {}); // Closed UI/API failures must not escape a detached job.
 		},
 	});
 }
