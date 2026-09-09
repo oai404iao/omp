@@ -3,7 +3,7 @@
 Codex-specific Responses support for Pi, driven by an exact per-model JSON
 catalog instead of model-name heuristics.
 
-Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
 
 > npm identity stays `@oai404iao/pi-codex-minimal-tools`. This checkout composes
 > core, web-search and imagegen through a shared runtime. The four new packages

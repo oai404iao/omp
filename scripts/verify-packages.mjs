@@ -2,13 +2,14 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { readManifest, registry, root, workspaces } from "./workspaces.mjs";
+import { piFloor, piDevelopmentVersion } from "./pi-baselines.mjs";
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const lock = JSON.parse(readFileSync(resolve(root, "package-lock.json"), "utf8"));
 
 const errors = [];
 const seenNames = new Set();
-const testedPiVersion = "0.84.2";
+const testedPiVersion = piFloor;
 const exactPiPeerPackages = new Set(["@oai404iao/pi-tree-continue"]);
 const requiredPiDependencies = {
   "@oai404iao/pi-tree-continue": {
@@ -108,7 +109,7 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   }
   const exactPiPeerRange = exactPiPeerPackages.has(manifest.name);
   const expectedPiPeerRange = exactPiPeerRange ? testedPiVersion : `>=${testedPiVersion}`;
-  const expectedPiDevBaseline = exactPiPeerRange ? testedPiVersion : `^${testedPiVersion}`;
+  const expectedPiDevBaseline = piDevelopmentVersion(manifest.name);
   for (const [dependency, range] of Object.entries(manifest.peerDependencies ?? {})) {
     if (!dependency.startsWith("@earendil-works/pi-")) continue;
     if (range !== expectedPiPeerRange) {

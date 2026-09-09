@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Node ${{ matrix.node }}
+    name: Node ${{ matrix.node }} / Pi ${{ matrix.pi }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -25,6 +25,9 @@ jobs:
         node:
           - "22.19.0"
           - "24.x"
+        pi:
+          - floor
+          - target
 
     steps:
       - name: Check out repository
@@ -44,17 +47,19 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
 
-      - name: Run package checks
-        run: npm run check
+      - name: Run complete baseline CI
+        run: node scripts/test-pi-baselines.mjs ${{ matrix.pi }}
+        env:
+          OMP_PI_MATRIX_LOG_DIR: ${{ runner.temp }}/pi-matrix
 
-      - name: Test release-script safety checks
-        run: npm run test:release-scripts
-
-      - name: Verify license and source snapshots
-        run: npm run license:check
-
-      - name: Inspect npm tarballs
-        run: npm run pack:check
+      - name: Upload baseline diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pi-${{ matrix.pi }}-node-${{ matrix.node }}
+          path: ${{ runner.temp }}/pi-matrix/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high

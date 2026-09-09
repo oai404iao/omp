@@ -98,7 +98,7 @@ npm run changeset:status
 ```
 
 `npm run test:codex-packages` packs all five Codex packages, npm-installs them in
-temporary consumers, and uses the actual Pi 0.84.2 loader. It covers runtime,
+temporary consumers, and uses the selected baseline's actual Pi loader. It covers runtime,
 each capability, all pairs, all capabilities, the bundle, duplicate composition,
 reversed order, separate physical runtime copies and shutdown/reload. Standalone
 auth/HTTP are deterministic fixtures; there are no real credentials or endpoints.
@@ -133,4 +133,5 @@ The publication pipeline independently validates dependency order, artifacts,
 eligibility and dependency visibility, stopping downstream publication on failure.
 
 Bootstrap approval and actual publication remain manual/unperformed.
-S5 independently verifies a named Pi 0.85.x target while retaining the 0.84.2 floor.
+S5 independently verifies Pi 0.85.1 while retaining the 0.84.2 floor. See
+[Pi compatibility](pi-compatibility.md) for full-matrix commands and limits.

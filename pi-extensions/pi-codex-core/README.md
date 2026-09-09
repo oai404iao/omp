@@ -2,6 +2,8 @@
 
 Private/blocked S3 extension; not published to npm.
 
+Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
+
 Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
 `apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,
 including `/codex-minimal-tools` and `/fast`. Unknown models remain native.

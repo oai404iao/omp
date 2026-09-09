@@ -282,12 +282,53 @@ streamSimple：同步捕获当前会话的展示 sink
   添加包 changeset；S3 的待发布 changeset 保留。subagent 已记录 flaky
   仍未修复，主工作区用户修改保持原样。
 
+### S5：Pi 双基线
+
+- 基于 `8658c935` 独立实施本阶段，目标明确为 `0.85.1`。核对官方 npm
+  版本及上游发布记录；0.85.1 修复了 0.85.0 的 SDK 导入问题，不用浮动
+  `0.85.x` 或 peer range 代替实际验证。见 `docs/pi-compatibility.md`。
+- 普通包的 peer floor 仍为 `>=0.84.2`，dev dependencies 精确 pin 到
+  0.85.1；root 同时锚定四个 SDK 包。首次仅修改 workspace dev pins 时，
+  npm 仍把 0.84.2 hoist 到根，并给普通包安装嵌套 0.85.1，可能使根测试
+  驱动误验旧 SDK；显式 root anchors 与实际 resolve 检查消除了该问题。
+- `pi-tree-continue` 的 private/blocked、exact 0.84.2 peer/dev 和实现
+  均不变。实际 loader 检查：floor 注册原 hook；target 不注册命令、
+  明确警告，并保持目标 AgentSession prototype 不变。
+- `ci:pi-matrix` 对同一份 tracked 工作区源码建立两个独立临时副本。
+  target 使用根锁；floor 只改测试副本的 Pi dev pins，再由根锁生成临时锁。
+  两者都 clean install 后运行完整 `ci`，日志记录源码 SHA-256、Node/Pi
+  版本；不复用工作区 node_modules，不修改调用方，不自动重试失败。
+- 更新根锁及 SDK 自带 shrinkwrap 的校验和保留。只借用相同 URL/version
+  的已知哈希；新的 target 若同时存在带 hash 的 hoisted 条目，可用于补齐
+  同一 artifact 的 shrinkwrap 条目。保留唯一根锁，没有新增长期 floor 锁。
+  Pi 引入的传递依赖变化保留，Codex 的已审查 transport 直接依赖未升级。
+- 新版 SDK 的多副本安装触及临时空间配额；consumer 验证改用隔离子进程，
+  验证 actual package version 与 SDK VERSION，及时删除不再需要的安装。
+  同组逆序/reload 和独立物理 root 仍共用真实 event bus 进行去重验证，
+  没有改回 workspace link 或减少原有 17 组组合。
+- 新增 credential-free offline CLI probe、每个 workspace SDK resolve
+  检查及 baseline/新 hash 复用单测。原 Codex 源码、catalog/schema、
+  协议/replay、许可证及发布资格保持不变；九包 manifest/README 有 changeset。
+- 只读 CI 配置为 Node 22.19.0 / 24.x × Pi floor / target，并上传诊断日志。
+  本机实测 Node 24.13.0；不声称已经执行远端矩阵或本机 Node 22.19.0。
+- 首轮 target 检查再次命中已记录的 subagent FIFO flaky
+  (`coordinator.test.ts:1640`, `2 !== 1`)；没有修改 subagent runtime 或
+  跳过测试。随后 floor 与 target 的完整 CI 分别通过；通过不代表 flaky 已修复。
+- 最终同源码双基线矩阵通过：每个版本 490 项 node:test、17 组生产
+  tarball/loader 组合、191 模块架构及十包 license/pack 检查。根目录另行
+  clean install 后锁哈希不变，实际 SDK/CLI smoke 再次通过；生产 audit
+  报告 0 vulnerabilities。changeset status 正常，未执行 version。
+- 常规和 bootstrap artifact preparation 再次在 bundle → private runtime
+  处按预期阻断，未创建 release-artifacts。主工作区用户修改、workspace
+  包版本和 release locks 未变；没有 merge、push 或发布操作。
+
 ### 剩余工作（不能标记为已完成）
 
 - 人工 bootstrap、npm 名称/账号资格和真实发布仍未执行；新包保持
   private/blocked。Codex 仍以本地 tarball 替代未发布 registry 版本。
   不得把无链接安装验证称作已经发布，也不能绕开当前 bundle 依赖门禁。
-- S5：尚未升级 Pi 或宣称 0.85.x 验证通过，floor/target 双基线待单独实施。
+- 远端 Node/Pi CI 矩阵、真实账号/收费端点、交互式 UI 和 npm 发布尚未执行；
+  目前验收仅覆盖文档中明确的两个 Pi 版本与本机 Node 基线。
 - 三个历史模块保留明确行数预算：catalog 636、wire identity 596、
   background image 574。预算不自动扩张；
   后续按归属拆分时同步降低或删除例外。

@@ -3,6 +3,8 @@
 Private/blocked S3 library; not published to npm. It has no Pi extension entry
 and does not automatically register tools or providers.
 
+Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
+
 Owns shared Codex authentication/headers, wire identity, settings/catalog,
 Responses replay contracts and the session-scoped composition broker.
 Capability-specific HTTP clients, storage and transports live in other packages.

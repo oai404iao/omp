@@ -2,6 +2,8 @@
 
 Private/blocked S3 extension; not published to npm.
 
+Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
+
 Installs `image_generation`, background image commands, image persistence and
 presentation. Depends only on `pi-codex-runtime`, not core, web-search or the bundle.
 Catalog-supported standalone profiles call Images generation/edit endpoints with

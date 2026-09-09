@@ -3,7 +3,8 @@ import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { piVersion } from "./pi-baselines.mjs";
 import { root, readManifest } from "./workspaces.mjs";
 import { isolatedConsumerLock } from "./isolated-consumer-lock.mjs";
 
@@ -88,55 +89,18 @@ function install(label, requested) {
   return path;
 }
 
-async function load(label, paths, expectedTools, core, bus) {
-  const cwd = consumers.get(label);
-  const piRoot = join(cwd, "node_modules/@earendil-works/pi-coding-agent/dist");
-  const { loadExtensions } = await import(pathToFileURL(join(piRoot, "core/extensions/loader.js")).href);
-  const result = await loadExtensions(paths, cwd, bus);
-  assert.deepEqual(result.errors, []);
-  const tools = result.extensions.flatMap(extension => [...extension.tools.keys()]);
-  assert.deepEqual([...tools].sort(), [...expectedTools].sort());
-  const commands = result.extensions.flatMap(extension => [...extension.commands.keys()]);
-  assert.equal(new Set(commands).size, commands.length, "commands registered more than once");
-  assert.equal(result.runtime.pendingProviderRegistrations.length, core ? 2 : 0);
-  const model = { provider: "openai", api: "openai-responses", id: "gpt-5.6-sol", baseUrl: "https://fixture.invalid/v1", input: ["text", "image"] };
-  const ctx = { cwd, model, hasUI: false, sessionManager: { getSessionId: () => label },
-    modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: false, error: "not logged in" }) } };
-  try {
-    for (const name of ["web_search", "image_generation"]) {
-      const registration = result.extensions.find(extension => extension.tools.has(name))?.tools.get(name);
-      if (!registration) continue;
-      const tool = registration.definition;
-      const input = name === "web_search" ? { search_query: [{ q: "fixture" }] } : { prompt: "fixture" };
-      await assert.rejects(tool.execute("missing-auth", input, undefined, undefined, ctx), /key|auth|logged|credential/i);
-      ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: true, apiKey: "fixture-key", headers: {} });
-      let calls = 0;
-      globalThis.fetch = async (url, init) => {
-        assert.match(String(url), /^https:\/\/fixture\.invalid\//);
-        assert.equal(new Headers(init.headers).get("authorization"), "Bearer fixture-key");
-        calls++;
-        if (name === "web_search") {
-          assert.ok(String(url).endsWith("/alpha/search"));
-          return Response.json({ output: "fixture search result", results: [] });
-        }
-        assert.ok(String(url).endsWith("/images/generations"));
-        return Response.json({ data: [{ b64_json: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6pAAAAABJRU5ErkJggg==" }] });
-      };
-      const response = await tool.execute("fixture-auth", input, undefined, undefined, ctx);
-      assert.ok(response.content.length);
-      assert.equal(calls, 1);
-      ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: false, error: "not logged in" });
-    }
-    checks++;
-  } finally {
-    globalThis.fetch = rejectNetwork;
-    result.runtime.getActiveTools = () => [];
-    result.runtime.setActiveTools = () => {};
-    for (const extension of result.extensions) {
-      for (const handler of extension.handlers.get("session_shutdown") ?? []) await handler({}, ctx);
-    }
-    result.runtime.invalidate();
-  }
+function runProbes(label, orders, expectedTools, core) {
+  const job = join(directory, "probe.json");
+  writeFileSync(job, JSON.stringify({
+    version: piVersion(),
+    probes: orders.map(paths => ({ label, cwd: consumers.get(label), paths, expectedTools, core })),
+  }));
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./codex-loader-probe.mjs", import.meta.url)), job], {
+    cwd: root, encoding: "utf8", timeout: 90000,
+    env: { ...process.env, PI_OFFLINE: "1", PI_TELEMETRY: "0" },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  checks += orders.length;
 }
 
 try {
@@ -161,20 +125,15 @@ try {
     const path = install(label, requested);
     const entries = requested.flatMap(name =>
       (manifests.get(prefix + name).pi?.extensions ?? []).map(entry => join(path, "node_modules", prefix + name, entry)));
-    await load(label, entries, tools, core);
-    if (entries.length > 1) await load(label, [...entries].reverse(), tools, core);
+    runProbes(label, entries.length > 1 ? [entries, [...entries].reverse()] : [entries], tools, core);
+    if (!["bundle", "web"].includes(label)) rmSync(path, { recursive: true, force: true });
   }
   // Physically separate runtime copies, not merely different API wrappers.
   const bundle = join(consumers.get("bundle"), "node_modules", prefix + "pi-codex-minimal-tools/src/index.ts");
   const web = join(consumers.get("web"), "node_modules", prefix + "pi-codex-web-search/src/index.ts");
   const allTools = ["apply_patch", "view_image", "web_search", "image_generation"];
-  const { createEventBus } = await import(pathToFileURL(join(
-    consumers.get("bundle"), "node_modules/@earendil-works/pi-coding-agent/dist/core/event-bus.js",
-  )).href);
-  const bus = createEventBus();
-  await load("bundle", [bundle, web], allTools, true, bus);
-  await load("bundle", [web, bundle], allTools, true, bus); // Same bus after shutdown/reload.
-  console.log(`✓ Codex: ${checks} production tarball/Pi-loader combinations; locked offline npm ci; no external links or capability leakage`);
+  runProbes("bundle", [[bundle, web], [web, bundle]], allTools, true);
+  console.log(`✓ Codex: ${checks} production tarball/Pi ${piVersion()} combinations; locked offline npm ci; no external links or capability leakage`);
 } finally {
   globalThis.fetch = previousFetch;
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

@@ -179,12 +179,17 @@ entry when an interactive bootstrap is verified; do not alter a locked value
 without a separate source-and-registry investigation.
 
 Public and supported-package peer ranges currently require Pi 0.84.2 or
-newer. Update the development baseline, peer ranges, lockfile, compatibility
+newer; the exact development target is 0.85.1, with both versions checked by
+`npm run ci:pi-matrix`. Actual SDK resolution is checked, not inferred from
+peer declarations. Update the development baseline, peer ranges, lockfile, compatibility
 notes, and tests together. Do not lower the minimum below the tested baseline.
 The open-ended upper range is an intentional forward-compatibility policy;
 evaluate each new Pi baseline in CI and tighten the range if an incompatibility
 is found. `@oai404iao/pi-tree-continue` is deliberately pinned to the exact
 0.84.2 baseline while it remains a private unsupported hook into Pi internals.
+The actual 0.85.1 loader must disable that hook without changing its prototype.
+See [Pi compatibility](docs/pi-compatibility.md) for the verified scope and
+upstream 0.85.0 SDK caveat.
 
 Official references:
 

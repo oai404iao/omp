@@ -19,6 +19,11 @@ Run the complete local verification before opening a pull request:
 npm run ci
 ```
 
+For Pi compatibility work also run `npm run ci:pi-matrix`. It runs complete CI
+on temporary floor (0.84.2) and target (0.85.1) installations without modifying
+the working tree. Stage new source files so they enter its tracked-file snapshot.
+See [Pi compatibility](docs/pi-compatibility.md) for logs and test limitations.
+
 Package checks include each extension's typecheck and tests where present.
 `license:check` protects verified source/license snapshots. `pack:check`
 inspects the exact npm tarball file list and verifies every Pi extension entry
