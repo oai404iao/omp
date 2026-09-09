@@ -13,6 +13,7 @@ import {
 } from "./release-utils.mjs";
 import { normalizePackagePath, tarballFacingChangedPaths } from "./recovery-guard.mjs";
 import { artifactWorkspaces, readManifest, registry, root } from "./workspaces.mjs";
+import { assertReleaseDependencies, orderReleaseWorkspaces } from "./release-dependencies.mjs";
 
 const outputDirectory = resolve(root, "release-artifacts");
 const stagingDirectory = resolve(outputDirectory, ".staging");
@@ -22,6 +23,8 @@ if (arguments_.some((argument) => argument !== "--include-bootstrap")) {
   throw new Error("usage: prepare-release-artifacts.mjs [--include-bootstrap]");
 }
 const includeBootstrap = arguments_.includes("--include-bootstrap");
+assertReleaseDependencies(artifactWorkspaces(includeBootstrap));
+const orderedWorkspaces = orderReleaseWorkspaces(artifactWorkspaces(includeBootstrap));
 if (includeBootstrap && process.env.GITHUB_ACTIONS === "true") {
   throw new Error("bootstrap artifacts must be prepared from a reviewed local checkout, not GitHub Actions");
 }
@@ -166,6 +169,9 @@ function verifyPublishedSource(name, version, directory, published, tag) {
     throw new Error(`${name}@${version} has invalid npm gitHead ${sourceCommit}`);
   }
   assertLockedPublishedArtifact(name, version, published);
+  if (!published.integrity?.startsWith("sha512-")) {
+    throw new Error(`${name}@${version} has no verifiable npm SHA-512 integrity`);
+  }
 
   const ancestry = spawnSync("git", ["merge-base", "--is-ancestor", sourceCommit, commit], {
     cwd: root,
@@ -196,7 +202,7 @@ function verifyPublishedSource(name, version, directory, published, tag) {
   }
 }
 
-for (const { name, directory } of artifactWorkspaces(includeBootstrap)) {
+for (const { name, directory } of orderedWorkspaces) {
   const manifest = readManifest(directory);
   if (manifest.private === true) {
     throw new Error(`${name} is approved in workspaces.mjs but remains private in package.json`);
@@ -219,6 +225,7 @@ for (const { name, directory } of artifactWorkspaces(includeBootstrap)) {
       directory,
       tag,
       mode: "recover",
+      integrity: published.integrity,
       sourceCommit: published.gitHead,
       distTag: manifest.version.includes("-") ? "next" : "latest",
       prerelease: manifest.version.includes("-"),

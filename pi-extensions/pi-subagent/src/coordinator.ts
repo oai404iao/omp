@@ -1554,7 +1554,8 @@ export class SubagentCoordinator {
 			if (signal) signal.removeEventListener("abort", onAbort);
 			resolvePromise("timeout");
 		}, timeoutMs);
-		timer.unref?.();
+		// An awaited tool deadline must keep headless SDK processes alive.
+		// Wake, abort and shutdown clear it rather than leaving a background timer.
 		const dispose = () => {
 			if (timer) clearTimeout(timer);
 			if (signal) signal.removeEventListener("abort", onAbort);

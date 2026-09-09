@@ -1,5 +1,15 @@
 # Third-party notices
 
+## Split ownership
+
+The local implementation paths described below are retained as compatibility
+forwards or verified asset mirrors. Their adaptations now live in
+`@oai404iao/pi-codex-core`; namespace serialization lives in
+`@oai404iao/pi-codex-runtime/src/reserved-tools/`. Those packages retain the
+original modification notices, Apache snapshots and provenance. Search/image
+clients live in their respective capability packages. No upstream revision or
+reviewed fingerprint changed during this move.
+
 ## OpenAI Codex
 
 This package includes and analyzes material from

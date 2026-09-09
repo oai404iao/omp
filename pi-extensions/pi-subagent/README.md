@@ -5,7 +5,7 @@ The design independently adapts the
 [DeepSeek Harness subagent seam](https://github.com/deepseek-ai/deepseek-harness/tree/4d03472cd098dc48a630e526ca620f4f37f18a0e/docs/subsystems)
 to Pi's extension and SDK APIs.
 
-Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
 
 > npm identity: `@oai404iao/pi-subagent`. Once the selected version is
 > available on npm, install it from npm; use a local checkout before its
@@ -65,7 +65,7 @@ For a temporary test:
 pi -e /absolute/path/to/pi-extensions/pi-subagent
 ```
 
-This implementation targets Pi `0.84.2`.
+Development is pinned to Pi `0.85.1`; full compatibility checks retain the `0.84.2` floor.
 
 ## Model-facing tools
 
@@ -470,6 +470,11 @@ Each message is limited to 131,072 characters; a mailbox is limited to 256 pendi
 messages and 256 KiB of pending UTF-8 content. `list_agents` exposes task
 `pending` and completion `updates` independently from lifecycle and scheduler
 state.
+
+FIFO follows durable append order after target resolution, not the invocation
+order of concurrent `send_message` calls. Each returned `pendingMessages` count
+describes that append. If one message must precede another, await the first send
+before starting the next.
 
 `mailbox-v2` is opt-in. Existing descriptors without a protocol field resume as
 `legacy`, and the default legacy tool behavior is unchanged. A persisted
