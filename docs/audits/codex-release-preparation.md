@@ -38,16 +38,29 @@ After the user restored npm login, the checks below were repeated with npm
 | `npm access list packages oai404iao <bundle>` | `read-write` | Existing bundle access confirmed |
 | `npm access list packages oai404iao <subagent>` | `read-write` | Existing subagent access confirmed |
 | Access lookup for each of the four new names | No matching package entry | No existing accessible package confirmed |
-| `npm trust list` for bundle and subagent | EOTP | Reading trusted-publisher configuration requires additional interactive authentication |
+| Authenticated `npm trust list` for bundle and subagent | Maintainer supplied matching configurations | Existing-package trusted-publisher configuration verified from the supplied CLI output |
 
 E404 does not prove name availability: an inaccessible private package or name
 policy can still prevent creation. No package-name reservation was attempted.
 Existing-package read-write access does not prove that new packages can be
-created or that a publish will pass every MFA/token/OIDC gate. Trusted-publisher
-configuration remains unverified because the read-only CLI queries returned an
-authentication challenge. No challenge was completed, no OTP/token was requested
-in the conversation, and the agent did not log in, revoke credentials or modify
-credential files. Ephemeral challenge URLs are intentionally omitted here.
+created or that a publish will pass every MFA/token/OIDC gate. The agent's initial
+trust-list queries returned EOTP. The maintainer subsequently completed the
+required authentication locally and supplied npm 11.19.0 CLI output for both
+existing packages. Each reports:
+
+- provider: `github`
+- repository: `oai404iao/omp`
+- workflow: `publish.yml`
+- environment: `npm-publish`
+- permissions: `publish`, `stage publish`
+
+These fields match the existing guarded release workflow. This evidence is the
+maintainer-supplied authenticated CLI output, not an independent agent rerun or
+a successful OIDC publication. It applies only to the existing compatibility
+bundle and subagent; it does not authorize or configure the four new packages.
+No OTP/token was requested in the conversation, and the agent did not follow
+authentication links, revoke credentials or modify credential files. Ephemeral
+challenge URLs are intentionally omitted here.
 
 The current bundle version already exists publicly; the refactored payload must
 receive its reviewed version bump, not be treated as recovery of unchanged 1.4.0.
@@ -91,18 +104,10 @@ permissions, dist-tags or package versions were changed.
 
 ## Maintainer actions before proceeding
 
-1. npm identity and existing bundle/subagent access are now verified. Complete
-   any additional authentication for these read-only queries locally:
-
-   ```bash
-   npx npm@11.19.0 trust list @oai404iao/pi-codex-minimal-tools
-   npx npm@11.19.0 trust list @oai404iao/pi-subagent
-   ```
-
-   Do not paste credentials, OTPs or challenge URLs here. Verify repository,
-   workflow, environment and allowed actions against `RELEASING.md`. The explicit
-   CLI version avoids relying on the older user-default npm. See
-   [npm access](https://docs.npmjs.com/cli/v11/commands/npm-access/).
+1. npm identity, existing bundle/subagent access and their reported
+   trusted-publisher configuration are now verified. No repeat authentication
+   is needed for this record. Recheck these point-in-time observations when
+   actually releasing; never paste credentials, OTPs or challenge URLs here.
 2. The four names still return E404 under the restored identity. Review the source,
    licenses, exported surface, release versions and dependency-first bootstrap
    plan. Any private/blocked → bootstrap change needs its own explicit approval
@@ -119,6 +124,11 @@ permissions, dist-tags or package versions were changed.
 6. Only after separate publication approval, perform the reviewed interactive
    bootstrap and configure/verify each new package's trusted publisher. Preserve
    the guarded workflow and registry identity/integrity checks.
+
+Subsequent artifact work must use reviewed main or its release-preparation
+descendant, not the older `refactor/codex-boundaries` checkout. Running the
+explicit-package trust-list commands from that older checkout did not invalidate
+their registry configuration results.
 
 Real model/endpoint calls, bootstrap, npm publication and remote CI execution
 remain **not performed**.
