@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { assertReleaseDependencies, orderReleaseWorkspaces } from "./release-dependencies.mjs";
-import { workspaces } from "./workspaces.mjs";
+import { artifactWorkspaces, readManifest, workspaces } from "./workspaces.mjs";
 
 test("publishable bundles fail closed on direct and transitive blocked dependencies", () => {
   const entries = ["bundle", "core", "runtime"].map(name => ({
@@ -28,9 +28,26 @@ test("bootstrap batches require included dependencies and exact pins", () => {
   assert.throws(() => assertReleaseDependencies(entries, entries, e => manifests[e.name]), /exactly pinned/);
 });
 
-test("the S3 compatibility bundle cannot enter release artifacts before new packages are approved", () => {
+test("the compatibility bundle cannot exclude its bootstrap dependencies", () => {
   const bundle = workspaces.find(e => e.name === "@oai404iao/pi-codex-minimal-tools");
-  assert.throws(() => assertReleaseDependencies([bundle]), /Release blocked.*pi-codex-runtime/);
+  assert.throws(() => assertReleaseDependencies([bundle]), /outside this artifact batch.*pi-codex-runtime/);
+});
+
+test("only the four approved Codex packages enter explicitly opted-in bootstrap batches", () => {
+  const names = ["runtime", "core", "web-search", "imagegen"].map(name => `@oai404iao/pi-codex-${name}`);
+  assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap").map(e => e.name), names);
+  for (const name of names) {
+    const entry = workspaces.find(e => e.name === name);
+    assert.equal(readManifest(entry.directory).private, false);
+    assert.ok(!artifactWorkspaces().some(e => e.name === name));
+    assert.ok(artifactWorkspaces(true).some(e => e.name === name));
+  }
+  const tree = workspaces.find(e => e.name === "@oai404iao/pi-tree-continue");
+  assert.equal(tree.releaseStatus, "blocked");
+  assert.equal(readManifest(tree.directory).private, true);
+  assert.ok(!artifactWorkspaces(true).includes(tree));
+  assert.throws(() => assertReleaseDependencies(artifactWorkspaces()), /outside this artifact batch/);
+  assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces(true)));
 });
 
 test("artifact order includes recovery/optional dependencies and is independent of input order", () => {

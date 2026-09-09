@@ -5,44 +5,39 @@ This repository contains a collection of extensions for
 is [`oai404iao/omp`](https://github.com/oai404iao/omp); the existing private
 Gitea remote is retained as a migration backup.
 
-> Guarded npm publication is enabled. `pi-external-thinking@0.1.0`,
-> `pi-keep-defaults@0.1.3`, `pi-subagent@0.2.0`, and
-> `pi-telegram-notify@0.1.3` are public; future releases require an explicit
-> `publish.yml` dispatch, its `publish` confirmation, and the protected
-> `npm-publish` environment.
+> This checkout prepares nine alpha versions; they are not yet npm releases.
+> Four new Codex packages require separately approved initial bootstrap.
+> Guarded releases of existing packages require an explicit `publish.yml`
+> dispatch, its `publish` confirmation, and the protected `npm-publish` environment.
 
 ## Packages
 
 All ten npm workspace packages use the `@oai404iao` scope. Scope naming does
 not change the private/public eligibility below.
 
-| Package | Version | Release track |
+| Package | Checkout candidate version | Release track |
 | --- | ---: | --- |
-| `@oai404iao/pi-codex-minimal-tools` | `1.3.0` | public; guarded manual releases enabled |
-| `@oai404iao/pi-external-thinking` | `0.1.0` | public; guarded manual releases enabled |
-| `@oai404iao/pi-keep-defaults` | `0.1.3` | public; guarded manual releases enabled |
-| `@oai404iao/pi-subagent` | `0.2.0` | public; guarded manual releases enabled |
-| `@oai404iao/pi-telegram-notify` | `0.1.3` | public; guarded manual releases enabled |
+| `@oai404iao/pi-codex-minimal-tools` | `1.4.1-alpha.0` | guarded; waiting for bootstrap dependencies |
+| `@oai404iao/pi-external-thinking` | `0.1.1-alpha.0` | guarded; unpublished alpha candidate |
+| `@oai404iao/pi-keep-defaults` | `0.1.4-alpha.0` | guarded; unpublished alpha candidate |
+| `@oai404iao/pi-subagent` | `0.4.0-alpha.0` | guarded; waiting for bootstrap dependencies |
+| `@oai404iao/pi-telegram-notify` | `0.1.4-alpha.0` | guarded; unpublished alpha candidate |
 | `@oai404iao/pi-tree-continue` | `0.1.0` | private; blocked pending a public Pi continuation API |
-| `@oai404iao/pi-codex-runtime` | `0.1.0-alpha.0` | private; blocked S3 library |
-| `@oai404iao/pi-codex-core` | `0.1.0-alpha.0` | private; blocked S3 capability |
-| `@oai404iao/pi-codex-web-search` | `0.1.0-alpha.0` | private; blocked S3 capability |
-| `@oai404iao/pi-codex-imagegen` | `0.1.0-alpha.0` | private; blocked S3 capability |
+| `@oai404iao/pi-codex-runtime` | `0.1.0-alpha.1` | non-private; bootstrap library candidate |
+| `@oai404iao/pi-codex-core` | `0.1.0-alpha.1` | non-private; bootstrap capability candidate |
+| `@oai404iao/pi-codex-web-search` | `0.1.0-alpha.1` | non-private; bootstrap capability candidate |
+| `@oai404iao/pi-codex-imagegen` | `0.1.0-alpha.1` | non-private; bootstrap capability candidate |
 
-The scoped npm packages use independent versions.
-`pi-external-thinking` is public at `0.1.0`; its upstream attribution and
-compatibility review are recorded. `pi-subagent` is public at `0.2.0`; its
-DeepSeek Harness provenance and compatibility review are recorded.
-
-The four split Codex rows show checkout versions, not npm releases.
-This checkout's compatibility bundle cannot enter release artifacts until its
-private dependencies are approved. See [Codex composition](docs/codex-packages.md)
-for package boundaries, local tarball tests and remaining release gates.
+The scoped npm packages use independent versions. These rows describe the
+checkout, not registry availability. The bundle cannot enter guarded release
+artifacts until the four dependencies are bootstrapped and separately activated.
+See [Codex composition](docs/codex-packages.md) for package boundaries and
+[alpha preparation](docs/audits/codex-alpha-release.md) for remaining release gates.
 
 > **Codex 1.3.0 documentation note:** the package README and notice inside the
 > immutable `1.3.0` tarball are bootstrap-stage snapshots and retain
-> pre-publication wording. The release status above is authoritative; correct
-> those package-facing texts only in a future versioned release.
+> pre-publication wording. Do not infer current eligibility from those archived
+> texts; this versioned checkout updates the package-facing documentation.
 
 ## Local development
 
