@@ -1,7 +1,8 @@
 # Codex package composition
 
-S3 adds four **private/blocked** workspaces. These are locally installable
-tarballs, not published npm releases. The existing
+The four workspaces introduced in S3 are now **alpha bootstrap candidates** after
+explicit maintainer approval. They are locally installable tarballs, not yet
+published npm releases. The existing
 `@oai404iao/pi-codex-minimal-tools` name becomes the compatibility bundle in this
 checkout; its previously published tarballs are unchanged.
 
@@ -120,11 +121,12 @@ paths, exact declared dependencies and forbidden optional/peer package edges.
 
 ## Release status
 
-Private packages are version-tracked by Changesets with tagging disabled. This
-does not make them publishable. Artifact preparation fails before packing or
-registry access if a selected bundle transitively requires a private/blocked
-workspace. Existing eligibility entries, bootstrap allowlist and release locks
-are unchanged.
+The four new packages are non-private on the `bootstrap` track, not on the
+guarded `publishable` track. Ordinary artifact preparation still rejects the
+bundle because those dependencies are outside its selected batch. Explicit
+local bootstrap preparation includes them only from reviewed public-main source.
+The tree-continue package stays private/blocked; historical release locks are
+unchanged.
 
 S4 supplies `changeset:sync`, CI coverage checking and the guarded
 `changeset:version` wrapper. Generated consumer changesets recurse through hard
@@ -132,7 +134,9 @@ and optional workspace dependencies; exact-pin changes require a consumer bump.
 The publication pipeline independently validates dependency order, artifacts,
 eligibility and dependency visibility, stopping downstream publication on failure.
 
-Bootstrap approval and actual publication remain manual/unperformed.
+Bootstrap eligibility and nine-package alpha version preparation were approved;
+actual npm publication and promotion to `publishable` remain unperformed and
+require separate approval. See [alpha preparation](audits/codex-alpha-release.md).
 S5 independently verifies Pi 0.85.1 while retaining the 0.84.2 floor. See
 [Pi compatibility](pi-compatibility.md) for full-matrix commands and limits.
 

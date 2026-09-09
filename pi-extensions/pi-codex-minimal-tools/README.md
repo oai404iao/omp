@@ -7,7 +7,8 @@ Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
 
 > npm identity stays `@oai404iao/pi-codex-minimal-tools`. This checkout composes
 > core, web-search and imagegen through a shared runtime. The four new packages
-> remain private/blocked, so this bundle cannot enter release artifacts yet.
+> are alpha bootstrap candidates. Guarded bundle publication remains blocked
+> until those dependencies are bootstrapped and separately activated.
 > Previously published tarballs are unchanged. See
 > [package composition](../../docs/codex-packages.md) for local installation tests
 > and version/lifecycle restrictions; this is not a new npm release.
@@ -55,13 +56,15 @@ sessions; it does not register providers, tools, commands, or renderers.
 
 ## Install
 
-After `1.3.0` is available on npm:
+After the reviewed split-package alpha and its dependencies are available on npm:
 
 ```bash
-pi install npm:@oai404iao/pi-codex-minimal-tools@1.3.0
+pi install npm:@oai404iao/pi-codex-minimal-tools@1.4.1-alpha.0
 ```
 
-Before the initial bootstrap, or when testing unreleased source:
+Until then, test a complete repository checkout after running the root
+`npm ci --ignore-scripts`; an isolated bundle source directory cannot supply
+its unpublished workspace dependencies:
 
 ```bash
 pi install /absolute/path/to/pi-codex-minimal-tools
@@ -427,8 +430,8 @@ Third-party material retains its own terms; see
 [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The Codex namespace-tool source attribution is recorded in
-`provenance/openai-codex-eb9dceba-reserved-tools.json`. The `1.3.0` source
-revision is intentionally staged for its one-time manual npm bootstrap and
-excluded from guarded GitHub Actions release artifacts until trusted publishing
-is configured. Responses Lite remains an internal Codex compatibility path,
+`provenance/openai-codex-eb9dceba-reserved-tools.json`. The existing bundle has
+configured trusted publishing, but the split-package alpha still requires
+dependency-first bootstrap and activation of the four new packages before
+guarded publication can proceed. Responses Lite remains an internal Codex compatibility path,
 not an OpenAI-supported public API contract.

@@ -54,7 +54,9 @@ test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagate
       name: "fixture", private: true, workspaces: workspaces.map(e => e.directory),
     }));
     writeFileSync(join(cwd, ".changeset/config.json"), readFileSync(join(root, ".changeset/config.json")));
-    const before = workspaceManifests();
+    const original = workspaceManifests();
+    const before = structuredClone(original);
+    before.get("@oai404iao/pi-codex-runtime").private = true;
     for (const entry of workspaces) {
       mkdirSync(join(cwd, entry.directory), { recursive: true });
       writeFileSync(join(cwd, entry.directory, "package.json"), JSON.stringify(before.get(entry.name)));
@@ -87,7 +89,7 @@ test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagate
     assert.equal(after.get("@oai404iao/pi-subagent").optionalDependencies["@oai404iao/pi-codex-minimal-tools"],
       after.get("@oai404iao/pi-codex-minimal-tools").version);
     for (const [name, manifest] of after) {
-      if (name.startsWith("@oai404iao/pi-codex-") && name !== "@oai404iao/pi-codex-minimal-tools") assert.equal(manifest.private, true);
+      assert.equal(manifest.private, before.get(name).private, `${name}: versioning must preserve privacy`);
     }
     assert.deepEqual(exactPinEdits(after, after), []);
     await versionWorkspace(cwd, { updateLock: false });
@@ -111,7 +113,7 @@ test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagate
       assert.doesNotMatch(stable.get("@oai404iao/pi-codex-core").version, /-/);
       assert.deepEqual(exactPinEdits(stable, stable), []);
     }
-    assert.deepEqual(workspaceManifests(), before, "fixture must not change real workspace versions");
+    assert.deepEqual(workspaceManifests(), original, "fixture must not change real workspace versions");
   } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
 }

@@ -1,6 +1,6 @@
 # pi-codex-imagegen
 
-Private/blocked S3 extension; not published to npm.
+Alpha bootstrap candidate; initial npm publication is still pending.
 
 Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
 

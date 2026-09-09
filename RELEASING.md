@@ -2,16 +2,17 @@
 
 ## Codex split-stage guard
 
-The four new Codex workspaces are private/blocked. Changesets tracks their
-versions (`privatePackages.version: true`) but does not tag them; neither setting
-changes npm eligibility. The existing bundle now depends on these workspaces,
-so artifact preparation rejects that dependency closure before staging or
-registry requests, including when `--include-bootstrap` is supplied.
+The four new Codex workspaces are non-private **bootstrap candidates** following
+explicit maintainer approval. They are still excluded from guarded workflow
+artifacts. Ordinary preparation rejects the bundle's missing dependency closure.
+Only local `--include-bootstrap` preparation may include them, after the reviewed
+source is reachable from freshly fetched public main. This is not approval to
+publish npm packages or promote them to the `publishable` track.
 
 Do not bypass this gate by ignoring the bundle or changing release locks.
 S4 implements recursive exact-pin changesets, dependency-ordered artifacts and
-no-links production consumers. These tests do not approve bootstrap, change the
-allowlist, or verify real account/registry publication. See
+no-links production consumers. These tests do not authorize registry writes or
+verify real account/model access. See
 [Codex composition](docs/codex-packages.md) for the tested boundaries.
 
 Use `npm run changeset:sync` after authoring a changeset. Its generated consumer
@@ -19,7 +20,14 @@ changeset covers `dependencies` and `optionalDependencies` recursively, includin
 subagent's optional dependency on the compatibility bundle. The release-PR
 workflow already calls `npm run changeset:version`; that wrapper preserves exact
 pins and rejects pin changes without a corresponding consumer version bump.
-Only temporary fixtures are versioned in its tests.
+Its tests version temporary fixtures; actual alpha versions belong in a reviewed
+version PR, never in an unreviewed direct main update.
+
+The approved preparation cohort is nine alpha packages (all workspaces except
+tree-continue). `.changeset/pre.json` records the `alpha` channel, while release
+artifacts use the `next` dist-tag. Real smoke is still explicitly deferred, and
+publication requires separate approval. See
+[alpha release preparation](docs/audits/codex-alpha-release.md).
 
 Artifact preparation and publication both apply a stable dependency-first order.
 Every workspace dependency must be present in the batch, including a recovery
