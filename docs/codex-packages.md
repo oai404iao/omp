@@ -135,3 +135,11 @@ eligibility and dependency visibility, stopping downstream publication on failur
 Bootstrap approval and actual publication remain manual/unperformed.
 S5 independently verifies Pi 0.85.1 while retaining the 0.84.2 floor. See
 [Pi compatibility](pi-compatibility.md) for full-matrix commands and limits.
+
+The [integration review](audits/codex-integration.md) additionally checks cached
+broker compatibility and restricts native placeholder rewriting to broker-owned
+capabilities across extension requests, prewarm and compaction. Lower-level
+helpers keep their legacy behavior when no ownership policy is supplied.
+Background `/image-gen` jobs now have instance-owned status and cancellation:
+session replacement/shutdown aborts work and suppresses late notifications and
+new writes. Already-started server generation or file writes cannot be undone.

@@ -68,8 +68,10 @@ have already passed.
 
 ## Limits and known issues
 
-Local full-matrix verification uses Node 24.13.0. The Node 22.19.0 GitHub job is
-configured separately and is not claimed as locally executed.
+The [integration acceptance](audits/codex-integration.md) ran all four local
+combinations: Node 22.19.0 / 24.13.0 × Pi 0.84.2 / 0.85.1, with npm 11.19.0.
+Node 24.13.0 represents the configured 24.x lane; this does not claim validation
+of every future 24.x release or execution of the remote GitHub jobs.
 There are no real account, billable endpoint, interactive UI or publication tests.
 Core protocol snapshots remain the repository's reviewed compatibility contract,
 not a blanket adoption of upstream protocol/model changes.
