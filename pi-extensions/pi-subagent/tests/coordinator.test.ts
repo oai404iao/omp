@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, test } from "node:test";
+import { afterEach, test, type TestContext } from "node:test";
 import {
 	createAssistantMessageEventStream,
 	type AssistantMessage,
@@ -35,6 +35,7 @@ import {
 	MAILBOX_COMMIT_CUSTOM_TYPE,
 	readMailbox,
 } from "../src/mailbox.ts";
+import { withTargetResolutionOrder } from "./support/target-resolution-order.ts";
 
 const roots: string[] = [];
 const UUID_V7_PATTERN =
@@ -1581,7 +1582,11 @@ test("continuable child settles, becomes ready, and cold-resumes for a later mes
 	}
 });
 
-test("mailbox-v2 send_message only persists FIFO work until followup_task starts one turn", async () => {
+async function assertMailboxFifo(
+	t: TestContext,
+	maxIdleRuntimes: number,
+	resolutionOrder: readonly [0 | 1, 0 | 1],
+): Promise<void> {
 	const requestContexts: Context[] = [];
 	const {
 		coordinator,
@@ -1596,6 +1601,7 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 	});
 	let restarted: SubagentCoordinator | undefined;
 	try {
+		await coordinator.configureIdleRuntimes(maxIdleRuntimes);
 		const outcome = await coordinator.delegate(
 			parent,
 			"spawn",
@@ -1608,37 +1614,69 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 			{
 				...DEFAULT_SETTINGS,
 				backgroundProtocol: "mailbox-v2",
+				maxIdleRuntimes,
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
 		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
+		const settledStatus = maxIdleRuntimes > 0 ? "idle" : "ready";
+		await waitForChildStatus(
 			coordinator,
 			parent,
 			outcome.details.agentId,
+			settledStatus,
 		);
 		const eventCount = eventDetails.length;
 		assert.equal(requestContexts.length, 1);
 		assert.equal(messages.length, 0);
 
-		const [first, second] = await Promise.all([
-			coordinator.sendMessageWithOutcome(
+		const inputs = ["First queued request.", "Second queued request."] as const;
+		const operations = coordinator as unknown as {
+			sendMessageSerialized(...args: unknown[]): Promise<unknown>;
+		};
+		const send = operations.sendMessageSerialized;
+		let concurrentSends = 0;
+		let peakSends = 0;
+		const serialized = t.mock.method(operations, "sendMessageSerialized", async (...args: unknown[]) => {
+			concurrentSends++;
+			peakSends = Math.max(peakSends, concurrentSends);
+			try {
+				return await send.apply(coordinator, args);
+			} finally {
+				concurrentSends--;
+			}
+		});
+		const [first, second] = await withTargetResolutionOrder(t, coordinator, resolutionOrder, [
+			() => coordinator.sendMessageWithOutcome(
 				parent,
 				outcome.details.agentId,
-				"First queued request.",
+				inputs[0],
 			),
-			coordinator.sendMessageWithOutcome(
+			() => coordinator.sendMessageWithOutcome(
 				parent,
-				outcome.details.agentId,
-				"Second queued request.",
+				outcome.details.taskPath,
+				inputs[1],
 			),
 		]);
+		assert.equal(serialized.mock.callCount(), 2);
+		assert.equal(peakSends, 1, "path and id aliases must share one serialization queue");
+		serialized.mock.restore();
 		assert.equal(first.kind, "mailbox-v2");
 		assert.equal(second.kind, "mailbox-v2");
-		if (first.kind === "mailbox-v2" && second.kind === "mailbox-v2") {
-			assert.notEqual(first.messageId, second.messageId);
-			assert.equal(first.pendingMessages, 1);
-			assert.equal(second.pendingMessages, 2);
+		if (first.kind !== "mailbox-v2" || second.kind !== "mailbox-v2") return;
+		assert.notEqual(first.messageId, second.messageId);
+		assert.match(first.messageId, UUID_V7_PATTERN);
+		assert.match(second.messageId, UUID_V7_PATTERN);
+		const receipts = [first, second] as const;
+		const expectedMessages = resolutionOrder.map((index) => ({
+			messageId: receipts[index].messageId,
+			content: inputs[index],
+		}));
+		assert.equal(receipts[resolutionOrder[0]].pendingMessages, 1);
+		assert.equal(receipts[resolutionOrder[1]].pendingMessages, 2);
+		for (const receipt of receipts) {
+			assert.equal(receipt.agentId, outcome.details.agentId);
+			assert.equal(receipt.taskPath, outcome.details.taskPath);
 		}
 		assert.equal(requestContexts.length, 1);
 		assert.equal(messages.length, 0);
@@ -1652,7 +1690,7 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		);
 		assert.equal(child?.kind, "child");
 		if (child?.kind !== "child") return;
-		assert.equal(child.status, "ready");
+		assert.equal(child.status, settledStatus);
 		assert.equal(child.pendingMessages, 2);
 		assert.equal(child.unreadUpdates, 1);
 		assert.match(coordinator.formatCatalog(queued, "children"), /pending=2/);
@@ -1664,9 +1702,9 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		);
 		assert.deepEqual(
 			readMailbox(persisted.getEntries()).pending.map(
-				(message) => message.content,
+				({ messageId, content }) => ({ messageId, content }),
 			),
-			["First queued request.", "Second queued request."],
+			expectedMessages,
 		);
 
 		await coordinator.shutdown();
@@ -1703,10 +1741,9 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		);
 		assert.equal(messages.length, 0);
 		const serializedContext = JSON.stringify(requestContexts[1]?.messages);
-		assert.ok(
-			serializedContext.indexOf("First queued request.")
-				< serializedContext.indexOf("Second queued request."),
-		);
+		const positions = expectedMessages.map(({ content }) => serializedContext.indexOf(content));
+		assert.ok(positions.every(position => position >= 0), "every queued message must reach the model");
+		assert.ok(positions[0]! < positions[1]!, "replay must retain durable append order");
 		const drained = await restarted.list(restartedParent, "children");
 		const drainedChild = drained.find(
 			(entry) =>
@@ -1726,7 +1763,16 @@ test("mailbox-v2 send_message only persists FIFO work until followup_task starts
 		await restarted?.shutdown();
 		await coordinator.shutdown();
 	}
-});
+}
+
+for (const maxIdleRuntimes of [0, 1]) {
+	for (const resolutionOrder of [[0, 1], [1, 0]] as const) {
+		test(
+			`mailbox-v2 send_message only persists FIFO work until followup_task starts one turn (lookup=${resolutionOrder}, idle=${maxIdleRuntimes})`,
+			(t) => assertMailboxFifo(t, maxIdleRuntimes, resolutionOrder),
+		);
+	}
+}
 
 test("mailbox-v2 completion is quiet and wait_agent durably delivers an existing update", async () => {
 	const requestContexts: Context[] = [];

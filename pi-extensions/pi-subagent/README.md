@@ -471,6 +471,11 @@ messages and 256 KiB of pending UTF-8 content. `list_agents` exposes task
 `pending` and completion `updates` independently from lifecycle and scheduler
 state.
 
+FIFO follows durable append order after target resolution, not the invocation
+order of concurrent `send_message` calls. Each returned `pendingMessages` count
+describes that append. If one message must precede another, await the first send
+before starting the next.
+
 `mailbox-v2` is opt-in. Existing descriptors without a protocol field resume as
 `legacy`, and the default legacy tool behavior is unchanged. A persisted
 mailbox-v2 child keeps its protocol snapshot. `followup_task` and `wait_agent` remain available

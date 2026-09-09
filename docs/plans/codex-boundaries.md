@@ -322,8 +322,11 @@ streamSimple：同步捕获当前会话的展示 sink
   处按预期阻断，未创建 release-artifacts。主工作区用户修改、workspace
   包版本和 release locks 未变；没有 merge、push 或发布操作。
 
-### 剩余工作（不能标记为已完成）
+S5 后续的 FIFO 测试定位与修正见
+[subagent FIFO stability](subagent-fifo-stability.md)；上文各阶段的 flaky
+记录保留为历史结果，修正没有改变 subagent runtime。
 
+### 剩余工作（不能标记为已完成）
 - 人工 bootstrap、npm 名称/账号资格和真实发布仍未执行；新包保持
   private/blocked。Codex 仍以本地 tarball 替代未发布 registry 版本。
   不得把无链接安装验证称作已经发布，也不能绕开当前 bundle 依赖门禁。

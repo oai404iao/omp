@@ -74,7 +74,7 @@ There are no real account, billable endpoint, interactive UI or publication test
 Core protocol snapshots remain the repository's reviewed compatibility contract,
 not a blanket adoption of upstream protocol/model changes.
 
-The previously reproduced subagent FIFO test can intermittently assert `2 !== 1`
-at `pi-subagent/tests/coordinator.test.ts:1640`. It also occurred during S5;
-successful full-matrix runs do not mean it was repaired. No subagent runtime
-changes or test-skipping workaround were introduced.
+The subagent FIFO test intermittently asserted `2 !== 1` during S5. The
+[stability follow-up](plans/subagent-fifo-stability.md) identified and corrected
+its invocation-order assumption using controlled lookup completion orders.
+The runtime queue was not changed; no retry or test-skipping workaround was added.
