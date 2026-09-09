@@ -24,21 +24,30 @@ change eligibility, or claim production endpoint acceptance.
 
 These are point-in-time observations, not reserved names or permanent permission
 guarantees. Commands used the explicit registry `https://registry.npmjs.org/`.
+After the user restored npm login, the checks below were repeated with npm
+11.19.0. The earlier E401 identity failure is now resolved.
 
 | Check | Observed result | Meaning |
 | --- | --- | --- |
-| `npm whoami --json` | E401 | Current npm identity was not authenticated |
+| `npm whoami --json` | `oai404iao` | Current npm identity authenticated successfully |
 | `@oai404iao/pi-codex-runtime` metadata | E404 | Not visible to this request |
 | `@oai404iao/pi-codex-core` metadata | E404 | Not visible to this request |
 | `@oai404iao/pi-codex-web-search` metadata | E404 | Not visible to this request |
 | `@oai404iao/pi-codex-imagegen` metadata | E404 | Not visible to this request |
 | Existing compatibility bundle metadata | Public, latest 1.4.0, maintainer `oai404iao` | Public registry control query succeeded |
+| `npm access list packages oai404iao <bundle>` | `read-write` | Existing bundle access confirmed |
+| `npm access list packages oai404iao <subagent>` | `read-write` | Existing subagent access confirmed |
+| Access lookup for each of the four new names | No matching package entry | No existing accessible package confirmed |
+| `npm trust list` for bundle and subagent | EOTP | Reading trusted-publisher configuration requires additional interactive authentication |
 
 E404 does not prove name availability: an inaccessible private package or name
 policy can still prevent creation. No package-name reservation was attempted.
-Because whoami failed, npm write access and trusted-publisher configuration could
-not be accepted. No login, token creation/revocation, OTP submission or credential
-file modification was attempted.
+Existing-package read-write access does not prove that new packages can be
+created or that a publish will pass every MFA/token/OIDC gate. Trusted-publisher
+configuration remains unverified because the read-only CLI queries returned an
+authentication challenge. No challenge was completed, no OTP/token was requested
+in the conversation, and the agent did not log in, revoke credentials or modify
+credential files. Ephemeral challenge URLs are intentionally omitted here.
 
 The current bundle version already exists publicly; the refactored payload must
 receive its reviewed version bump, not be treated as recovery of unchanged 1.4.0.
@@ -46,7 +55,7 @@ The historical release lock was not rewritten.
 
 ## GitHub observations
 
-Read-only API calls to `oai404iao/omp` reported:
+The earlier read-only API calls to `oai404iao/omp` reported:
 
 - Public repository; current GitHub credential has admin/maintain/push access.
 - `npm-publish` exists and requires reviewer `oai404iao`.
@@ -72,6 +81,9 @@ Release blocked by unpublished workspace dependency:
 @oai404iao/pi-codex-minimal-tools -> @oai404iao/pi-codex-runtime
 ```
 
+Both commands were repeated after successful npm reauthentication and still
+rejected the same private dependency closure.
+
 No `release-artifacts/` directory was created. Runtime/core/web-search/imagegen
 remain private and blocked; the private tree-continue package also remains
 blocked. No release locks, bootstrap allowlist, protected environments, workflow
@@ -79,11 +91,19 @@ permissions, dist-tags or package versions were changed.
 
 ## Maintainer actions before proceeding
 
-1. Reauthenticate npm interactively outside the agent conversation; do not paste
-   credentials here. Verify the intended identity and package/scope rights using
-   read-only `npm whoami` and `npm access list` commands. See
+1. npm identity and existing bundle/subagent access are now verified. Complete
+   any additional authentication for these read-only queries locally:
+
+   ```bash
+   npx npm@11.19.0 trust list @oai404iao/pi-codex-minimal-tools
+   npx npm@11.19.0 trust list @oai404iao/pi-subagent
+   ```
+
+   Do not paste credentials, OTPs or challenge URLs here. Verify repository,
+   workflow, environment and allowed actions against `RELEASING.md`. The explicit
+   CLI version avoids relying on the older user-default npm. See
    [npm access](https://docs.npmjs.com/cli/v11/commands/npm-access/).
-2. Recheck the four names with that identity. Separately review the source,
+2. The four names still return E404 under the restored identity. Review the source,
    licenses, exported surface, release versions and dependency-first bootstrap
    plan. Any private/blocked → bootstrap change needs its own explicit approval
    and dedicated reviewed commit; this document is not that approval.
