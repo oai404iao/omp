@@ -1,6 +1,6 @@
-# @oai404iao/pi-codex-minimal-tools
+# @oai404iao/pi-codex-core
 
-## 1.4.1
+## 0.1.0
 
 ### Patch Changes
 
@@ -10,15 +10,10 @@
   The private tree-continue hook remains exact-0.84.2 and disabled under the target
   loader. No Codex catalog, protocol, default capability or publication eligibility
   is changed.
-- 952cb3f: Separate startup prewarm and image display lifecycles from provider registration,
-  and inject image/web presentation observers instead of importing tool code from
-  the transport. Existing registration and tools retain their default behavior.
-  
-  Cancel pending image-display timers and ignore late display callbacks after a
-  session is replaced. Aborted image capture suppresses new persistence and
-  completion notifications. Speculative prewarm authentication failures settle
-  without leaking unhandled rejections or forcing HTTP fallback, and reset releases
-  prewarm waiters even when an authentication lookup has not finished.
+- 952cb3f: Restrict native web-search and image-generation placeholder rewriting to
+  capabilities installed in the Codex broker. Core-only installations must leave
+  unowned tool names unchanged rather than turning another extension's function
+  into a hosted or reserved namespace tool.
 - 952cb3f: Split Codex ownership into a non-registering runtime library and independent core,
   web-search and image-generation packages. Retain the existing package name and
   subagent-inline entry as compatibility composition paths. Share capability and
@@ -30,22 +25,7 @@
   their bootstrap or publication. Runtime versions must match when composing
   packages. Hosted capabilities still require core; standalone clients retain the
   existing catalog, Pi authentication, configuration paths and opt-in fallbacks.
-- 952cb3f: Separate Codex transport, replay, compaction, and tool presentation into internal
-  modules while retaining existing entry points, tools, configuration, and wire
-  behavior. Add compatibility and architecture regression coverage.
-- Updated dependencies [952cb3f]
-- Updated dependencies [952cb3f]
 - Updated dependencies [952cb3f]
 - Updated dependencies [952cb3f]
 - Updated dependencies [952cb3f]
   - @oai404iao/pi-codex-runtime@0.1.0
-  - @oai404iao/pi-codex-core@0.1.0
-  - @oai404iao/pi-codex-web-search@0.1.0
-  - @oai404iao/pi-codex-imagegen@0.1.0
-
-## 1.4.0
-
-### Minor Changes
-
-- c753cd9: Add Codex-owned session, thread, turn, and request identity lifecycle support,
-  plus opt-in inline OpenAI Responses identity propagation for subagents.
