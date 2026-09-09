@@ -3,25 +3,38 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type {
 	AgentScope,
 	AgentSnapshot,
-	AgentSource,
+	AgentSnapshotSource,
+	BackgroundProtocol,
+	ContextInheritance,
 	ReportDelivery,
 	SubagentDescriptor,
 	SubagentMode,
 	SubagentProviderName,
 } from "./types.ts";
+import { validateDescriptorTask } from "./task-path.ts";
 
 export const DESCRIPTOR_CUSTOM_TYPE = "pi-subagent/descriptor";
-export const DESCRIPTOR_VERSION = 2;
+export const DESCRIPTOR_VERSION = 3;
+export const LEGACY_DESCRIPTOR_VERSION = 2;
+const LEGACY_MAX_CONCURRENT_BACKGROUND_RUNS = 4;
+const LEGACY_MAX_IDLE_RUNTIMES = 0;
+const LEGACY_BACKGROUND_PROTOCOL: BackgroundProtocol = "legacy";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-const AGENT_SOURCES = new Set<AgentSource>(["bundled", "user", "project"]);
+const AGENT_SOURCES = new Set<AgentSnapshotSource>(["bundled", "user", "project"]);
 const MODES = new Set<SubagentMode>(["one-shot", "continuable"]);
 const PROVIDERS = new Set<SubagentProviderName>(["spawn", "fork"]);
 const REPORT_DELIVERIES = new Set<ReportDelivery>(["wakeup", "quiet"]);
+const BACKGROUND_PROTOCOLS = new Set<BackgroundProtocol>(["legacy", "mailbox-v2"]);
 const AGENT_SCOPES = new Set<AgentScope>(["user", "project", "both"]);
 const AGENT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 /** UUIDv7 with the standard RFC 9562 variant bits (version 7, variant 10xx). */
 const AGENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CONTEXT_MODES = new Set<ContextInheritance["mode"]>([
+	"fresh",
+	"all_completed",
+	"last_n_completed",
+]);
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -97,7 +110,7 @@ function stringArray(value: unknown, field: string): string[] | undefined {
 
 function parseAgent(value: unknown): AgentSnapshot {
 	const input = record(value, "agent");
-	const source = string(input.source, "agent.source") as AgentSource;
+	const source = string(input.source, "agent.source") as AgentSnapshotSource;
 	if (!AGENT_SOURCES.has(source)) throw new Error(`agent.source is unsupported: ${source}`);
 	const thinking = optionalString(input.thinking, "agent.thinking") as ThinkingLevel | undefined;
 	if (thinking && !THINKING_LEVELS.has(thinking)) throw new Error(`agent.thinking is unsupported: ${thinking}`);
@@ -116,11 +129,40 @@ function parseAgent(value: unknown): AgentSnapshot {
 	};
 }
 
+function parseContext(value: unknown): ContextInheritance {
+	const input = record(value, "context");
+	const mode = string(input.mode, "context.mode") as ContextInheritance["mode"];
+	if (!CONTEXT_MODES.has(mode)) {
+		throw new Error(`unsupported context.mode: ${mode}`);
+	}
+	if (mode === "last_n_completed") {
+		return {
+			mode,
+			completedTurns: boundedInteger(
+				input.completedTurns,
+				"context.completedTurns",
+				1,
+				100,
+			),
+		};
+	}
+	if (input.completedTurns !== undefined) {
+		throw new Error(
+			"context.completedTurns is available only for last_n_completed",
+		);
+	}
+	return { mode };
+}
+
 export function parseDescriptor(value: unknown): SubagentDescriptor {
 	const input = record(value, "descriptor");
-	if (input.version !== DESCRIPTOR_VERSION) {
+	if (
+		input.version !== LEGACY_DESCRIPTOR_VERSION
+		&& input.version !== DESCRIPTOR_VERSION
+	) {
 		throw new Error(`unsupported descriptor version: ${String(input.version)}`);
 	}
+	const version = input.version;
 	const mode = string(input.mode, "mode") as SubagentMode;
 	if (!MODES.has(mode)) throw new Error(`unsupported descriptor mode: ${mode}`);
 	const provider = string(input.provider, "provider") as SubagentProviderName;
@@ -136,12 +178,23 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 	if (!REPORT_DELIVERIES.has(reportDelivery)) {
 		throw new Error(`unsupported runtime.reportDelivery: ${reportDelivery}`);
 	}
+	const backgroundProtocol =
+		runtime.backgroundProtocol === undefined
+			? LEGACY_BACKGROUND_PROTOCOL
+			: string(runtime.backgroundProtocol, "runtime.backgroundProtocol") as BackgroundProtocol;
+	if (!BACKGROUND_PROTOCOLS.has(backgroundProtocol)) {
+		throw new Error(`unsupported runtime.backgroundProtocol: ${backgroundProtocol}`);
+	}
+	if (runtime.syncBundledAgents !== undefined) {
+		// Validate, then discard the retired 0.2/0.3 runtime switch. Keeping this
+		// read compatibility allows persisted children to cold-resume.
+		boolean(runtime.syncBundledAgents, "runtime.syncBundledAgents");
+	}
 
 	const createdAt = string(input.createdAt, "createdAt");
 	if (Number.isNaN(Date.parse(createdAt))) throw new Error("createdAt must be an ISO date string");
 
-	return {
-		version: DESCRIPTOR_VERSION,
+	const base = {
 		mode,
 		provider,
 		label: limitedString(input.label, "label", 200),
@@ -162,16 +215,31 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 		thinkingLevel,
 		runtime: {
 			agentScope,
-			syncBundledAgents:
-				runtime.syncBundledAgents === undefined
-					? true
-					: boolean(runtime.syncBundledAgents, "runtime.syncBundledAgents"),
 			maxDepth: safeNatural(runtime.maxDepth, "runtime.maxDepth"),
 			enableRunInBackground:
 				runtime.enableRunInBackground === undefined
 					? true
 					: boolean(runtime.enableRunInBackground, "runtime.enableRunInBackground"),
 			defaultBackground: boolean(runtime.defaultBackground, "runtime.defaultBackground"),
+			maxConcurrentBackgroundRuns:
+				runtime.maxConcurrentBackgroundRuns === undefined
+					? LEGACY_MAX_CONCURRENT_BACKGROUND_RUNS
+					: boundedInteger(
+							runtime.maxConcurrentBackgroundRuns,
+							"runtime.maxConcurrentBackgroundRuns",
+							1,
+							Number.MAX_SAFE_INTEGER,
+						),
+			maxIdleRuntimes:
+				runtime.maxIdleRuntimes === undefined
+					? LEGACY_MAX_IDLE_RUNTIMES
+					: boundedInteger(
+							runtime.maxIdleRuntimes,
+							"runtime.maxIdleRuntimes",
+							0,
+							Number.MAX_SAFE_INTEGER,
+						),
+			backgroundProtocol,
 			reportDelivery,
 			inheritExtensions: boolean(runtime.inheritExtensions, "runtime.inheritExtensions"),
 			openAIIdentity: boolean(runtime.openAIIdentity, "runtime.openAIIdentity"),
@@ -182,6 +250,22 @@ export function parseDescriptor(value: unknown): SubagentDescriptor {
 				1024 * 1024,
 			),
 		},
+	};
+	if (version === LEGACY_DESCRIPTOR_VERSION) {
+		return {
+			version: LEGACY_DESCRIPTOR_VERSION,
+			...base,
+		};
+	}
+	const task = record(input.task, "task");
+	return {
+		version: DESCRIPTOR_VERSION,
+		...base,
+		task: validateDescriptorTask({
+			name: string(task.name, "task.name"),
+			path: string(task.path, "task.path"),
+		}),
+		context: parseContext(input.context),
 	};
 }
 
@@ -199,4 +283,13 @@ export function foldDescriptor(entries: readonly SessionEntry[]): DescriptorFold
 	} catch (error) {
 		return { kind: "corrupt", message: error instanceof Error ? error.message : String(error) };
 	}
+}
+
+export function descriptorContext(
+	descriptor: SubagentDescriptor,
+): ContextInheritance {
+	if (descriptor.version === 3) return structuredClone(descriptor.context);
+	return descriptor.provider === "fork"
+		? { mode: "all_completed" }
+		: { mode: "fresh" };
 }

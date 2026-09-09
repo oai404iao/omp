@@ -8,9 +8,10 @@ import {
   lookupDistTags,
   lookupPublishedVersion,
   npm,
-  sha512,
+  assertLockedPublishedArtifact,
 } from "./release-utils.mjs";
 import { registry, root } from "./workspaces.mjs";
+import { publishOrderedBatch, validateReleaseBatch, verifyPackedCandidate } from "./release-batch.mjs";
 
 const [manifestArgument, resultArgument] = process.argv.slice(2);
 if (!manifestArgument || !resultArgument) {
@@ -45,44 +46,54 @@ if (manifest.registry !== registry || !Array.isArray(manifest.candidates)) {
   throw new Error("release artifact manifest is malformed or targets another registry");
 }
 
-const publishWarnings = [];
-for (const candidate of manifest.candidates) {
-  if (candidate.mode !== "publish") continue;
-
-  const tarballPath = resolve(manifestPath, "..", candidate.filename);
-  if (sha512(tarballPath) !== candidate.integrity) {
-    throw new Error(`artifact integrity mismatch for ${candidate.filename}`);
-  }
-
-  const published = spawnSync(
-    npm,
-    [
-      "publish",
-      tarballPath,
-      "--ignore-scripts",
-      "--access",
-      "public",
-      "--provenance",
-      "--tag",
-      candidate.distTag,
-      "--registry",
-      registry,
-    ],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (published.status !== 0) {
-    publishWarnings.push({
-      name: candidate.name,
-      message: (published.stderr || published.stdout).trim(),
-    });
-    break;
+const candidates = validateReleaseBatch(manifest.candidates);
+// Validate the entire batch before the first irreversible registry write.
+for (const candidate of candidates) {
+  if (candidate.mode === "publish") {
+    if (candidate.sourceCommit !== commit) throw new Error(`Publish candidate is not from this checkout: ${candidate.name}`);
+    verifyPackedCandidate(candidate, resolve(manifestPath, "..", candidate.filename));
   }
 }
+
+const publishWarnings = publishOrderedBatch(candidates, {
+  publish(candidate) {
+    const tarballPath = resolve(manifestPath, "..", candidate.filename);
+    const published = spawnSync(
+      npm,
+      [
+        "publish",
+        tarballPath,
+        "--ignore-scripts",
+        "--access",
+        "public",
+        "--provenance",
+        "--tag",
+        candidate.distTag,
+        "--registry",
+        registry,
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
+    if (published.status !== 0) {
+      throw new Error((published.stderr || published.stdout).trim());
+    }
+  },
+  verify(candidate) {
+    const published = lookupWithPropagationRetry(candidate.name, candidate.version);
+    if (!published.exists || published.gitHead !== candidate.sourceCommit) {
+      throw new Error(`Dependency release is not registry-visible with the expected identity: ${candidate.name}`);
+    }
+    assertLockedPublishedArtifact(candidate.name, candidate.version, published);
+    if (published.integrity !== candidate.integrity) {
+      throw new Error(`Published integrity mismatch: ${candidate.name}`);
+    }
+  },
+});
 
 const releases = [];
 const tagsToCreate = [];
 const unresolved = [];
-for (const candidate of manifest.candidates) {
+for (const candidate of candidates) {
   const candidateUnresolved = [];
   const published = lookupWithPropagationRetry(candidate.name, candidate.version);
   if (!published.exists) {
@@ -95,6 +106,11 @@ for (const candidate of manifest.candidates) {
       `${candidate.name}@${candidate.version} has npm gitHead ${published.gitHead ?? "(missing)"}, expected ${candidate.sourceCommit}`,
     );
     unresolved.push(...candidateUnresolved);
+    continue;
+  }
+  assertLockedPublishedArtifact(candidate.name, candidate.version, published);
+  if (published.integrity !== candidate.integrity) {
+    unresolved.push(`${candidate.name}@${candidate.version} has mismatched published integrity`);
     continue;
   }
 
@@ -132,7 +148,7 @@ for (const candidate of manifest.candidates) {
 const ok =
   unresolved.length === 0
   && publishWarnings.length === 0
-  && releases.length === manifest.candidates.length
+  && releases.length === candidates.length
   && releases.length > 0;
 
 if (ok) {
@@ -154,7 +170,7 @@ writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
 for (const release of releases) console.log(`✓ reconciled ${release.tag}`);
 for (const message of unresolved) console.error(`✗ ${message}`);
 for (const warning of publishWarnings) {
-  console.error(`! npm publish reported an error for ${warning.name}; registry state was reconciled afterward`);
+  console.error(`! release step did not verify for ${warning.name}; registry state was reconciled afterward`);
 }
 if (!ok) {
   console.error("! npm release finalization is deferred until a clean recovery run; no new tags were created");

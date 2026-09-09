@@ -32,6 +32,11 @@ interface AgentManifest {
 	files: Record<string, string>;
 }
 
+type ManifestReadResult =
+	| { kind: "missing" }
+	| { kind: "valid"; manifest: AgentManifest }
+	| { kind: "corrupt"; diagnostic: string };
+
 interface BundledAgentFile {
 	name: string;
 	content: Buffer;
@@ -182,53 +187,35 @@ function bundledAgentFiles(bundledDir: string): BundledAgentFile[] {
 	return files;
 }
 
-function readPreviousManifest(manifestPath: string): AgentManifest | undefined {
-	if (!existsSync(manifestPath)) return undefined;
+function readPreviousManifest(manifestPath: string): ManifestReadResult {
+	if (!existsSync(manifestPath)) return { kind: "missing" };
+	let content: Buffer | undefined;
 	try {
-		return parseManifest(JSON.parse(readFileSync(manifestPath, "utf8")), manifestPath);
+		content = readFileSync(manifestPath);
+		const manifest = parseManifest(JSON.parse(content.toString("utf8")), manifestPath);
+		return { kind: "valid", manifest };
 	} catch (error) {
-		const corruptPath = `${manifestPath}.corrupt-${timestamp()}-${randomUUID().slice(0, 8)}`;
-		copyFileSync(manifestPath, corruptPath);
-		throw new Error(
-			`${manifestPath}: invalid manifest; a copy was preserved at ${corruptPath}: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-		);
-	}
-}
-
-/**
- * Identify untouched files created by the old opt-out synchronizer without
- * changing the user filesystem. Direct bundled discovery can then use newer
- * package definitions while real user edits continue to override them.
- */
-export function unmodifiedManagedAgentNames(agentDir: string): Set<string> {
-	const manifestPath = join(agentDir, STATE_DIR_NAME, MANIFEST_FILE_NAME);
-	if (!existsSync(manifestPath)) return new Set();
-
-	let manifest: AgentManifest;
-	try {
-		manifest = parseManifest(JSON.parse(readFileSync(manifestPath, "utf8")), manifestPath);
-	} catch {
-		// A malformed historical manifest must never cause a default read-only
-		// session to hide user files or rewrite state.
-		return new Set();
-	}
-
-	const unmodified = new Set<string>();
-	const userAgentsDir = join(agentDir, "agents");
-	for (const [name, expectedHash] of Object.entries(manifest.files)) {
+		const fingerprint =
+			typeof content === "undefined"
+				? randomUUID().slice(0, 12)
+				: hash(content).slice(0, 12);
+		const corruptPath = `${manifestPath}.corrupt-${fingerprint}`;
+		let preservation = `a copy was preserved at ${corruptPath}`;
 		try {
-			const path = join(userAgentsDir, name);
-			if (lstatSync(path).isFile() && hash(readFileSync(path)) === expectedHash) {
-				unmodified.add(name);
-			}
-		} catch {
-			// Missing, unreadable, or replaced paths are user-controlled and
-			// therefore remain visible to discovery.
+			if (!existsSync(corruptPath)) copyFileSync(manifestPath, corruptPath);
+		} catch (backupError) {
+			preservation = `the corrupt file could not be copied: ${
+				backupError instanceof Error ? backupError.message : String(backupError)
+			}`;
 		}
+		return {
+			kind: "corrupt",
+			diagnostic:
+				`${manifestPath}: invalid manifest; bundled-template initialization was skipped and user/project agents remain available; ${preservation}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+		};
 	}
-	return unmodified;
 }
 
 function sleepSync(milliseconds: number): void {
@@ -445,15 +432,46 @@ function syncBundledAgentsLocked(
 	manifestPath: string,
 ): AgentSyncResult {
 	const diagnostics: string[] = [];
-	const previous = readPreviousManifest(manifestPath);
-	const packageChanged = previous !== undefined && previous.packageVersion !== packageVersion;
+	const manifestRead = readPreviousManifest(manifestPath);
+	if (manifestRead.kind === "corrupt") {
+		return {
+			packageVersion,
+			userAgentsDir,
+			manifestPath,
+			installed: [],
+			updated: [],
+			removed: [],
+			preserved: [],
+			backups: [],
+			diagnostics: [manifestRead.diagnostic],
+		};
+	}
+	const previous = manifestRead.kind === "valid" ? manifestRead.manifest : undefined;
+
+	// The package copies are initialization templates, not a runtime fallback.
+	// Once this package version has been initialized, the user directory is
+	// authoritative: edits and deletions must survive every same-version start.
+	if (previous?.packageVersion === packageVersion) {
+		return {
+			packageVersion,
+			userAgentsDir,
+			manifestPath,
+			installed: [],
+			updated: [],
+			removed: [],
+			preserved: [],
+			backups: [],
+			diagnostics,
+		};
+	}
+
 	const files = bundledAgentFiles(options.bundledDir);
 	const currentNames = new Set(files.map((file) => file.name));
 	const preserved: string[] = [];
 	const actions: PlannedAction[] = [];
 
-	// Plan the complete operation before changing any user agent file. A current
-	// manifest/source pair means ordinary restarts do not even read user content.
+	// Plan the complete first-install or version-change operation before
+	// changing any user agent file.
 	for (const file of files) {
 		const destination = join(userAgentsDir, file.name);
 		const destinationState = destinationKind(destination);
@@ -468,13 +486,6 @@ function syncBundledAgentsLocked(
 			continue;
 		}
 
-		const previousHash = previous?.files[file.name];
-		const bundledChanged = previousHash === undefined || previousHash !== file.hash;
-		const refresh = previous === undefined || packageChanged || bundledChanged;
-		if (!refresh) {
-			preserved.push(file.name);
-			continue;
-		}
 		if (
 			destinationState.kind === "file" &&
 			sameRegularFile(destination, destinationState.size, file.content)

@@ -5,18 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { loadModelSettings } from "../src/model-catalog/runtime.js";
-import { decodeWebSearchActivityTextSignature } from "../src/providers/openai-responses-shared.js";
 import {
 	buildCodexCompactionCheckpoint,
 	buildWebSearchStatusText,
 	extractWebSearchProgress,
 	mergeWebSearchActivity,
-	registerOpenAIResponsesProviders,
 	requestOpenAINativeCompaction,
 	WEB_SEARCH_ACTIVITY_MESSAGE_TYPE,
 	withHttpStatusPrefix,
 	withResponsesLiteWebSocketMetadata,
 } from "../src/provider-shim.js";
+import { decodeWebSearchActivityTextSignature } from "../src/providers/openai-responses-shared.js";
+import { codexJwt, createProviderHarness } from "./support/openai-codex-test-support.js";
 
 const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
@@ -62,35 +62,6 @@ function installImmediateRetryTimers(): void {
 		});
 		return 0 as unknown as ReturnType<typeof setTimeout>;
 	}) as unknown as typeof setTimeout;
-}
-
-function codexJwt(): string {
-	const payload = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct_test" } })).toString("base64");
-	return `header.${payload}.signature`;
-}
-
-function createProviderHarness(): {
-	providers: Record<string, any>;
-	handlers: Record<string, Function[]>;
-	messages: any[];
-	renderers: Record<string, Function>;
-} {
-	const providers: Record<string, any> = {};
-	const handlers: Record<string, Function[]> = {};
-	const messages: any[] = [];
-	const renderers: Record<string, Function> = {};
-	const pi = {
-		registerProvider(name: string, value: any) {
-			providers[name] = value;
-		},
-		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },
-		registerMessageRenderer(type: string, renderer: Function) { renderers[type] = renderer; },
-		sendMessage(message: any, options: any) { messages.push({ message, options }); },
-	};
-	registerOpenAIResponsesProviders(pi as any, { getCurrentCwd: () => process.cwd() });
-	assert.ok(providers["openai-codex"]);
-	assert.ok(providers.openai);
-	return { providers, handlers, messages, renderers };
 }
 
 function createCodexProvider(): any {

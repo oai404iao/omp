@@ -1,16 +1,23 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { AgentScope, ReportDelivery, SubagentSettings } from "./types.ts";
+import type {
+	AgentScope,
+	BackgroundProtocol,
+	ReportDelivery,
+	SubagentSettings,
+} from "./types.ts";
 
 export const CONFIG_FILE_NAME = "subagent.json";
 
 export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	agentScope: "user",
-	syncBundledAgents: false,
 	maxDepth: 3,
 	enableRunInBackground: true,
 	defaultBackground: true,
+	maxConcurrentBackgroundRuns: 4,
+	maxIdleRuntimes: 0,
+	backgroundProtocol: "legacy",
 	reportDelivery: "wakeup",
 	inheritExtensions: false,
 	openAIIdentity: false,
@@ -24,6 +31,9 @@ const CONFIG_KEYS = new Set([
 	"maxDepth",
 	"enableRunInBackground",
 	"defaultBackground",
+	"maxConcurrentBackgroundRuns",
+	"maxIdleRuntimes",
+	"backgroundProtocol",
 	"reportDelivery",
 	"inheritExtensions",
 	"openAIIdentity",
@@ -86,6 +96,11 @@ function parseReportDelivery(value: unknown, source: string): ReportDelivery {
 	throw new Error(`${source}: reportDelivery must be "wakeup" or "quiet"`);
 }
 
+function parseBackgroundProtocol(value: unknown, source: string): BackgroundProtocol {
+	if (value === "legacy" || value === "mailbox-v2") return value;
+	throw new Error(`${source}: backgroundProtocol must be "legacy" or "mailbox-v2"`);
+}
+
 function parseBoolean(value: unknown, key: string, source: string): boolean {
 	if (typeof value === "boolean") return value;
 	throw new Error(`${source}: ${key} must be a boolean`);
@@ -119,13 +134,15 @@ function applyConfig(
 	if (config.syncBundledAgents !== undefined && !options.allowSyncBundledAgents) {
 		throw new Error(`${source}: syncBundledAgents may be configured only in the user-level subagent.json`);
 	}
+	if (config.syncBundledAgents !== undefined) {
+		// Compatibility with 0.2/0.3 configuration files. Bundled templates are
+		// now always initialized on first install/version change, and this
+		// retired switch no longer controls runtime discovery or writes.
+		parseBoolean(config.syncBundledAgents, "syncBundledAgents", source);
+	}
 	return {
 		agentScope:
 			config.agentScope === undefined ? settings.agentScope : parseAgentScope(config.agentScope, source),
-		syncBundledAgents:
-			config.syncBundledAgents === undefined
-				? settings.syncBundledAgents
-				: parseBoolean(config.syncBundledAgents, "syncBundledAgents", source),
 		maxDepth:
 			config.maxDepth === undefined
 				? settings.maxDepth
@@ -141,6 +158,34 @@ function applyConfig(
 			config.defaultBackground === undefined
 				? settings.defaultBackground
 				: parseBoolean(config.defaultBackground, "defaultBackground", source),
+		maxConcurrentBackgroundRuns:
+			config.maxConcurrentBackgroundRuns === undefined
+				? settings.maxConcurrentBackgroundRuns
+				: parseInteger(
+						config.maxConcurrentBackgroundRuns,
+						"maxConcurrentBackgroundRuns",
+						source,
+						{
+							minimum: 1,
+							maximum: Number.MAX_SAFE_INTEGER,
+						},
+					),
+		maxIdleRuntimes:
+			config.maxIdleRuntimes === undefined
+				? settings.maxIdleRuntimes
+				: parseInteger(
+						config.maxIdleRuntimes,
+						"maxIdleRuntimes",
+						source,
+						{
+							minimum: 0,
+							maximum: Number.MAX_SAFE_INTEGER,
+						},
+					),
+		backgroundProtocol:
+			config.backgroundProtocol === undefined
+				? settings.backgroundProtocol
+				: parseBackgroundProtocol(config.backgroundProtocol, source),
 		reportDelivery:
 			config.reportDelivery === undefined
 				? settings.reportDelivery

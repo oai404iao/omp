@@ -17,7 +17,7 @@ import {
 import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
-import { syncBundledAgents, unmodifiedManagedAgentNames } from "../src/agent-sync.ts";
+import { syncBundledAgents } from "../src/agent-sync.ts";
 
 const roots: string[] = [];
 
@@ -72,36 +72,43 @@ test("same-version restarts preserve edits, then an update backs up and replaces
 	assert.equal(readFileSync(userScout, "utf8"), "bundled scout v2\n");
 });
 
-test("read-only migration identifies only unchanged formerly managed presets", () => {
+test("same-version deletion is authoritative until the package version changes", () => {
 	const root = tempRoot();
 	const bundledDir = join(root, "bundled");
 	const agentDir = join(root, "agent");
 	writeBundled(bundledDir, "scout", "bundled scout v1\n");
+	writeBundled(bundledDir, "worker", "bundled worker v1\n");
 	syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
 
-	assert.deepEqual([...unmodifiedManagedAgentNames(agentDir)], ["scout.md"]);
-
-	writeFileSync(join(agentDir, "agents", "scout.md"), "custom scout\n");
-	assert.deepEqual([...unmodifiedManagedAgentNames(agentDir)], []);
-});
-
-test("read-only migration preserves a user-replaced symlink as an override", () => {
-	const root = tempRoot();
-	const bundledDir = join(root, "bundled");
-	const agentDir = join(root, "agent");
-	const target = join(root, "same-content-scout.md");
-	writeBundled(bundledDir, "scout", "bundled scout v1\n");
-	syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
-
-	writeFileSync(target, "bundled scout v1\n");
 	const userScout = join(agentDir, "agents", "scout.md");
 	unlinkSync(userScout);
-	symlinkSync(target, userScout);
+	const restart = syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+	assert.equal(existsSync(userScout), false);
+	assert.deepEqual(restart.installed, []);
+	assert.deepEqual(restart.updated, []);
+	assert.deepEqual(restart.removed, []);
+	assert.deepEqual(restart.backups, []);
 
-	assert.deepEqual([...unmodifiedManagedAgentNames(agentDir)], []);
+	const update = syncBundledAgents({ bundledDir, agentDir, packageVersion: "2.0.0" });
+	assert.deepEqual(update.installed, ["scout.md"]);
+	assert.equal(readFileSync(userScout, "utf8"), "bundled scout v1\n");
 });
 
-test("a bundled prompt change triggers a safe refresh even without a version bump", () => {
+test("deleting every initialized role leaves the same-version catalog empty", () => {
+	const root = tempRoot();
+	const bundledDir = join(root, "bundled");
+	const agentDir = join(root, "agent");
+	writeBundled(bundledDir, "planner", "bundled planner\n");
+	writeBundled(bundledDir, "reviewer", "bundled reviewer\n");
+	syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+	rmSync(join(agentDir, "agents"), { recursive: true, force: true });
+
+	const restart = syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+	assert.deepEqual(readdirSync(restart.userAgentsDir), []);
+	assert.deepEqual(restart.installed, []);
+});
+
+test("a bundled prompt change is ignored without a package version change", () => {
 	const root = tempRoot();
 	const bundledDir = join(root, "bundled");
 	const agentDir = join(root, "agent");
@@ -112,13 +119,12 @@ test("a bundled prompt change triggers a safe refresh even without a version bum
 	writeBundled(bundledDir, "planner", "bundled planner changed\n");
 
 	const update = syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
-	assert.deepEqual(update.updated, ["planner.md"]);
-	assert.equal(update.backups.length, 1);
-	assert.equal(readFileSync(update.backups[0].path, "utf8"), "custom planner\n");
-	assert.equal(readFileSync(userPlanner, "utf8"), "bundled planner changed\n");
+	assert.deepEqual(update.updated, []);
+	assert.deepEqual(update.backups, []);
+	assert.equal(readFileSync(userPlanner, "utf8"), "custom planner\n");
 });
 
-test("a corrupt manifest is preserved and fails closed", () => {
+test("a corrupt manifest skips initialization without blocking user roles", () => {
 	const root = tempRoot();
 	const bundledDir = join(root, "bundled");
 	const agentDir = join(root, "agent");
@@ -128,10 +134,10 @@ test("a corrupt manifest is preserved and fails closed", () => {
 	writeFileSync(userReviewer, "custom reviewer\n");
 	writeFileSync(first.manifestPath, "{broken");
 
-	assert.throws(
-		() => syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" }),
-		/invalid manifest; a copy was preserved/,
-	);
+	const result = syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+	assert.match(result.diagnostics.join("\n"), /invalid manifest/);
+	assert.match(result.diagnostics.join("\n"), /user\/project agents remain available/);
+	assert.deepEqual(result.installed, []);
 	assert.equal(readFileSync(first.manifestPath, "utf8"), "{broken");
 	assert.equal(readFileSync(userReviewer, "utf8"), "custom reviewer\n");
 	assert.equal(

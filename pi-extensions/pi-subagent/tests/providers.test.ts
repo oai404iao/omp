@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import type { AssistantMessage, UserMessage, Usage } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { completedTurnBoundaryId, ForkProvider, SpawnProvider } from "../src/providers.ts";
+import {
+	completedContextEntries,
+	completedTurnBoundaryId,
+	ForkProvider,
+	SpawnProvider,
+} from "../src/providers.ts";
 
 const roots: string[] = [];
 
@@ -84,12 +89,205 @@ test("spawn provider creates an empty child with parent lineage", async () => {
 	await prepared.rollback();
 });
 
-test("fork provider rejects continuable mode", async () => {
-	const parent = SessionManager.inMemory("/tmp/project");
-	await assert.rejects(
-		() => new ForkProvider().prepare({ sessionManager: parent }, "continuable"),
-		/one-shot only/,
+test("fork provider supports continuable inherited-context children", async () => {
+	const root = tempRoot();
+	const parent = SessionManager.create(
+		join(root, "project"),
+		join(root, "sessions"),
 	);
+	parent.appendMessage(user("question"));
+	parent.appendMessage(assistant("answer", "stop"));
+	const prepared = await new ForkProvider().prepare(
+		{ sessionManager: parent },
+		"continuable",
+	);
+	assert.deepEqual(
+		prepared.sessionManager
+			.buildSessionContext()
+			.messages.map((message) => message.role),
+		["user", "assistant"],
+	);
+	await prepared.rollback();
+});
+
+test("last_n_completed inherits only complete suffix turns and no control records", async () => {
+	const root = tempRoot();
+	const parent = SessionManager.create(
+		join(root, "project"),
+		join(root, "sessions"),
+	);
+	for (let turn = 1; turn <= 3; turn++) {
+		parent.appendMessage(user(`question ${turn}`));
+		parent.appendMessage(assistant(`answer ${turn}`, "stop"));
+		if (turn === 2) {
+			parent.appendCustomEntry("pi-subagent/descriptor", {
+				shouldNotBeCopied: true,
+			});
+		}
+	}
+	parent.appendMessage(user("current question"));
+	parent.appendMessage(assistant("calling child", "toolUse"));
+
+	const prepared = await new ForkProvider().prepare(
+		{ sessionManager: parent },
+		"continuable",
+		{ mode: "last_n_completed", completedTurns: 2 },
+	);
+	const context = prepared.sessionManager.buildSessionContext().messages;
+	assert.deepEqual(
+		context.map((message) => message.role),
+		["user", "assistant", "user", "assistant"],
+	);
+	assert.equal((context[0] as UserMessage).content, "question 2");
+	assert.equal(
+		prepared.sessionManager
+			.getEntries()
+			.some(
+				(entry) =>
+					entry.type === "custom"
+					&& entry.customType === "pi-subagent/descriptor",
+			),
+		false,
+	);
+	await prepared.rollback();
+});
+
+test("compaction summary remains inherited when the active suffix has no terminal assistant", async () => {
+	const root = tempRoot();
+	const parent = SessionManager.create(
+		join(root, "project"),
+		join(root, "sessions"),
+	);
+	parent.appendCompaction(
+		"durable completed history",
+		"missing-kept-entry",
+		10_000,
+	);
+	parent.appendMessage(user("active question"));
+	parent.appendMessage(assistant("calling child", "toolUse"));
+	const contextEntries = parent.buildContextEntries();
+	assert.deepEqual(
+		completedContextEntries(
+			contextEntries,
+			{ mode: "all_completed" },
+		).map((entry) => entry.type),
+		["compaction"],
+	);
+
+	const prepared = await new ForkProvider().prepare(
+		{ sessionManager: parent },
+		"one-shot",
+		{ mode: "last_n_completed", completedTurns: 3 },
+	);
+	const inherited = prepared.sessionManager.buildSessionContext().messages;
+	assert.equal(inherited.length, 1);
+	assert.equal(inherited[0]?.role, "custom");
+	assert.match(
+		inherited[0]?.role === "custom"
+			? typeof inherited[0].content === "string"
+				? inherited[0].content
+				: ""
+			: "",
+		/durable completed history/,
+	);
+	await prepared.rollback();
+});
+
+test("last_n_completed keeps a compaction summary needed by a split retained turn", async () => {
+	const root = tempRoot();
+	const parent = SessionManager.create(
+		join(root, "project"),
+		join(root, "sessions"),
+	);
+	parent.appendMessage(user("original tool question"));
+	const toolAssistant = assistant("calling tool", "toolUse");
+	toolAssistant.content = [
+		{
+			type: "toolCall",
+			id: "split-tool",
+			name: "read",
+			arguments: { path: "README.md" },
+		},
+	];
+	const firstKeptEntryId = parent.appendMessage(toolAssistant);
+	parent.appendMessage({
+		role: "toolResult",
+		toolCallId: "split-tool",
+		toolName: "read",
+		content: [{ type: "text", text: "tool output" }],
+		isError: false,
+		timestamp: Date.now(),
+	});
+	parent.appendCompaction(
+		"summary containing the original user prefix",
+		firstKeptEntryId,
+		10_000,
+	);
+	parent.appendMessage(assistant("terminal answer", "stop"));
+
+	const selected = completedContextEntries(
+		parent.buildContextEntries(),
+		{ mode: "last_n_completed", completedTurns: 1 },
+	);
+	assert.equal(selected[0]?.type, "compaction");
+	const prepared = await new ForkProvider().prepare(
+		{ sessionManager: parent },
+		"one-shot",
+		{ mode: "last_n_completed", completedTurns: 1 },
+	);
+	assert.deepEqual(
+		prepared.sessionManager
+			.buildSessionContext()
+			.messages.map((message) => message.role),
+		["custom", "assistant", "toolResult", "assistant"],
+	);
+	await prepared.rollback();
+});
+
+test("last_n_completed counts an error and automatic retry as one logical turn", async () => {
+	const root = tempRoot();
+	const parent = SessionManager.create(
+		join(root, "project"),
+		join(root, "sessions"),
+	);
+	parent.appendMessage(user("retry this question"));
+	parent.appendMessage(assistant("retryable failure", "error"));
+	parent.appendMessage(assistant("successful retry", "stop"));
+	parent.appendMessage(user("active question"));
+	parent.appendMessage(assistant("calling child", "toolUse"));
+
+	const selected = completedContextEntries(
+		parent.buildContextEntries(),
+		{ mode: "last_n_completed", completedTurns: 1 },
+	);
+	assert.equal(
+		selected.find(
+			(entry) =>
+				entry.type === "message"
+				&& entry.message.role === "user",
+		)?.type,
+		"message",
+	);
+	const prepared = await new ForkProvider().prepare(
+		{ sessionManager: parent },
+		"one-shot",
+		{ mode: "last_n_completed", completedTurns: 1 },
+	);
+	assert.deepEqual(
+		prepared.sessionManager
+			.buildSessionContext()
+			.messages.map((message) => message.role),
+		["user", "assistant", "assistant"],
+	);
+	assert.equal(
+		(
+			prepared.sessionManager
+				.buildSessionContext()
+				.messages[0] as UserMessage
+		).content,
+		"retry this question",
+	);
+	await prepared.rollback();
 });
 
 test("fork provider does not silently drop completed history from an ephemeral parent", async () => {

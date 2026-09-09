@@ -23,20 +23,38 @@ function descriptor(label = "inspect auth"): SubagentDescriptor {
 			tools: ["read", "grep"],
 			thinking: "low",
 			systemPrompt: "Inspect.",
-			source: "bundled",
+			source: "user",
 		},
 		model: { provider: "openai", id: "gpt-5" },
 		thinkingLevel: "low",
 		runtime: {
 			agentScope: "user",
-			syncBundledAgents: false,
 			maxDepth: 3,
 			enableRunInBackground: true,
 			defaultBackground: true,
+			maxConcurrentBackgroundRuns: 4,
+			maxIdleRuntimes: 0,
+			backgroundProtocol: "legacy",
 			reportDelivery: "wakeup",
 			inheritExtensions: false,
 			openAIIdentity: false,
 			maxOutputBytes: 51200,
+		},
+	};
+}
+
+function currentDescriptor(): SubagentDescriptor {
+	const legacy = descriptor();
+	return {
+		...legacy,
+		version: 3,
+		task: {
+			name: "inspect-auth",
+			path: "/root/inspect-auth",
+		},
+		context: {
+			mode: "last_n_completed",
+			completedTurns: 2,
 		},
 	};
 }
@@ -59,6 +77,32 @@ test("descriptor parser returns a detached validated value", () => {
 	assert.notEqual(parsed.agent.tools, input.agent.tools);
 });
 
+test("v3 descriptors persist readable paths and context policy", () => {
+	const input = currentDescriptor();
+	const parsed = parseDescriptor(input);
+	assert.deepEqual(parsed, input);
+	assert.equal(parsed.version, 3);
+	if (parsed.version !== 3 || input.version !== 3) return;
+	assert.notEqual(parsed.task, input.task);
+	assert.notEqual(parsed.context, input.context);
+});
+
+test("v3 descriptors reject inconsistent paths and context", () => {
+	const wrongPath = currentDescriptor();
+	if (wrongPath.version !== 3) return;
+	wrongPath.task.path = "/root/another-name";
+	assert.throws(() => parseDescriptor(wrongPath), /must end with task.name/);
+
+	const wrongContext = currentDescriptor() as SubagentDescriptor & {
+		context: { mode: "fresh"; completedTurns: number };
+	};
+	wrongContext.context = { mode: "fresh", completedTurns: 2 };
+	assert.throws(
+		() => parseDescriptor(wrongContext),
+		/available only for last_n_completed/,
+	);
+});
+
 test("legacy descriptors default to background-enabled behavior", () => {
 	const input = descriptor() as SubagentDescriptor & {
 		runtime: Omit<SubagentDescriptor["runtime"], "enableRunInBackground">;
@@ -68,13 +112,62 @@ test("legacy descriptors default to background-enabled behavior", () => {
 	assert.equal(parsed.runtime.enableRunInBackground, true);
 });
 
-test("legacy descriptors preserve synchronized bundled-agent behavior", () => {
+test("legacy descriptors receive the default background concurrency limit", () => {
 	const input = descriptor() as SubagentDescriptor & {
-		runtime: Omit<SubagentDescriptor["runtime"], "syncBundledAgents">;
+		runtime: Omit<
+			SubagentDescriptor["runtime"],
+			"maxConcurrentBackgroundRuns"
+		>;
 	};
-	delete (input.runtime as Partial<SubagentDescriptor["runtime"]>).syncBundledAgents;
+	delete (
+		input.runtime as Partial<SubagentDescriptor["runtime"]>
+	).maxConcurrentBackgroundRuns;
 	const parsed = parseDescriptor(input);
-	assert.equal(parsed.runtime.syncBundledAgents, true);
+	assert.equal(parsed.runtime.maxConcurrentBackgroundRuns, 4);
+});
+
+test("legacy descriptors receive a disabled idle runtime cache", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		runtime: Omit<SubagentDescriptor["runtime"], "maxIdleRuntimes">;
+	};
+	delete (
+		input.runtime as Partial<SubagentDescriptor["runtime"]>
+	).maxIdleRuntimes;
+	assert.equal(parseDescriptor(input).runtime.maxIdleRuntimes, 0);
+});
+
+test("legacy descriptors receive the legacy background protocol", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		runtime: Omit<SubagentDescriptor["runtime"], "backgroundProtocol">;
+	};
+	delete (
+		input.runtime as Partial<SubagentDescriptor["runtime"]>
+	).backgroundProtocol;
+	const parsed = parseDescriptor(input);
+	assert.equal(parsed.runtime.backgroundProtocol, "legacy");
+});
+
+test("mailbox-v2 descriptors retain their protocol snapshot", () => {
+	const input = descriptor();
+	input.runtime.backgroundProtocol = "mailbox-v2";
+	assert.equal(parseDescriptor(input).runtime.backgroundProtocol, "mailbox-v2");
+});
+
+test("legacy syncBundledAgents snapshots are validated then discarded", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		runtime: SubagentDescriptor["runtime"] & { syncBundledAgents: boolean };
+	};
+	input.runtime.syncBundledAgents = false;
+	const parsed = parseDescriptor(input);
+	assert.equal("syncBundledAgents" in parsed.runtime, false);
+});
+
+test("legacy bundled agent snapshots remain readable", () => {
+	const input = descriptor() as SubagentDescriptor & {
+		agent: SubagentDescriptor["agent"] & { source: "bundled" };
+	};
+	input.agent.source = "bundled";
+	assert.equal(parseDescriptor(input).agent.source, "bundled");
 });
 
 test("descriptor folding is last-wins for fork seeds", () => {

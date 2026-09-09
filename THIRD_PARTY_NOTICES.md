@@ -5,6 +5,13 @@ following components retain their own licenses and attribution.
 
 ## OpenAI Codex
 
+In the S3 split, implementation ownership moves to the private
+`pi-codex-core` package (patch grammar/adaptations) and `pi-codex-runtime`
+(`src/reserved-tools/{web-search,image-generation,types}.ts` and serialization).
+Historical paths below in `pi-codex-minimal-tools` remain compatibility forwards
+or checked asset mirrors. All four new packages retain identical reviewed
+LICENSE/NOTICE and provenance snapshots; their own notices describe local ownership.
+
 `pi-extensions/pi-codex-minimal-tools` includes material from
 [OpenAI Codex](https://github.com/openai/codex), analyzed at revision
 [`eb9dceba1a2e658142a456c5898836774835616b`](https://github.com/openai/codex/commit/eb9dceba1a2e658142a456c5898836774835616b).

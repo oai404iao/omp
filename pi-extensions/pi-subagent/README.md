@@ -5,7 +5,7 @@ The design independently adapts the
 [DeepSeek Harness subagent seam](https://github.com/deepseek-ai/deepseek-harness/tree/4d03472cd098dc48a630e526ca620f4f37f18a0e/docs/subsystems)
 to Pi's extension and SDK APIs.
 
-Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
+Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
 
 > npm identity: `@oai404iao/pi-subagent`. Once the selected version is
 > available on npm, install it from npm; use a local checkout before its
@@ -15,21 +15,29 @@ Compatibility: Pi 0.84.2 or newer; tested against 0.84.2.
 
 - **Named providers**
   - `spawn`: fresh child with no parent conversation
-  - `fork`: one-shot child seeded through the parent's latest completed turn
+  - `fork`: child seeded through the parent's latest completed turn
+- **Readable task paths** such as `/root/review/auth`, with relative addressing
+- **Explicit context inheritance**: `fresh`, `all_completed`, or
+  `last_n_completed`
 - **Two lifecycles**
   - foreground one-shot runs return the child's final answer
-  - background continuable runs return a durable agent id immediately
+  - background continuable runs return a readable path and stable agent id at
+    prompt acceptance
 - **Foreground-only policy** that removes background scheduling and lifecycle controls
 - **Independent context and session** for every child
-- **Bundled presets without filesystem writes by default**, with opt-in
-  materialization, backup, and replacement
+- **User-owned agent catalog** with bundled templates used only for
+  first-install and package-version initialization
 - **Durable descriptors and lineage** stored in child JSONL sessions
-- **Cold resume** through `send_message`
+- **Two background protocols**: compatible immediate follow-ups or an opt-in
+  durable mailbox with explicit turn starts
+- **Quiet durable completion updates** with event-driven `wait_agent`
 - **Control plane** with listing and interruption
 - **Child-to-parent `report` channel** for continuable children
 - **Nested delegation** with an absolute persisted depth limit
 - **Dynamic agent-name enums** generated from the effective user/project catalog
 - **Parallel-safe delegation**: multiple `subagent` calls in one assistant message may overlap
+- **Bounded background execution** with per-agent cold-resume serialization
+- **Optional idle runtime LRU** with transparent cold resume
 - **Composable tool ceilings** that preserve model/extension tool decisions
 - **Usage accounting, streaming progress, output caps, and custom TUI rendering**
 
@@ -57,17 +65,19 @@ For a temporary test:
 pi -e /absolute/path/to/pi-extensions/pi-subagent
 ```
 
-This implementation targets Pi `0.84.2`.
+Development is pinned to Pi `0.85.1`; full compatibility checks retain the `0.84.2` floor.
 
 ## Model-facing tools
 
 | Tool | Behavior |
 | --- | --- |
-| `subagent` | Starts a fresh child. Background continuable mode is the default unless configured otherwise; foreground-only mode always waits for the answer. |
-| `subagent_fork` | Starts a foreground one-shot child with the parent's completed-turn history. The in-flight tool turn is excluded. |
-| `send_message` | Sends the next FIFO turn to a direct continuable child; cold-resumes a persisted child when background execution is enabled. |
-| `interrupt_agent` | Requests cancellation of a live descendant's current turn without deleting its session. Active only when background execution is enabled. |
-| `list_agents` | Lists direct children or all descendants as `running`, `idle`, or `ready`. Active only when background execution is enabled. |
+| `subagent` | Starts a named child with selectable context inheritance. Background continuable mode is the default unless configured otherwise; foreground-only mode always waits for the answer. |
+| `subagent_fork` | Starts a child with all completed parent turns. It remains foreground by default; `run_in_background: true` creates a continuable fork. |
+| `send_message` | Targets a direct child by path or durable id. Legacy starts/joins the next FIFO turn; `mailbox-v2` only durably appends. |
+| `followup_task` | `mailbox-v2` only: targets a direct child by path or id, atomically claims the pending FIFO batch, and starts one scheduled turn. |
+| `wait_agent` | `mailbox-v2` only: waits event-driven for unread direct-child completions without starting a model turn or consuming a scheduler slot. |
+| `interrupt_agent` | Requests cancellation of a live descendant by path or id without deleting its session. Active only when background execution is enabled. |
+| `list_agents` | Lists readable descendant paths as `running`, `idle`, or `ready`, including separate `pending=N` task and `updates=N` completion counts. Active only when background execution is enabled. |
 | `report` | Child-only return channel. Installed automatically in continuable children. |
 
 The `/subagents` command shows the effective scheduling mode, available agent definitions,
@@ -92,52 +102,118 @@ Use subagent_fork with planner to plan the change using our completed discussion
 List my subagents, then send the scout a follow-up asking for exact call sites.
 ```
 
+With `"backgroundProtocol": "mailbox-v2"`, enqueue first and start explicitly:
+
+```text
+Send the scout two mailbox messages, then call followup_task once so it handles
+the current FIFO batch in one turn. Call wait_agent when the next action needs
+its quiet completion update.
+```
+
 Pi executes sibling tool calls in parallel, so this package deliberately accepts one delegation per `subagent` call instead of embedding a separate `tasks` array.
+
+### Task paths and context
+
+Every new child has an immutable path rooted at `/root`:
+
+```text
+/root
+├─ review
+│  └─ auth
+└─ tests
+```
+
+Set `task_name` to choose the final path segment. Names use 1–64 lowercase
+ASCII letters, digits, hyphens, or underscores. If omitted, the extension
+slugs `description` and appends `-2`, `-3`, and so on to avoid sibling
+collisions. Explicit duplicate sibling names fail before child creation.
+
+Control tools retain their existing parameter names for compatibility, but
+accept any of:
+
+- a durable UUIDv7 agent id;
+- an absolute path such as `/root/review/auth`;
+- a path relative to the caller, such as `auth`, `./auth`, or `../tests`.
+
+References cannot escape `/root`. Path lookup is resolved to the durable agent
+id before per-agent serialization; mailbox ownership, events, and durable
+lineage remain UUID-based. Direct-child restrictions still apply to
+`send_message` and `followup_task`, while `interrupt_agent` still requires a
+descendant. Paths do not bypass those checks.
+
+`subagent` accepts an optional context object:
+
+```json
+{
+  "task_name": "review",
+  "context": {
+    "mode": "last_n_completed",
+    "completed_turns": 2
+  }
+}
+```
+
+Context modes are:
+
+| Mode | Initial child context |
+| --- | --- |
+| `fresh` | No parent conversation. This is the compatible `subagent` default. |
+| `all_completed` | The parent's compaction-aware context through its latest completed assistant turn. |
+| `last_n_completed` | The last `completed_turns` complete parent turns, bounded to 1–100. |
+
+The active assistant/tool-call suffix is always excluded. A compaction summary
+is retained when it is the only safe representation of completed history; if
+it prevents exact turn counting, `last_n_completed` keeps that summary only
+when fewer than the requested number of explicit completed turns remain.
+Context is copied once into a new child session. Descriptor, lineage, mailbox,
+completion, and other plain extension-state entries are not copied.
+
+`subagent_fork` is the compatibility shortcut for `all_completed`. It remains
+foreground unless `run_in_background: true` is explicitly supplied, even when
+`defaultBackground` is true. A background fork is continuable and supports the
+same legacy or mailbox-v2 follow-up lifecycle as a fresh child.
+
+New sessions persist descriptor version 3 with their task path and context
+policy. Version-2 descriptors remain readable and controllable by UUID; they
+are displayed under the deterministic compatibility namespace
+`/root/.legacy/<agent-id>`.
 
 ## Agent definitions
 
-The package includes `scout`, `planner`, `reviewer`, and `worker`. By default,
-these bundled definitions are read directly from the package. Startup does
-**not** create, replace, remove, or back up files in the Pi agent directory.
-`/subagents` reports those defaults as `(bundled)`.
-
-User and project definitions can override the same names without modifying
-package files. Runtime locations and precedence are:
-
-1. bundled package definitions
-2. `<Pi agent dir>/agents/*.md`
-3. nearest trusted `.pi/agents/*.md`
-
-Project definitions replace user and bundled definitions with the same name
-when project scope is enabled. Project agents are disabled by the default
-`agentScope: "user"`. Setting the scope to `project` explicitly selects only
-project definitions; `both` loads bundled definitions, user overrides, then
-project overrides.
-
-When upgrading from a version that synchronized presets by default, unchanged
-previously managed files are recognized read-only and do not shadow newer
-package defaults. Edited managed files remain user overrides. The default
-never deletes or rewrites those existing files.
-
-### Opt-in managed preset synchronization
-
-Set `syncBundledAgents: true` only if you explicitly want the package to
-materialize its bundled definitions into:
+The package ships `scout`, `planner`, `reviewer`, and `worker` as initialization
+templates. On the first extension startup after installation, and whenever the
+detected package version changes, those templates are materialized into:
 
 ```text
 <Pi agent dir>/agents/*.md
 ```
 
-With that opt-in, runtime discovery uses the managed user files rather than
-reading package copies directly, and `/subagents` reports built-ins as
-`(user)`. Synchronization behavior is then:
+The package copies are **never runtime agent definitions or fallbacks**.
+Runtime discovery reads only:
+
+1. `<Pi agent dir>/agents/*.md`
+2. nearest trusted `.pi/agents/*.md`
+
+Project definitions replace user definitions with the same name when project
+scope is enabled. Project agents are disabled by the default
+`agentScope: "user"`. Setting the scope to `project` selects only project
+definitions; `both` loads user definitions followed by project overrides.
+
+After the current package version has been initialized, the user directory is
+authoritative. Same-version startups do not restore missing files or refresh
+changed templates. If the user deletes every agent definition, the effective
+catalog is empty and delegation tools are inactive after restart or `/reload`.
+A later package-version change starts a new initialization pass and installs
+missing bundled templates again.
+
+Initialization behavior:
 
 1. **First startup:** missing presets are installed. A different pre-existing same-name file
    is backed up before the bundled version replaces it.
 2. **Ordinary restart of the same release:** user edits are preserved.
 3. **Plugin update:** differing user presets are backed up, then replaced with the new
-   bundled versions. A bundled prompt hash change also triggers this refresh even if the
-   package version was not bumped.
+   bundled versions. A bundled prompt change without a package-version change does not
+   trigger a refresh.
 4. **Retired preset:** a formerly bundled name is backed up and removed so an obsolete
    prompt does not remain silently active.
 5. Files whose names were never managed bundled presets are left untouched.
@@ -146,8 +222,10 @@ Synchronization holds a cross-process lock, then preflights and stages the whole
 before changing agent files. If a commit fails, it rolls back already-applied changes and
 fails extension startup rather than falling back to package prompts. Same-name symbolic
 links are preserved as symbolic links inside the backup directory before the user path is
-replaced. An invalid synchronization manifest is copied to a timestamped `.corrupt-*` file
-and startup fails closed until the manifest is repaired or deliberately removed.
+replaced. An invalid synchronization manifest is copied to a content-addressed
+`.corrupt-*` file and skips template initialization; user and project agent discovery
+continues with a warning. Repair the manifest, or deliberately remove it to request a new
+first-install initialization pass.
 
 Synchronization state and backups live at:
 
@@ -236,10 +314,12 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 {
   "$schema": "/path/to/pi-subagent/config.schema.json",
   "agentScope": "user",
-  "syncBundledAgents": false,
   "maxDepth": 3,
   "enableRunInBackground": true,
   "defaultBackground": true,
+  "maxConcurrentBackgroundRuns": 4,
+  "maxIdleRuntimes": 0,
+  "backgroundProtocol": "legacy",
   "reportDelivery": "wakeup",
   "inheritExtensions": false,
   "openAIIdentity": false,
@@ -250,16 +330,22 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `agentScope` | `user` | Select user definitions, project definitions, or user definitions followed by project overrides. |
-| `syncBundledAgents` | `false` | **User-level config only.** Opt in to writing managed bundled presets into `<Pi agent dir>/agents`. `true` may install, replace, retire, and back up those files. |
 | `maxDepth` | `3` | Absolute delegation depth; a top-level Pi session is depth 0. |
 | `enableRunInBackground` | `true` | Enable continuable background children and their model-facing lifecycle controls. Set `false` for strict foreground-only mode. |
-| `defaultBackground` | `true` | Default scheduling for fresh `subagent` calls when background execution is enabled. |
-| `reportDelivery` | `wakeup` | `wakeup` starts/queues a parent turn; `quiet` waits for the parent's next turn. |
+| `defaultBackground` | `true` | Default scheduling for `subagent` calls when background execution is enabled. `subagent_fork` remains foreground unless explicitly requested. |
+| `maxConcurrentBackgroundRuns` | `4` | Maximum continuable subagent turns executing at once in one extension runtime. Additional top-level runs wait in FIFO order; nested work fails at capacity instead of deadlocking its parent turn. |
+| `maxIdleRuntimes` | `0` | Process-wide LRU capacity for settled continuable runtimes. `0` preserves immediate unload; a positive value keeps the most recently used idle runtimes and transparently cold-resumes evicted paths. |
+| `backgroundProtocol` | `legacy` | `legacy` preserves immediate `send_message` turns. `mailbox-v2` makes `send_message` enqueue-only and requires `followup_task` to start a turn. The protocol is snapshotted in each child descriptor. |
+| `reportDelivery` | `wakeup` | Controls explicit `report` calls: `wakeup` starts/queues a parent turn; `quiet` waits for the parent's next turn. Mailbox-v2 completion updates are always quiet. |
 | `inheritExtensions` | `false` | Load other Pi extensions in child runtimes. This package filters itself out; explicit agent tool ceilings still apply. |
 | `openAIIdentity` | `false` | For OpenAI Responses child models, inject only the named `pi-codex-minimal-tools` identity lifecycle inline. Codex Session/Thread/Turn/Window ids remain owned and serialized by that package. |
-| `maxOutputBytes` | `51200` | Cap for parent-visible foreground output, reports, and settlement notices. Full output remains in the child session. |
+| `maxOutputBytes` | `51200` | Cap for parent-visible foreground output, reports, completion updates, and legacy settlement notices. Full output remains in the child session. |
 
 Invalid configuration and unknown child tool names fail loud before the child's first model request.
+
+The retired user-level `syncBundledAgents` key from versions 0.2 and 0.3 is
+accepted for configuration compatibility but ignored. Template initialization
+is now automatic and runtime discovery never reads bundled definitions.
 
 `openAIIdentity` and `inheritExtensions` are independent. The former adds only
 the lightweight Codex identity lifecycle even when normal extension inheritance
@@ -285,14 +371,15 @@ In this mode:
 - `run_in_background` is removed from the model-facing schema at session startup;
 - a forced `run_in_background: true` call is rejected before a child is created;
 - nested subagents inherit the foreground-only policy through the durable runtime snapshot;
-- `send_message`, `interrupt_agent`, and `list_agents` are removed from the active
+- `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` are removed from the active
   model tool set, including inside nested children;
 - sibling foreground calls may still execute in parallel in one assistant message.
 
-`subagent_fork` is already foreground-only and is unchanged. The `/subagents` command
-remains available for human inspection of historical children, but persisted continuable
-children cannot be resumed until background execution is re-enabled. Run `/reload` or
-restart Pi after changing this setting so the active tool set and displayed schema are
+`subagent_fork` remains foreground in this mode and its `run_in_background`
+field is removed too. The `/subagents` command remains available for human
+inspection of historical children, but persisted continuable children cannot
+be resumed until background execution is re-enabled. Run `/reload` or restart
+Pi after changing this setting so the active tool set and displayed schema are
 refreshed.
 
 ## Lifecycle
@@ -313,42 +400,131 @@ The caller waits for one isolated child run. Only the child's last non-empty ass
 
 ### Continuable
 
-The start tool resolves at prompt preflight acceptance and returns the child's durable
-agent id (UUIDv7). Agent ids are independent of Pi session (file) ids: they are
+The start tool resolves at prompt preflight acceptance and returns the child's
+readable task path plus stable agent id (UUIDv7). Agent ids are independent of
+Pi session (file) ids: they are
 generated once per subagent, recorded in the child's session as `pi-subagent/agent`,
 and chained through `parentAgentId` in the descriptor, so children stay addressable
 even when a parent session is forked or re-created. When an activation settles:
 
-1. the runtime sends the parent a settlement notice with the stop reason and closing message;
-2. the child runtime is disposed once its owned descendants are done;
-3. its persistent session becomes `ready`;
-4. `send_message` can cold-resume that same session for another FIFO turn.
+1. `legacy` sends the parent its existing wakeup settlement; `mailbox-v2`
+   appends a quiet completion update to the direct parent's session instead;
+2. once owned descendants are done, the child runtime is either disposed or
+   retained in the optional idle LRU;
+3. an unloaded persistent session is `ready`; a retained settled runtime is
+   `idle`;
+4. legacy `send_message`, or mailbox-v2 `followup_task`, can cold-resume that
+   same session for another turn.
 
-A child can explicitly call `report` before settlement. Reports and settlement notices are separate by design.
+A child can explicitly call `report` before settlement. Reports retain
+`reportDelivery` behavior and are separate from quiet mailbox-v2 completions.
 
-### Fork boundary
+Continuable turns share a bounded scheduler. Calls targeting the same durable
+agent are serialized so concurrent messages cannot create multiple cold
+runtimes for one child session. Every scheduler-admitted run has a stable
+`turnId` in delegation details and the paired `pi-subagent:turn-start` /
+`pi-subagent:turn-end` events. FIFO follow-ups accepted while that
+`AgentSession` is already running remain part of the same admitted run.
+Existing `pi-subagent:start` / `pi-subagent:end` events continue to describe
+the wider activation lifecycle and now include `taskPath`.
 
-The parent is executing a tool when `subagent_fork` starts, so its current assistant/tool-result sequence is incomplete. The provider copies only through the latest assistant message whose stop reason is not `toolUse`. This avoids seeding an invalid unbalanced tool turn.
+With `maxIdleRuntimes: 0`, disposal behavior is unchanged. A positive value
+retains only settled continuable runtimes with no active run, owned descendant,
+or pending mailbox claim. LRU accounting is serialized across concurrent
+settlements. Eviction disposes only the runtime; the descriptor, path, context,
+session history, task mailbox, and completion mailbox remain durable, so the
+next accepted turn cold-resumes normally.
+
+#### Mailbox-v2
+
+Set `"backgroundProtocol": "mailbox-v2"` to separate delivery from execution:
+
+1. `send_message` appends a bounded message record to the direct child's JSONL
+   session and returns its stable message id. It does not create a runtime,
+   acquire a scheduler permit, create a `turnId`, or emit turn events.
+2. `followup_task` snapshots the current pending FIFO prefix, waits for the
+   normal background scheduler, and starts one turn containing that batch.
+   Messages arriving after the snapshot remain pending for a later turn.
+3. A claim is committed only after Pi prompt preflight succeeds. The durable
+   user-turn marker makes a claim without its corresponding prompt recoverable
+   after a crash. Once the user turn is durable, the batch is consumed even if
+   that model turn later fails or is interrupted.
+4. Scheduler rejection, cancellation while queued, and shutdown before prompt
+   acceptance leave the batch pending. Concurrent sends and starts for one
+   agent are serialized within the extension process.
+5. A completed turn appends a stable completion record to the direct parent's
+   separate notification mailbox before the child unloads. This custom entry
+   does not enter model context and does not wake or start the parent.
+6. `wait_agent` returns existing unread updates immediately or subscribes to
+   in-process mailbox activity and rechecks durable state after wakeup. Its
+   optional timeout defaults to 30 seconds and is capped at 120 seconds.
+7. A returned update becomes read only after Pi durably appends the successful
+   `wait_agent` tool result. An interrupted/failed delivery is released at the
+   end of the parent turn; a process restart also makes an orphan reservation
+   available again. Delivery output is bounded to a 256 KiB FIFO prefix.
+8. If the parent completion append fails, the child records an undelivered
+   fallback in its own session and emits `pi-subagent:completion-error` before
+   normal residency cleanup; no false completion is exposed to `wait_agent`.
+
+Each message is limited to 131,072 characters; a mailbox is limited to 256 pending
+messages and 256 KiB of pending UTF-8 content. `list_agents` exposes task
+`pending` and completion `updates` independently from lifecycle and scheduler
+state.
+
+FIFO follows durable append order after target resolution, not the invocation
+order of concurrent `send_message` calls. Each returned `pendingMessages` count
+describes that append. If one message must precede another, await the first send
+before starting the next.
+
+`mailbox-v2` is opt-in. Existing descriptors without a protocol field resume as
+`legacy`, and the default legacy tool behavior is unchanged. A persisted
+mailbox-v2 child keeps its protocol snapshot. `followup_task` and `wait_agent` remain available
+when such a child exists even if the current default is later changed back to
+legacy.
+
+`wait_agent` observes only completions written by the current agent's direct
+children. Nested parents consume their own child updates; a root wait does not
+steal grandchild updates. Legacy settlements and all explicit reports retain
+their previous behavior.
+
+### Inherited-context boundary
+
+The parent is executing a tool when an inherited-context child starts, so its
+current assistant/tool-result sequence is incomplete. The provider projects
+Pi's active compaction-aware context only through a safe completed boundary,
+then copies model-facing entries into a new child session. This avoids seeding
+an invalid unbalanced tool turn and prevents parent control-log records from
+becoming child descriptors or mailbox ownership.
 
 ## Security
 
 - Extensions and subagents run with the user's OS permissions.
-- Opt-in `syncBundledAgents: true` synchronizes bundled presets into the user
-  agent directory and may create backups under
-  `<Pi agent dir>/.pi-subagent/backups`. The default does not write these
-  paths.
+- First-install and package-version initialization writes bundled templates
+  into the user agent directory and may create backups under
+  `<Pi agent dir>/.pi-subagent/backups`.
 - Project-local agents are repository-controlled prompts. They are loaded only when the project is trusted and configuration enables project scope.
 - `inheritExtensions` is disabled by default because loading an extension in a child executes its code and may duplicate external side effects.
 - Explicit agent tool lists are enforced as registry ceilings, but this controls model visibility and execution composition rather than providing an OS sandbox.
-- A child may send content only to its recorded direct parent through `report`; `send_message` likewise requires direct-parent identity.
+- A child may send content only to its recorded direct parent through `report`;
+  path resolution is only an address lookup, and `send_message` /
+  `followup_task` still require direct-parent identity.
 
 ## Current limitations
 
-- Activations and ownership are process-local; there is no cross-process lease or durable mailbox.
-- Pi does not expose stable inbox message ids, so control acknowledgements return the child id rather than a delivery id.
-- A process crash can lose a prompt accepted just before Pi writes it to the child JSONL; there is no durable mailbox for accepted-but-unlogged work.
+- Activations, scheduling ownership, and mailbox serialization are process-local;
+  two Pi processes must not concurrently control the same child session.
+- Readable-path reservation and idle-LRU accounting are process-local. Durable
+  UUID identity remains authoritative when multiple processes are involved,
+  which is still unsupported.
+- Resident parents still retain `ownedChildren` until descendants settle;
+  actor-graph residency, orphan handling, and background GC are not implemented.
+- Pi lazily creates a new child JSONL file on its first assistant entry. The
+  initial background agent id therefore has a crash window after prompt
+  acceptance; mailbox-v2 `send_message` waits for that first durable checkpoint
+  before acknowledging an enqueue.
+- Legacy `send_message` still has Pi's prompt-acceptance crash window. Use
+  `mailbox-v2` when delivery must be persisted before an explicit turn start.
 - `interrupt_agent` is fire-and-return and relies on Pi's current `AgentSession.abort()` queue behavior.
-- The fork provider is intentionally one-shot.
 - Structured-output delegation is not implemented yet.
 - Continuable starts require a persisted parent session; ephemeral (`--no-session`) parents can use foreground one-shot delegation only.
 - `subagent_fork` needs a persisted parent to copy completed history; before the first completed turn its safe prefix is empty and it behaves like a fresh child.
@@ -368,6 +544,5 @@ The test suite includes provider-boundary, descriptor, configuration, discovery,
 MIT © 2026 oai404iao. See [LICENSE](LICENSE) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Managed global-preset synchronization is opt-in through
-`syncBundledAgents: true`; the default reads bundled definitions without
-writing user files.
+Bundled presets are initialization templates only. Runtime agent discovery is
+limited to user and trusted project configuration.

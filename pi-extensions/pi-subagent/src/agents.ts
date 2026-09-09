@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
@@ -13,10 +13,7 @@ export interface AgentDiscoveryOptions {
 	cwd: string;
 	scope: AgentScope;
 	projectTrusted: boolean;
-	bundledDir: string;
 	agentDir?: string;
-	includeBundled?: boolean;
-	excludeUserAgentNames?: ReadonlySet<string>;
 }
 
 export interface AgentDiscoveryResult {
@@ -94,11 +91,7 @@ function loadAgentFile(filePath: string, source: AgentSource): AgentDefinition {
 	};
 }
 
-function loadDirectory(
-	dir: string,
-	source: AgentSource,
-	excludeNames?: ReadonlySet<string>,
-): { agents: AgentDefinition[]; diagnostics: string[] } {
+function loadDirectory(dir: string, source: AgentSource): { agents: AgentDefinition[]; diagnostics: string[] } {
 	if (!isDirectory(dir)) return { agents: [], diagnostics: [] };
 	const agents: AgentDefinition[] = [];
 	const diagnostics: string[] = [];
@@ -114,7 +107,6 @@ function loadDirectory(
 
 	for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
 		if (!entry.name.endsWith(".md") || (!entry.isFile() && !entry.isSymbolicLink())) continue;
-		if (excludeNames?.has(entry.name)) continue;
 		const filePath = join(dir, entry.name);
 		try {
 			agents.push(loadAgentFile(filePath, source));
@@ -131,9 +123,6 @@ export function discoverAgents(options: AgentDiscoveryOptions): AgentDiscoveryRe
 			? findNearestProjectAgentsDir(options.cwd)
 			: undefined;
 	const sources: Array<{ dir: string; source: AgentSource }> = [];
-	if (options.includeBundled !== false) {
-		sources.push({ dir: options.bundledDir, source: "bundled" });
-	}
 	if (options.scope !== "project") {
 		sources.push({ dir: join(options.agentDir ?? getAgentDir(), "agents"), source: "user" });
 	}
@@ -148,11 +137,7 @@ export function discoverAgents(options: AgentDiscoveryOptions): AgentDiscoveryRe
 
 	const byName = new Map<string, AgentDefinition>();
 	for (const item of sources) {
-		const loaded = loadDirectory(
-			item.dir,
-			item.source,
-			item.source === "user" ? options.excludeUserAgentNames : undefined,
-		);
+		const loaded = loadDirectory(item.dir, item.source);
 		diagnostics.push(...loaded.diagnostics);
 		for (const agent of loaded.agents) byName.set(agent.name, agent);
 	}
@@ -167,8 +152,4 @@ export function discoverAgents(options: AgentDiscoveryOptions): AgentDiscoveryRe
 export function formatAgentCatalog(agents: AgentDefinition[]): string {
 	if (agents.length === 0) return "(no agents)";
 	return agents.map((agent) => `${agent.name} (${agent.source}) — ${agent.description}`).join("\n");
-}
-
-export function hasBundledAgents(dir: string): boolean {
-	return existsSync(dir) && isDirectory(dir);
 }

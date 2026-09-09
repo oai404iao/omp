@@ -91,7 +91,8 @@ retains an explicitly documented earlier execution baseline.
 
 ## Standalone namespace compatibility serialization
 
-`src/codex-reserved-tools.ts` is a modified TypeScript compatibility
+Runtime's `src/reserved-tools/{web-search,image-generation}.ts`, composed by
+`src/codex-reserved-tools.ts`, contain the modified TypeScript compatibility
 serialization of the pinned Codex namespace-tool construction. It preserves
 the local `web.run` and `image_gen.imagegen` declaration shapes used in the
 internal Responses Lite path; it is neither an exact source-file copy nor a
@@ -166,3 +167,29 @@ upstream parameter declarations are generated from Rust types.
 
 The public built-in guide is included for protocol comparison. It is not
 evidence that the analyzed Codex CLI uses `tools:[{"type":"apply_patch"}]`.
+
+## Local implementation map
+
+The upstream revisions and evidence above are unchanged by the internal module
+split. `src/provider-shim.ts` and `src/providers/openai-responses-shared.ts`
+retain their old exports as compatibility facades; follow these owners when
+auditing or modifying the implementation:
+
+All owners are under `pi-extensions/<package>/src/`. The old local paths remain
+forwarders; `scripts/codex-source-owners.json` records the exact migration.
+
+| Concern | Package | Path within `src/` |
+| --- | --- | --- |
+| Request body, Lite, headers and metadata | pi-codex-core | `providers/openai-codex/{request-body,lite,headers,request-metadata}.ts` |
+| SSE and WebSocket transport | pi-codex-core | `providers/openai-codex/{sse,websocket-connection,websocket-events,websocket-session,websocket-stream}.ts` |
+| Continuation, prewarm and retries | pi-codex-core | `providers/openai-codex/{continuation,prewarm,retry}.ts` |
+| Remote compaction | pi-codex-core | `adapter/compaction/` |
+| Replay, signatures, stream, citations | pi-codex-runtime | `providers/responses/` |
+| Identity, catalog and schemas | pi-codex-runtime | `codex-wire-identity.ts`, `model-catalog/`, package-root schemas |
+| Optional stream effects | pi-codex-runtime | `providers/openai-codex/stream-effects.ts` |
+| Versioned composition and activation | pi-codex-runtime | `broker.ts`, `tool-activation.ts`, `session-claims.ts` |
+| Per-capability namespace evidence | pi-codex-runtime | `reserved-tools/` |
+| Image capture, persistence, display | pi-codex-imagegen | `tools/image-generation/`, `utils/images.ts` |
+| Search client, schema and capture | pi-codex-web-search | `tools/web-search.ts`, `tools/web-search/` |
+| Provider lifecycle and prewarm | pi-codex-core | `extension/{provider-runtime,startup-prewarm}.ts` |
+| Legacy default composition | pi-codex-minimal-tools | `index.ts`, `extension/register.ts` |
