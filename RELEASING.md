@@ -123,8 +123,10 @@ For a workspace on the `bootstrap` track:
    `npm ci --ignore-scripts`, `npm run ci`, and
    `npm run release:bootstrap-artifacts`.
 2. Publish only that workspace's named tarball from `release-artifacts/` with
-   interactive 2FA and `--access public --tag latest`. Bootstrap artifacts
-   cannot be prepared from GitHub Actions.
+   interactive 2FA and `--access public`, using the prepared manifest's
+   `distTag`: `next` for prereleases, `latest` for stable releases. Do not
+   promote an initial alpha to `latest`. Bootstrap artifacts cannot be
+   prepared from GitHub Actions.
 3. Configure its trusted publisher, then merge a dedicated reviewed change
    from `bootstrap` to `publishable`. That activation change must record the
    reviewed npm `gitHead` and SHA-512 integrity in

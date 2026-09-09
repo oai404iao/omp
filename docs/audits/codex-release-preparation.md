@@ -18,7 +18,9 @@ change eligibility, or claim production endpoint acceptance.
   `.worktrees/wip-subagent-redesign-local`. All eight selected files matched
   their pre-save SHA-256 values. That commit is not an ancestor of integrated
   main; its design/configuration work was not merged into the refactor.
-- No branch, tag or package was pushed or published.
+- At completion of this local-integration/preparation stage, no branch, tag or
+  package had been pushed or published. Subsequent public-review authorization
+  and scope are recorded in [bootstrap review](codex-bootstrap-review.md).
 
 ## Registry and account observations
 
@@ -130,5 +132,6 @@ descendant, not the older `refactor/codex-boundaries` checkout. Running the
 explicit-package trust-list commands from that older checkout did not invalidate
 their registry configuration results.
 
-Real model/endpoint calls, bootstrap, npm publication and remote CI execution
-remain **not performed**.
+At completion of this preparation record, real model/endpoint calls, bootstrap,
+npm publication and remote CI execution had **not been performed**. Subsequent
+review activity is tracked separately by the bootstrap review and its public PR.
