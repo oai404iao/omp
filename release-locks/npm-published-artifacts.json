@@ -2,6 +2,22 @@
   "schemaVersion": 1,
   "registry": "https://registry.npmjs.org/",
   "releases": {
+    "@oai404iao/pi-codex-runtime@0.1.0-alpha.1": {
+      "gitHead": "32ba01f3c08b7fd63d09e9b2373cf081c4525533",
+      "integrity": "sha512-i06b9iB8rw4IdcBT1ORW/OSyurnFTdH7bF5jcA7vrvAUiQW4mvu2Ah7FHZ90BMaVTCkmuotY2Q7Wcuo8lpKPkQ=="
+    },
+    "@oai404iao/pi-codex-core@0.1.0-alpha.1": {
+      "gitHead": "32ba01f3c08b7fd63d09e9b2373cf081c4525533",
+      "integrity": "sha512-ckupSb20mdhglNAkB1VNHLaOHxFisZlkLx0cFsJn9ZashH/LCyttIE3g54zzm1eA7/3DxVluzCXfxLbDoQ0oLg=="
+    },
+    "@oai404iao/pi-codex-imagegen@0.1.0-alpha.1": {
+      "gitHead": "32ba01f3c08b7fd63d09e9b2373cf081c4525533",
+      "integrity": "sha512-FG8NsrD/VAJNWN+buigEh6qguk8nhWf6BFZTX8BV3mFuNir6qnYtxeXRAt08T6r0UftKYHbCQXb76vgcvVbwLQ=="
+    },
+    "@oai404iao/pi-codex-web-search@0.1.0-alpha.1": {
+      "gitHead": "32ba01f3c08b7fd63d09e9b2373cf081c4525533",
+      "integrity": "sha512-sIZdn8Q3Yxo7gQqxplFp8V3vdow6koONWt2vqPocRSJRObRGlSc+Fk/b+aBVAYUIsSHsZgHYfiMaYnuw0mDO/Q=="
+    },
     "@oai404iao/pi-codex-minimal-tools@1.3.0": {
       "gitHead": "596d799c6f7db3508b6d46bb05cdca6ea9e3b716",
       "integrity": "sha512-eEUta4JsIJldxM5w+0mAz28YUlev5IECN1kOGQrCX1rFm/xsOqHmdqArmIF94zZz8pbetFo+FPI9bohdwONvLg=="

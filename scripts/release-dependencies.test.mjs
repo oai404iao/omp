@@ -28,25 +28,28 @@ test("bootstrap batches require included dependencies and exact pins", () => {
   assert.throws(() => assertReleaseDependencies(entries, entries, e => manifests[e.name]), /exactly pinned/);
 });
 
-test("the compatibility bundle cannot exclude its bootstrap dependencies", () => {
+test("the compatibility bundle cannot exclude its activated dependencies", () => {
   const bundle = workspaces.find(e => e.name === "@oai404iao/pi-codex-minimal-tools");
   assert.throws(() => assertReleaseDependencies([bundle]), /outside this artifact batch.*pi-codex-runtime/);
 });
 
-test("only the four approved Codex packages enter explicitly opted-in bootstrap batches", () => {
+test("the four verified Codex packages enter guarded batches without admitting the private hook", () => {
   const names = ["runtime", "core", "web-search", "imagegen"].map(name => `@oai404iao/pi-codex-${name}`);
-  assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap").map(e => e.name), names);
+  assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap"), []);
   for (const name of names) {
     const entry = workspaces.find(e => e.name === name);
+    assert.equal(entry.releaseStatus, "publishable");
     assert.equal(readManifest(entry.directory).private, false);
-    assert.ok(!artifactWorkspaces().some(e => e.name === name));
+    assert.ok(artifactWorkspaces().some(e => e.name === name));
     assert.ok(artifactWorkspaces(true).some(e => e.name === name));
   }
   const tree = workspaces.find(e => e.name === "@oai404iao/pi-tree-continue");
   assert.equal(tree.releaseStatus, "blocked");
   assert.equal(readManifest(tree.directory).private, true);
   assert.ok(!artifactWorkspaces(true).includes(tree));
-  assert.throws(() => assertReleaseDependencies(artifactWorkspaces()), /outside this artifact batch/);
+  assert.equal(artifactWorkspaces().length, 9);
+  assert.deepEqual(artifactWorkspaces(), artifactWorkspaces(true));
+  assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces()));
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces(true)));
 });
 

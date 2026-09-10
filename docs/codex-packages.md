@@ -1,8 +1,8 @@
 # Codex package composition
 
-The four workspaces introduced in S3 are now **alpha bootstrap candidates** after
-explicit maintainer approval. They are locally installable tarballs, not yet
-published npm releases. The existing
+The four workspaces introduced in S3 are published at **`0.1.0-alpha.1`**.
+This checkout activates their guarded recovery after independent registry and
+trusted-publisher verification. The existing
 `@oai404iao/pi-codex-minimal-tools` name becomes the compatibility bundle in this
 checkout; its previously published tarballs are unchanged.
 
@@ -111,8 +111,10 @@ The test projects only the production/host-peer closure, preserving nested
 dependency versions and checksums, and checks that even executable symlinks
 stay inside the consumer. It imports the consumer's own Pi loader, not the
 workspace loader. The node_modules capability closure is independently asserted.
-Local Codex tarballs substitute for still-unpublished registry versions: this
-does not claim successful npm bootstrap or real endpoint/account access.
+These tests deliberately use local Codex tarballs, not mutable registry installs;
+they do not themselves verify publication or real endpoint/account access.
+Separate registry and limited real-smoke evidence is recorded in the
+[activation audit](audits/codex-bootstrap-activation.md).
 
 Unit tests additionally exercise activation, unknown/disabled models, legacy
 configuration, new/fork, no UI, abort, late image results and old replay fixtures.
@@ -121,12 +123,13 @@ paths, exact declared dependencies and forbidden optional/peer package edges.
 
 ## Release status
 
-The four new packages are non-private on the `bootstrap` track, not on the
-guarded `publishable` track. Ordinary artifact preparation still rejects the
-bundle because those dependencies are outside its selected batch. Explicit
-local bootstrap preparation includes them only from reviewed public-main source.
-The tree-continue package stays private/blocked; historical release locks are
-unchanged.
+The four new packages are non-private on the guarded `publishable` track.
+Their already-published versions are recovery nodes, pinned by source and SHA-512
+in the release lock. Ordinary preparation includes them with the other five
+alpha candidates; dependency closure may not be bypassed. A locked version
+temporarily missing from registry metadata stops preparation, not triggers a
+new publish. The tree-continue package stays private/blocked, and previous lock
+entries remain unchanged.
 
 S4 supplies `changeset:sync`, CI coverage checking and the guarded
 `changeset:version` wrapper. Generated consumer changesets recurse through hard
@@ -134,9 +137,13 @@ and optional workspace dependencies; exact-pin changes require a consumer bump.
 The publication pipeline independently validates dependency order, artifacts,
 eligibility and dependency visibility, stopping downstream publication on failure.
 
-Bootstrap eligibility and nine-package alpha version preparation were approved;
-actual npm publication and promotion to `publishable` remain unperformed and
-require separate approval. See [alpha preparation](audits/codex-alpha-release.md).
+Initial bootstrap is complete and this dedicated activation change was authorized
+for review. Its merge and protected publication of the remaining five alpha
+versions still need separate approval. The first four packages have both `next`
+and `latest` pointing to their sole initial alpha; that bounded exception is not
+stable-release acceptance. Trusted-publisher configuration is not proof of a
+successful OIDC publish. See [activation evidence](audits/codex-bootstrap-activation.md)
+and [RELEASING.md](../RELEASING.md).
 S5 independently verifies Pi 0.85.1 while retaining the 0.84.2 floor. See
 [Pi compatibility](pi-compatibility.md) for full-matrix commands and limits.
 

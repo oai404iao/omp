@@ -5,9 +5,9 @@ This repository contains a collection of extensions for
 is [`oai404iao/omp`](https://github.com/oai404iao/omp); the existing private
 Gitea remote is retained as a migration backup.
 
-> This checkout prepares nine alpha versions; they are not yet npm releases.
-> Four new Codex packages require separately approved initial bootstrap.
-> Guarded releases of existing packages require an explicit `publish.yml`
+> Four new Codex alpha packages are published and verified; this checkout
+> activates their guarded recovery. The other five alpha versions await release.
+> Guarded publication requires an explicit `publish.yml`
 > dispatch, its `publish` confirmation, and the protected `npm-publish` environment.
 
 ## Packages
@@ -15,24 +15,26 @@ Gitea remote is retained as a migration backup.
 All ten npm workspace packages use the `@oai404iao` scope. Scope naming does
 not change the private/public eligibility below.
 
-| Package | Checkout candidate version | Release track |
+| Package | Checkout version | Release track |
 | --- | ---: | --- |
-| `@oai404iao/pi-codex-minimal-tools` | `1.4.1-alpha.0` | guarded; waiting for bootstrap dependencies |
+| `@oai404iao/pi-codex-minimal-tools` | `1.4.1-alpha.0` | guarded; unpublished alpha candidate |
 | `@oai404iao/pi-external-thinking` | `0.1.1-alpha.0` | guarded; unpublished alpha candidate |
 | `@oai404iao/pi-keep-defaults` | `0.1.4-alpha.0` | guarded; unpublished alpha candidate |
-| `@oai404iao/pi-subagent` | `0.4.0-alpha.0` | guarded; waiting for bootstrap dependencies |
+| `@oai404iao/pi-subagent` | `0.4.0-alpha.0` | guarded; unpublished alpha candidate |
 | `@oai404iao/pi-telegram-notify` | `0.1.4-alpha.0` | guarded; unpublished alpha candidate |
 | `@oai404iao/pi-tree-continue` | `0.1.0` | private; blocked pending a public Pi continuation API |
-| `@oai404iao/pi-codex-runtime` | `0.1.0-alpha.1` | non-private; bootstrap library candidate |
-| `@oai404iao/pi-codex-core` | `0.1.0-alpha.1` | non-private; bootstrap capability candidate |
-| `@oai404iao/pi-codex-web-search` | `0.1.0-alpha.1` | non-private; bootstrap capability candidate |
-| `@oai404iao/pi-codex-imagegen` | `0.1.0-alpha.1` | non-private; bootstrap capability candidate |
+| `@oai404iao/pi-codex-runtime` | `0.1.0-alpha.1` | published alpha; guarded recovery |
+| `@oai404iao/pi-codex-core` | `0.1.0-alpha.1` | published alpha; guarded recovery |
+| `@oai404iao/pi-codex-web-search` | `0.1.0-alpha.1` | published alpha; guarded recovery |
+| `@oai404iao/pi-codex-imagegen` | `0.1.0-alpha.1` | published alpha; guarded recovery |
 
 The scoped npm packages use independent versions. These rows describe the
-checkout, not registry availability. The bundle cannot enter guarded release
-artifacts until the four dependencies are bootstrapped and separately activated.
+checkout; verified registry observations are recorded separately. Guarded
+preparation includes four immutable recovery nodes and five unpublished candidates.
+The new packages' initial `latest` aliases do not make them stable; use explicit
+`@next` or exact alpha versions. Do not mix new capabilities with an old monolith.
 See [Codex composition](docs/codex-packages.md) for package boundaries and
-[alpha preparation](docs/audits/codex-alpha-release.md) for remaining release gates.
+[bootstrap activation](docs/audits/codex-bootstrap-activation.md) for evidence and remaining gates.
 
 > **Codex 1.3.0 documentation note:** the package README and notice inside the
 > immutable `1.3.0` tarball are bootstrap-stage snapshots and retain
