@@ -69,6 +69,20 @@ test("Responses Lite profiles keep standalone tools and custom apply_patch", () 
 	assert.equal(capabilities.image_generation.enabled, true);
 }));
 
+test("global image gate disables only image generation", () => withAgentDir(() => {
+	const settings = { ...DEFAULT_SETTINGS, imageGeneration: false };
+	const capabilities = computeToolCapabilities(
+		{ provider: "openai-codex", id: "gpt-6-astra", input: ["text", "image"] },
+		settings,
+	);
+	assert.deepEqual(capabilities.image_generation, {
+		enabled: false,
+		reason: "image generation disabled by global setting",
+	});
+	assert.equal(capabilities.apply_patch.enabled, true);
+	assert.equal(capabilities.web_search.enabled, true);
+}));
+
 test("legacy model settings remain a one-version compatibility override", () => withAgentDir(() => {
 	const disabledPatch = computeToolCapabilities(openai55, {
 		...DEFAULT_SETTINGS,

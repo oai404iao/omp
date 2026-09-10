@@ -69,7 +69,10 @@ export function createCompositionHost(directory: string, bus = new EventEmitter(
 			handlers.set(name, [...(handlers.get(name) ?? []), handler]);
 		},
 		registerTool: (tool: any) => add(tools, tool.name, tool),
-		registerProvider: (name: string, value: any) => add(providers, name, value),
+		registerProvider: (providerOrName: string | { id: string }, value?: any) => {
+			if (typeof providerOrName === "string") add(providers, providerOrName, value);
+			else add(providers, providerOrName.id, providerOrName);
+		},
 		registerCommand: (name: string, value: any) => add(commands, name, value),
 		registerMessageRenderer: (name: string, value: any) => add(renderers, name, value),
 		getAllTools: () => [...tools.values()],

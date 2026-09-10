@@ -35,6 +35,9 @@ supported, forwarding to runtime's identically named subpath.
 The default bundle keeps its existing tool names, activation, mutation-tool
 suppression, commands, schemas, saved message types and wire formats.
 Unknown or disabled model profiles remain on Pi's native implementation.
+`openai-codex/gpt-6-astra` has an exact Responses Lite profile. Core
+conditionally supplements its model descriptor only when the Pi 0.84.2 static
+catalog lacks it; Pi versions that already provide Astra keep their catalog.
 
 All combinations read the same existing configuration:
 
@@ -47,6 +50,12 @@ All combinations read the same existing configuration:
 settings precedence is unchanged. Runtime owns the canonical schemas/default
 catalog; the bundle retains byte-checked compatibility copies. Do not create
 parallel configuration directories named after the new capabilities.
+
+Global `config.json.imageGeneration:false` is a generation kill switch. It
+prevents image tool, command and presentation registration and blocks hosted,
+standalone and direct-fallback execution without changing Responses mode,
+transport, compaction, patch, web-search, image input or historical replay.
+Per-model `tools.imageGeneration:false` remains an independent profile override.
 
 Standalone clients obtain authentication from Pi's model registry. Without core:
 

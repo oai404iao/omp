@@ -123,7 +123,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`compaction: ${modelSettings.compactionMode}`,
 		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, summary=${requestProfile.reasoningSummary}, system=${requestProfile.systemPromptPlacement}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
 		`web search: ${modelSettings.webSearchImplementation ?? "off"}`,
-		`image generation: ${modelSettings.imageGenerationImplementation ?? "off"}`,
+		`image generation: ${settings.imageGeneration ? modelSettings.imageGenerationImplementation ?? "off" : "off (global gate)"}`,
 		`legacy additionalModelIds: ${settings.additionalModelIds.length > 0 ? settings.additionalModelIds.join(", ") : "(none)"}`,
 		`apiKeyMode: ${modelSettings.apiKeyMode}`,
 		`native provider shim: ${settings.enabled ? "registered" : "disabled"}`,
@@ -236,7 +236,6 @@ export default function codexCore(pi: ExtensionAPI): void {
 			!settings.enabled
 			|| !profile?.effective.enabled
 			|| !modelSettings.providerShimActive
-			|| !modelSettings.nativeProviderTools
 		) return undefined;
 		const capabilities = computeToolCapabilities(contextModel(ctx), settings);
 		const webSearch = profile.effective.tools.webSearch;
@@ -252,6 +251,8 @@ export default function codexCore(pi: ExtensionAPI): void {
 					}
 				: false,
 		});
-		return result.rewritten.length > 0 ? result.payload : undefined;
+		return result.rewritten.length > 0 || result.removed.length > 0
+			? result.payload
+			: undefined;
 	});
 }

@@ -7,6 +7,29 @@ them. Paths are relative to the analyzed `openai/codex` checkout at commit
 The local executor behavior in [apply-patch behavior](apply-patch-behavior.md)
 retains an explicitly documented earlier execution baseline.
 
+The Astra-only catalog delta is pinned separately to
+`ddea03ad049142943bdbf13e937b1d67e8c1ba0c`. It does not change the older
+reserved-tool or grammar fingerprints.
+
+## GPT-6 Astra delta
+
+| Source | Evidence |
+| --- | --- |
+| `codex-rs/models-manager/models.json` | Declares the Astra context limits, reasoning levels/defaults, modalities, Responses Lite mode, WebSocket preference, freeform patch support, service tier, and experimental-context capability. |
+| `codex-rs/models-manager/src/model_info.rs` | Defines model metadata defaults and configurable context-window limits. |
+| `codex-rs/core/src/client.rs` | Confirms Lite developer-message placement, `additional_tools`, disabled parallel calls, reasoning context, and WebSocket request behavior. |
+
+The published provenance record
+`provenance/openai-codex-ddea03ad-astra.json` preserves the immutable upstream
+blob IDs and SHA-256 hashes for this delta.
+
+The supplemental model/provider design was also adapted from
+`IgorWarzocha/howaboua-pi-stuff` commit
+`56c7a9b4a10a2ea2115e27dbd0524d6000769398`, path
+`packages/pi-codex-conversion/src/providers/openai-codex/model-catalog.ts`.
+That source is MIT-licensed; its immutable blob/hash and included license path
+are recorded in the same provenance file.
+
 ## Apply-patch declaration and grammar
 
 | Source | Evidence |

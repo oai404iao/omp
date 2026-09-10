@@ -111,6 +111,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 				tools: snapshot.tools,
 			}, profile, {
 				ownsNativeTool,
+				imageGeneration: settings.imageGenerationImplementation ?? false,
 				apiKey: auth.apiKey,
 				headers: auth.headers,
 				sessionId,
@@ -119,20 +120,18 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 			settings,
 			model,
 		);
-		if (settings.nativeProviderTools) {
-			const webSearch = settings.modelProfile.effective.tools.webSearch;
-			body = rewriteNativeOpenAiTools(body, {
-				ownsNativeTool,
-				imageModel: settings.imageModel,
-				imageGeneration: settings.imageGenerationImplementation ?? false,
-				webSearch: settings.webSearchEnabled && webSearch
-					? {
-							implementation: webSearch.implementation,
-							contentTypes: webSearch.contentTypes,
-						}
-					: false,
-			}).payload;
-		}
+		const webSearch = settings.modelProfile.effective.tools.webSearch;
+		body = rewriteNativeOpenAiTools(body, {
+			ownsNativeTool,
+			imageModel: settings.imageModel,
+			imageGeneration: settings.imageGenerationImplementation ?? false,
+			webSearch: settings.webSearchEnabled && webSearch
+				? {
+						implementation: webSearch.implementation,
+						contentTypes: webSearch.contentTypes,
+					}
+				: false,
+		}).payload;
 		ensureWebSearchDetailsIncluded(body);
 		body = withResponsesLiteWebSocketMetadata(body, profile.responsesMode);
 

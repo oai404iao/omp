@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/openai/codex",
+    "revision": "ddea03ad049142943bdbf13e937b1d67e8c1ba0c",
+    "commitUrl": "https://github.com/openai/codex/commit/ddea03ad049142943bdbf13e937b1d67e8c1ba0c",
+    "license": "Apache-2.0"
+  },
+  "files": {
+    "LICENSE": {
+      "role": "upstream Apache-2.0 license",
+      "gitBlobSha": "4606e72e042564097e8780d66c1d4dcb611869bd",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/ddea03ad049142943bdbf13e937b1d67e8c1ba0c/LICENSE"
+    },
+    "NOTICE": {
+      "role": "upstream NOTICE",
+      "gitBlobSha": "2805899d56d0332d175cfc613c67d45d6f006db7",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/ddea03ad049142943bdbf13e937b1d67e8c1ba0c/NOTICE"
+    },
+    "codex-rs/models-manager/models.json": {
+      "role": "GPT-6 Astra capabilities and defaults",
+      "gitBlobSha": "1b5ce2c515986f84147abe5f4fb6e9b0deab0470",
+      "sha256": "897614e513a591b362f76c34e4b4d31af5809a2b52f8c0ab57f2990c5bf4ab3d",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/ddea03ad049142943bdbf13e937b1d67e8c1ba0c/codex-rs/models-manager/models.json"
+    },
+    "codex-rs/models-manager/src/model_info.rs": {
+      "role": "model metadata representation and context-window limits",
+      "gitBlobSha": "ca1006993137d66de19137ff136f7ac8d36f9da3",
+      "sha256": "919883a4a15f6f3cace2ec78388aa7f9f8e042f74f553877843552ed55bf15bf",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/ddea03ad049142943bdbf13e937b1d67e8c1ba0c/codex-rs/models-manager/src/model_info.rs"
+    },
+    "codex-rs/core/src/client.rs": {
+      "role": "Responses Lite and WebSocket request behavior",
+      "gitBlobSha": "8d2db30d7bb942cd030cb8d511eaafba8cbe46dd",
+      "sha256": "6a9b3d5d60293ca694e1642c905b574c2c12da490cff1c165e485f35a81f6edb",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/ddea03ad049142943bdbf13e937b1d67e8c1ba0c/codex-rs/core/src/client.rs"
+    }
+  },
+  "catalogReference": {
+    "package": "@earendil-works/pi-ai",
+    "version": "0.85.1",
+    "license": "MIT",
+    "repository": "https://github.com/earendil-works/pi",
+    "tarballIntegrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==",
+    "path": "dist/providers/data/openai-codex.json",
+    "sha256": "a10bfcfd34db6bcb98d8ee46175e154cab30530a137dbf31ac1434020ed3ffdd"
+  },
+  "referenceImplementation": {
+    "repository": "https://github.com/IgorWarzocha/howaboua-pi-stuff",
+    "revision": "56c7a9b4a10a2ea2115e27dbd0524d6000769398",
+    "commitUrl": "https://github.com/IgorWarzocha/howaboua-pi-stuff/commit/56c7a9b4a10a2ea2115e27dbd0524d6000769398",
+    "license": "MIT",
+    "sourcePath": "packages/pi-codex-conversion/src/providers/openai-codex/model-catalog.ts",
+    "gitBlobSha": "dff3dc50745525de28a4da16f18babb446e99b30",
+    "sha256": "e8ad2939e4f5261b99cdbc8a8b2937d3b8f2d5ddb3dd206de69ea3feaabc44d4",
+    "relationship": "Astra descriptor and conditional provider supplementation adapted to this repository's provider-preserving split-package architecture.",
+    "licensePath": "LICENSES/howaboua-pi-stuff-MIT.txt"
+  },
+  "localImplementations": [
+    "pi-codex-runtime/src/model-catalog/default-models.json",
+    "pi-codex-core/src/providers/openai-codex/model-catalog.ts",
+    "pi-codex-minimal-tools/src/model-catalog/default-models.json"
+  ]
+}

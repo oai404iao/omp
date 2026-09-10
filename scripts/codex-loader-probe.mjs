@@ -20,7 +20,15 @@ for (const { cwd, label, paths, expectedTools, core } of job.probes) {
   assert.deepEqual([...tools].sort(), [...expectedTools].sort());
   const commands = result.extensions.flatMap(extension => [...extension.commands.keys()]);
   assert.equal(new Set(commands).size, commands.length, "commands registered more than once");
-  assert.equal(result.runtime.pendingProviderRegistrations.length, core ? 2 : 0);
+  assert.equal(
+    result.runtime.pendingProviderRegistrations.length
+      + result.runtime.pendingNativeProviderRegistrations.length,
+    core ? 2 : 0,
+  );
+  for (const registration of result.runtime.pendingNativeProviderRegistrations) {
+    assert.equal(registration.provider.id, "openai-codex");
+    assert.ok(registration.provider.getModels().some(model => model.id === "gpt-6-astra"));
+  }
   const model = { provider: "openai", api: "openai-responses", id: "gpt-5.6-sol", baseUrl: "https://fixture.invalid/v1", input: ["text", "image"] };
   const ctx = { cwd, model, hasUI: false, sessionManager: { getSessionId: () => label },
     modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: false, error: "not logged in" }) } };

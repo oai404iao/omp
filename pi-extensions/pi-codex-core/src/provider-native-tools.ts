@@ -4,6 +4,7 @@ import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/p
 export interface NativeToolRewriteResult<T = unknown> {
 	payload: T;
 	rewritten: string[];
+	removed: string[];
 }
 
 export interface NativeToolRewriteOptions {
@@ -40,36 +41,43 @@ function imageToolConfig(tool: Record<string, unknown>, options: NativeToolRewri
 }
 
 export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewriteOptions = {}): NativeToolRewriteResult<T> {
-	if (!isRecord(payload) || !Array.isArray(payload.tools)) return { payload, rewritten: [] };
+	if (!isRecord(payload) || !Array.isArray(payload.tools)) return { payload, rewritten: [], removed: [] };
 	const rewritten: string[] = [];
-	const tools = payload.tools.map((candidate) => {
-		if (!isRecord(candidate)) return candidate;
+	const removed: string[] = [];
+	const tools = payload.tools.flatMap((candidate) => {
+		if (!isRecord(candidate)) return [candidate];
 		const name = toolName(candidate);
 		if ((name === "web_search" || name === "image_generation")
-			&& options.ownsNativeTool?.(name) === false) return candidate;
+			&& options.ownsNativeTool?.(name) === false) return [candidate];
+		if (name === "image_generation"
+			&& options.ownsNativeTool?.(name) === true
+			&& options.imageGeneration === false) {
+			removed.push(name);
+			return [];
+		}
 		if (name === "image_generation" && options.imageGeneration !== false) {
 			rewritten.push(name);
 			if (options.imageGeneration === "standalone") {
-				return createCodexReservedNamespaceTool("image_generation");
+				return [createCodexReservedNamespaceTool("image_generation")];
 			}
-			return imageToolConfig(candidate, options);
+			return [imageToolConfig(candidate, options)];
 		}
 		if (name === "web_search" && options.webSearch) {
 			rewritten.push(name);
 			if (typeof options.webSearch === "object" && options.webSearch.implementation === "standalone") {
-				return createCodexReservedNamespaceTool("web_search");
+				return [createCodexReservedNamespaceTool("web_search")];
 			}
 			const contentTypes = typeof options.webSearch === "object"
 				? options.webSearch.contentTypes
 				: undefined;
-			return {
+			return [{
 				type: "web_search",
 				...(contentTypes && contentTypes.length > 0
 					? { search_content_types: [...contentTypes] }
 					: {}),
-			};
+			}];
 		}
-		return candidate;
+		return [candidate];
 	});
-	return { payload: { ...payload, tools } as T, rewritten };
+	return { payload: { ...payload, tools } as T, rewritten, removed };
 }

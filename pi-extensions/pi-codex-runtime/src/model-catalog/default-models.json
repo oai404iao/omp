@@ -151,6 +151,14 @@
       }
     },
     {
+      "id": "openai-codex/gpt-6-astra",
+      "extends": "openai/gpt-5.6-sol",
+      "responses": {
+        "endpoint": "codex",
+        "reasoningSummary": "none"
+      }
+    },
+    {
       "id": "openai-codex/gpt-5.6-terra",
       "extends": "openai/gpt-5.6-terra",
       "responses": {

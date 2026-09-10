@@ -12,7 +12,10 @@ Capability-specific HTTP clients, storage and transports live in other packages.
 
 Configuration paths remain
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json`.
-This package ships the canonical schemas and default catalog.
+This package ships the canonical schemas and default catalog, including the
+`openai-codex/gpt-6-astra` Responses Lite profile. The global
+`config.json.imageGeneration:false` setting gates image capability derivation
+without replacing the selected model profile.
 `./subagent-inline` supplies the existing SDK identity integration.
 `./internal/*` is implementation wiring, not a stable public API.
 

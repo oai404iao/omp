@@ -75,24 +75,26 @@ export function createCodexStream<TApi extends Api>(
 				"turn",
 			);
 			let body = applyFastModeServiceTier(
-				buildRequestBody(model, context, requestProfile, { ...options, ownsNativeTool: deps.ownsNativeTool }),
+				buildRequestBody(model, context, requestProfile, {
+					...options,
+					ownsNativeTool: deps.ownsNativeTool,
+					imageGeneration: settings.imageGenerationImplementation ?? false,
+				}),
 				settings,
 				model,
 			);
-			if (settings.nativeProviderTools) {
-				const webSearch = settings.modelProfile.effective.tools.webSearch;
-				body = rewriteNativeOpenAiTools(body, {
-					ownsNativeTool: deps.ownsNativeTool,
-					imageModel: settings.imageModel,
-					imageGeneration: settings.imageGenerationImplementation ?? false,
-					webSearch: settings.webSearchEnabled && webSearch
-						? {
-								implementation: webSearch.implementation,
-								contentTypes: webSearch.contentTypes,
-							}
-						: false,
-				}).payload;
-			}
+			const webSearch = settings.modelProfile.effective.tools.webSearch;
+			body = rewriteNativeOpenAiTools(body, {
+				ownsNativeTool: deps.ownsNativeTool,
+				imageModel: settings.imageModel,
+				imageGeneration: settings.imageGenerationImplementation ?? false,
+				webSearch: settings.webSearchEnabled && webSearch
+					? {
+							implementation: webSearch.implementation,
+							contentTypes: webSearch.contentTypes,
+						}
+					: false,
+			}).payload;
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
 				body = nextBody as ResponsesBody;

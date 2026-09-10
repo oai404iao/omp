@@ -11,6 +11,9 @@ rolled back; cancellation is not a guarantee of avoiding provider charges.
 
 Installs `image_generation`, background image commands, image persistence and
 presentation. Depends only on `pi-codex-runtime`, not core, web-search or the bundle.
+When global `config.json.imageGeneration` is `false`, none of those generation
+surfaces are registered. The gate also blocks late/manual standalone and direct
+fallback execution before authentication or network I/O.
 Catalog-supported standalone profiles call Images generation/edit endpoints with
 Pi authentication. Hosted profiles need core unless the existing
 `directImageApiFallback` option was explicitly enabled.

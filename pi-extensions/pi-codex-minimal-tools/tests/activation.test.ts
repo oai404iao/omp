@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import codexMinimalTools from "../src/index.js";
 import { hasConfiguredModelsLoaded } from "../src/activation.js";
 import { DEFAULT_SETTINGS } from "../src/settings.js";
@@ -18,7 +19,10 @@ function fakePi() {
 		providers,
 		tools,
 		registerCommand() {},
-		registerProvider(name: string, value: any) { providers.push({ name, value }); },
+		registerProvider(providerOrName: string | { id: string }, value?: any) {
+			if (typeof providerOrName === "string") providers.push({ name: providerOrName, value });
+			else providers.push({ name: providerOrName.id, value: providerOrName });
+		},
 		registerMessageRenderer() {},
 		registerTool(tool: any) { tools.push(tool); },
 		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },
@@ -128,6 +132,26 @@ test("provider shim remains registered when native hosted tools are disabled", a
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
 	assert.deepEqual(pi.providers.map((provider) => provider.name), ["openai-codex", "openai"]);
+}));
+
+test("provider registration supplements Astra only when the host catalog needs it", async () => withAgentDir(async () => {
+	const pi = fakePi();
+	codexMinimalTools(pi as any);
+	const registration = pi.providers.find(provider => provider.name === "openai-codex")?.value;
+	assert.ok(registration);
+	const hostModels = getBuiltinModels("openai-codex");
+	if (hostModels.some(model => model.id === "gpt-6-astra")) {
+		assert.equal(registration.api, "openai-codex-responses");
+		assert.equal(registration.getModels, undefined);
+		return;
+	}
+	assert.equal(registration.id, "openai-codex");
+	assert.ok(registration.auth?.oauth);
+	const registeredModels = registration.getModels();
+	assert.ok(registeredModels.some((model: { id: string }) => model.id === "gpt-6-astra"));
+	for (const model of hostModels) {
+		assert.ok(registeredModels.some((candidate: { id: string }) => candidate.id === model.id));
+	}
 }));
 
 test("user model profiles register a provider-preserving Responses shim", async () => withAgentDir(async (agentDir) => {

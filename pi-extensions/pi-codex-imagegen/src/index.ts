@@ -11,6 +11,8 @@ import { createImageDisplay } from "./tools/image-generation/display.js";
 export default function codexImagegen(pi: ExtensionAPI): void {
 	const broker = ensureCodexServices(pi);
 	if (!broker.claim("package:imagegen")) return;
+	const settings = loadSettings();
+	if (!settings.enabled || !settings.imageGeneration) return;
 	const display = createImageDisplay(pi);
 	broker.addPresentation("image_generation", {
 		clear: display.clear,
@@ -29,5 +31,5 @@ export default function codexImagegen(pi: ExtensionAPI): void {
 			hasProviderRuntime: () => broker.coreEnabled,
 		}) as never);
 	});
-	if (loadSettings().enabled) registerBackgroundImageGenerationCommand(pi);
+	registerBackgroundImageGenerationCommand(pi);
 }
