@@ -133,7 +133,9 @@ For a workspace on the `bootstrap` track:
 2. Publish only that workspace's named tarball from `release-artifacts/` with
    interactive 2FA and `--access public`, using the prepared manifest's
    `distTag`: `next` for prereleases, `latest` for stable releases. Do not
-   promote an initial alpha to `latest`. Bootstrap artifacts cannot be
+   explicitly publish a prerelease with `--tag latest`. npm retains a `latest`
+   tag for a new package; the reviewed initial Codex exception below handles
+   that alias without trying to delete it. Bootstrap artifacts cannot be
    prepared from GitHub Actions.
 3. Configure its trusted publisher, then merge a dedicated reviewed change
    from `bootstrap` to `publishable`. That activation change must record the
@@ -187,6 +189,36 @@ The recovery guard compares the registry `gitHead` and SHA-512 integrity with
 any matching entry in `release-locks/npm-published-artifacts.json`. Add an
 entry when an interactive bootstrap is verified; do not alter a locked value
 without a separate source-and-registry investigation.
+
+### Initial Codex `latest` alias
+
+npm's registry metadata requires a `latest` tag. The first runtime publication
+has both `next` and `latest` pointing to its only version; removing `latest`
+returned E400. Do not unpublish, republish, publish a dummy stable version, or
+delete the tag to work around this. See the
+[official registry schema](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md#package).
+
+The maintainer approved a narrow exception recorded in
+`scripts/initial-codex-bootstrap.mjs`: only runtime/core/imagegen/web-search
+at `0.1.0-alpha.1` from reviewed source
+`32ba01f3c08b7fd63d09e9b2373cf081c4525533`, with `next` and `latest` both pointing
+to that version and no other published version visible in registry history.
+This does not declare the alpha stable. A version-less install of a new package
+can resolve to that alpha; prefer explicit `@next` or exact versions.
+
+The guarded publisher accepts this alias only for an already-published
+`recover` candidate with matching reviewed release-lock gitHead/integrity.
+The current bootstrap eligibility still excludes those packages from guarded
+artifacts until a separately approved activation. Missing/malformed history,
+missing locks, other packages, later versions or a wrong `next` still fail
+closed. Existing stable packages retain their prerelease/latest prohibition.
+Tags are checked before proceeding to consumers and again during reconciliation.
+Neither the publisher nor the local verifier edits registry tags.
+
+The local interactive bootstrap verifier uses the same tag predicate after
+validating the prepared artifact and published identity; it cannot require a
+release-lock entry that is only added after verified bootstrap. See
+[the correction record](docs/audits/codex-bootstrap-latest.md).
 
 Public and supported-package peer ranges currently require Pi 0.84.2 or
 newer; the exact development target is 0.85.1, with both versions checked by

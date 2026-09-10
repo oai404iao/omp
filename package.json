@@ -51,7 +51,7 @@
     "release:artifacts": "node scripts/prepare-release-artifacts.mjs",
     "release:bootstrap-artifacts": "node scripts/prepare-release-artifacts.mjs --include-bootstrap",
     "release:preflight": "node scripts/release-preflight.mjs",
-    "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs scripts/pi-baselines.test.mjs"
+    "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/initial-codex-bootstrap.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs scripts/pi-baselines.test.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",
