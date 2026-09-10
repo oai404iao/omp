@@ -66,7 +66,9 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	const providerShimActive = modelSettings.providerShimActive;
 
 	return {
-		image_generation: imageGeneration === "hosted" && providerShimActive && imageInput
+		image_generation: !settings.imageGeneration
+			? { enabled: false, reason: "image generation disabled by global setting" }
+			: imageGeneration === "hosted" && providerShimActive && imageInput
 			? { enabled: true, reason: "model profile enables hosted image_generation" }
 			: imageGeneration === "standalone" && imageInput
 				? { enabled: true, reason: "model profile enables standalone image generation" }

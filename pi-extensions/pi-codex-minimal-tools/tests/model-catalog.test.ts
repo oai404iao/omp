@@ -63,6 +63,59 @@ test("bundled profiles expose independent Standard and Lite Codex capabilities",
 	assert.equal(lite.effective.tools.webSearch && lite.effective.tools.webSearch.implementation, "standalone");
 	assert.equal(lite.effective.tools.imageGeneration, "standalone");
 	assert.equal(lite.effective.compaction, "responses");
+
+	const astra = loadModelSettings(
+		{
+			provider: "openai-codex",
+			id: "gpt-6-astra",
+			api: "openai-codex-responses",
+		},
+		undefined,
+		DEFAULT_SETTINGS,
+	);
+	assert.deepEqual(astra.modelProfile?.sources, ["bundled"]);
+	assert.equal(astra.providerShimActive, true);
+	assert.equal(astra.apiKeyMode, false);
+	assert.equal(astra.openaiTransport, "auto");
+	assert.equal(astra.openaiWebSocketPrewarm, true);
+	assert.equal(astra.requestProfile.responsesMode, "lite");
+	assert.equal(astra.requestProfile.reasoningSummary, "none");
+	assert.equal(astra.requestProfile.supportsParallelTools, false);
+	assert.equal(astra.requestProfile.patchTransport, "custom");
+	assert.equal(astra.webSearchImplementation, "standalone");
+	assert.equal(astra.imageGenerationImplementation, "standalone");
+	assert.equal(astra.compactionMode, "responses");
+	assert.equal(astra.fastServiceTier, "priority");
+	assert.equal(
+		resolveModelProfile(
+			{ provider: "openai", id: "gpt-6-astra" },
+			{ settings: DEFAULT_SETTINGS },
+		),
+		undefined,
+	);
+}));
+
+test("global image gate preserves the selected model protocol profile", () => withAgentDir(() => {
+	const settings = loadModelSettings(
+		{
+			provider: "openai-codex",
+			id: "gpt-6-astra",
+			api: "openai-codex-responses",
+		},
+		undefined,
+		{ ...DEFAULT_SETTINGS, imageGeneration: false },
+	);
+	assert.deepEqual(settings.modelProfile?.sources, ["bundled"]);
+	assert.equal(settings.modelProfile?.effective.tools.imageGeneration, "standalone");
+	assert.equal(settings.imageGeneration, false);
+	assert.equal(settings.imageGenerationImplementation, undefined);
+	assert.equal(settings.providerShimActive, true);
+	assert.equal(settings.openaiTransport, "auto");
+	assert.equal(settings.openaiWebSocketPrewarm, true);
+	assert.equal(settings.requestProfile.responsesMode, "lite");
+	assert.equal(settings.requestProfile.patchTransport, "custom");
+	assert.equal(settings.compactionMode, "responses");
+	assert.equal(settings.webSearchImplementation, "standalone");
 }));
 
 test("user entries deep-override bundled profiles by exact provider/model id", () => withAgentDir((agentDir) => {

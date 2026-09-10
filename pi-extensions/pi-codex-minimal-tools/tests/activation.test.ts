@@ -18,7 +18,10 @@ function fakePi() {
 		providers,
 		tools,
 		registerCommand() {},
-		registerProvider(name: string, value: any) { providers.push({ name, value }); },
+		registerProvider(providerOrName: string | { id: string }, value?: any) {
+			if (typeof providerOrName === "string") providers.push({ name: providerOrName, value });
+			else providers.push({ name: providerOrName.id, value: providerOrName });
+		},
 		registerMessageRenderer() {},
 		registerTool(tool: any) { tools.push(tool); },
 		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },

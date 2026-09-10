@@ -8,7 +8,7 @@ forwards or verified asset mirrors. Their adaptations now live in
 `@oai404iao/pi-codex-runtime/src/reserved-tools/`. Those packages retain the
 original modification notices, Apache snapshots and provenance. Search/image
 clients live in their respective capability packages. No upstream revision or
-reviewed fingerprint changed during this move.
+reviewed reserved-tool fingerprint changed during this move.
 
 ## OpenAI Codex
 
@@ -58,6 +58,16 @@ Apache-2.0 terms for the adapted material.
 The repository's `reference/` directory contains protocol analysis based on
 both Codex revisions above. It is development documentation and is excluded
 from the npm tarball.
+
+### GPT-6 Astra profile
+
+The Astra profile is derived from Codex model/request metadata at revision
+[`ddea03ad049142943bdbf13e937b1d67e8c1ba0c`](https://github.com/openai/codex/commit/ddea03ad049142943bdbf13e937b1d67e8c1ba0c)
+and cross-checked against the MIT-licensed
+`@earendil-works/pi-ai@0.85.1` generated catalog. The Codex file/blob hashes
+and locked npm tarball identity are recorded in
+`provenance/openai-codex-ddea03ad-astra.json`. This delta does not repin or
+modify the reserved namespace-tool and apply-patch grammar fingerprints.
 
 ### Modified namespace-tool compatibility serialization
 

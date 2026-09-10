@@ -9,11 +9,17 @@ extension.
 - Codex checkout: `openai/codex`
 - Primary analyzed commit:
   `eb9dceba1a2e658142a456c5898836774835616b`
+- Astra model delta:
+  `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`
 - Local analysis date: August 12, 2026
 - Primary implementation: `codex-rs/`
 
 Source paths are relative to that checkout unless noted. Model availability
 and internal fields can change after the snapshot.
+
+The Astra delta supplies model metadata and confirms the current Lite request
+behavior. It does not repin the reserved-tool fingerprints or apply-patch
+grammar from the primary snapshot.
 
 The local apply-patch executor behavior note retains the earlier
 `03bb3b12367397e14a8facc2e018d645ff4d8e83` execution baseline and documents

@@ -490,7 +490,6 @@ function legacySettingsRecord(settings: CodexMinimalToolsSettings): JsonRecord {
 		"compactionMode",
 		"requestProfile",
 		"apiKeyMode",
-		"imageGeneration",
 		"webSearchEnabled",
 		"viewImage",
 		"applyPatchEnabled",
@@ -523,7 +522,6 @@ function legacyProfilePatch(
 		"compactionMode",
 		"requestProfile",
 		"apiKeyMode",
-		"imageGeneration",
 		"webSearchEnabled",
 		"viewImage",
 		"applyPatchEnabled",
@@ -568,9 +566,6 @@ function legacyProfilePatch(
 				: false,
 			webSearch: settings.webSearchEnabled && hostedTools && oldExtendedToolModel
 				? { implementation: "hosted", contentTypes: [...contentTypes] }
-				: false,
-			imageGeneration: settings.imageGeneration && hostedTools
-				? "hosted"
 				: false,
 			viewImage: settings.viewImage,
 		},

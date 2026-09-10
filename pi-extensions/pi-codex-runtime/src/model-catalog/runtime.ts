@@ -70,7 +70,9 @@ export function loadModelSettings(
 	const configuredWebSearchImplementation = effective.tools.webSearch
 		? effective.tools.webSearch.implementation
 		: undefined;
-	const configuredImageGenerationImplementation = effective.tools.imageGeneration || undefined;
+	const configuredImageGenerationImplementation = baseSettings.imageGeneration
+		? effective.tools.imageGeneration || undefined
+		: undefined;
 	const webSearchImplementation = !packageEnabled
 		|| (configuredWebSearchImplementation === "hosted" && !providerShimActive)
 		? undefined

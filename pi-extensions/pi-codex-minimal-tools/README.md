@@ -3,7 +3,7 @@
 Codex-specific Responses support for Pi, driven by an exact per-model JSON
 catalog instead of model-name heuristics.
 
-Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
+Peer floor: Pi 0.85.1; tested against 0.85.1.
 
 > npm identity stays `@oai404iao/pi-codex-minimal-tools`. This checkout composes
 > core, web-search and imagegen through a shared runtime. The four new packages
@@ -113,6 +113,7 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
   "glyphStyle": "unicode",
   "autoEnable": true,
   "fastMode": false,
+  "imageGeneration": true,
   "imageOutputDir": ".pi/openai-codex-images",
   "imageModel": "gpt-image-2",
   "directImageApiFallback": false,
@@ -127,6 +128,7 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `glyphStyle` | Use `unicode` or `ascii` UI glyphs. |
 | `autoEnable` | Add supported package tools automatically. |
 | `fastMode` | Global user toggle; only profiles with `fast` are affected. |
+| `imageGeneration` | Global master switch. Set `false` to omit image tools, `/image-gen`, presentation, hosted injection, standalone requests, and direct fallback without changing other model behavior. |
 | `imageOutputDir` | Generated-image output directory. Relative paths resolve from the workspace root. |
 | `imageModel` | Image model used by standalone/hosted image requests and direct fallback. |
 | `directImageApiFallback` | Permit the separate `OPENAI_API_KEY` Images API fallback. |
@@ -134,7 +136,8 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `deferApplyPatchRendering` | Use Pi's fallback renderer instead of the streaming patch preview. |
 
 The older model-level keys remain readable for one migration version, but are
-deprecated. See [Legacy migration](#legacy-migration).
+deprecated. `imageGeneration` is the exception: it remains the supported global
+master switch. See [Legacy migration](#legacy-migration).
 
 ### Per-Model Catalog
 
@@ -297,10 +300,12 @@ Important constraints:
 ## Built-In Profiles
 
 The bundled catalog is based on local Codex commit
-`eb9dceba1a2e658142a456c5898836774835616b` from August 12, 2026.
+`eb9dceba1a2e658142a456c5898836774835616b` from August 12, 2026, with the
+Astra profile updated from `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`.
 
 | Models | Responses | Web | Image | Patch | Compaction |
 | --- | --- | --- | --- | --- | --- |
+| `openai-codex/gpt-6-astra` | Lite, auto WS/SSE | standalone text+image | standalone | custom | responses |
 | `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | Lite, auto WS/SSE | standalone text+image | standalone | custom | responses |
 | `gpt-5.5`, `gpt-5.4` | Standard, auto WS/SSE | hosted text+image | standalone | custom | responses |
 | `gpt-5.4-mini`, `codex-auto-review` | Standard, auto WS/SSE | hosted text+image | standalone | custom | responses |
@@ -309,8 +314,19 @@ The bundled catalog is based on local Codex commit
 | `gpt-4.1` | Standard SSE | off | hosted | off | Pi |
 | `o4-mini` | Standard SSE | off | off | off | Pi |
 
-Equivalent `openai/...` and `openai-codex/...` IDs are included; the latter
-switch only the endpoint/auth shape to `codex`.
+The pre-Astra entries include equivalent `openai/...` and
+`openai-codex/...` IDs; the latter switch only the endpoint/auth shape to
+`codex`. Astra is bundled only for `openai-codex`, matching the analyzed
+ChatGPT subscription route. A public-API or proxy Astra deployment requires an
+explicit user profile for that endpoint.
+
+Pi 0.85.1 provides the Astra model descriptor; it is now the package peer
+floor. The extension composes its stream shim over that provider and does not
+replace authentication, streams, or the model catalog.
+The descriptor keeps the production default at 272,000 context tokens and
+128,000 output tokens. A backend-authorized larger context must be selected
+explicitly through Pi's provider `modelOverrides`; the extension does not infer
+that entitlement from the Astra slug.
 
 These entries are defaults, not claims that every proxy with the same model
 slug supports the protocol. Override or disable a profile for the endpoint
@@ -334,6 +350,10 @@ default and show deduplicated source hosts; expand the tool row to inspect the
 raw result text.
 
 ## Image Generation
+
+Set global `config.json.imageGeneration` to `false` to disable the entire
+generation capability. Per-model `tools.imageGeneration:false` disables only
+that profile. Neither setting disables image input or historical image replay.
 
 `tools.imageGeneration` supports:
 
@@ -407,14 +427,15 @@ model override for compatibility:
 | `requestProfile.systemPromptPlacement` | `responses.systemPromptPlacement` |
 | `requestProfile.patchTransport` | `tools.applyPatch` |
 | `apiKeyMode` | `responses.endpoint` |
-| `imageGeneration` | `tools.imageGeneration` |
 | `webSearchEnabled` | `tools.webSearch` |
 | `viewImage` | `tools.viewImage` |
 | `applyPatchEnabled` | `tools.applyPatch` |
 | `additionalModelIds` | one exact user catalog entry per model |
 
 Move these values to extension `models.json`; legacy projection is intended
-only as a transition path.
+only as a transition path. `imageGeneration` is no longer a legacy projection:
+it is the supported global gate, while per-model selection stays in
+`tools.imageGeneration`.
 
 ## Protocol Reference
 

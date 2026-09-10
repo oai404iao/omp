@@ -51,6 +51,7 @@ async function urlToBase64(url: string, signal?: AbortSignal): Promise<string> {
 }
 
 export async function directImageGeneration(input: ImageGenerationInput, cwd: string, settings: CodexMinimalToolsSettings, signal?: AbortSignal) {
+	if (!settings.imageGeneration) throw new Error("Image generation is disabled by the global imageGeneration setting.");
 	if (!settings.directImageApiFallback) throw new Error("Direct Images API fallback is disabled. Use native openai or openai-codex handling, or enable directImageApiFallback.");
 	const apiKey = process.env.OPENAI_API_KEY;
 	if (!apiKey) throw new Error("OPENAI_API_KEY is required for direct image_generation fallback.");
@@ -174,6 +175,7 @@ export async function standaloneImageGeneration(
 	const model = ctx.model;
 	if (!model || !ctx.modelRegistry) throw new Error("No active model is available for standalone image generation.");
 	if (!settings.enabled) throw new Error("pi-codex-minimal-tools is disabled.");
+	if (!settings.imageGeneration) throw new Error("Image generation is disabled by the global setting or current model profile.");
 	if (!input.prompt?.trim()) throw new Error("A prompt is required for standalone image generation.");
 	if (input.num_last_images_to_include !== undefined && input.referenced_image_paths?.length) {
 		throw new Error("Provide only one of referenced_image_paths or num_last_images_to_include.");
@@ -264,6 +266,9 @@ export function createImageGenerationToolDefinition(options: {
 			const resolvedSettings = "modelProfile" in settings
 				? settings as ResolvedCodexModelSettings
 				: loadModelSettings(ctx.model, cwd, settings);
+			if (!resolvedSettings.imageGeneration) {
+				throw new Error("Image generation is disabled by the global setting or current model profile.");
+			}
 			if (resolvedSettings.imageGenerationImplementation === "standalone") {
 				const sessionId = ctx.sessionManager?.getSessionId?.();
 				return standaloneImageGeneration(params, ctx, resolvedSettings, signal, {

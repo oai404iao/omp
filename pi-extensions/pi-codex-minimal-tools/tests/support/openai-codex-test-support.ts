@@ -18,7 +18,10 @@ export function createProviderHarness(options?: {
 	const messages: any[] = [];
 	const renderers: Record<string, Function> = {};
 	const pi = {
-		registerProvider(name: string, value: any) { providers[name] = value; },
+		registerProvider(providerOrName: string | { id: string }, value?: any) {
+			if (typeof providerOrName === "string") providers[providerOrName] = value;
+			else providers[providerOrName.id] = providerOrName;
+		},
 		on(name: string, handler: (event: any, ctx: any) => Promise<void> | void) {
 			(handlers[name] ??= []).push(handler);
 		},

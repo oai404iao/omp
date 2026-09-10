@@ -35,6 +35,9 @@ supported, forwarding to runtime's identically named subpath.
 The default bundle keeps its existing tool names, activation, mutation-tool
 suppression, commands, schemas, saved message types and wire formats.
 Unknown or disabled model profiles remain on Pi's native implementation.
+`openai-codex/gpt-6-astra` has an exact Responses Lite profile. Pi 0.85.1 is
+the package floor and provides its model descriptor; core composes a stream
+shim without replacing provider authentication, streams, or models.
 
 All combinations read the same existing configuration:
 
@@ -47,6 +50,12 @@ All combinations read the same existing configuration:
 settings precedence is unchanged. Runtime owns the canonical schemas/default
 catalog; the bundle retains byte-checked compatibility copies. Do not create
 parallel configuration directories named after the new capabilities.
+
+Global `config.json.imageGeneration:false` is a generation kill switch. It
+prevents image tool, command and presentation registration and blocks hosted,
+standalone and direct-fallback execution without changing Responses mode,
+transport, compaction, patch, web-search, image input or historical replay.
+Per-model `tools.imageGeneration:false` remains an independent profile override.
 
 Standalone clients obtain authentication from Pi's model registry. Without core:
 
@@ -144,8 +153,9 @@ and `latest` pointing to their sole initial alpha; that bounded exception is not
 stable-release acceptance. Trusted-publisher configuration is not proof of a
 successful OIDC publish. See [activation evidence](audits/codex-bootstrap-activation.md)
 and [RELEASING.md](../RELEASING.md).
-S5 independently verifies Pi 0.85.1 while retaining the 0.84.2 floor. See
-[Pi compatibility](pi-compatibility.md) for full-matrix commands and limits.
+The public package floor and current development target are both Pi 0.85.1.
+The private tree-continue hook remains isolated on 0.84.2. See
+[Pi compatibility](pi-compatibility.md) for verification commands and limits.
 
 The [integration review](audits/codex-integration.md) additionally checks cached
 broker compatibility and restricts native placeholder rewriting to broker-owned

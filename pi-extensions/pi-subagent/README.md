@@ -5,7 +5,7 @@ The design independently adapts the
 [DeepSeek Harness subagent seam](https://github.com/deepseek-ai/deepseek-harness/tree/4d03472cd098dc48a630e526ca620f4f37f18a0e/docs/subsystems)
 to Pi's extension and SDK APIs.
 
-Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
+Peer floor: Pi 0.85.1; tested against 0.85.1.
 
 > npm identity: `@oai404iao/pi-subagent`. Once the selected version is
 > available on npm, install it from npm; use a local checkout before its
@@ -65,7 +65,7 @@ For a temporary test:
 pi -e /absolute/path/to/pi-extensions/pi-subagent
 ```
 
-Development is pinned to Pi `0.85.1`; full compatibility checks retain the `0.84.2` floor.
+Development and the supported compatibility floor are pinned to Pi `0.85.1`.
 
 ## Model-facing tools
 

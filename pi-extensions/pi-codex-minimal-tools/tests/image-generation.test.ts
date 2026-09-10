@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { directImageGeneration } from "../src/tools/image-generation.js";
+import { createImageGenerationToolDefinition, directImageGeneration } from "../src/tools/image-generation.js";
 import { DEFAULT_SETTINGS } from "../src/settings.js";
 
 function tempDir(): string {
@@ -31,4 +31,66 @@ test("directImageGeneration omits deprecated response_format and passes abort si
 		else process.env.OPENAI_API_KEY = previousKey;
 		globalThis.fetch = previousFetch;
 	}
+});
+
+test("global image gate blocks direct fallback before authentication or network I/O", async () => {
+	const previousFetch = globalThis.fetch;
+	let fetched = false;
+	globalThis.fetch = (async () => {
+		fetched = true;
+		throw new Error("must not fetch");
+	}) as typeof fetch;
+	try {
+		await assert.rejects(
+			directImageGeneration(
+				{ prompt: "test" },
+				tempDir(),
+				{
+					...DEFAULT_SETTINGS,
+					imageGeneration: false,
+					directImageApiFallback: true,
+				},
+			),
+			/global imageGeneration setting/,
+		);
+		assert.equal(fetched, false);
+	} finally {
+		globalThis.fetch = previousFetch;
+	}
+});
+
+test("per-model image gate blocks manual execution before fallback or auth", async () => {
+	let authRequested = false;
+	const tool = createImageGenerationToolDefinition({
+		loadSettings: () => ({
+			...DEFAULT_SETTINGS,
+			directImageApiFallback: true,
+		}),
+		hasProviderRuntime: () => true,
+	});
+	await assert.rejects(
+		tool.execute(
+			"image-disabled",
+			{ prompt: "test" },
+			undefined,
+			undefined,
+			{
+				cwd: tempDir(),
+				model: {
+					provider: "openai",
+					id: "o4-mini",
+					api: "openai-responses",
+					input: ["text", "image"],
+				} as any,
+				modelRegistry: {
+					async getApiKeyAndHeaders() {
+						authRequested = true;
+						return { ok: true, apiKey: "must-not-be-used" };
+					},
+				},
+			},
+		),
+		/global setting or current model profile/,
+	);
+	assert.equal(authRequested, false);
 });

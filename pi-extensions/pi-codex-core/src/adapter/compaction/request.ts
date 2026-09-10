@@ -57,27 +57,26 @@ export async function requestOpenAINativeCompaction(
 	);
 	let body = applyFastModeServiceTier(buildRequestBody(model, context, profile, {
 		ownsNativeTool: options.ownsNativeTool,
+		imageGeneration: settings.imageGenerationImplementation ?? false,
 		apiKey: options.apiKey,
 		headers: options.headers,
 		signal: options.signal,
 		reasoning: options.reasoning,
 		sessionId: options.sessionId,
 	}), settings, model);
-	if (settings.nativeProviderTools) {
-		const webSearch = settings.modelProfile?.effective.tools.webSearch;
-		body = rewriteNativeOpenAiTools(body, {
-			ownsNativeTool: options.ownsNativeTool,
-			imageModel: settings.imageModel,
-			imageGeneration: settings.imageGenerationImplementation ?? false,
-			webSearch: settings.webSearchEnabled
-				&& webSearch
-				? {
-						implementation: webSearch.implementation,
-						contentTypes: webSearch.contentTypes,
-					}
-				: false,
-		}).payload;
-	}
+	const webSearch = settings.modelProfile?.effective.tools.webSearch;
+	body = rewriteNativeOpenAiTools(body, {
+		ownsNativeTool: options.ownsNativeTool,
+		imageModel: settings.imageModel,
+		imageGeneration: settings.imageGenerationImplementation ?? false,
+		webSearch: settings.webSearchEnabled
+			&& webSearch
+			? {
+					implementation: webSearch.implementation,
+					contentTypes: webSearch.contentTypes,
+				}
+			: false,
+	}).payload;
 	ensureWebSearchDetailsIncluded(body);
 
 	if (options.mode === "responses") {

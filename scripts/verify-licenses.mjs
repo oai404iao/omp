@@ -16,6 +16,7 @@ const expectedHashes = new Map([
 
 const codexRepository = "https://github.com/openai/codex";
 const codexRevision = "eb9dceba1a2e658142a456c5898836774835616b";
+const astraRevision = "ddea03ad049142943bdbf13e937b1d67e8c1ba0c";
 const expectedCodexReservedToolSources = {
   LICENSE: {
     gitBlobSha: "4606e72e042564097e8780d66c1d4dcb611869bd",
@@ -115,6 +116,19 @@ for (const packageName of ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-se
   }
   check(text(`${directory}/THIRD_PARTY_NOTICES.md`).includes(codexRevision), `${packageName}: missing pinned source notice`);
 }
+for (const packageName of ["pi-codex-runtime", "pi-codex-core"]) {
+  const directory = `pi-extensions/${packageName}`;
+  check(
+    read(`${directory}/provenance/openai-codex-ddea03ad-astra.json`).equals(
+      read("pi-extensions/pi-codex-minimal-tools/provenance/openai-codex-ddea03ad-astra.json"),
+    ),
+    `${packageName}: Astra provenance must match the compatibility package`,
+  );
+  check(
+    text(`${directory}/THIRD_PARTY_NOTICES.md`).includes(astraRevision),
+    `${packageName}: missing Astra source notice`,
+  );
+}
 check(
   read("pi-extensions/pi-codex-core/src/providers/codex-apply-patch.lark").equals(
     read("pi-extensions/pi-codex-minimal-tools/src/providers/codex-apply-patch.lark")),
@@ -171,6 +185,9 @@ const codexReservedTools = text("pi-extensions/pi-codex-runtime/src/codex-reserv
 const codexReservedProvenancePath =
   `${codexDirectory}/provenance/openai-codex-eb9dceba-reserved-tools.json`;
 const codexReservedProvenance = JSON.parse(text(codexReservedProvenancePath));
+const astraProvenance = JSON.parse(
+  text(`${codexDirectory}/provenance/openai-codex-ddea03ad-astra.json`),
+);
 const codexWorkspace = workspaces.find(({ name }) => name === "@oai404iao/pi-codex-minimal-tools");
 check(
   codexManifest.private !== true,
@@ -193,6 +210,25 @@ check(
 check(
   codexNotice.includes("03bb3b12367397e14a8facc2e018d645ff4d8e83"),
   "pi-codex-minimal-tools notice lacks the apply-patch compatibility revision",
+);
+check(
+  codexNotice.includes(astraRevision),
+  "pi-codex-minimal-tools notice lacks the Astra source revision",
+);
+check(
+  astraProvenance.upstream?.repository === codexRepository
+    && astraProvenance.upstream?.revision === astraRevision
+    && astraProvenance.upstream?.license === "Apache-2.0"
+    && astraProvenance.files?.["codex-rs/models-manager/models.json"]?.gitBlobSha
+      === "1b5ce2c515986f84147abe5f4fb6e9b0deab0470"
+    && astraProvenance.files?.["codex-rs/models-manager/models.json"]?.sha256
+      === "897614e513a591b362f76c34e4b4d31af5809a2b52f8c0ab57f2990c5bf4ab3d"
+    && astraProvenance.catalogReference?.package === "@earendil-works/pi-ai"
+    && astraProvenance.catalogReference?.version === "0.85.1"
+    && astraProvenance.catalogReference?.license === "MIT"
+    && astraProvenance.catalogReference?.sha256
+      === "a10bfcfd34db6bcb98d8ee46175e154cab30530a137dbf31ac1434020ed3ffdd",
+  "pi-codex-minimal-tools Astra provenance must retain verified source and catalog identifiers",
 );
 for (const path of ["src/patch/parser.ts", "src/patch/apply.ts"]) {
   check(

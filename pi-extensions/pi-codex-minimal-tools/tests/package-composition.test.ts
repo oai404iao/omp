@@ -96,6 +96,27 @@ test("disabled initial configuration registers no tools or providers across dupl
 		} finally { host.dispose(); }
 	}));
 
+test("global image gate registers no image capability while preserving core and web behavior", () =>
+	withCompositionDirectory(async directory => {
+		writeCompositionConfig(directory, { imageGeneration: false });
+		const host = createCompositionHost(directory);
+		try {
+			image(host.api());
+			core(host.api());
+			web(host.api());
+			assert.equal(host.tools.has("image_generation"), false);
+			assert.equal(host.commands.has("image-gen"), false);
+			assert.equal(getCodexBroker(host.api()).tools.has("image_generation"), false);
+			assert.equal(host.providers.size, 2);
+			host.ctx.model = compositionModel("gpt-6-astra", "openai-codex");
+			await host.emit("session_start");
+			assert.equal(host.active().includes("image_generation"), false);
+			assert.equal(host.active().includes("apply_patch"), true);
+			assert.equal(host.active().includes("web_search"), true);
+			await host.emit("session_shutdown");
+		} finally { host.dispose(); }
+	}));
+
 test("new/fork clear presentation ownership; shutdown and reload create a fresh broker", () =>
 	withCompositionDirectory(async directory => {
 		const host = createCompositionHost(directory);

@@ -109,8 +109,7 @@
     },
     "imageGeneration": {
       "type": "boolean",
-      "description": "Deprecated compatibility override. Move per-model image-generation support to extension models.json.",
-      "deprecated": true,
+      "description": "Global image-generation master switch. false disables image tools, commands, presentation, hosted injection, standalone endpoints, and direct fallback without changing other model-profile behavior.",
       "default": true
     },
     "webSearchEnabled": {

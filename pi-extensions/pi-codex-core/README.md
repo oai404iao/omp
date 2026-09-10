@@ -2,11 +2,13 @@
 
 Alpha bootstrap candidate; initial npm publication is still pending.
 
-Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
+Peer floor: Pi 0.85.1; tested against 0.85.1.
 
 Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
 `apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,
 including `/codex-minimal-tools` and `/fast`. Unknown models remain native.
+It supplies the Astra descriptor only when the Pi floor catalog lacks it; newer
+Pi catalogs retain their native provider model list.
 
 Depends only on the shared runtime and its transport libraries; it does not
 install web-search or image-generation clients/presentation. Protocol replay of

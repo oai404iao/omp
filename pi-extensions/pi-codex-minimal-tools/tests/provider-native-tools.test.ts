@@ -91,6 +91,25 @@ test("rewriteNativeOpenAiTools rewrites web_search only when enabled", () => {
 	assert.deepEqual(enabled.payload.tools[0], { type: "web_search" });
 });
 
+test("rewriteNativeOpenAiTools removes only a disabled tool owned by this package", () => {
+	const image = { type: "function", name: "image_generation", parameters: {} };
+	const read = { type: "function", name: "read", parameters: {} };
+	const owned = rewriteNativeOpenAiTools({ tools: [image, read] }, {
+		ownsNativeTool: name => name === "image_generation",
+		imageGeneration: false,
+	});
+	assert.deepEqual(owned.rewritten, []);
+	assert.deepEqual(owned.removed, ["image_generation"]);
+	assert.deepEqual(owned.payload.tools, [read]);
+
+	const external = rewriteNativeOpenAiTools({ tools: [image] }, {
+		ownsNativeTool: () => false,
+		imageGeneration: false,
+	});
+	assert.deepEqual(external.removed, []);
+	assert.deepEqual(external.payload.tools, [image]);
+});
+
 test("rewriteNativeOpenAiTools emits Codex namespace tools for standalone profiles", () => {
 	const payload = {
 		tools: [

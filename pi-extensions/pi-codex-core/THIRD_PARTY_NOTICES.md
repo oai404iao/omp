@@ -11,6 +11,13 @@ apply-patch compatibility evidence remains pinned to
 The unmodified provenance record preserves upstream source identifiers, not
 claims that every referenced source file is shipped in this package.
 
+The `openai-codex/gpt-6-astra` Lite behavior is derived from Codex
+model/request metadata at
+`ddea03ad049142943bdbf13e937b1d67e8c1ba0c`, cross-checked against the
+MIT-licensed `@earendil-works/pi-ai@0.85.1` catalog. Exact source and tarball
+identifiers are recorded in
+`provenance/openai-codex-ddea03ad-astra.json`.
+
 The substantially modified TypeScript apply-patch adaptations and grammar are
 under `src/patch/` and `src/providers/`; retain their source modification notices.
 The internal Responses Lite transport is an unsupported compatibility boundary.

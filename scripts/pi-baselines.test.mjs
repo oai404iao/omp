@@ -1,14 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isPiDependency, piDevelopmentVersion, piFloor, piTarget, piVersion } from "./pi-baselines.mjs";
+import {
+  isPiDependency,
+  piDevelopmentVersion,
+  piFloor,
+  piTarget,
+  piVersion,
+  privatePiVersion,
+} from "./pi-baselines.mjs";
 import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
 
 test("explicit floor/target selection never widens the private hook's exact peer", () => {
-  assert.equal(piVersion("floor"), "0.84.2");
+  assert.equal(piFloor, "0.85.1");
+  assert.equal(piVersion("floor"), "0.85.1");
   assert.equal(piVersion("target"), "0.85.1");
   assert.throws(() => piVersion("latest"), /Unknown Pi baseline/);
   for (const baseline of ["floor", "target"]) {
-    assert.equal(piDevelopmentVersion("@oai404iao/pi-tree-continue", baseline), piFloor);
+    assert.equal(piDevelopmentVersion("@oai404iao/pi-tree-continue", baseline), privatePiVersion);
   }
   assert.equal(piDevelopmentVersion("@oai404iao/pi-codex-core", "target"), piTarget);
   assert.equal(isPiDependency("@earendil-works/pi-ai"), true);

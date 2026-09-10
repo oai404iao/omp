@@ -43,6 +43,7 @@ Resolution proceeds as follows:
    present.
 6. Apply protocol normalization and safety constraints.
 7. Hash the effective profile.
+8. Apply package-wide feature gates to the derived runtime capabilities.
 
 IDs are normalized for exact case-insensitive lookup. Objects merge
 recursively. Arrays and primitive values replace inherited values.
@@ -97,9 +98,10 @@ openai-codex-responses
 ```
 
 The extension registers its stream handler for the selected provider without
-supplying URL, auth, headers, or models. Newer Pi versions therefore compose
-the handler over the user's provider; older Pi versions dispatch it by the
-Responses API type.
+supplying URL, auth, headers, or models. Supported Pi versions therefore
+compose the handler over the user's provider while dispatching it by the
+Responses API type. Pi 0.85.1, the peer floor, supplies Astra's model
+descriptor; this extension supplies only its exact Codex request profile.
 
 If the API does not match, hosted tools, custom `apply_patch`, native
 compaction, and Fast are disabled. Standalone web/image and function
@@ -165,6 +167,12 @@ The request includes:
 
 ## Image implementations
 
+Global `config.json.imageGeneration:false` gates all image-generation
+implementations after profile resolution. It is not a legacy model-profile
+patch and therefore cannot reset Responses mode, transport, compaction, patch,
+web-search or Fast behavior. Per-model `tools.imageGeneration:false` remains
+the profile-level control.
+
 Hosted image generation is the Responses `image_generation` tool.
 
 Standalone image generation calls `images/generations` or `images/edits` with
@@ -220,3 +228,7 @@ The implementation was checked against local Codex commit
 - `codex-rs/ext/image-generation/`
 - `codex-rs/codex-api/src/endpoint/`
 - `codex-rs/models-manager/models.json`
+
+The `openai-codex/gpt-6-astra` delta was checked separately against
+`ddea03ad049142943bdbf13e937b1d67e8c1ba0c`; see
+`source-map.md` and `provenance/openai-codex-ddea03ad-astra.json`.
