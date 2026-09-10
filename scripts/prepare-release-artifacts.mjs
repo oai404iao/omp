@@ -6,6 +6,7 @@ import {
   currentCommit,
   existingTagCommit,
   lookupPublishedVersion,
+  lockedPublishedArtifact,
   npm,
   releaseNotes,
   sha512,
@@ -208,6 +209,11 @@ for (const { name, directory } of orderedWorkspaces) {
     throw new Error(`${name} is approved in workspaces.mjs but remains private in package.json`);
   }
   const published = lookupPublishedVersion(name, manifest.version);
+  if (!published.exists && lockedPublishedArtifact(name, manifest.version)) {
+    throw new Error(
+      `${name}@${manifest.version} is locked as published, but registry verification is pending; do not repack or republish it. Recheck read-only when metadata is visible.`,
+    );
+  }
   const tag = tagFor(name, manifest.version);
   const localTagCommit = existingTagCommit(tag);
 

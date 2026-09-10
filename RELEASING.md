@@ -1,15 +1,20 @@
 # Releasing
 
-## Codex split-stage guard
+## Codex bootstrap activation
 
-The four new Codex workspaces are non-private **bootstrap candidates** following
-explicit maintainer approval. They are still excluded from guarded workflow
-artifacts. Ordinary preparation rejects the bundle's missing dependency closure.
-Only local `--include-bootstrap` preparation may include them, after the reviewed
-source is reachable from freshly fetched public main. This is not approval to
-publish npm packages or promote them to the `publishable` track.
+The four new Codex workspaces were manually published at `0.1.0-alpha.1` from
+`32ba01f3c08b7fd63d09e9b2373cf081c4525533`. Their registry identity, downloaded
+tarball SHA-512 and trusted publishers have been independently verified.
+This dedicated activation checkout moves them to `publishable` and records
+their exact artifacts in the release lock. Its merge and actual protected
+publication still require separate approval.
 
-Do not bypass this gate by ignoring the bundle or changing release locks.
+Ordinary preparation now includes all nine alpha packages: four immutable
+`recover` dependencies plus five `publish` candidates. Do not republish the
+initial four, ignore dependencies, or replace locked artifacts. A known locked
+version returning E404 is pending verification, not a fresh publication candidate.
+See [activation evidence](docs/audits/codex-bootstrap-activation.md).
+
 S4 implements recursive exact-pin changesets, dependency-ordered artifacts and
 no-links production consumers. These tests do not authorize registry writes or
 verify real account/model access. See
@@ -25,9 +30,11 @@ version PR, never in an unreviewed direct main update.
 
 The approved preparation cohort is nine alpha packages (all workspaces except
 tree-continue). `.changeset/pre.json` records the `alpha` channel, while release
-artifacts use the `next` dist-tag. Real smoke is still explicitly deferred, and
-publication requires separate approval. See
-[alpha release preparation](docs/audits/codex-alpha-release.md).
+artifacts use the `next` dist-tag. Limited real smoke on the immutable bootstrap
+artifacts has been performed, with important harness/coverage limitations
+recorded in the activation audit; it is not universal endpoint acceptance.
+Remaining publication requires separate approval. The earlier
+[alpha preparation audit](docs/audits/codex-alpha-release.md) is a historical checkpoint.
 
 Artifact preparation and publication both apply a stable dependency-first order.
 Every workspace dependency must be present in the batch, including a recovery
@@ -36,7 +43,7 @@ batch before any registry write, then verifies each exact version's gitHead and
 integrity before proceeding to dependents. Failure stops subsequent publication;
 final reconciliation still gates all tag creation.
 
-## Current state
+## Workflow state and historical bootstraps
 
 Guarded npm publication is enabled:
 
@@ -58,7 +65,7 @@ Their npm `gitHead`, package tags, and GitHub Releases point to
 releases is enabled; the trusted-publisher and protected-environment gates
 below still apply.
 
-The current stable version of both packages is `0.1.3`, published from
+Both packages subsequently released stable version `0.1.3` from
 `16dccb8953b717670c34fe978c79c07d592ca7e2`.
 
 `@oai404iao/pi-external-thinking@0.1.0` is public, published from
@@ -67,7 +74,7 @@ and GitHub Release match that commit.
 
 `@oai404iao/pi-subagent@0.2.0` is public, published from
 `ef42984c0e40ef1f26ead4b4c7d149b21280e66b`; its npm `gitHead` and `latest`
-dist-tag match that commit. Its trusted publisher is configured for guarded
+dist-tag were verified at that bootstrap checkpoint. Its trusted publisher was configured for guarded
 tag/Release reconciliation and future OIDC releases.
 
 ## One-time GitHub preparation
@@ -167,11 +174,10 @@ Release eligibility is explicit in two places:
      artifacts.
 2. only `blocked` packages may set `"private": true`.
 
-CI rejects mismatches. The guarded release scripts currently allow
-`@oai404iao/pi-external-thinking`, `@oai404iao/pi-keep-defaults`,
-`@oai404iao/pi-subagent`, and `@oai404iao/pi-telegram-notify`.
-`pi-external-thinking` is public at `0.1.0`; `pi-subagent` is public at
-`0.2.0`; `pi-keep-defaults` and `pi-telegram-notify` are public at `0.1.3`.
+CI rejects mismatches. The guarded release scripts now select all nine packages
+other than `pi-tree-continue`, including the four verified Codex recovery nodes.
+The historical manual releases below remain locked; they are not a live registry
+inventory. See the root README and activation audit for this alpha cohort.
 All future releases require a maintainer to manually dispatch and approve the
 guarded workflow. Their trusted-publisher configuration and
 `NPM_PUBLISH_ENABLED` environment variable are release prerequisites.
@@ -208,8 +214,9 @@ can resolve to that alpha; prefer explicit `@next` or exact versions.
 
 The guarded publisher accepts this alias only for an already-published
 `recover` candidate with matching reviewed release-lock gitHead/integrity.
-The current bootstrap eligibility still excludes those packages from guarded
-artifacts until a separately approved activation. Missing/malformed history,
+The dedicated activation now admits those four recovery nodes into guarded
+artifacts; generic bootstrap/private-package exclusion remains enforced.
+Missing/malformed history,
 missing locks, other packages, later versions or a wrong `next` still fail
 closed. Existing stable packages retain their prerelease/latest prohibition.
 Tags are checked before proceeding to consumers and again during reconciliation.
@@ -271,6 +278,9 @@ clean-install smoke tests pass.
 ## Recovery
 
 - Never overwrite an npm version.
+- A release-lock entry is evidence that a version was already published.
+  If its metadata lookup returns E404, preparation stops as pending verification
+  without packing or publishing that version. Do not remove the lock to proceed.
 - If npm succeeds only for part of a release, the workflow reconciles each
   published package's npm `gitHead` but creates no new tags or GitHub Releases.
   A clean rerun recovers missing tags/Releases and publishes only versions
