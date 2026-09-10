@@ -98,15 +98,10 @@ openai-codex-responses
 ```
 
 The extension registers its stream handler for the selected provider without
-supplying URL, auth, headers, or models. Newer Pi versions therefore compose
-the handler over the user's provider; older Pi versions dispatch it by the
-Responses API type.
-
-The Pi 0.84.2 static catalog predates Astra. On that floor only, core registers
-a native wrapper around the built-in `openai-codex` provider, preserving its
-authentication, streams and static models while appending the Astra descriptor.
-Pi versions whose catalog already contains Astra retain the ordinary
-provider-preserving stream overlay.
+supplying URL, auth, headers, or models. Supported Pi versions therefore
+compose the handler over the user's provider while dispatching it by the
+Responses API type. Pi 0.85.1, the peer floor, supplies Astra's model
+descriptor; this extension supplies only its exact Codex request profile.
 
 If the API does not match, hosted tools, custom `apply_patch`, native
 compaction, and Fast are disabled. Standalone web/image and function

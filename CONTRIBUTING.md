@@ -20,7 +20,7 @@ npm run ci
 ```
 
 For Pi compatibility work also run `npm run ci:pi-matrix`. It runs complete CI
-on temporary floor (0.84.2) and target (0.85.1) installations without modifying
+through the floor and target roles (currently both Pi 0.85.1) without modifying
 the working tree. Stage new source files so they enter its tracked-file snapshot.
 See [Pi compatibility](docs/pi-compatibility.md) for logs and test limitations.
 

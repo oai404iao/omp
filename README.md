@@ -47,8 +47,8 @@ Requirements:
 
 - Node.js 22.19 or newer
 - npm 11.5.1 or newer; the repository pins npm 11.19.0
-- Pi 0.84.2 peer floor; supported-package development is pinned to 0.85.1.
-  Full CI verifies both exact baselines. The private
+- Pi 0.85.1 peer floor and exact supported-package development target.
+  Full CI verifies both lock-validation roles. The private
   `pi-tree-continue` hook is pinned to exactly 0.84.2.
 
 ```bash

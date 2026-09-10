@@ -3,7 +3,7 @@
 Replace compatible Pi models' native reasoning with a visible `Think`
 scratchpad tool.
 
-Peer floor: Pi 0.84.2; tested against 0.84.2 and 0.85.1.
+Peer floor: Pi 0.85.1; tested against 0.85.1.
 
 > npm identity: `@oai404iao/pi-external-thinking`. This package is approved for
 > npm bootstrap but is not published yet. To load it for one run from a local

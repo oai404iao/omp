@@ -17,10 +17,6 @@ request metadata at
 MIT-licensed `@earendil-works/pi-ai@0.85.1` catalog. Exact source and tarball
 identifiers are recorded in
 `provenance/openai-codex-ddea03ad-astra.json`.
-The supplemental-catalog design was adapted from
-`IgorWarzocha/howaboua-pi-stuff` revision
-`56c7a9b4a10a2ea2115e27dbd0524d6000769398`; its MIT license is included at
-`LICENSES/howaboua-pi-stuff-MIT.txt`.
 
 Modified namespace-tool compatibility serialization is in
 `src/codex-reserved-tools.ts` and the capability-specific `src/reserved-tools/`

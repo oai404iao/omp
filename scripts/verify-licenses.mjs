@@ -8,7 +8,6 @@ const expectedHashes = new Map([
   ["LICENSES/OpenAI-Codex-NOTICE.txt", "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"],
   ["LICENSES/DeepSeek-Harness-MIT.txt", "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"],
   ["LICENSES/oh-my-pi-MIT.txt", "545636e19386d3d4e0ae6d77354527499999c3ebfbca61b9fa5aa4ead7c0b308"],
-  ["LICENSES/howaboua-pi-stuff-MIT.txt", "62e30d946c466ae06393dc26d5073a46e03759eae97fa2d078b934534d15be6e"],
   [
     "pi-extensions/pi-codex-minimal-tools/src/providers/codex-apply-patch.lark",
     "d6367f4826ed608c424b0a308f3d6163527df63c22513d089b91863552f8bfeb",
@@ -18,7 +17,6 @@ const expectedHashes = new Map([
 const codexRepository = "https://github.com/openai/codex";
 const codexRevision = "eb9dceba1a2e658142a456c5898836774835616b";
 const astraRevision = "ddea03ad049142943bdbf13e937b1d67e8c1ba0c";
-const astraReferenceRevision = "56c7a9b4a10a2ea2115e27dbd0524d6000769398";
 const expectedCodexReservedToolSources = {
   LICENSE: {
     gitBlobSha: "4606e72e042564097e8780d66c1d4dcb611869bd",
@@ -131,19 +129,6 @@ for (const packageName of ["pi-codex-runtime", "pi-codex-core"]) {
     `${packageName}: missing Astra source notice`,
   );
 }
-for (const packageName of ["pi-codex-runtime", "pi-codex-core", "pi-codex-minimal-tools"]) {
-  const directory = `pi-extensions/${packageName}`;
-  check(
-    read(`${directory}/LICENSES/howaboua-pi-stuff-MIT.txt`).equals(
-      read("LICENSES/howaboua-pi-stuff-MIT.txt"),
-    ),
-    `${packageName}: missing the verified Astra reference implementation license`,
-  );
-  check(
-    text(`${directory}/THIRD_PARTY_NOTICES.md`).includes(astraReferenceRevision),
-    `${packageName}: missing Astra reference implementation notice`,
-  );
-}
 check(
   read("pi-extensions/pi-codex-core/src/providers/codex-apply-patch.lark").equals(
     read("pi-extensions/pi-codex-minimal-tools/src/providers/codex-apply-patch.lark")),
@@ -242,13 +227,7 @@ check(
     && astraProvenance.catalogReference?.version === "0.85.1"
     && astraProvenance.catalogReference?.license === "MIT"
     && astraProvenance.catalogReference?.sha256
-      === "a10bfcfd34db6bcb98d8ee46175e154cab30530a137dbf31ac1434020ed3ffdd"
-    && astraProvenance.referenceImplementation?.revision === astraReferenceRevision
-    && astraProvenance.referenceImplementation?.license === "MIT"
-    && astraProvenance.referenceImplementation?.gitBlobSha
-      === "dff3dc50745525de28a4da16f18babb446e99b30"
-    && astraProvenance.referenceImplementation?.sha256
-      === "e8ad2939e4f5261b99cdbc8a8b2937d3b8f2d5ddb3dd206de69ea3feaabc44d4",
+      === "a10bfcfd34db6bcb98d8ee46175e154cab30530a137dbf31ac1434020ed3ffdd",
   "pi-codex-minimal-tools Astra provenance must retain verified source and catalog identifiers",
 );
 for (const path of ["src/patch/parser.ts", "src/patch/apply.ts"]) {

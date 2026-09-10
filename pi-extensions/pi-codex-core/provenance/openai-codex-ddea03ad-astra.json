@@ -47,20 +47,8 @@
     "path": "dist/providers/data/openai-codex.json",
     "sha256": "a10bfcfd34db6bcb98d8ee46175e154cab30530a137dbf31ac1434020ed3ffdd"
   },
-  "referenceImplementation": {
-    "repository": "https://github.com/IgorWarzocha/howaboua-pi-stuff",
-    "revision": "56c7a9b4a10a2ea2115e27dbd0524d6000769398",
-    "commitUrl": "https://github.com/IgorWarzocha/howaboua-pi-stuff/commit/56c7a9b4a10a2ea2115e27dbd0524d6000769398",
-    "license": "MIT",
-    "sourcePath": "packages/pi-codex-conversion/src/providers/openai-codex/model-catalog.ts",
-    "gitBlobSha": "dff3dc50745525de28a4da16f18babb446e99b30",
-    "sha256": "e8ad2939e4f5261b99cdbc8a8b2937d3b8f2d5ddb3dd206de69ea3feaabc44d4",
-    "relationship": "Astra descriptor and conditional provider supplementation adapted to this repository's provider-preserving split-package architecture.",
-    "licensePath": "LICENSES/howaboua-pi-stuff-MIT.txt"
-  },
   "localImplementations": [
     "pi-codex-runtime/src/model-catalog/default-models.json",
-    "pi-codex-core/src/providers/openai-codex/model-catalog.ts",
     "pi-codex-minimal-tools/src/model-catalog/default-models.json"
   ]
 }

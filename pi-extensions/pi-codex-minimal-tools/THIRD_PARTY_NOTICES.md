@@ -59,23 +59,15 @@ The repository's `reference/` directory contains protocol analysis based on
 both Codex revisions above. It is development documentation and is excluded
 from the npm tarball.
 
-### GPT-6 Astra catalog delta
+### GPT-6 Astra profile
 
-The Astra profile and conditional floor descriptor are derived from Codex
-model/request metadata at revision
+The Astra profile is derived from Codex model/request metadata at revision
 [`ddea03ad049142943bdbf13e937b1d67e8c1ba0c`](https://github.com/openai/codex/commit/ddea03ad049142943bdbf13e937b1d67e8c1ba0c)
 and cross-checked against the MIT-licensed
 `@earendil-works/pi-ai@0.85.1` generated catalog. The Codex file/blob hashes
 and locked npm tarball identity are recorded in
 `provenance/openai-codex-ddea03ad-astra.json`. This delta does not repin or
 modify the reserved namespace-tool and apply-patch grammar fingerprints.
-
-The supplemental-catalog design was adapted from
-[`IgorWarzocha/howaboua-pi-stuff`](https://github.com/IgorWarzocha/howaboua-pi-stuff)
-at revision
-[`56c7a9b4a10a2ea2115e27dbd0524d6000769398`](https://github.com/IgorWarzocha/howaboua-pi-stuff/commit/56c7a9b4a10a2ea2115e27dbd0524d6000769398).
-That material is MIT-licensed by Igor Warzocha; the required notice is
-included at `LICENSES/howaboua-pi-stuff-MIT.txt`.
 
 ### Modified namespace-tool compatibility serialization
 

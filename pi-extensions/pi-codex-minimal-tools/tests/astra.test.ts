@@ -3,11 +3,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { buildRequestBody } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/request-body";
-import { OPENAI_CODEX_ASTRA_MODEL } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/model-catalog";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { DEFAULT_SETTINGS } from "@oai404iao/pi-codex-runtime/internal/settings";
+
+const OPENAI_CODEX_ASTRA_MODEL = getBuiltinModels("openai-codex")
+	.find(model => model.id === "gpt-6-astra");
+assert.ok(OPENAI_CODEX_ASTRA_MODEL, "supported Pi baseline must provide the Astra model descriptor");
 
 function withAgentDir<T>(run: () => T): T {
 	const previous = process.env.PI_CODING_AGENT_DIR;
@@ -83,6 +87,13 @@ test("Astra uses the exact Codex Responses Lite request profile", () => withAgen
 }));
 
 test("Astra exposes every Pi-supported reasoning effort without inventing ultra", () => withAgentDir(() => {
+	assert.equal(OPENAI_CODEX_ASTRA_MODEL.provider, "openai-codex");
+	assert.equal(OPENAI_CODEX_ASTRA_MODEL.api, "openai-codex-responses");
+	assert.deepEqual(OPENAI_CODEX_ASTRA_MODEL.input, ["text", "image"]);
+	assert.equal(OPENAI_CODEX_ASTRA_MODEL.contextWindow, 272_000);
+	assert.equal(OPENAI_CODEX_ASTRA_MODEL.maxTokens, 128_000);
+	assert.equal(OPENAI_CODEX_ASTRA_MODEL.compat?.supportsAdditionalTools, true);
+	assert.equal(OPENAI_CODEX_ASTRA_MODEL.compat?.supportsOpenAIGrammarTools, true);
 	assert.deepEqual(OPENAI_CODEX_ASTRA_MODEL.thinkingLevelMap, {
 		off: null,
 		minimal: "low",

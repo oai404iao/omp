@@ -5,9 +5,8 @@
 "@oai404iao/pi-codex-minimal-tools": minor
 ---
 
-Add an exact `openai-codex/gpt-6-astra` Responses Lite profile and conditionally
-supplement its model descriptor for Pi versions whose static catalog predates
-Astra.
+Add an exact `openai-codex/gpt-6-astra` Responses Lite profile using the model
+descriptor supplied by the supported Pi baseline.
 
 Promote `config.json.imageGeneration` to a global generation gate. Disabling it
 now omits image tools, background commands, presentation and provider injection,

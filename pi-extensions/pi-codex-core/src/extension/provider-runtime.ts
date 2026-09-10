@@ -7,7 +7,6 @@ import { installCodexIdentityLifecycle } from "@oai404iao/pi-codex-runtime/inter
 import { currentCodexTurn, resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { createCodexStream } from "../providers/openai-codex/stream.js";
-import { createSupplementalOpenAICodexProvider } from "../providers/openai-codex/model-catalog.js";
 import type { OpenAIResponsesProviderController } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { closeProviderWebSocketSessions } from "../providers/openai-codex/websocket-session.js";
 import type { ProviderPresentation } from "@oai404iao/pi-codex-runtime/internal/extension/provider-presentation";
@@ -64,13 +63,7 @@ export function registerResponsesProviderRuntime(
 
 	// Register built-ins first; custom providers require an actual selected
 	// model so their URL, auth and model list are never created or overwritten.
-	const supplementalCodexProvider = createSupplementalOpenAICodexProvider(streamSimple);
-	if (supplementalCodexProvider) {
-		pi.registerProvider(supplementalCodexProvider);
-		registeredProviderApis.set("openai-codex", "openai-codex-responses");
-	} else {
-		registerProviderShim("openai-codex", "openai-codex-responses");
-	}
+	registerProviderShim("openai-codex", "openai-codex-responses");
 	registerProviderShim("openai", "openai-responses");
 
 	pi.on("session_start", async (_event, ctx) => {
