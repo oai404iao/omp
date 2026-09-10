@@ -6,12 +6,15 @@ import {
   existingTagCommit,
   git,
   lookupDistTags,
+  lookupPublishedVersions,
+  lockedPublishedArtifact,
   lookupPublishedVersion,
   npm,
   assertLockedPublishedArtifact,
 } from "./release-utils.mjs";
 import { registry, root } from "./workspaces.mjs";
 import { publishOrderedBatch, validateReleaseBatch, verifyPackedCandidate } from "./release-batch.mjs";
+import { hasInitialBootstrapLatestAlias, isInitialCodexBootstrap } from "./initial-codex-bootstrap.mjs";
 
 const [manifestArgument, resultArgument] = process.argv.slice(2);
 if (!manifestArgument || !resultArgument) {
@@ -55,6 +58,32 @@ for (const candidate of candidates) {
   }
 }
 
+function verifyCandidateTags(candidate) {
+  const unresolved = [];
+  const distTags = lookupDistTags(candidate.name);
+  if (distTags[candidate.distTag] !== candidate.version) {
+    unresolved.push(`${candidate.name}@${candidate.version} is not assigned to npm dist-tag ${candidate.distTag}; fix it interactively`);
+  }
+  if (candidate.prerelease && distTags.latest === candidate.version) {
+    let initialAlias = false;
+    const locked = lockedPublishedArtifact(candidate.name, candidate.version);
+    if (candidate.mode === "recover" && isInitialCodexBootstrap(candidate)
+      && locked?.gitHead === candidate.sourceCommit && locked?.integrity === candidate.integrity) {
+      try {
+        initialAlias = hasInitialBootstrapLatestAlias(candidate, distTags, lookupPublishedVersions(candidate.name));
+      } catch {
+        unresolved.push(`Cannot verify initial bootstrap version history for ${candidate.name}`);
+      }
+    }
+    if (!initialAlias) {
+      unresolved.push(`${candidate.name}@${candidate.version} is a prerelease but is also assigned to npm dist-tag latest`);
+    } else {
+      console.log(`ℹ accepted locked first-bootstrap latest/next alias for ${candidate.name}@${candidate.version}`);
+    }
+  }
+  return unresolved;
+}
+
 const publishWarnings = publishOrderedBatch(candidates, {
   publish(candidate) {
     const tarballPath = resolve(manifestPath, "..", candidate.filename);
@@ -87,6 +116,8 @@ const publishWarnings = publishOrderedBatch(candidates, {
     if (published.integrity !== candidate.integrity) {
       throw new Error(`Published integrity mismatch: ${candidate.name}`);
     }
+    const tagErrors = verifyCandidateTags(candidate);
+    if (tagErrors.length > 0) throw new Error(tagErrors.join("; "));
   },
 });
 
@@ -114,17 +145,7 @@ for (const candidate of candidates) {
     continue;
   }
 
-  const distTags = lookupDistTags(candidate.name);
-  if (distTags[candidate.distTag] !== candidate.version) {
-    candidateUnresolved.push(
-      `${candidate.name}@${candidate.version} is not assigned to npm dist-tag ${candidate.distTag}; fix it interactively`,
-    );
-  }
-  if (candidate.prerelease && distTags.latest === candidate.version) {
-    candidateUnresolved.push(
-      `${candidate.name}@${candidate.version} is a prerelease but is also assigned to npm dist-tag latest`,
-    );
-  }
+  candidateUnresolved.push(...verifyCandidateTags(candidate));
 
   const tagCommit = existingTagCommit(candidate.tag);
   if (tagCommit && tagCommit !== candidate.sourceCommit) {

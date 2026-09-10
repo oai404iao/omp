@@ -35,12 +35,12 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
     mkdirSync(binaryDirectory);
     const scripts = join(temporaryDirectory, "scripts");
     mkdirSync(scripts);
-    for (const name of ["publish-release-artifacts.mjs", "release-batch.mjs", "release-dependencies.mjs", "release-utils.mjs"]) {
+    for (const name of ["publish-release-artifacts.mjs", "release-batch.mjs", "release-dependencies.mjs", "release-utils.mjs", "initial-codex-bootstrap.mjs"]) {
       writeFileSync(join(scripts, name), readFileSync(join(root, "scripts", name)));
     }
     mkdirSync(join(temporaryDirectory, "release-locks"));
     writeFileSync(join(temporaryDirectory, "release-locks/npm-published-artifacts.json"),
-      JSON.stringify({ schemaVersion: 1, registry: "https://registry.npmjs.org/", releases: {} }));
+      JSON.stringify({ schemaVersion: 1, registry: "https://registry.npmjs.org/", releases: options.locked ?? {} }));
     const entries = candidates.map(c => ({ name: c.name, directory: c.directory, releaseStatus: "publishable" }));
     const manifests = {};
     const registryPackages = {};
@@ -58,7 +58,7 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
         c.integrity = `sha512-${createHash("sha512").update(readFileSync(tar)).digest("base64")}`;
       }
       registryPackages[`${c.name}@${c.version}`] = {
-        version: c.version, gitHead: commit,
+        version: c.version, gitHead: c.sourceCommit,
         "dist.integrity": options.wrongIntegrityFor === c.name ? "sha512-wrong" : c.integrity,
       };
       if (options.corruptFor === c.name) c.integrity = "sha512-invalid";
@@ -92,7 +92,12 @@ if (args[0] !== "view") process.exit(1);
 if (args[2] === "version") {
   console.log(JSON.stringify(JSON.parse(process.env.FAKE_PACKAGES)[args[1]]));
 } else if (args[2] === "dist-tags") {
-  console.log(JSON.stringify({ latest: args[1] === process.env.WRONG_DIST_TAG_FOR ? "0.9.0" : "1.0.0" }));
+  console.log(JSON.stringify(JSON.parse(process.env.FAKE_DIST_TAGS)[args[1]]
+    ?? { latest: args[1] === process.env.WRONG_DIST_TAG_FOR ? "0.9.0" : "1.0.0" }));
+} else if (args[2] === "versions") {
+  const value = JSON.parse(process.env.FAKE_VERSIONS)[args[1]];
+  if (value === "lookup-error") process.exit(1);
+  console.log(JSON.stringify(value ?? []));
 } else process.exit(1);
 `,
     );
@@ -119,6 +124,8 @@ if (args[2] === "version") {
         GITHUB_SHA: commit,
         WRONG_DIST_TAG_FOR: wrongDistTagFor ?? "",
         FAKE_PACKAGES: JSON.stringify(registryPackages),
+        FAKE_DIST_TAGS: JSON.stringify(options.distTags ?? {}),
+        FAKE_VERSIONS: JSON.stringify(options.versions ?? {}),
         FAIL_PUBLISH_PATH: options.failPublishFor
           ? join(temporaryDirectory, `${options.failPublishFor.split("/").at(-1)}.tgz`) : "",
       },
@@ -132,6 +139,68 @@ if (args[2] === "version") {
     // The caller receives all data it needs before this task-owned directory is removed.
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
+}
+
+function bootstrapCandidate(name = "@oai404iao/pi-codex-runtime") {
+  const version = "0.1.0-alpha.1";
+  return { ...candidate(name), version, tag: `${name}@${version}`, distTag: "next", prerelease: true,
+    sourceCommit: "32ba01f3c08b7fd63d09e9b2373cf081c4525533" };
+}
+
+function bootstrapOptions(value) {
+  return {
+    locked: { [`${value.name}@${value.version}`]: { gitHead: value.sourceCommit, integrity: value.integrity } },
+    distTags: { [value.name]: { next: value.version, latest: value.version } },
+    versions: { [value.name]: [value.version] },
+  };
+}
+
+test("reviewed initial bootstrap recovery accepts the registry-required latest alias without modifying tags", () => {
+  const runtime = bootstrapCandidate();
+  const bundle = { ...candidate("@oai404iao/consumer"), mode: "publish" };
+  const { process, result, calls } = runPublisher([bundle, runtime], undefined, {
+    ...bootstrapOptions(runtime), dependencies: { [bundle.name]: { [runtime.name]: runtime.version } },
+  });
+  assert.equal(process.status, 0, process.stderr);
+  assert.equal(result.ok, true);
+  assert.doesNotMatch(calls, /^npm publish .*pi-codex-runtime\.tgz/m);
+  assert.doesNotMatch(calls, /^npm dist-tag/m);
+  assert.ok(calls.indexOf(`npm view ${runtime.name} versions`) < calls.indexOf("npm publish "));
+});
+
+for (const failure of ["stable-history", "missing-lock", "wrong-lock", "wrong-source", "later-alpha", "wrong-next", "malformed-history", "lookup-error", "unapproved-package", "existing-bundle"]) {
+  test(`bootstrap latest alias rejects ${failure} before publishing consumers`, () => {
+    const runtime = bootstrapCandidate(failure === "unapproved-package" ? "@oai404iao/other-package" : undefined);
+    if (failure === "existing-bundle") {
+      runtime.name = "@oai404iao/pi-codex-minimal-tools";
+      runtime.version = "1.4.1-alpha.0";
+      runtime.tag = `${runtime.name}@${runtime.version}`;
+    }
+    if (failure === "wrong-source") runtime.sourceCommit = commit;
+    if (failure === "later-alpha") {
+      runtime.version = "0.1.0-alpha.2";
+      runtime.tag = `${runtime.name}@${runtime.version}`;
+    }
+    const options = bootstrapOptions(runtime);
+    if (failure === "stable-history") options.versions[runtime.name].unshift("0.0.1");
+    if (failure === "missing-lock") options.locked = {};
+    if (failure === "wrong-lock") options.locked[`${runtime.name}@${runtime.version}`].integrity = "sha512-wrong";
+    if (failure === "wrong-next") options.distTags[runtime.name].next = "0.1.0-alpha.0";
+    if (failure === "malformed-history") options.versions[runtime.name] = { bad: true };
+    if (failure === "lookup-error") options.versions[runtime.name] = "lookup-error";
+    if (failure === "existing-bundle") options.versions[runtime.name].unshift("1.4.0");
+    const bundle = { ...candidate("@oai404iao/consumer"), mode: "publish" };
+    const { process, result, calls } = runPublisher([runtime, bundle], undefined, {
+      ...options, dependencies: { [bundle.name]: { [runtime.name]: runtime.version } },
+    });
+    if (failure === "wrong-lock") assert.notEqual(process.status, 0);
+    else {
+      assert.equal(process.status, 0, process.stderr);
+      assert.equal(result.ok, false);
+    }
+    assert.doesNotMatch(calls, /^npm publish /m);
+    assert.doesNotMatch(calls, /^git tag /m);
+  });
 }
 
 test("partial reconciliation does not create local tags", { skip: process.platform === "win32" }, () => {

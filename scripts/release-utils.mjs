@@ -114,6 +114,19 @@ export function lookupDistTags(name) {
   return value;
 }
 
+export function lookupPublishedVersions(name) {
+  const result = spawnSync(npm, ["view", name, "versions", "--json", "--prefer-online", "--registry", registry], {
+    cwd: root, encoding: "utf8", env: { ...process.env, npm_config_loglevel: "error" },
+  });
+  if (result.status !== 0) throw new Error(`npm version-history lookup failed for ${name}`);
+  const value = JSON.parse(result.stdout);
+  const versions = typeof value === "string" ? [value] : value;
+  if (!Array.isArray(versions) || versions.length === 0 || versions.some(version => typeof version !== "string")) {
+    throw new Error(`npm returned malformed version history for ${name}`);
+  }
+  return versions;
+}
+
 export function existingTagCommit(tag) {
   const result = spawnSync("git", ["rev-list", "-n", "1", tag], {
     cwd: root,
