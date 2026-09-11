@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TESTED_PI_VERSION, supportsTestedPiVersion } from "../src/index.js";
+import { TESTED_PI_VERSION, supportsTestedPiVersion } from "../index.js";
 
 test("only enables the private hook for its exact audited Pi version", () => {
 	assert.equal(TESTED_PI_VERSION, "0.85.1");
