@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { isPiDependency, piDevelopmentVersion, piVersion } from "./pi-baselines.mjs";
+import { isPiDependency, piVersion } from "./pi-baselines.mjs";
 import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
 import { root, workspaces } from "./workspaces.mjs";
 
@@ -60,7 +60,7 @@ for (const baseline of baselines) {
         const path = join(cwd, entry.directory, "package.json");
         const manifest = JSON.parse(readFileSync(path, "utf8"));
         for (const dependency of Object.keys(manifest.devDependencies ?? {})) {
-          if (isPiDependency(dependency)) manifest.devDependencies[dependency] = piDevelopmentVersion(entry.name, baseline);
+          if (isPiDependency(dependency)) manifest.devDependencies[dependency] = piVersion(baseline);
         }
         writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
       }

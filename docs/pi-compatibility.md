@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | Supported-package floor | 0.85.1 | Every public Pi peer is `>=0.85.1` |
 | Development / target | 0.85.1 | Exact root and supported-workspace dev dependencies |
-| Private tree-continue hook | 0.84.2 only | Blocked/private compatibility experiment; excluded from public support |
+| Private tree-continue hook | 0.85.1 only | Blocked/private compatibility experiment; excluded from public support |
 
 Pi 0.85.0 is explicitly excluded. Upstream reports that 0.85.1 fixes SDK
 imports broken by accidentally published experimental code/dependencies in
@@ -57,15 +57,15 @@ have already passed.
 
 ## Checks that prevent false positives
 
-- Root SDK anchors prevent npm from hoisting the private tree-continue hook's
-  0.84.2 SDK as the harness for public packages pinned to 0.85.1.
+- Root SDK anchors keep every workspace, including the private tree-continue
+  hook, on the single audited 0.85.1 SDK.
 - `check:pi-baseline` checks both declared and actually resolved SDK versions for
   every workspace.
 - Loader probes use each installed consumer's SDK and check its package version
   and exported VERSION. Ordinary, reversed and duplicate package loading all run.
 - The private hook is loaded by the active real Pi 0.85.1 loader. It registers
-  nothing, warns, and leaves the target prototype unchanged despite retaining
-  its own exact 0.84.2 peer/dev SDK. It is not part of the public support claim.
+  `/continue` and patches the intended `AgentSession` prototype, but it is not
+  part of the public support claim.
 - A credential-free offline CLI probe explicitly loads the compatibility bundle.
 - Consumer probes run in separate processes to avoid cross-case module globals
   and release temporary installations promptly to bound disk/memory use.

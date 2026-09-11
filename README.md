@@ -49,7 +49,8 @@ Requirements:
 - npm 11.5.1 or newer; the repository pins npm 11.19.0
 - Pi 0.85.1 peer floor and exact supported-package development target.
   Full CI verifies both lock-validation roles. The private
-  `pi-tree-continue` hook is pinned to exactly 0.84.2.
+  `pi-tree-continue` hook is audited for exactly 0.85.1 and stays
+  blocked from publication.
 
 ```bash
 npm ci --ignore-scripts

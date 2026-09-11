@@ -154,7 +154,8 @@ stable-release acceptance. Trusted-publisher configuration is not proof of a
 successful OIDC publish. See [activation evidence](audits/codex-bootstrap-activation.md)
 and [RELEASING.md](../RELEASING.md).
 The public package floor and current development target are both Pi 0.85.1.
-The private tree-continue hook remains isolated on 0.84.2. See
+The private tree-continue hook is audited for the same 0.85.1 baseline but
+remains private/blocked. See
 [Pi compatibility](pi-compatibility.md) for verification commands and limits.
 
 The [integration review](audits/codex-integration.md) additionally checks cached
