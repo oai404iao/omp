@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { root, workspaces } from "./workspaces.mjs";
-import { isPiDependency, piDevelopmentVersion, piVersion } from "./pi-baselines.mjs";
+import { isPiDependency, piVersion } from "./pi-baselines.mjs";
 
 for (const entry of [{ directory: ".", name: "workspace-root" }, ...workspaces]) {
   const directory = join(root, entry.directory);
@@ -13,7 +13,7 @@ for (const entry of [{ directory: ".", name: "workspace-root" }, ...workspaces])
   const require = createRequire(join(directory, "package.json"));
   for (const [dependency, declared] of Object.entries(manifest.devDependencies ?? {})) {
     if (!isPiDependency(dependency)) continue;
-    const expected = piDevelopmentVersion(entry.name);
+    const expected = piVersion();
     assert.equal(declared, expected, `${entry.name}: declared Pi development version`);
     const path = require.resolve.paths(dependency).map(base => join(base, dependency, "package.json")).find(existsSync);
     assert.ok(path, `${entry.name}: missing ${dependency}`);
@@ -41,5 +41,5 @@ try {
   ], { cwd: temporary, encoding: "utf8", env, timeout: 60000 });
   assert.equal(cli.status, 0, cli.stdout + cli.stderr);
   assert.doesNotMatch(cli.stdout + cli.stderr, /Failed to load extension|ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED/);
-  console.log(`✓ Pi ${piVersion()}: resolved workspace peers, private-hook loader gate and offline CLI smoke`);
+  console.log(`✓ Pi ${piVersion()}: resolved workspace peers, private-hook loader probe and offline CLI smoke`);
 } finally { rmSync(temporary, { recursive: true, force: true }); }

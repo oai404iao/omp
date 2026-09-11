@@ -4,7 +4,7 @@ const PATCHED = Symbol.for("pi-tree-continue.agent-session-patched");
 const ORIGINAL_BIND = Symbol.for("pi-tree-continue.original-bind-extension-core");
 const STATE = Symbol.for("pi-tree-continue.state");
 const PATCH_VERSION = 2;
-export const TESTED_PI_VERSION = "0.84.2";
+export const TESTED_PI_VERSION = "0.85.1";
 
 interface InternalAgentSession {
 	agent: {
@@ -12,9 +12,12 @@ interface InternalAgentSession {
 		hasQueuedMessages(): boolean;
 	};
 	sessionManager: object;
-	_modelRegistry?: { hasConfiguredAuth(model: unknown): boolean };
+	modelRuntime?: { hasConfiguredAuth(providerId: string): boolean };
+	_isAgentRunActive?: boolean;
 	_flushPendingBashMessages?: () => void;
+	_flushPendingCustomMessages?: () => void;
 	_handlePostAgentRun?: () => Promise<boolean>;
+	_emitAgentSettled?: () => Promise<void>;
 	_systemPromptOverride?: string | undefined;
 }
 
@@ -88,7 +91,8 @@ export default function treeContinueExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			if (session._modelRegistry && !session._modelRegistry.hasConfiguredAuth(ctx.model)) {
+			const hasConfiguredAuth = session.modelRuntime?.hasConfiguredAuth(ctx.model.provider) ?? true;
+			if (!hasConfiguredAuth) {
 				ctx.ui.notify("The selected model is not authenticated; fix auth before /continue.", "warning");
 				return;
 			}
@@ -244,7 +248,14 @@ async function continueWithoutMessage(session: InternalAgentSession): Promise<vo
 	if (typeof session._handlePostAgentRun !== "function") {
 		throw new Error("Pi post-run continuation hook is not available");
 	}
+	if (typeof session._emitAgentSettled !== "function") {
+		throw new Error("Pi agent-settled hook is not available");
+	}
 
+	// Mirror AgentSession._runAgentPrompt's continuation lifecycle: mark the run
+	// active so idle/streaming consumers see the same state as a regular turn,
+	// flush queued bash/custom messages, and emit agent_settled when done.
+	session._isAgentRunActive = true;
 	try {
 		session._flushPendingBashMessages?.();
 		await session.agent.continue();
@@ -254,5 +265,7 @@ async function continueWithoutMessage(session: InternalAgentSession): Promise<vo
 	} finally {
 		session._systemPromptOverride = undefined;
 		session._flushPendingBashMessages?.();
+		session._flushPendingCustomMessages?.();
+		await session._emitAgentSettled();
 	}
 }

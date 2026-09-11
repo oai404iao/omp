@@ -2,7 +2,7 @@
 
 Adds `/continue` for Pi sessions. It resumes the agent without adding any new message to the LLM context.
 
-Compatibility: experimental against Pi 0.84.2 only. It is not compatible by
+Compatibility: experimental against Pi 0.85.1 only. It is not compatible by
 contract with any Pi version.
 
 > npm identity: `@oai404iao/pi-tree-continue`. This experimental package
@@ -51,9 +51,11 @@ Use `/continue --force` when you intentionally want to roll the branch back to t
 
 Because Pi does not currently expose a public extension API for message-free
 continuation, this package installs a runtime hook into private
-`AgentSession` fields. That hook cannot currently preserve Pi's documented
-agent-run lifecycle, authentication preflight, and per-turn system-prompt
-semantics. Do not treat it as equivalent to normal Pi continuation.
+`AgentSession` fields. The hook mirrors Pi's agent-run lifecycle (active-run
+state, queued-message flushing, and the `agent_settled` event) and checks the
+selected model's configured auth before continuing, but it cannot emit
+`before_agent_start` or reproduce Pi's branch-prompt semantics. Do not treat
+it as equivalent to a normal user-initiated prompt.
 
 ## License and publication status
 

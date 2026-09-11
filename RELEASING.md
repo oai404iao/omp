@@ -235,9 +235,9 @@ lockfile, compatibility notes, and tests together. Do not lower the minimum
 below the tested baseline.
 The open-ended upper range is an intentional forward-compatibility policy;
 evaluate each new Pi baseline in CI and tighten the range if an incompatibility
-is found. `@oai404iao/pi-tree-continue` is deliberately pinned to the exact
-0.84.2 baseline while it remains a private unsupported hook into Pi internals.
-The actual 0.85.1 loader must disable that hook without changing its prototype.
+is found. `@oai404iao/pi-tree-continue` is audited against the exact 0.85.1
+baseline while it remains a private unsupported hook into Pi internals, so it
+stays blocked from publication.
 See [Pi compatibility](docs/pi-compatibility.md) for the verified scope and
 upstream 0.85.0 SDK caveat.
 

@@ -12,4 +12,4 @@
 
 Raise every public plugin's Pi peer floor to `>=0.85.1`. Pi 0.85.0 is excluded
 because its published SDK imports are broken; the private tree-continue
-experiment remains blocked and pinned to 0.84.2.
+experiment is audited for 0.85.1 too but remains blocked from publication.

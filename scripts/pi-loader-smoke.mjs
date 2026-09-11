@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { piVersion, privatePiVersion } from "./pi-baselines.mjs";
+import { piVersion } from "./pi-baselines.mjs";
 import { root } from "./workspaces.mjs";
 
 globalThis.fetch = async () => { throw new Error("Network is forbidden in the Pi loader probe"); };
@@ -21,15 +21,8 @@ try {
 } finally { console.warn = warn; }
 assert.deepEqual(loaded.errors, []);
 const commands = loaded.extensions.flatMap(extension => [...extension.commands.keys()]);
-if (sdk.VERSION === privatePiVersion) {
-  assert.equal(typeof before, "function");
-  assert.deepEqual(commands, ["continue"]);
-  assert.notEqual(sdk.AgentSession.prototype._bindExtensionCore, before);
-  assert.deepEqual(warnings, []);
-} else {
-  assert.deepEqual(commands, []);
-  assert.equal(sdk.AgentSession.prototype._bindExtensionCore, before, "unsupported hook must not patch the target prototype");
-  assert.equal(warnings.length, 1);
-  assert.ok(warnings[0].includes(`supports Pi ${privatePiVersion} only (found ${sdk.VERSION})`));
-}
+assert.equal(typeof before, "function");
+assert.deepEqual(commands, ["continue"]);
+assert.notEqual(sdk.AgentSession.prototype._bindExtensionCore, before, "audited hook must patch the target prototype");
+assert.deepEqual(warnings, []);
 loaded.runtime.invalidate();

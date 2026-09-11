@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { readManifest, registry, root, workspaces } from "./workspaces.mjs";
-import { piFloor, piDevelopmentVersion, privatePiVersion } from "./pi-baselines.mjs";
+import { piFloor, piVersion } from "./pi-baselines.mjs";
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const lock = JSON.parse(readFileSync(resolve(root, "package-lock.json"), "utf8"));
@@ -10,15 +10,6 @@ const lock = JSON.parse(readFileSync(resolve(root, "package-lock.json"), "utf8")
 const errors = [];
 const seenNames = new Set();
 const testedPiVersion = piFloor;
-const exactPiPeerPackages = new Set(["@oai404iao/pi-tree-continue"]);
-const requiredPiDependencies = {
-  "@oai404iao/pi-tree-continue": {
-    "@earendil-works/pi-coding-agent": {
-      peer: privatePiVersion,
-      dev: privatePiVersion,
-    },
-  },
-};
 const requiredRuntimeFiles = {
   "@oai404iao/pi-external-thinking": ["THIRD_PARTY_NOTICES.md"],
   "@oai404iao/pi-codex-minimal-tools": [
@@ -107,9 +98,8 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   if (kind === "library" && manifest.pi?.extensions?.length) {
     report(`${manifest.name}: runtime library must not auto-register Pi extensions`);
   }
-  const exactPiPeerRange = exactPiPeerPackages.has(manifest.name);
-  const expectedPiPeerRange = exactPiPeerRange ? privatePiVersion : `>=${testedPiVersion}`;
-  const expectedPiDevBaseline = piDevelopmentVersion(manifest.name);
+  const expectedPiPeerRange = `>=${testedPiVersion}`;
+  const expectedPiDevBaseline = piVersion();
   for (const [dependency, range] of Object.entries(manifest.peerDependencies ?? {})) {
     if (!dependency.startsWith("@earendil-works/pi-")) continue;
     if (range !== expectedPiPeerRange) {
@@ -117,14 +107,6 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
     }
     if (manifest.devDependencies?.[dependency] !== expectedPiDevBaseline) {
       report(`${manifest.name}: ${dependency} development baseline must be ${expectedPiDevBaseline}`);
-    }
-  }
-  for (const [dependency, expected] of Object.entries(requiredPiDependencies[manifest.name] ?? {})) {
-    if (manifest.peerDependencies?.[dependency] !== expected.peer) {
-      report(`${manifest.name}: ${dependency} peer dependency must be ${expected.peer}`);
-    }
-    if (manifest.devDependencies?.[dependency] !== expected.dev) {
-      report(`${manifest.name}: ${dependency} development dependency must be ${expected.dev}`);
     }
   }
   if (
