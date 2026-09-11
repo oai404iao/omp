@@ -123,12 +123,12 @@ import {
 	type SubagentProviderName,
 	type SubagentRunResult,
 	type SubagentSettings,
+	type RuntimeMode,
 	type SubagentStopReason,
 	type TraceItem,
 } from "./types.ts";
 
 const REPORT_CUSTOM_TYPE = "pi-subagent/report";
-const SETTLED_CUSTOM_TYPE = "pi-subagent/settled";
 const AGENT_CUSTOM_TYPE = "pi-subagent/agent";
 const LINEAGE_CUSTOM_TYPE = "pi-subagent/lineage";
 const AGENT_ID_PATTERN =
@@ -153,7 +153,8 @@ const DELEGATION_SCOPE_PROMPT = [
 const REPORT_PROMPT = [
 	"You have a `report` tool that sends a selected update to the agent that started you.",
 	"Call it with a self-contained answer before finishing, and earlier when a finding changes what the parent should do.",
-	"Reporting does not end this turn and does not prevent later follow-up messages.",
+	"A report is recorded for the parent without waking it; it does not end this turn and does not prevent later follow-up messages.",
+	"Your final answer is delivered separately as a completion update.",
 ].join(" ");
 
 export interface DelegationInput {
@@ -161,7 +162,6 @@ export interface DelegationInput {
 	task_name?: string;
 	description: string;
 	prompt: string;
-	run_in_background?: boolean;
 	context?: {
 		mode: ContextInheritance["mode"];
 		completed_turns?: number;
@@ -172,15 +172,13 @@ export type DelegationOutcome =
 	| { kind: "continuable"; details: DelegationDetails }
 	| { kind: "foreground"; details: DelegationDetails; result: SubagentRunResult };
 
-export type SendMessageOutcome =
-	| { kind: "legacy"; agentId: string; taskPath: string }
-	| {
-			kind: "mailbox-v2";
-			agentId: string;
-			taskPath: string;
-			messageId: string;
-			pendingMessages: number;
-		};
+export interface SendMessageOutcome {
+	kind: "mailbox";
+	agentId: string;
+	taskPath: string;
+	messageId: string;
+	pendingMessages: number;
+}
 
 export interface FollowupTaskOutcome {
 	agentId: string;
@@ -218,7 +216,6 @@ interface ParentRef {
 		customType: string,
 		content: string,
 		details: ParentMessageDetails,
-		delivery: "wakeup" | "quiet",
 	): Promise<void>;
 }
 
@@ -240,7 +237,6 @@ interface Activation {
 	userMessageGates: Map<string, UserMessageGate>;
 	ownedChildren: Set<string>;
 	currentRun?: Promise<SubagentRunResult>;
-	currentMessageGate?: Promise<void>;
 	pendingSettlement?: SubagentRunResult;
 	unsubscribe?: () => void;
 	onUpdate?: (details: DelegationDetails) => void;
@@ -301,14 +297,7 @@ interface PendingPromptStart {
 	coldPrepared?: PreparedChildSession;
 }
 
-type SerializedSendMessageOutcome =
-	| {
-			kind: "legacy";
-			agentId: string;
-			taskPath: string;
-			pending?: PendingPromptStart;
-		}
-	| Extract<SendMessageOutcome, { kind: "mailbox-v2" }>;
+type SerializedSendMessageOutcome = SendMessageOutcome;
 
 interface PendingFollowupStart extends PendingPromptStart {
 	outcome: FollowupTaskOutcome;
@@ -490,12 +479,9 @@ function makeRuntimeSettings(descriptor: SubagentDescriptor): SubagentSettings {
 	return {
 		agentScope: descriptor.runtime.agentScope,
 		maxDepth: descriptor.runtime.maxDepth,
-		enableRunInBackground: descriptor.runtime.enableRunInBackground,
-		defaultBackground: descriptor.runtime.defaultBackground,
+		runtimeMode: descriptor.runtime.runtimeMode,
 		maxConcurrentBackgroundRuns: descriptor.runtime.maxConcurrentBackgroundRuns,
 		maxIdleRuntimes: descriptor.runtime.maxIdleRuntimes,
-		backgroundProtocol: descriptor.runtime.backgroundProtocol,
-		reportDelivery: descriptor.runtime.reportDelivery,
 		inheritExtensions: descriptor.runtime.inheritExtensions,
 		openAIIdentity: descriptor.runtime.openAIIdentity,
 		maxOutputBytes: descriptor.runtime.maxOutputBytes,
@@ -698,13 +684,13 @@ export class SubagentCoordinator {
 			model: ctx.model,
 			thinkingLevel: ctx.thinkingLevel ?? "off",
 			projectTrusted: ctx.isProjectTrusted(),
-			deliver: async (customType, content, details, delivery) => {
-				const options =
-					delivery === "wakeup"
-						? { triggerTurn: true, deliverAs: "followUp" as const }
-						: ctx.isIdle()
-							? { triggerTurn: false }
-							: { triggerTurn: false, deliverAs: "nextTurn" as const };
+			// Reports never start a parent turn. The entry becomes part of the
+			// parent session (and therefore its next model context) while the
+			// parent keeps working; durable completions are read with wait_agent.
+			deliver: async (customType, content, details) => {
+				const options = ctx.isIdle()
+					? { triggerTurn: false }
+					: { triggerTurn: false, deliverAs: "nextTurn" as const };
 				this.pi.sendMessage({ customType, content, display: true, details }, options);
 			},
 		};
@@ -746,32 +732,19 @@ export class SubagentCoordinator {
 		const resolvedProviderName: SubagentProviderName =
 			context.mode === "fresh" ? "spawn" : "fork";
 		const provider = this.providers.get(resolvedProviderName);
-		if (
-			!settings.enableRunInBackground &&
-			input.run_in_background === true
-		) {
-			throw new Error(
-				"run_in_background is disabled by pi-subagent foreground-only mode (enableRunInBackground: false)",
-			);
-		}
-		const runInBackground =
-			settings.enableRunInBackground
-				? providerName === "fork"
-					? (input.run_in_background ?? false)
-					: (input.run_in_background ?? settings.defaultBackground)
-				: false;
-		const mode: SubagentMode = runInBackground ? "continuable" : "one-shot";
+		const mode: SubagentMode =
+			settings.runtimeMode === "background" ? "continuable" : "one-shot";
 		if (mode === "continuable" && !provider.supportsContinuable) {
 			throw new Error(`subagent provider "${provider.name}" does not support continuable children`);
 		}
 		if (mode === "continuable" && !parent.sessionManager.getSessionFile()) {
 			throw new Error(
-				"continuable subagents require a persisted parent session; set run_in_background to false",
+				'continuable subagents require a persisted parent session; set runtimeMode to "foreground" to delegate from an ephemeral session',
 			);
 		}
 		if (mode === "continuable" && parent.activation?.descriptor.mode === "one-shot") {
 			throw new Error(
-				"a one-shot child cannot leave a continuable descendant behind; set run_in_background to false",
+				"a foreground child cannot leave a continuable descendant behind; its runtime mode is fixed at creation",
 			);
 		}
 
@@ -840,12 +813,9 @@ export class SubagentCoordinator {
 				runtime: {
 					agentScope: settings.agentScope,
 					maxDepth: settings.maxDepth,
-					enableRunInBackground: settings.enableRunInBackground,
-					defaultBackground: settings.defaultBackground,
+					runtimeMode: settings.runtimeMode,
 					maxConcurrentBackgroundRuns: settings.maxConcurrentBackgroundRuns,
 					maxIdleRuntimes: settings.maxIdleRuntimes,
-					backgroundProtocol: settings.backgroundProtocol ?? "legacy",
-					reportDelivery: settings.reportDelivery,
 					inheritExtensions: settings.inheritExtensions,
 					openAIIdentity: openAIIdentityEnabled,
 					maxOutputBytes: settings.maxOutputBytes,
@@ -937,32 +907,9 @@ export class SubagentCoordinator {
 	): Promise<SendMessageOutcome> {
 		if (this.draining) throw new Error("pi-subagent is shutting down; message was not delivered");
 		const target = await this.resolveTarget(parent, childId);
-		const delivery = await this.agentOperations.run(target.agentId, () =>
+		return this.agentOperations.run(target.agentId, () =>
 			this.sendMessageSerialized(parent, target.agentId, message, signal),
 		);
-		if (delivery.kind === "mailbox-v2") return delivery;
-		const pending = delivery.pending;
-		if (!pending) return delivery;
-		try {
-			await pending.accepted;
-		} catch (error) {
-			if (pending.coldPrepared && !pending.activation.published) {
-				await this.agentOperations.run(target.agentId, async () => {
-					if (this.active.get(target.agentId) !== pending.activation) return;
-					pending.activation.suppressSettlement = true;
-					await this.rollbackActivation(
-						pending.activation,
-						pending.coldPrepared!,
-					);
-				});
-			}
-			throw error;
-		}
-		return {
-			kind: "legacy",
-			agentId: delivery.agentId,
-			taskPath: delivery.taskPath,
-		};
 	}
 
 	private async sendMessageSerialized(
@@ -975,139 +922,54 @@ export class SubagentCoordinator {
 			throw new Error("pi-subagent is shutting down; message was not delivered");
 		}
 		let activation = this.active.get(childId);
-		let coldPrepared: PreparedChildSession | undefined;
 		if (activation?.disposed) activation = undefined;
 		if (activation) {
 			this.touchActivation(activation);
 			this.assertContinuableDirectChild(parent, activation.descriptor);
-			if (activation.descriptor.runtime.backgroundProtocol === "mailbox-v2") {
-				if (signal?.aborted) throw abortReason(signal);
-				await waitForPromise(activation.persistenceGate.promise, signal);
-				if (this.draining || activation.disposed) {
-					throw new Error(
-						`subagent ${childId} became unavailable before its mailbox could be persisted`,
-					);
-				}
-				const enqueued = enqueueMailboxMessage(
-					activation.runtime.session.sessionManager,
-					{
-						senderAgentId: parent.agentId,
-						recipientAgentId: childId,
-						content: message,
-					},
+			if (signal?.aborted) throw abortReason(signal);
+			await waitForPromise(activation.persistenceGate.promise, signal);
+			if (this.draining || activation.disposed) {
+				throw new Error(
+					`subagent ${childId} became unavailable before its mailbox could be persisted`,
 				);
-				return {
-					kind: "mailbox-v2",
-					agentId: childId,
-					taskPath: descriptorTaskPath(activation.descriptor),
-					messageId: enqueued.message.messageId,
-					pendingMessages: enqueued.pendingMessages,
-				};
 			}
-		}
-		if (activation?.pendingSettlement && !activation.currentRun) {
-			await this.finalizeContinuableLocked(activation);
-			if (activation.disposed || this.active.get(childId) !== activation) {
-				activation = undefined;
-			}
-		}
-		if (!activation) {
-			const located = await this.findPersistedChild(parent, childId);
-			if (!located) throw new Error(`unknown subagent: ${childId}; message was not delivered`);
-			this.assertContinuableDirectChild(parent, located.descriptor);
-			const manager = SessionManager.open(
-				located.sessionFile,
-				parent.sessionManager.getSessionDir(),
-				parent.cwd,
-			);
-			if (located.descriptor.runtime.backgroundProtocol === "mailbox-v2") {
-				if (signal?.aborted) throw abortReason(signal);
-				const enqueued = enqueueMailboxMessage(manager, {
+			const enqueued = enqueueMailboxMessage(
+				activation.runtime.session.sessionManager,
+				{
 					senderAgentId: parent.agentId,
 					recipientAgentId: childId,
 					content: message,
-				});
-				return {
-					kind: "mailbox-v2",
-					agentId: childId,
-					taskPath: descriptorTaskPath(located.descriptor),
-					messageId: enqueued.message.messageId,
-					pendingMessages: enqueued.pendingMessages,
-				};
-			}
-			coldPrepared = {
-				sessionManager: manager,
-				seedMessageCount: manager.buildSessionContext().messages.length,
-				rollback: () => Promise.resolve(),
-			};
-			activation = await this.createActivation({
-				parent,
-				descriptor: located.descriptor,
-				prepared: coldPrepared,
-				isNew: false,
-			});
-			this.acquireParentOwnership(activation, parent);
-		} else {
-			this.assertContinuableDirectChild(parent, activation.descriptor);
-		}
-		const resolvedPath = descriptorTaskPath(activation.descriptor);
-
-		const session = activation.runtime.session;
-		if (activation.currentRun || session.isStreaming) {
-			if (signal?.aborted) throw signal.reason ?? new Error("message delivery aborted");
-			if (activation.controlState.turn.state === "queued") {
-				if (!activation.currentMessageGate) {
-					throw new Error(
-						`subagent ${activation.agentId} is queued but has no message gate`,
-					);
-				}
-				return {
-					kind: "legacy",
-					agentId: childId,
-					taskPath: resolvedPath,
-					pending: {
-						activation,
-						accepted: waitForPromise(
-							activation.currentMessageGate,
-							signal,
-						).then(() => {
-							if (signal?.aborted) throw abortReason(signal);
-							return session.followUp(message);
-						}),
-					},
-				};
-			}
-			await session.followUp(message);
-			return {
-				kind: "legacy",
-				agentId: childId,
-				taskPath: resolvedPath,
-			};
-		}
-
-		try {
-			this.acquireParentOwnership(activation, parent);
-			const started = this.startPrompt(activation, message, signal, {
-				detachAtAcceptance: true,
-				waitForCapacity: !parent.activation?.holdsBackgroundSlot,
-			});
-			return {
-				kind: "legacy",
-				agentId: childId,
-				taskPath: resolvedPath,
-				pending: {
-					activation,
-					accepted: started.accepted,
-					...(coldPrepared ? { coldPrepared } : {}),
 				},
+			);
+			return {
+				kind: "mailbox",
+				agentId: childId,
+				taskPath: descriptorTaskPath(activation.descriptor),
+				messageId: enqueued.message.messageId,
+				pendingMessages: enqueued.pendingMessages,
 			};
-		} catch (error) {
-			if (coldPrepared && !activation.published) {
-				activation.suppressSettlement = true;
-				await this.rollbackActivation(activation, coldPrepared);
-			}
-			throw error;
 		}
+		const located = await this.findPersistedChild(parent, childId);
+		if (!located) throw new Error(`unknown subagent: ${childId}; message was not delivered`);
+		this.assertContinuableDirectChild(parent, located.descriptor);
+		const manager = SessionManager.open(
+			located.sessionFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		if (signal?.aborted) throw abortReason(signal);
+		const enqueued = enqueueMailboxMessage(manager, {
+			senderAgentId: parent.agentId,
+			recipientAgentId: childId,
+			content: message,
+		});
+		return {
+			kind: "mailbox",
+			agentId: childId,
+			taskPath: descriptorTaskPath(located.descriptor),
+			messageId: enqueued.message.messageId,
+			pendingMessages: enqueued.pendingMessages,
+		};
 	}
 
 	async followupTask(
@@ -1188,12 +1050,6 @@ export class SubagentCoordinator {
 				parent.cwd,
 			);
 		}
-		if (descriptor.runtime.backgroundProtocol !== "mailbox-v2") {
-			throw new Error(
-				`subagent ${childId} uses the legacy background protocol; use send_message to start its next turn`,
-			);
-		}
-
 		const owner = mailboxOwner(descriptor);
 		const batch = readMailbox(manager.getEntries(), owner).pending;
 		if (batch.length === 0) {
@@ -1716,18 +1572,13 @@ export class SubagentCoordinator {
 		const content = `Background subagent ${readablePath} (${child.agentId}) reported:\n\n${truncated.text}${
 			truncated.truncated ? `\n\n[Report truncated; ${truncated.omittedBytes} bytes omitted.]` : ""
 		}`;
-		await child.parent.deliver(
-			REPORT_CUSTOM_TYPE,
-			content,
-			{
-				kind: "report",
-				childAgentId: child.agentId,
-				taskPath: readablePath,
-				label: child.descriptor.label,
-				...(truncated.truncated ? { truncated: true } : {}),
-			},
-			child.descriptor.runtime.reportDelivery,
-		);
+		await child.parent.deliver(REPORT_CUSTOM_TYPE, content, {
+			kind: "report",
+			childAgentId: child.agentId,
+			taskPath: readablePath,
+			label: child.descriptor.label,
+			...(truncated.truncated ? { truncated: true } : {}),
+		});
 	}
 
 	private runAdmittedOperation<T>(operation: () => Promise<T>): Promise<T> {
@@ -1812,14 +1663,12 @@ export class SubagentCoordinator {
 
 	createChildToolDefinitions(
 		getActivation: () => Activation,
-		enableRunInBackground = true,
-		defaultBackground = true,
+		runtimeMode: RuntimeMode = "background",
 		agentDiscovery?: AgentDiscoveryResult,
-		backgroundProtocol: NonNullable<SubagentSettings["backgroundProtocol"]> = "legacy",
 	): ToolDefinition[] {
 		const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
 		const assertBackgroundControlEnabled = (toolName: string): void => {
-			if (!enableRunInBackground) {
+			if (runtimeMode === "foreground") {
 				throw new Error(`tool "${toolName}" is unavailable in foreground-only mode`);
 			}
 		};
@@ -1836,12 +1685,10 @@ export class SubagentCoordinator {
 			label: "Subagent",
 			description:
 				"Delegate a standalone task to a named child path, with optional completed-turn context inheritance. " +
-				(!enableRunInBackground
+				(runtimeMode === "foreground"
 					? "This foreground-only instance always waits for the result."
-					: defaultBackground
-						? "It runs in the background by default and returns a readable path plus durable id."
-						: "It waits for the result by default; background mode returns a readable path plus durable id."),
-			parameters: delegationParameters(enableRunInBackground, agentNames),
+					: "It returns a readable path plus durable id; use send_message, followup_task, and wait_agent to continue it."),
+			parameters: delegationParameters(agentNames),
 			execute: async (_id, params, signal, onUpdate) => {
 				const activation = getActivation();
 				const outcome = await this.delegate(
@@ -1861,11 +1708,11 @@ export class SubagentCoordinator {
 			name: "subagent_fork",
 			label: "Subagent Fork",
 			description:
-				"Delegate a task to a child seeded with all completed turns from this conversation. It is foreground by default and can be explicitly continuable.",
-			parameters: forkDelegationParameters(
-				agentNames,
-				enableRunInBackground,
-			),
+				"Delegate a task to a child seeded with all completed turns from this conversation. " +
+				(runtimeMode === "foreground"
+					? "This foreground-only instance always waits for the result."
+					: "It returns a readable path plus durable id and can be continued through its mailbox."),
+			parameters: forkDelegationParameters(agentNames),
 			execute: async (_id, params, signal, onUpdate) => {
 				const activation = getActivation();
 				const outcome = await this.delegate(
@@ -1885,9 +1732,7 @@ export class SubagentCoordinator {
 			name: "send_message",
 			label: "Send Message",
 			description:
-				backgroundProtocol === "mailbox-v2"
-					? "Durably append a message to a direct mailbox-v2 child's FIFO mailbox without starting or resuming it."
-					: "Queue a message as a direct continuable child's next FIFO turn. This returns acceptance, not the child's answer.",
+				"Durably append a message to a direct continuable child's FIFO mailbox without starting or resuming it. Use followup_task to start the queued batch. This returns acceptance, not the child's answer.",
 			parameters: SendMessageParameters,
 			execute: async (_id, params, signal) => {
 				assertBackgroundControlEnabled("send_message");
@@ -1903,7 +1748,7 @@ export class SubagentCoordinator {
 						{
 							type: "text",
 							text:
-								delivery.kind === "mailbox-v2"
+								delivery.kind === "mailbox"
 									? `message ${delivery.messageId} durably enqueued for ${delivery.taskPath}; ${delivery.pendingMessages} pending`
 									: `message queued as the next turn for ${delivery.taskPath}`,
 						},
@@ -1913,7 +1758,7 @@ export class SubagentCoordinator {
 						action: "send",
 						agentId: delivery.agentId,
 						taskPath: delivery.taskPath,
-						...(delivery.kind === "mailbox-v2"
+						...(delivery.kind === "mailbox"
 							? {
 									messageId: delivery.messageId,
 									pendingMessages: delivery.pendingMessages,
@@ -1928,7 +1773,7 @@ export class SubagentCoordinator {
 			name: "followup_task",
 			label: "Follow-up Task",
 			description:
-				"Start exactly one scheduled turn for a direct mailbox-v2 child, atomically claiming its current pending FIFO mailbox batch.",
+				"Start exactly one scheduled turn for a direct child, atomically claiming its current pending FIFO mailbox batch.",
 			parameters: FollowupTaskParameters,
 			execute: async (_id, params, signal) => {
 				assertBackgroundControlEnabled("followup_task");
@@ -1961,7 +1806,7 @@ export class SubagentCoordinator {
 			name: "wait_agent",
 			label: "Wait Agent",
 			description:
-				"Wait event-driven for unread completion updates from direct mailbox-v2 children. This does not start a child or occupy a background scheduler slot.",
+				"Wait event-driven for unread completion updates from direct children. This does not start a child or occupy a background scheduler slot.",
 			parameters: WaitAgentParameters,
 			execute: async (id, params, signal) => {
 				assertBackgroundControlEnabled("wait_agent");
@@ -2099,10 +1944,7 @@ export class SubagentCoordinator {
 					scope === "descendants"
 						? ` parent=${entry.parentTaskPath} depth=${entry.depth}`
 						: "";
-				const mailbox =
-					entry.descriptor.runtime.backgroundProtocol === "mailbox-v2"
-						? ` pending=${entry.pendingMessages} updates=${entry.unreadUpdates}`
-						: "";
+				const mailbox = ` pending=${entry.pendingMessages} updates=${entry.unreadUpdates}`;
 				return `${entry.taskPath} [${entry.status}]${mailbox}${location} — ${entry.descriptor.label} (${entry.descriptor.agent.name}) id=${entry.agentId}`;
 			})
 			.join("\n");
@@ -2180,10 +2022,8 @@ export class SubagentCoordinator {
 				if (!activation) throw new Error("subagent activation is not published yet");
 				return activation;
 			},
-			descriptor.runtime.enableRunInBackground,
-			descriptor.runtime.defaultBackground,
+			descriptor.runtime.runtimeMode,
 			agentDiscovery,
-			descriptor.runtime.backgroundProtocol,
 		);
 		const model =
 			options.parent.modelRuntime.getModel(descriptor.model.provider, descriptor.model.id) ??
@@ -2299,17 +2139,8 @@ export class SubagentCoordinator {
 						return false;
 					}
 					if (
-						!descriptor.runtime.enableRunInBackground &&
-						BACKGROUND_CONTROL_TOOLS.has(tool)
-					) {
-						return false;
-					}
-					if (
-						descriptor.runtime.backgroundProtocol !== "mailbox-v2"
-						&& (
-							tool === "followup_task"
-							|| tool === "wait_agent"
-						)
+						descriptor.runtime.runtimeMode === "foreground"
+						&& BACKGROUND_CONTROL_TOOLS.has(tool)
 					) {
 						return false;
 					}
@@ -2428,13 +2259,6 @@ export class SubagentCoordinator {
 			resolveAccepted = resolvePromise;
 			rejectAccepted = rejectPromise;
 		});
-		activation.currentMessageGate = accepted;
-		const clearCurrentMessageGate = () => {
-			if (activation.currentMessageGate === accepted) {
-				activation.currentMessageGate = undefined;
-			}
-		};
-		void accepted.then(clearCurrentMessageGate, clearCurrentMessageGate);
 		const turnAbortController = new AbortController();
 		activation.turnAbortController = turnAbortController;
 		const abort = () => {
@@ -2570,86 +2394,6 @@ export class SubagentCoordinator {
 		return { turnId, accepted, result: lifecycle };
 	}
 
-	private startInternalMessage(
-		activation: Activation,
-		customType: string,
-		content: string,
-		details: ParentMessageDetails,
-	): void {
-		if (activation.currentRun || activation.disposed) return;
-		activation.pendingSettlement = undefined;
-		this.resetTurnCapture(activation);
-		const turnId = uuidv7();
-		queueAgentTurn(activation.controlState, turnId);
-		this.emitUpdate(activation);
-		const turnAbortController = new AbortController();
-		activation.turnAbortController = turnAbortController;
-		let resolveMessageGate!: () => void;
-		let rejectMessageGate!: (error: Error) => void;
-		let messageGateSettled = false;
-		const messageGate = new Promise<void>((resolvePromise, rejectPromise) => {
-			resolveMessageGate = resolvePromise;
-			rejectMessageGate = rejectPromise;
-		});
-		activation.currentMessageGate = messageGate;
-		void messageGate.catch(() => {});
-		const core = (async (): Promise<SubagentRunResult> => {
-			let permit: BackgroundRunPermit | undefined;
-			try {
-				permit = await this.acquireBackgroundRun(
-					activation,
-					turnAbortController.signal,
-					true,
-				);
-				startAgentTurn(activation.controlState, turnId);
-				activation.startedTurnIds.add(turnId);
-				this.emitTurnStart(activation, turnId);
-				this.emitUpdate(activation);
-				messageGateSettled = true;
-				resolveMessageGate();
-				await activation.runtime.session.sendCustomMessage(
-					{ customType, content, display: true, details },
-					{ triggerTurn: true, deliverAs: "followUp" },
-				);
-				return this.collectResult(activation, turnId, "completed");
-			} catch (error) {
-				activation.lastError = errorText(error);
-				if (!messageGateSettled) {
-					messageGateSettled = true;
-					rejectMessageGate(
-						error instanceof Error ? error : new Error(String(error)),
-					);
-				}
-				const result = this.collectResult(
-					activation,
-					turnId,
-					turnAbortController.signal.aborted ? "aborted" : "error",
-				);
-				if (!result.output) result.output = activation.lastError;
-				return result;
-			} finally {
-				if (activation.turnAbortController === turnAbortController) {
-					activation.turnAbortController = undefined;
-				}
-				if (activation.currentMessageGate === messageGate) {
-					activation.currentMessageGate = undefined;
-				}
-				if (permit) {
-					activation.holdsBackgroundSlot = false;
-					permit.release();
-				}
-			}
-		})();
-		let lifecycle!: Promise<SubagentRunResult>;
-		lifecycle = core.then(async (result) => {
-			if (activation.currentRun === lifecycle) activation.currentRun = undefined;
-			await this.runFinished(activation, result);
-			return result;
-		});
-		activation.currentRun = lifecycle;
-		void lifecycle.catch(() => {});
-	}
-
 	private async runFinished(activation: Activation, result: SubagentRunResult): Promise<void> {
 		activation.pendingMailboxClaims.delete(result.turnId);
 		activation.persistenceGate.reject(
@@ -2671,7 +2415,6 @@ export class SubagentCoordinator {
 			&& !activation.silentSettlementTurnIds.has(result.turnId)
 			&& activation.published
 			&& activation.descriptor.mode === "continuable"
-			&& activation.descriptor.runtime.backgroundProtocol === "mailbox-v2"
 		) {
 			try {
 				appendCompletionUpdate(activation.parent.sessionManager, {
@@ -2743,18 +2486,6 @@ export class SubagentCoordinator {
 		const finalizePromise = (async (): Promise<boolean> => {
 			let retained = false;
 			try {
-				const silentSettlement =
-					activation.silentSettlementTurnIds.has(result.turnId);
-				if (
-					activation.descriptor.runtime.backgroundProtocol !== "mailbox-v2"
-					&& !silentSettlement
-					&& !activation.suppressSettlement
-					&& !this.draining
-				) {
-					await this.deliverSettlement(activation, result).catch((error) => {
-						activation.lastError = errorText(error);
-					});
-				}
 				this.emitEnd(activation, result);
 				activation.silentSettlementTurnIds.delete(result.turnId);
 				activation.pendingSettlement = undefined;
@@ -2786,30 +2517,6 @@ export class SubagentCoordinator {
 		}
 	}
 
-	private async deliverSettlement(activation: Activation, result: SubagentRunResult): Promise<void> {
-		const readablePath = descriptorTaskPath(activation.descriptor);
-		const truncated = truncateUtf8(result.output, activation.descriptor.runtime.maxOutputBytes);
-		const closing = truncated.text.trim()
-			? `Its closing message:\n\n${truncated.text}`
-			: "It left no closing message.";
-		const content = `Background subagent ${readablePath} (${activation.agentId}) ${stopReasonHeadline(result.stopReason)} and will do no further work unless you send it more.\n\n${closing}${
-			truncated.truncated ? `\n\n[Closing message truncated; ${truncated.omittedBytes} bytes omitted.]` : ""
-		}`;
-		await activation.parent.deliver(
-			SETTLED_CUSTOM_TYPE,
-			content,
-			{
-				kind: "settled",
-				childAgentId: activation.agentId,
-				taskPath: readablePath,
-				label: activation.descriptor.label,
-				stopReason: result.stopReason,
-				...(truncated.truncated ? { truncated: true } : {}),
-			},
-			"wakeup",
-		);
-	}
-
 	private parentForActivation(activation: Activation): ParentRef {
 		return {
 			agentId: activation.agentId,
@@ -2822,26 +2529,15 @@ export class SubagentCoordinator {
 			thinkingLevel: activation.runtime.session.thinkingLevel,
 			projectTrusted: activation.parent.projectTrusted,
 			activation,
-			deliver: async (customType, content, details, delivery) => {
+			deliver: async (customType, content, details) => {
 				if (activation.disposed) throw new Error(`parent subagent ${activation.agentId} is no longer resident`);
 				const session = activation.runtime.session;
-				if (delivery === "quiet") {
-					await session.sendCustomMessage(
-						{ customType, content, display: true, details },
-						session.isStreaming
-							? { triggerTurn: false, deliverAs: "nextTurn" }
-							: { triggerTurn: false },
-					);
-					return;
-				}
-				if (activation.currentRun || session.isStreaming) {
-					await session.sendCustomMessage(
-						{ customType, content, display: true, details },
-						{ triggerTurn: true, deliverAs: "followUp" },
-					);
-					return;
-				}
-				this.startInternalMessage(activation, customType, content, details);
+				await session.sendCustomMessage(
+					{ customType, content, display: true, details },
+					session.isStreaming
+						? { triggerTurn: false, deliverAs: "nextTurn" }
+						: { triggerTurn: false },
+				);
 			},
 		};
 	}
@@ -3379,7 +3075,7 @@ export class SubagentCoordinator {
 				if (parentPath === undefined || parentDepth === undefined) {
 					continue;
 				}
-				if (record.descriptor.version === 3) {
+				{
 					let expectedPath: string;
 					try {
 						expectedPath = taskPath(
@@ -3418,7 +3114,6 @@ export class SubagentCoordinator {
 		);
 		const problems = new Map<string, string>();
 		for (const record of records) {
-			if (record.descriptor.version !== 3) continue;
 			const parent = byId.get(record.descriptor.parentAgentId);
 			if (parent) {
 				let expectedPath: string | undefined;
@@ -3559,28 +3254,26 @@ export class SubagentCoordinator {
 		for (const activation of this.active.values()) {
 			if (activation.descriptor.cwd !== parent.cwd) continue;
 			let pendingMessages = 0;
-			if (activation.descriptor.runtime.backgroundProtocol === "mailbox-v2") {
-				const mailbox = foldOwnedMailbox(
-					activation.runtime.session.sessionManager.getEntries(),
-					mailboxOwner(activation.descriptor),
-				);
-				if (mailbox.kind === "valid") {
-					pendingMessages = mailbox.snapshot.pending.length;
-				} else {
-					activeDiagnostics.push({
-						kind: "diagnostic",
-						piSessionId: activation.runtime.session.sessionId,
-						reason: "corrupt",
-						...(activation.runtime.session.sessionFile
-							? { sessionFile: activation.runtime.session.sessionFile }
-							: {}),
-						...(activation.descriptor.parentSessionFile
-							? { parentSessionFile: activation.descriptor.parentSessionFile }
-							: {}),
-						message: `corrupt subagent mailbox: ${mailbox.message}`,
-					});
-					continue;
-				}
+			const mailbox = foldOwnedMailbox(
+				activation.runtime.session.sessionManager.getEntries(),
+				mailboxOwner(activation.descriptor),
+			);
+			if (mailbox.kind === "valid") {
+				pendingMessages = mailbox.snapshot.pending.length;
+			} else {
+				activeDiagnostics.push({
+					kind: "diagnostic",
+					piSessionId: activation.runtime.session.sessionId,
+					reason: "corrupt",
+					...(activation.runtime.session.sessionFile
+						? { sessionFile: activation.runtime.session.sessionFile }
+						: {}),
+					...(activation.descriptor.parentSessionFile
+						? { parentSessionFile: activation.descriptor.parentSessionFile }
+						: {}),
+					message: `corrupt subagent mailbox: ${mailbox.message}`,
+				});
+				continue;
 			}
 			const completions = foldCompletionMailbox(
 				activation.runtime.session.sessionManager.getEntries(),
@@ -3658,7 +3351,6 @@ export class SubagentCoordinator {
 
 export {
 	REPORT_CUSTOM_TYPE,
-	SETTLED_CUSTOM_TYPE,
 	AGENT_CUSTOM_TYPE,
 	LINEAGE_CUSTOM_TYPE,
 };

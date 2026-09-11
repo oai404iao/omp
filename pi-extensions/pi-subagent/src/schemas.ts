@@ -70,84 +70,22 @@ function forkDelegationFields(agentNames?: readonly string[]) {
 	};
 }
 
-function createDelegationParameters(
-	enableRunInBackground: boolean,
-	agentNames?: readonly string[],
-) {
+export function delegationParameters(agentNames?: readonly string[]) {
 	const fields = delegationFields(agentNames);
-	const contextualFields = {
-		...fields,
-		context: Type.Optional(ContextParameters),
-	};
 	return Type.Object(
-		enableRunInBackground
-			? {
-					...contextualFields,
-					run_in_background: Type.Optional(
-						Type.Boolean({
-							description:
-								"Run as a continuable background child. The spawn provider defaults this from configuration.",
-						}),
-					),
-				}
-			: contextualFields,
+		{
+			...fields,
+			context: Type.Optional(ContextParameters),
+		},
 		{ additionalProperties: false },
 	);
 }
 
-export const ForegroundDelegationParameters = createDelegationParameters(false);
-
-export const DelegationParameters = createDelegationParameters(true);
-
-export function delegationParameters(
-	enableRunInBackground: boolean,
-	agentNames?: readonly string[],
-) {
-	if (agentNames === undefined) {
-		return enableRunInBackground ? DelegationParameters : ForegroundDelegationParameters;
-	}
-	return createDelegationParameters(enableRunInBackground, agentNames);
-}
-
-function createForkDelegationParameters(
-	enableRunInBackground: boolean,
-	agentNames?: readonly string[],
-) {
+export function forkDelegationParameters(agentNames?: readonly string[]) {
 	const fields = forkDelegationFields(agentNames);
 	return Type.Object(
-		enableRunInBackground
-			? {
-					...fields,
-					run_in_background: Type.Optional(
-						Type.Boolean({
-							description:
-								"Run as a continuable inherited-context background child. Fork remains foreground by default.",
-						}),
-					),
-				}
-			: fields,
+		fields,
 		{ additionalProperties: false },
-	);
-}
-
-export const ForegroundForkDelegationParameters =
-	createForkDelegationParameters(false);
-
-export const ForkDelegationParameters =
-	createForkDelegationParameters(true);
-
-export function forkDelegationParameters(
-	agentNames?: readonly string[],
-	enableRunInBackground = true,
-) {
-	if (agentNames === undefined) {
-		return enableRunInBackground
-			? ForkDelegationParameters
-			: ForegroundForkDelegationParameters;
-	}
-	return createForkDelegationParameters(
-		enableRunInBackground,
-		agentNames,
 	);
 }
 
@@ -171,7 +109,7 @@ export const FollowupTaskParameters = Type.Object(
 	{
 		subagent_id: Type.String({
 			description:
-				"Readable absolute/relative task path or durable id of a direct mailbox-v2 continuable child",
+				"Readable absolute/relative task path or durable id of a direct continuable child",
 			minLength: 1,
 			maxLength: 4096,
 		}),

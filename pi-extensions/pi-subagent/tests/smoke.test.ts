@@ -108,14 +108,14 @@ test("extension loads and registers its model-facing surface", async () => {
 		assert.equal(names.has("followup_task"), true);
 		assert.equal(
 			active.has("followup_task"),
-			false,
-			"legacy protocol should leave followup_task inactive",
+			true,
+			"background mode should activate followup_task",
 		);
 		assert.equal(names.has("wait_agent"), true);
 		assert.equal(
 			active.has("wait_agent"),
-			false,
-			"legacy protocol should leave wait_agent inactive",
+			true,
+			"background mode should activate wait_agent",
 		);
 		for (const toolName of ["subagent", "subagent_fork"]) {
 			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
@@ -184,7 +184,7 @@ test("foreground-only empty catalog preserves SDK tool overrides", async () => {
 		join(cwd, ".pi", "subagent.json"),
 		JSON.stringify({
 			agentScope: "project",
-			enableRunInBackground: false,
+			runtimeMode: "foreground",
 		}),
 	);
 	const parameters = {
@@ -277,7 +277,7 @@ test("trusted foreground-only configuration hides background controls", async ()
 	mkdirSync(join(cwd, ".pi"), { recursive: true });
 	writeFileSync(
 		join(cwd, ".pi", "subagent.json"),
-		JSON.stringify({ enableRunInBackground: false }),
+		JSON.stringify({ runtimeMode: "foreground" }),
 	);
 	const settingsManager = SettingsManager.inMemory({}, { projectTrusted: true });
 	const loader = new DefaultResourceLoader({
@@ -349,15 +349,11 @@ test("trusted foreground-only configuration hides background controls", async ()
 	}
 });
 
-test("mailbox-v2 configuration activates followup_task", async () => {
+test("the default background mode activates the durable mailbox controls", async () => {
 	const extensionRoot = resolve(import.meta.dirname, "..");
 	const cwd = join(root, "mailbox-project");
 	const agentDir = join(root, "mailbox-agent");
-	mkdirSync(join(cwd, ".pi"), { recursive: true });
-	writeFileSync(
-		join(cwd, ".pi", "subagent.json"),
-		JSON.stringify({ backgroundProtocol: "mailbox-v2" }),
-	);
+	mkdirSync(cwd, { recursive: true });
 	const settingsManager = SettingsManager.inMemory({}, { projectTrusted: true });
 	const loader = new DefaultResourceLoader({
 		cwd,

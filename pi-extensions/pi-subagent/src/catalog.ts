@@ -61,24 +61,22 @@ export async function readPersistedCatalog(session: SessionView): Promise<Persis
 					return;
 				}
 				let pendingMessages = 0;
-				if (folded.descriptor.runtime.backgroundProtocol === "mailbox-v2") {
-					const mailbox = foldOwnedMailbox(manager.getEntries(), {
-						parentAgentId: folded.descriptor.parentAgentId,
-						agentId: folded.descriptor.agentId,
+				const mailbox = foldOwnedMailbox(manager.getEntries(), {
+					parentAgentId: folded.descriptor.parentAgentId,
+					agentId: folded.descriptor.agentId,
+				});
+				if (mailbox.kind === "corrupt") {
+					diagnostics.push({
+						kind: "diagnostic",
+						piSessionId: manager.getSessionId(),
+						reason: "corrupt",
+						sessionFile: info.path,
+						...(headerParent ? { parentSessionFile: headerParent } : {}),
+						message: `corrupt subagent mailbox: ${mailbox.message}`,
 					});
-					if (mailbox.kind === "corrupt") {
-						diagnostics.push({
-							kind: "diagnostic",
-							piSessionId: manager.getSessionId(),
-							reason: "corrupt",
-							sessionFile: info.path,
-							...(headerParent ? { parentSessionFile: headerParent } : {}),
-							message: `corrupt subagent mailbox: ${mailbox.message}`,
-						});
-						return;
-					}
-					pendingMessages = mailbox.snapshot.pending.length;
+					return;
 				}
+				pendingMessages = mailbox.snapshot.pending.length;
 				let unreadUpdatesByChild = new Map<string, number>();
 				const completions = foldCompletionMailbox(
 					manager.getEntries(),

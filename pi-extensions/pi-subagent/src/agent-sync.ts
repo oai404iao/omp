@@ -30,6 +30,11 @@ interface AgentManifest {
 	version: 1;
 	packageVersion: string;
 	files: Record<string, string>;
+	/**
+	 * Bundled preset names the user deleted. Initialization never restores
+	 * them, so deleting a preset stays effective across package versions.
+	 */
+	retired: string[];
 }
 
 type ManifestReadResult =
@@ -74,7 +79,14 @@ export interface AgentSyncResult {
 	manifestPath: string;
 	installed: string[];
 	updated: string[];
+	/** Bundled presets retired upstream and removed from the user directory. */
 	removed: string[];
+	/** Presets the user deleted; initialization keeps them absent. */
+	retired: string[];
+	/** Previously deleted presets that reappeared on disk as managed again. */
+	restored: string[];
+	/** True when this run recorded a new deletion or a recreation. */
+	retirementChanged: boolean;
 	preserved: string[];
 	backups: AgentBackup[];
 	diagnostics: string[];
@@ -135,10 +147,27 @@ function parseManifest(value: unknown, manifestPath: string): AgentManifest {
 		}
 		files[name] = hash;
 	}
+	const retired: string[] = [];
+	if (input.retired !== undefined) {
+		if (!Array.isArray(input.retired)) {
+			throw new Error("retired must be an array of bundled preset file names");
+		}
+		for (const name of input.retired) {
+			if (
+				typeof name !== "string" ||
+				basename(name) !== name ||
+				!name.endsWith(".md")
+			) {
+				throw new Error(`retired contains an invalid entry for "${String(name)}"`);
+			}
+			if (!retired.includes(name)) retired.push(name);
+		}
+	}
 	return {
 		version: MANIFEST_VERSION,
 		packageVersion: input.packageVersion.trim(),
 		files,
+		retired,
 	};
 }
 
@@ -441,6 +470,9 @@ function syncBundledAgentsLocked(
 			installed: [],
 			updated: [],
 			removed: [],
+			retired: [],
+			restored: [],
+			retirementChanged: false,
 			preserved: [],
 			backups: [],
 			diagnostics: [manifestRead.diagnostic],
@@ -448,10 +480,38 @@ function syncBundledAgentsLocked(
 	}
 	const previous = manifestRead.kind === "valid" ? manifestRead.manifest : undefined;
 
+	const files = bundledAgentFiles(options.bundledDir);
+	const currentNames = new Set(files.map((file) => file.name));
+	const previousFiles = previous?.files ?? {};
+	const retiredNames = new Set<string>();
+	const restored: string[] = [];
+
+	// A preset that was managed before and is missing now was deleted by the
+	// user. Record that deletion at every startup so a later package version
+	// cannot resurrect it; an explicit recreation restores management.
+	for (const name of previous?.retired ?? []) {
+		if (currentNames.has(name) && existsSync(join(userAgentsDir, name))) {
+			restored.push(name);
+		}
+	}
+	for (const name of Object.keys(previousFiles)) {
+		if (!currentNames.has(name)) continue;
+		if (restored.includes(name)) continue;
+		if ((previous?.retired ?? []).includes(name)) {
+			retiredNames.add(name);
+			continue;
+		}
+		if (!existsSync(join(userAgentsDir, name))) retiredNames.add(name);
+	}
+	const recordedRetired = [...retiredNames].sort();
+	const retirementChanged =
+		restored.length > 0 ||
+		recordedRetired.join("\n") !== (previous?.retired ?? []).slice().sort().join("\n");
+
 	// The package copies are initialization templates, not a runtime fallback.
 	// Once this package version has been initialized, the user directory is
 	// authoritative: edits and deletions must survive every same-version start.
-	if (previous?.packageVersion === packageVersion) {
+	if (previous?.packageVersion === packageVersion && !retirementChanged) {
 		return {
 			packageVersion,
 			userAgentsDir,
@@ -459,68 +519,77 @@ function syncBundledAgentsLocked(
 			installed: [],
 			updated: [],
 			removed: [],
+			retired: recordedRetired,
+			restored: [],
+			retirementChanged: false,
 			preserved: [],
 			backups: [],
 			diagnostics,
 		};
 	}
 
-	const files = bundledAgentFiles(options.bundledDir);
-	const currentNames = new Set(files.map((file) => file.name));
 	const preserved: string[] = [];
 	const actions: PlannedAction[] = [];
+	const versionChanged = previous?.packageVersion !== packageVersion;
 
-	// Plan the complete first-install or version-change operation before
-	// changing any user agent file.
-	for (const file of files) {
-		const destination = join(userAgentsDir, file.name);
-		const destinationState = destinationKind(destination);
-		if (destinationState.kind === "missing") {
+	// Agent files change only on first install and package-version changes. A
+	// same-version startup that merely recorded a deletion or a recreation only
+	// rewrites the manifest below.
+	if (versionChanged) {
+		// Plan the complete operation before changing any user agent file.
+		for (const file of files) {
+			if (retiredNames.has(file.name)) continue;
+			const destination = join(userAgentsDir, file.name);
+			const destinationState = destinationKind(destination);
+			if (destinationState.kind === "missing") {
+				actions.push({
+					name: file.name,
+					kind: "install",
+					destination,
+					destinationKind: "missing",
+					content: file.content,
+				});
+				continue;
+			}
+
+			if (
+				destinationState.kind === "file"
+				&& sameRegularFile(destination, destinationState.size, file.content)
+			) {
+				preserved.push(file.name);
+				continue;
+			}
 			actions.push({
 				name: file.name,
-				kind: "install",
+				kind: "replace",
 				destination,
-				destinationKind: "missing",
+				destinationKind: destinationState.kind,
 				content: file.content,
 			});
-			continue;
 		}
 
-		if (
-			destinationState.kind === "file" &&
-			sameRegularFile(destination, destinationState.size, file.content)
-		) {
-			preserved.push(file.name);
-			continue;
+		// Retired bundled presets must not remain silently active. They are
+		// backed up like replacements, then removed; unrelated user-defined
+		// names remain.
+		for (const name of Object.keys(previousFiles).sort((left, right) => left.localeCompare(right))) {
+			if (currentNames.has(name)) continue;
+			const destination = join(userAgentsDir, name);
+			const destinationState = destinationKind(destination);
+			if (destinationState.kind === "missing") continue;
+			actions.push({
+				name,
+				kind: "remove",
+				destination,
+				destinationKind: destinationState.kind,
+			});
 		}
-		actions.push({
-			name: file.name,
-			kind: "replace",
-			destination,
-			destinationKind: destinationState.kind,
-			content: file.content,
-		});
-	}
-
-	// Retired bundled presets must not remain silently active. They are backed
-	// up like replacements, then removed; unrelated user-defined names remain.
-	for (const name of Object.keys(previous?.files ?? {}).sort((left, right) => left.localeCompare(right))) {
-		if (currentNames.has(name)) continue;
-		const destination = join(userAgentsDir, name);
-		const destinationState = destinationKind(destination);
-		if (destinationState.kind === "missing") continue;
-		actions.push({
-			name,
-			kind: "remove",
-			destination,
-			destinationKind: destinationState.kind,
-		});
 	}
 
 	const manifest: AgentManifest = {
 		version: MANIFEST_VERSION,
 		packageVersion,
 		files: Object.fromEntries(files.map((file) => [file.name, file.hash])),
+		retired: recordedRetired,
 	};
 	const stagedPaths: string[] = [];
 	const backups: AgentBackup[] = [];
@@ -587,6 +656,9 @@ function syncBundledAgentsLocked(
 		installed: actions.filter((action) => action.kind === "install").map((action) => action.name),
 		updated: actions.filter((action) => action.kind === "replace").map((action) => action.name),
 		removed: actions.filter((action) => action.kind === "remove").map((action) => action.name),
+		retired: recordedRetired,
+		restored: [...restored].sort(),
+		retirementChanged,
 		preserved,
 		backups,
 		diagnostics,
