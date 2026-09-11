@@ -13,14 +13,13 @@
     },
     "agentScope": {
       "type": "string",
-      "enum": ["user", "project", "both"],
+      "enum": [
+        "user",
+        "project",
+        "both"
+      ],
       "description": "Select user definitions, project definitions, or user definitions followed by project overrides.",
       "default": "user"
-    },
-    "syncBundledAgents": {
-      "type": "boolean",
-      "deprecated": true,
-      "description": "Retired user-level compatibility key from versions 0.2 and 0.3. It is validated but ignored; template initialization is automatic and bundled definitions are never used at runtime."
     },
     "maxDepth": {
       "type": "integer",
@@ -29,15 +28,14 @@
       "description": "Absolute delegation depth. A top-level Pi session has depth 0.",
       "default": 3
     },
-    "enableRunInBackground": {
-      "type": "boolean",
-      "description": "Enable continuable background children and their model-facing lifecycle controls. Set false for strict foreground-only mode.",
-      "default": true
-    },
-    "defaultBackground": {
-      "type": "boolean",
-      "description": "Default run mode for subagent calls when background execution is enabled. subagent_fork remains foreground unless explicitly requested.",
-      "default": true
+    "runtimeMode": {
+      "type": "string",
+      "enum": [
+        "foreground",
+        "background"
+      ],
+      "description": "Single execution mode. foreground waits for every child's final answer and exposes no lifecycle tools; background starts continuable mailbox-v2 children that return a readable path plus durable id.",
+      "default": "background"
     },
     "maxConcurrentBackgroundRuns": {
       "type": "integer",
@@ -53,18 +51,6 @@
       "description": "Maximum settled continuable child runtimes retained in the process-wide idle LRU. Zero unloads immediately.",
       "default": 0
     },
-    "backgroundProtocol": {
-      "type": "string",
-      "enum": ["legacy", "mailbox-v2"],
-      "description": "Background message protocol. legacy starts or follows a turn from send_message; mailbox-v2 durably enqueues until followup_task explicitly starts one turn.",
-      "default": "legacy"
-    },
-    "reportDelivery": {
-      "type": "string",
-      "enum": ["wakeup", "quiet"],
-      "description": "Whether explicit child reports trigger a parent turn or wait for the parent's next turn. mailbox-v2 completion updates are always quiet.",
-      "default": "wakeup"
-    },
     "inheritExtensions": {
       "type": "boolean",
       "description": "Load the parent's other Pi extensions in child runtimes. pi-subagent itself is filtered out and explicit agent tool ceilings still apply.",
@@ -79,7 +65,7 @@
       "type": "integer",
       "minimum": 1024,
       "maximum": 1048576,
-      "description": "Maximum child output inserted into a parent tool result, report, or settlement notice.",
+      "description": "Maximum child output inserted into a parent tool result, report, or completion update.",
       "default": 51200
     }
   }

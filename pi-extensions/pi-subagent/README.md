@@ -19,20 +19,22 @@ Peer floor: Pi 0.85.1; tested against 0.85.1.
 - **Readable task paths** such as `/root/review/auth`, with relative addressing
 - **Explicit context inheritance**: `fresh`, `all_completed`, or
   `last_n_completed`
-- **Two lifecycles**
-  - foreground one-shot runs return the child's final answer
-  - background continuable runs return a readable path and stable agent id at
-    prompt acceptance
-- **Foreground-only policy** that removes background scheduling and lifecycle controls
+- **One scheduling mode per session** (`runtimeMode`)
+  - `foreground`: one-shot runs return the child's final answer
+  - `background`: continuable runs return a readable path and stable agent id
+    at prompt acceptance
+- **Foreground-only policy** that removes background scheduling and lifecycle
+  controls when `runtimeMode` is `foreground`
 - **Independent context and session** for every child
 - **User-owned agent catalog** with bundled templates used only for
   first-install and package-version initialization
 - **Durable descriptors and lineage** stored in child JSONL sessions
-- **Two background protocols**: compatible immediate follow-ups or an opt-in
-  durable mailbox with explicit turn starts
+- **Durable mailbox protocol**: enqueue-only `send_message` plus explicit
+  `followup_task` turn starts
 - **Quiet durable completion updates** with event-driven `wait_agent`
 - **Control plane** with listing and interruption
-- **Child-to-parent `report` channel** for continuable children
+- **Child-to-parent `report` channel** for continuable children (quiet: it never
+  starts a parent turn)
 - **Nested delegation** with an absolute persisted depth limit
 - **Dynamic agent-name enums** generated from the effective user/project catalog
 - **Parallel-safe delegation**: multiple `subagent` calls in one assistant message may overlap
@@ -71,14 +73,14 @@ Development and the supported compatibility floor are pinned to Pi `0.85.1`.
 
 | Tool | Behavior |
 | --- | --- |
-| `subagent` | Starts a named child with selectable context inheritance. Background continuable mode is the default unless configured otherwise; foreground-only mode always waits for the answer. |
-| `subagent_fork` | Starts a child with all completed parent turns. It remains foreground by default; `run_in_background: true` creates a continuable fork. |
-| `send_message` | Targets a direct child by path or durable id. Legacy starts/joins the next FIFO turn; `mailbox-v2` only durably appends. |
-| `followup_task` | `mailbox-v2` only: targets a direct child by path or id, atomically claims the pending FIFO batch, and starts one scheduled turn. |
-| `wait_agent` | `mailbox-v2` only: waits event-driven for unread direct-child completions without starting a model turn or consuming a scheduler slot. |
-| `interrupt_agent` | Requests cancellation of a live descendant by path or id without deleting its session. Active only when background execution is enabled. |
-| `list_agents` | Lists readable descendant paths as `running`, `idle`, or `ready`, including separate `pending=N` task and `updates=N` completion counts. Active only when background execution is enabled. |
-| `report` | Child-only return channel. Installed automatically in continuable children. |
+| `subagent` | Starts a named child with selectable context inheritance. In `background` mode it is continuable and returns at prompt acceptance; in `foreground` mode it waits for the final answer. |
+| `subagent_fork` | Starts a child with all completed parent turns and uses the same session scheduling mode. |
+| `send_message` | Durably appends a message to a direct child's FIFO mailbox. It never starts or resumes the child. |
+| `followup_task` | Targets a direct child by path or id, atomically claims the pending FIFO batch, and starts one scheduled turn. |
+| `wait_agent` | Waits event-driven for unread direct-child completions without starting a model turn or consuming a scheduler slot. |
+| `interrupt_agent` | Requests cancellation of a live descendant by path or id without deleting its session. Active only in `background` mode. |
+| `list_agents` | Lists readable descendant paths as `running`, `idle`, or `ready`, including separate `pending=N` task and `updates=N` completion counts. Active only in `background` mode. |
+| `report` | Child-only return channel. Installed automatically in continuable children; the entry is recorded in the parent session without waking it. |
 
 The `/subagents` command shows the effective scheduling mode, available agent definitions,
 and the current descendant catalog.
@@ -102,7 +104,7 @@ Use subagent_fork with planner to plan the change using our completed discussion
 List my subagents, then send the scout a follow-up asking for exact call sites.
 ```
 
-With `"backgroundProtocol": "mailbox-v2"`, enqueue first and start explicitly:
+In the default background mode, enqueue first and start explicitly:
 
 ```text
 Send the scout two mailbox messages, then call followup_task once so it handles
@@ -111,6 +113,10 @@ its quiet completion update.
 ```
 
 Pi executes sibling tool calls in parallel, so this package deliberately accepts one delegation per `subagent` call instead of embedding a separate `tasks` array.
+
+Every child follows the session's `runtimeMode`; there is no per-call background
+flag. Independent foreground calls still execute in parallel within one
+assistant message.
 
 ### Task paths and context
 
@@ -168,15 +174,15 @@ when fewer than the requested number of explicit completed turns remain.
 Context is copied once into a new child session. Descriptor, lineage, mailbox,
 completion, and other plain extension-state entries are not copied.
 
-`subagent_fork` is the compatibility shortcut for `all_completed`. It remains
-foreground unless `run_in_background: true` is explicitly supplied, even when
-`defaultBackground` is true. A background fork is continuable and supports the
-same legacy or mailbox-v2 follow-up lifecycle as a fresh child.
+`subagent_fork` is the compatibility shortcut for `all_completed` and follows
+the session's `runtimeMode` exactly like `subagent`: in `background` mode the
+fork is continuable and uses the same mailbox lifecycle as a fresh child.
 
-New sessions persist descriptor version 3 with their task path and context
-policy. Version-2 descriptors remain readable and controllable by UUID; they
-are displayed under the deterministic compatibility namespace
-`/root/.legacy/<agent-id>`.
+Every child persists descriptor version 4 with its task path, context policy,
+and `runtimeMode`. Descriptors written by earlier releases use retired
+scheduling switches and a background-protocol snapshot; they are **not**
+readable any more. Such sessions stay on disk but appear as a corrupt
+diagnostic in `list_agents` and cannot be addressed by path or id.
 
 ## Agent definitions
 
@@ -203,8 +209,26 @@ After the current package version has been initialized, the user directory is
 authoritative. Same-version startups do not restore missing files or refresh
 changed templates. If the user deletes every agent definition, the effective
 catalog is empty and delegation tools are inactive after restart or `/reload`.
-A later package-version change starts a new initialization pass and installs
-missing bundled templates again.
+
+### Deleting a bundled preset
+
+Deleting a managed preset file is a durable decision, not a transient one:
+
+- every startup compares the manifest with the user agent directory; a managed
+  preset that is missing is recorded in `agents-manifest.json` as `retired`;
+- later package-version changes install **new** bundled presets but never
+  restore a preset you deleted;
+- presets that were never previously managed are still installed, and a preset
+  the user deleted before this version was first run is detected on the next
+  startup;
+- recreating the file (for example by copying a backup) makes it a managed
+  preset again; from then on an ordinary package-version change refreshes it
+  with a backup like any other existing preset;
+- deleting every preset leaves delegation tools inactive after restart or
+  `/reload`; run `/subagents` to see the effective catalog.
+
+Retirement is reported at startup (`deleted by you (not restored): ...`) and a
+name is dropped from the retirement list once it is no longer bundled.
 
 Initialization behavior:
 
@@ -212,8 +236,8 @@ Initialization behavior:
    is backed up before the bundled version replaces it.
 2. **Ordinary restart of the same release:** user edits are preserved.
 3. **Plugin update:** differing user presets are backed up, then replaced with the new
-   bundled versions. A bundled prompt change without a package-version change does not
-   trigger a refresh.
+   bundled versions. Presets deleted by the user stay deleted. A bundled prompt
+   change without a package-version change does not trigger a refresh.
 4. **Retired preset:** a formerly bundled name is backed up and removed so an obsolete
    prompt does not remain silently active.
 5. Files whose names were never managed bundled presets are left untouched.
@@ -315,12 +339,9 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
   "$schema": "/path/to/pi-subagent/config.schema.json",
   "agentScope": "user",
   "maxDepth": 3,
-  "enableRunInBackground": true,
-  "defaultBackground": true,
+  "runtimeMode": "background",
   "maxConcurrentBackgroundRuns": 4,
   "maxIdleRuntimes": 0,
-  "backgroundProtocol": "legacy",
-  "reportDelivery": "wakeup",
   "inheritExtensions": false,
   "openAIIdentity": false,
   "maxOutputBytes": 51200
@@ -331,21 +352,35 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 | --- | --- | --- |
 | `agentScope` | `user` | Select user definitions, project definitions, or user definitions followed by project overrides. |
 | `maxDepth` | `3` | Absolute delegation depth; a top-level Pi session is depth 0. |
-| `enableRunInBackground` | `true` | Enable continuable background children and their model-facing lifecycle controls. Set `false` for strict foreground-only mode. |
-| `defaultBackground` | `true` | Default scheduling for `subagent` calls when background execution is enabled. `subagent_fork` remains foreground unless explicitly requested. |
+| `runtimeMode` | `background` | The single scheduling switch. `background` starts continuable children and exposes their lifecycle tools; `foreground` waits for every child's final answer and removes those tools. |
 | `maxConcurrentBackgroundRuns` | `4` | Maximum continuable subagent turns executing at once in one extension runtime. Additional top-level runs wait in FIFO order; nested work fails at capacity instead of deadlocking its parent turn. |
 | `maxIdleRuntimes` | `0` | Process-wide LRU capacity for settled continuable runtimes. `0` preserves immediate unload; a positive value keeps the most recently used idle runtimes and transparently cold-resumes evicted paths. |
-| `backgroundProtocol` | `legacy` | `legacy` preserves immediate `send_message` turns. `mailbox-v2` makes `send_message` enqueue-only and requires `followup_task` to start a turn. The protocol is snapshotted in each child descriptor. |
-| `reportDelivery` | `wakeup` | Controls explicit `report` calls: `wakeup` starts/queues a parent turn; `quiet` waits for the parent's next turn. Mailbox-v2 completion updates are always quiet. |
 | `inheritExtensions` | `false` | Load other Pi extensions in child runtimes. This package filters itself out; explicit agent tool ceilings still apply. |
 | `openAIIdentity` | `false` | For OpenAI Responses child models, inject only the named `pi-codex-minimal-tools` identity lifecycle inline. Codex Session/Thread/Turn/Window ids remain owned and serialized by that package. |
-| `maxOutputBytes` | `51200` | Cap for parent-visible foreground output, reports, completion updates, and legacy settlement notices. Full output remains in the child session. |
+| `maxOutputBytes` | `51200` | Cap for parent-visible foreground output, reports, and completion updates. Full output remains in the child session. |
 
 Invalid configuration and unknown child tool names fail loud before the child's first model request.
 
-The retired user-level `syncBundledAgents` key from versions 0.2 and 0.3 is
-accepted for configuration compatibility but ignored. Template initialization
-is now automatic and runtime discovery never reads bundled definitions.
+### Migrating an existing configuration
+
+Earlier releases configured two booleans (`enableRunInBackground`,
+`defaultBackground`) plus a `backgroundProtocol` selector, and 0.2/0.3 added a
+`syncBundledAgents` switch. Every one of them is retired and is now rejected as
+an unknown setting, and the extension never rewrites a configuration file:
+
+| Retired key | Replace with |
+| --- | --- |
+| `enableRunInBackground: false` | `runtimeMode: "foreground"` |
+| `enableRunInBackground: true` (or absent) | `runtimeMode: "background"` |
+| `defaultBackground` | nothing; background children are always continuable |
+| `backgroundProtocol` | nothing; the durable mailbox is the only background protocol |
+| `syncBundledAgents` | nothing; template initialization is automatic |
+| `reportDelivery` | nothing; `report` never starts a parent turn |
+
+`reportDelivery` was removed together with the parent-wakeup path. A child
+`report` is appended to the parent session (so the parent model sees it on its
+next turn) and displayed in the TUI, but it never starts or queues a parent
+turn. Durable completion updates are read with `wait_agent`.
 
 `openAIIdentity` and `inheritExtensions` are independent. The former adds only
 the lightweight Codex identity lifecycle even when normal extension inheritance
@@ -361,25 +396,23 @@ with an actionable missing-adapter error.
 
 ```json
 {
-  "enableRunInBackground": false
+  "runtimeMode": "foreground"
 }
 ```
 
 In this mode:
 
-- `subagent` always waits for the child's final answer, even when `defaultBackground` is `true`;
-- `run_in_background` is removed from the model-facing schema at session startup;
-- a forced `run_in_background: true` call is rejected before a child is created;
-- nested subagents inherit the foreground-only policy through the durable runtime snapshot;
+- `subagent` and `subagent_fork` always wait for the child's final answer;
+- no per-call background flag exists, so a child can never be created continuable;
+- nested subagents inherit the mode through the durable runtime snapshot;
 - `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` are removed from the active
   model tool set, including inside nested children;
 - sibling foreground calls may still execute in parallel in one assistant message.
 
-`subagent_fork` remains foreground in this mode and its `run_in_background`
-field is removed too. The `/subagents` command remains available for human
-inspection of historical children, but persisted continuable children cannot
-be resumed until background execution is re-enabled. Run `/reload` or restart
-Pi after changing this setting so the active tool set and displayed schema are
+The `/subagents` command remains available for human inspection of historical
+children, but persisted continuable children cannot be resumed until
+`runtimeMode` is set back to `background`. Run `/reload` or restart Pi after
+changing this setting so the active tool set and displayed schema are
 refreshed.
 
 ## Lifecycle
@@ -407,17 +440,17 @@ generated once per subagent, recorded in the child's session as `pi-subagent/age
 and chained through `parentAgentId` in the descriptor, so children stay addressable
 even when a parent session is forked or re-created. When an activation settles:
 
-1. `legacy` sends the parent its existing wakeup settlement; `mailbox-v2`
-   appends a quiet completion update to the direct parent's session instead;
+1. the child appends a quiet completion update to the direct parent's session;
 2. once owned descendants are done, the child runtime is either disposed or
    retained in the optional idle LRU;
 3. an unloaded persistent session is `ready`; a retained settled runtime is
    `idle`;
-4. legacy `send_message`, or mailbox-v2 `followup_task`, can cold-resume that
-   same session for another turn.
+4. `send_message` plus `followup_task` can cold-resume that same session for
+   another turn.
 
-A child can explicitly call `report` before settlement. Reports retain
-`reportDelivery` behavior and are separate from quiet mailbox-v2 completions.
+A child can explicitly call `report` before settlement. A report is recorded in
+the parent session and never starts or queues a parent turn; it is a content
+channel that is separate from the quiet completion update.
 
 Continuable turns share a bounded scheduler. Calls targeting the same durable
 agent are serialized so concurrent messages cannot create multiple cold
@@ -435,9 +468,9 @@ settlements. Eviction disposes only the runtime; the descriptor, path, context,
 session history, task mailbox, and completion mailbox remain durable, so the
 next accepted turn cold-resumes normally.
 
-#### Mailbox-v2
+#### Mailbox protocol
 
-Set `"backgroundProtocol": "mailbox-v2"` to separate delivery from execution:
+The mailbox separates delivery from execution:
 
 1. `send_message` appends a bounded message record to the direct child's JSONL
    session and returns its stable message id. It does not create a runtime,
@@ -476,16 +509,13 @@ order of concurrent `send_message` calls. Each returned `pendingMessages` count
 describes that append. If one message must precede another, await the first send
 before starting the next.
 
-`mailbox-v2` is opt-in. Existing descriptors without a protocol field resume as
-`legacy`, and the default legacy tool behavior is unchanged. A persisted
-mailbox-v2 child keeps its protocol snapshot. `followup_task` and `wait_agent` remain available
-when such a child exists even if the current default is later changed back to
-legacy.
+The durable mailbox is the only background protocol: `send_message` always
+enqueues and `followup_task` is always required to start the queued batch.
 
 `wait_agent` observes only completions written by the current agent's direct
 children. Nested parents consume their own child updates; a root wait does not
-steal grandchild updates. Legacy settlements and all explicit reports retain
-their previous behavior.
+steal grandchild updates. Nothing in this extension wakes a parent turn: work
+continues until the parent reads its mailbox.
 
 ### Inherited-context boundary
 
@@ -520,10 +550,10 @@ becoming child descriptors or mailbox ownership.
   actor-graph residency, orphan handling, and background GC are not implemented.
 - Pi lazily creates a new child JSONL file on its first assistant entry. The
   initial background agent id therefore has a crash window after prompt
-  acceptance; mailbox-v2 `send_message` waits for that first durable checkpoint
-  before acknowledging an enqueue.
-- Legacy `send_message` still has Pi's prompt-acceptance crash window. Use
-  `mailbox-v2` when delivery must be persisted before an explicit turn start.
+  acceptance; `send_message` waits for that first durable checkpoint before
+  acknowledging an enqueue.
+- A foreground child that is still being created has no mailbox; only
+  `runtimeMode: "background"` children accept durable messages.
 - `interrupt_agent` is fire-and-return and relies on Pi's current `AgentSession.abort()` queue behavior.
 - Structured-output delegation is not implemented yet.
 - Continuable starts require a persisted parent session; ephemeral (`--no-session`) parents can use foreground one-shot delegation only.

@@ -24,6 +24,7 @@ import {
 	COMPLETION_FAILURE_CUSTOM_TYPE,
 	COMPLETION_UPDATE_CUSTOM_TYPE,
 	readCompletionMailbox,
+	type CompletionUpdate,
 } from "../src/completion-mailbox.ts";
 import { SubagentCoordinator, AGENT_CUSTOM_TYPE } from "../src/coordinator.ts";
 import {
@@ -432,6 +433,22 @@ async function waitForChildStatus(
 	});
 }
 
+function parentCompletions(
+	parent: Parameters<SubagentCoordinator["list"]>[0],
+): CompletionUpdate[] {
+	return readCompletionMailbox(
+		(parent.sessionManager as SessionManager).getEntries(),
+		{ parentAgentId: parent.agentId },
+	).updates;
+}
+
+async function waitForCompletions(
+	parent: Parameters<SubagentCoordinator["list"]>[0],
+	count: number,
+): Promise<void> {
+	await waitUntil(() => parentCompletions(parent).length >= count);
+}
+
 function appendWaitAgentToolResult(
 	parent: Parameters<SubagentCoordinator["list"]>[0],
 	toolCallId: string,
@@ -456,9 +473,8 @@ test("one-shot child returns only its own final output and usage", async () => {
 				agent: "scout",
 				description: "inspect module",
 				prompt: "Inspect it.",
-				run_in_background: false,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: false },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
 		);
 		assert.equal(outcome.kind, "foreground");
 		if (outcome.kind === "foreground") {
@@ -503,7 +519,6 @@ test("delegation assigns stable readable paths and disambiguates generated sibli
 				task_name: "auth",
 				description: "inspect auth",
 				prompt: "Inspect auth.",
-				run_in_background: true,
 			},
 			DEFAULT_SETTINGS,
 		);
@@ -522,7 +537,6 @@ test("delegation assigns stable readable paths and disambiguates generated sibli
 						task_name: "auth",
 						description: "duplicate auth",
 						prompt: "Inspect again.",
-						run_in_background: true,
 					},
 					DEFAULT_SETTINGS,
 				),
@@ -536,7 +550,6 @@ test("delegation assigns stable readable paths and disambiguates generated sibli
 				agent: "scout",
 				description: "inspect cache",
 				prompt: "Inspect cache.",
-				run_in_background: true,
 			},
 			DEFAULT_SETTINGS,
 		);
@@ -547,7 +560,6 @@ test("delegation assigns stable readable paths and disambiguates generated sibli
 				agent: "scout",
 				description: "inspect cache",
 				prompt: "Inspect cache again.",
-				run_in_background: true,
 			},
 			DEFAULT_SETTINGS,
 		);
@@ -579,7 +591,6 @@ test("absolute and relative task paths resolve to the same serialized child", as
 				task_name: "reader",
 				description: "read target",
 				prompt: "Initial read.",
-				run_in_background: true,
 			},
 			DEFAULT_SETTINGS,
 		);
@@ -638,7 +649,6 @@ test("a nested parent resolves a direct child by its relative path", async () =>
 						task_name: "leaf",
 						description: "nested leaf",
 						prompt: "Complete the first leaf turn.",
-						run_in_background: true,
 					},
 				});
 			}
@@ -653,6 +663,14 @@ test("a nested parent resolves a direct child by its relative path", async () =>
 					},
 				});
 			}
+			if (latest.toolName === "send_message") {
+				return toolCallStream(model, {
+					type: "toolCall",
+					id: `followup-leaf-${turn}`,
+					name: "followup_task",
+					arguments: { subagent_id: "./leaf" },
+				});
+			}
 			return scriptedStream(model, "nested parent done", signal);
 		},
 	});
@@ -665,7 +683,6 @@ test("a nested parent resolves a direct child by its relative path", async () =>
 				task_name: "parent",
 				description: "nested parent",
 				prompt: "Spawn leaf and send a relative follow-up.",
-				run_in_background: true,
 			},
 			DEFAULT_SETTINGS,
 		);
@@ -696,7 +713,6 @@ test("an unrelated cyclic descriptor component cannot block readable path operat
 				task_name: "seed",
 				description: "seed child",
 				prompt: "Create a descriptor seed.",
-				run_in_background: true,
 			},
 			DEFAULT_SETTINGS,
 		);
@@ -717,9 +733,7 @@ test("an unrelated cyclic descriptor component cannot block readable path operat
 		);
 		const folded = foldDescriptor(seedManager.getEntries());
 		assert.equal(folded.kind, "valid");
-		if (folded.kind !== "valid" || folded.descriptor.version !== 3) {
-			return;
-		}
+		if (folded.kind !== "valid") return;
 		const rootFile = parent.sessionManager.getSessionFile();
 		assert.ok(rootFile);
 		const cycleIds = [
@@ -830,7 +844,6 @@ test("an unrelated cyclic descriptor component cannot block readable path operat
 				task_name: "after-cycle",
 				description: "after cycle",
 				prompt: "Create after corrupt topology.",
-				run_in_background: true,
 			},
 			DEFAULT_SETTINGS,
 		);
@@ -894,13 +907,12 @@ test("last_n_completed context excludes the active parent tool turn", async () =
 				task_name: "context-reader",
 				description: "read context",
 				prompt: "Use inherited context.",
-				run_in_background: false,
 				context: {
 					mode: "last_n_completed",
 					completed_turns: 2,
 				},
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: false },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
 		);
 		assert.equal(outcome.kind, "foreground");
 		assert.equal(outcome.details.provider, "fork");
@@ -954,7 +966,6 @@ test("subagent_fork can create a continuable inherited-context child", async () 
 				task_name: "continuable-fork",
 				description: "continue inherited",
 				prompt: "Start inherited work.",
-				run_in_background: true,
 			},
 			DEFAULT_SETTINGS,
 		);
@@ -977,22 +988,20 @@ test("subagent_fork can create a continuable inherited-context child", async () 
 			"/root/continuable-fork",
 			"Continue the same fork.",
 		);
+		await coordinator.followupTask(parent, "/root/continuable-fork");
 		await waitForChildReady(coordinator, parent, outcome.details.agentId);
 		assert.equal(requestContexts.length, 2);
-		assert.equal(
-			requestContexts[1]?.messages.some(
-				(message) =>
-					message.role === "user"
-					&& userMessageText(message) === "Continue the same fork.",
-			),
-			true,
+		// The follow-up turn carries the claimed mailbox batch.
+		assert.match(
+			JSON.stringify(requestContexts[1]?.messages),
+			/Continue the same fork\./,
 		);
 	} finally {
 		await coordinator.shutdown();
 	}
 });
 
-test("continuable fork preserves mailbox-v2 queue, start, and quiet completion semantics", async () => {
+test("continuable fork preserves mailbox queue, start, and quiet completion semantics", async () => {
 	const { coordinator, parent, messages } = await fixture();
 	try {
 		appendCompletedParentTurn(
@@ -1002,7 +1011,6 @@ test("continuable fork preserves mailbox-v2 queue, start, and quiet completion s
 		);
 		const settings = {
 			...DEFAULT_SETTINGS,
-			backgroundProtocol: "mailbox-v2" as const,
 		};
 		const outcome = await coordinator.delegate(
 			parent,
@@ -1012,7 +1020,6 @@ test("continuable fork preserves mailbox-v2 queue, start, and quiet completion s
 				task_name: "mailbox-fork",
 				description: "mailbox fork",
 				prompt: "Run the initial inherited turn.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -1024,7 +1031,7 @@ test("continuable fork preserves mailbox-v2 queue, start, and quiet completion s
 			"mailbox-fork",
 			"Run a durable follow-up.",
 		);
-		assert.equal(delivery.kind, "mailbox-v2");
+		assert.equal(delivery.kind, "mailbox");
 		const started = await coordinator.followupTask(
 			parent,
 			"/root/mailbox-fork",
@@ -1064,7 +1071,6 @@ test("idle runtime LRU retains the newest child and cold-resumes an evicted path
 				task_name: "first",
 				description: "first idle",
 				prompt: "Finish first.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -1085,7 +1091,6 @@ test("idle runtime LRU retains the newest child and cold-resumes an evicted path
 				task_name: "second",
 				description: "second idle",
 				prompt: "Finish second.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -1109,6 +1114,7 @@ test("idle runtime LRU retains the newest child and cold-resumes an evicted path
 			"/root/first",
 			"Cold resume the first child.",
 		);
+		await coordinator.followupTask(parent, "/root/first");
 		await waitForChildStatus(
 			coordinator,
 			parent,
@@ -1142,7 +1148,6 @@ test("reusing an idle runtime emits paired activation start and end events", asy
 				task_name: "event-pairs",
 				description: "event pairs",
 				prompt: "Finish once.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -1159,6 +1164,7 @@ test("reusing an idle runtime emits paired activation start and end events", asy
 			"event-pairs",
 			"Finish a second retained-runtime turn.",
 		);
+		await coordinator.followupTask(parent, "event-pairs");
 		await waitForChildStatus(
 			coordinator,
 			parent,
@@ -1214,7 +1220,6 @@ test("an unaccepted retained-runtime turn is silent and remains retryable", asyn
 				task_name: "retained",
 				description: "retained child",
 				prompt: "Finish the initial turn.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -1226,11 +1231,7 @@ test("an unaccepted retained-runtime turn is silent and remains retryable", asyn
 			retained.details.agentId,
 			"idle",
 		);
-		const retainedSettlements = () =>
-			messages.filter((message) =>
-				message.content.includes("/root/retained"),
-			).length;
-		assert.equal(retainedSettlements(), 1);
+		assert.equal(parentCompletions(parent).length, 1);
 
 		const blocker = await coordinator.delegate(
 			parent,
@@ -1240,30 +1241,47 @@ test("an unaccepted retained-runtime turn is silent and remains retryable", asyn
 				task_name: "blocker",
 				description: "scheduler blocker",
 				prompt: "Hold the only scheduler slot.",
-				run_in_background: true,
 			},
 			settings,
 		);
 		assert.equal(blocker.kind, "continuable");
-		const controller = new AbortController();
-		const rejected = coordinator.sendMessageWithOutcome(
+		await coordinator.sendMessage(
 			parent,
 			"retained",
 			"This queued turn must stay silent.",
+		);
+		const controller = new AbortController();
+		const cancelled = coordinator.followupTask(
+			parent,
+			"retained",
 			controller.signal,
 		);
 		setTimeout(
 			() => controller.abort(new Error("cancel queued retry")),
 			10,
 		);
-		await assert.rejects(rejected, /cancel queued retry/);
+		await assert.rejects(cancelled, /cancel queued retry/);
 		await waitForChildStatus(
 			coordinator,
 			parent,
 			retained.details.agentId,
 			"idle",
 		);
-		assert.equal(retainedSettlements(), 1);
+		// The cancelled claim leaves the batch pending and adds no completion.
+		assert.equal(parentCompletions(parent).length, 1);
+		const stillQueued = await coordinator.list(parent, "children");
+		const retainedEntry = stillQueued.find(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.agentId === retained.details.agentId,
+		);
+		assert.equal(
+			retainedEntry?.kind === "child"
+				? retainedEntry.pendingMessages
+				: undefined,
+			1,
+		);
+		assert.equal(messages.length, 0);
 
 		if (blocker.kind === "continuable") {
 			await waitForChildStatus(
@@ -1273,18 +1291,14 @@ test("an unaccepted retained-runtime turn is silent and remains retryable", asyn
 				"idle",
 			);
 		}
-		await coordinator.sendMessage(
-			parent,
-			"retained",
-			"Run the accepted retry.",
-		);
+		await coordinator.followupTask(parent, "retained");
+		await waitForCompletions(parent, 2);
 		await waitForChildStatus(
 			coordinator,
 			parent,
 			retained.details.agentId,
 			"idle",
 		);
-		assert.equal(retainedSettlements(), 2);
 	} finally {
 		await coordinator.shutdown();
 	}
@@ -1307,7 +1321,6 @@ test("concurrent settlements still enforce the idle runtime LRU limit", async ()
 					task_name: "concurrent-one",
 					description: "concurrent one",
 					prompt: "Finish concurrently.",
-					run_in_background: true,
 				},
 				settings,
 			),
@@ -1319,7 +1332,6 @@ test("concurrent settlements still enforce the idle runtime LRU limit", async ()
 					task_name: "concurrent-two",
 					description: "concurrent two",
 					prompt: "Finish concurrently.",
-					run_in_background: true,
 				},
 				settings,
 			),
@@ -1374,7 +1386,6 @@ test("mailbox child remains recoverable after an initial provider failure with i
 		const settings = {
 			...DEFAULT_SETTINGS,
 			maxIdleRuntimes: 1,
-			backgroundProtocol: "mailbox-v2" as const,
 		};
 		const outcome = await coordinator.delegate(
 			parent,
@@ -1384,7 +1395,6 @@ test("mailbox child remains recoverable after an initial provider failure with i
 				task_name: "recoverable",
 				description: "recover failed child",
 				prompt: "The provider will fail this turn.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -1408,7 +1418,7 @@ test("mailbox child remains recoverable after an initial provider failure with i
 			"recoverable",
 			"Recover from durable mailbox work.",
 		);
-		assert.equal(delivered.kind, "mailbox-v2");
+		assert.equal(delivered.kind, "mailbox");
 		await coordinator.followupTask(parent, "recoverable");
 		await waitForChildStatus(
 			coordinator,
@@ -1431,11 +1441,10 @@ test("OpenAI identity config injects the Codex lifecycle inline", async () => {
 				agent: "scout",
 				description: "codex identity child",
 				prompt: "Inspect it.",
-				run_in_background: false,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				defaultBackground: false,
+				runtimeMode: "foreground" as const,
 				openAIIdentity: true,
 			},
 		);
@@ -1494,9 +1503,8 @@ test("OpenAI identity config off does not inject the inline lifecycle", async ()
 				agent: "scout",
 				description: "provider-neutral child",
 				prompt: "Inspect it.",
-				run_in_background: false,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: false, openAIIdentity: false },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const, openAIIdentity: false },
 		);
 		assert.equal(outcome.kind, "foreground");
 		if (outcome.kind !== "foreground" || !outcome.details.sessionFile) return;
@@ -1531,9 +1539,8 @@ test("delegation initializes user templates before runtime discovery", async () 
 				agent: "scout",
 				description: "synchronized scout",
 				prompt: "Inspect it.",
-				run_in_background: false,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: false },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
 		);
 		assert.equal(outcome.kind, "foreground");
 		assert.equal(existsSync(join(agentDir, "agents", "scout.md")), true);
@@ -1552,12 +1559,11 @@ test("continuable child settles, becomes ready, and cold-resumes for a later mes
 				agent: "scout",
 				description: "background scout",
 				prompt: "Inspect it.",
-				run_in_background: true,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 		);
 		assert.equal(outcome.kind, "continuable");
-		await waitUntil(() => messages.length === 1);
+		await waitForChildStatus(coordinator, parent, outcome.details.agentId, "ready");
 		const id = outcome.details.agentId;
 		const firstList = await coordinator.list(parent, "children");
 		assert.equal(firstList[0]?.kind, "child");
@@ -1568,9 +1574,13 @@ test("continuable child settles, becomes ready, and cold-resumes for a later mes
 		}
 
 		await coordinator.sendMessage(parent, id, "Inspect one more thing.");
-		await waitUntil(() => messages.length === 2);
-		assert.match(messages[0].content, /child answer 1/);
-		assert.match(messages[1].content, /child answer 2/);
+		await coordinator.followupTask(parent, id);
+		await waitForCompletions(parent, 2);
+		await waitForChildStatus(coordinator, parent, id, "ready");
+		const completions = parentCompletions(parent);
+		assert.match(completions[0]!.output, /child answer 1/);
+		assert.match(completions[1]!.output, /child answer 2/);
+		assert.equal(messages.length, 0);
 		assert.deepEqual(events, [
 			"pi-subagent:start",
 			"pi-subagent:end",
@@ -1609,11 +1619,9 @@ async function assertMailboxFifo(
 				agent: "scout",
 				description: "durable mailbox child",
 				prompt: "Initial task.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 				maxIdleRuntimes,
 			},
 		);
@@ -1661,9 +1669,9 @@ async function assertMailboxFifo(
 		assert.equal(serialized.mock.callCount(), 2);
 		assert.equal(peakSends, 1, "path and id aliases must share one serialization queue");
 		serialized.mock.restore();
-		assert.equal(first.kind, "mailbox-v2");
-		assert.equal(second.kind, "mailbox-v2");
-		if (first.kind !== "mailbox-v2" || second.kind !== "mailbox-v2") return;
+		assert.equal(first.kind, "mailbox");
+		assert.equal(second.kind, "mailbox");
+		if (first.kind !== "mailbox" || second.kind !== "mailbox") return;
 		assert.notEqual(first.messageId, second.messageId);
 		assert.match(first.messageId, UUID_V7_PATTERN);
 		assert.match(second.messageId, UUID_V7_PATTERN);
@@ -1768,13 +1776,13 @@ async function assertMailboxFifo(
 for (const maxIdleRuntimes of [0, 1]) {
 	for (const resolutionOrder of [[0, 1], [1, 0]] as const) {
 		test(
-			`mailbox-v2 send_message only persists FIFO work until followup_task starts one turn (lookup=${resolutionOrder}, idle=${maxIdleRuntimes})`,
+			`mailbox send_message only persists FIFO work until followup_task starts one turn (lookup=${resolutionOrder}, idle=${maxIdleRuntimes})`,
 			(t) => assertMailboxFifo(t, maxIdleRuntimes, resolutionOrder),
 		);
 	}
 }
 
-test("mailbox-v2 completion is quiet and wait_agent durably delivers an existing update", async () => {
+test("mailbox completion is quiet and wait_agent durably delivers an existing update", async () => {
 	const requestContexts: Context[] = [];
 	const { coordinator, parent, messages } = await fixture({
 		onRequestContext: (requestContext) => requestContexts.push(requestContext),
@@ -1787,11 +1795,9 @@ test("mailbox-v2 completion is quiet and wait_agent durably delivers an existing
 				agent: "scout",
 				description: "quiet completion child",
 				prompt: "Initial task.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -1876,11 +1882,9 @@ test("wait_agent delivery survives failed readable-path enrichment", async () =>
 				task_name: "path-fallback",
 				description: "path fallback",
 				prompt: "Finish once.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -1906,7 +1910,7 @@ test("wait_agent delivery survives failed readable-path enrichment", async () =>
 	}
 });
 
-test("mailbox-v2 completion persistence failure emits an explicit error and no false update", async () => {
+test("mailbox completion persistence failure emits an explicit error and no false update", async () => {
 	const { coordinator, parent, messages, eventDetails } = await fixture();
 	const manager = parent.sessionManager as SessionManager;
 	const appendCustomEntry = manager.appendCustomEntry.bind(manager);
@@ -1924,11 +1928,9 @@ test("mailbox-v2 completion persistence failure emits an explicit error and no f
 				agent: "scout",
 				description: "failed completion storage",
 				prompt: "Finish once.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -2000,11 +2002,9 @@ test("wait_agent wakes from a durable completion event without polling or starti
 				agent: "scout",
 				description: "event waiter child",
 				prompt: "Finish after the waiter subscribes.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -2050,11 +2050,9 @@ test("a failed wait_agent delivery can be released and retried in the same runti
 				agent: "scout",
 				description: "retry wait delivery",
 				prompt: "Finish once.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -2108,7 +2106,6 @@ test("wait_agent bounds one oversized head without consuming the next completion
 	try {
 		const settings = {
 			...DEFAULT_SETTINGS,
-			backgroundProtocol: "mailbox-v2" as const,
 			maxOutputBytes: 1024 * 1024,
 		};
 		const first = await coordinator.delegate(
@@ -2118,7 +2115,6 @@ test("wait_agent bounds one oversized head without consuming the next completion
 				agent: "scout",
 				description: "large first completion",
 				prompt: "Return the first output.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -2129,7 +2125,6 @@ test("wait_agent bounds one oversized head without consuming the next completion
 				agent: "scout",
 				description: "large second completion",
 				prompt: "Return the second output.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -2212,7 +2207,7 @@ test("shutdown rejects and cleans an event-driven wait_agent waiter", async () =
 	await shutdown;
 });
 
-test("unread mailbox-v2 completion survives coordinator and session reload", async () => {
+test("unread mailbox completion survives coordinator and session reload", async () => {
 	const {
 		coordinator,
 		parent,
@@ -2259,11 +2254,9 @@ test("unread mailbox-v2 completion survives coordinator and session reload", asy
 				agent: "scout",
 				description: "reload completion child",
 				prompt: "Finish before restart.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -2343,7 +2336,6 @@ test("nested wait_agent consumes only direct-child completion from the parent se
 						agent: "scout",
 						description: "nested mailbox child",
 						prompt: "Complete nested work.",
-						run_in_background: true,
 					},
 				});
 			}
@@ -2366,11 +2358,9 @@ test("nested wait_agent consumes only direct-child completion from the parent se
 				agent: "worker",
 				description: "nested mailbox parent",
 				prompt: "Spawn and wait for one direct child.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -2425,7 +2415,7 @@ test("nested wait_agent consumes only direct-child completion from the parent se
 	}
 });
 
-test("concurrent mailbox-v2 followup_task calls cannot claim or start the same batch twice", async () => {
+test("concurrent mailbox followup_task calls cannot claim or start the same batch twice", async () => {
 	const requestContexts: Context[] = [];
 	const { coordinator, parent, messages } = await fixture({
 		delayMs: 50,
@@ -2439,11 +2429,9 @@ test("concurrent mailbox-v2 followup_task calls cannot claim or start the same b
 				agent: "scout",
 				description: "single claim child",
 				prompt: "Initial task.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -2512,7 +2500,7 @@ test("concurrent mailbox-v2 followup_task calls cannot claim or start the same b
 	}
 });
 
-test("mailbox-v2 enqueue waits for a newly accepted child session to become durable", async () => {
+test("mailbox enqueue waits for a newly accepted child session to become durable", async () => {
 	const requestContexts: Context[] = [];
 	const { coordinator, parent, messages } = await fixture({
 		delayMs: 60,
@@ -2526,11 +2514,9 @@ test("mailbox-v2 enqueue waits for a newly accepted child session to become dura
 				agent: "scout",
 				description: "initially unflushed child",
 				prompt: "Initial task.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -2549,7 +2535,7 @@ test("mailbox-v2 enqueue waits for a newly accepted child session to become dura
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
 		assert.equal(accepted, false);
 		const delivery = await enqueue;
-		assert.equal(delivery.kind, "mailbox-v2");
+		assert.equal(delivery.kind, "mailbox");
 		assert.equal(requestContexts.length, 1);
 		await waitForChildReady(
 			coordinator,
@@ -2570,7 +2556,7 @@ test("mailbox-v2 enqueue waits for a newly accepted child session to become dura
 	}
 });
 
-test("mailbox-v2 prompt preflight failure leaves the unclaimed batch pending", async () => {
+test("mailbox prompt preflight failure leaves the unclaimed batch pending", async () => {
 	const { coordinator, parent, messages, modelRuntime } = await fixture();
 	try {
 		const outcome = await coordinator.delegate(
@@ -2580,11 +2566,9 @@ test("mailbox-v2 prompt preflight failure leaves the unclaimed batch pending", a
 				agent: "scout",
 				description: "preflight mailbox child",
 				prompt: "Initial task.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 			},
 		);
 		assert.equal(outcome.kind, "continuable");
@@ -2637,7 +2621,7 @@ test("mailbox-v2 prompt preflight failure leaves the unclaimed batch pending", a
 	}
 });
 
-test("mailbox-v2 commits a claimed turn even when an input extension transforms its prompt", async () => {
+test("mailbox commits a claimed turn even when an input extension transforms its prompt", async () => {
 	const childExtension = `
 export default function transformMailbox(pi) {
 	pi.on("input", async (event) => {
@@ -2657,11 +2641,9 @@ export default function transformMailbox(pi) {
 				agent: "scout",
 				description: "transformed mailbox child",
 				prompt: "Initial task.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 				inheritExtensions: true,
 			},
 		);
@@ -2697,7 +2679,7 @@ export default function transformMailbox(pi) {
 	}
 });
 
-test("mailbox-v2 rejects an input-handled prompt without claiming its batch", async () => {
+test("mailbox rejects an input-handled prompt without claiming its batch", async () => {
 	const childExtension = `
 export default function handleMailbox(pi) {
 	pi.on("input", async (event) => {
@@ -2717,11 +2699,9 @@ export default function handleMailbox(pi) {
 				agent: "scout",
 				description: "handled mailbox child",
 				prompt: "Initial task.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
 				inheritExtensions: true,
 			},
 		);
@@ -2770,13 +2750,12 @@ export default function handleMailbox(pi) {
 	}
 });
 
-test("interrupting a mailbox-v2 followup while it waits for capacity preserves its batch", async () => {
+test("interrupting a mailbox followup while it waits for capacity preserves its batch", async () => {
 	const { coordinator, parent, messages } = await fixture({ delayMs: 80 });
 	coordinator.configureBackgroundRuns(1);
 	try {
 		const settings = {
 			...DEFAULT_SETTINGS,
-			backgroundProtocol: "mailbox-v2" as const,
 			maxConcurrentBackgroundRuns: 1,
 		};
 		const first = await coordinator.delegate(
@@ -2786,7 +2765,6 @@ test("interrupting a mailbox-v2 followup while it waits for capacity preserves i
 				agent: "scout",
 				description: "capacity holder",
 				prompt: "Initial first task.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -2803,7 +2781,6 @@ test("interrupting a mailbox-v2 followup while it waits for capacity preserves i
 				agent: "scout",
 				description: "queued mailbox child",
 				prompt: "Initial second task.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -2867,25 +2844,28 @@ test("concurrent messages cold-resume one runtime and preserve one lifecycle", a
 				agent: "scout",
 				description: "serialized cold child",
 				prompt: "Initial task.",
-				run_in_background: true,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 		);
 		assert.equal(outcome.kind, "continuable");
-		await waitUntil(() => messages.length === 1);
+		await waitForCompletions(parent, 1);
 
 		await Promise.all([
 			coordinator.sendMessage(parent, outcome.details.agentId, "First follow-up."),
 			coordinator.sendMessage(parent, outcome.details.agentId, "Second follow-up."),
 		]);
-		await waitUntil(() => messages.length === 2);
+		// Enqueue-only delivery starts no turn and produces no new completion.
+		assert.equal(parentCompletions(parent).length, 1);
+		await coordinator.followupTask(parent, outcome.details.agentId);
+		await waitForCompletions(parent, 2);
 		assert.deepEqual(events, [
 			"pi-subagent:start",
 			"pi-subagent:end",
 			"pi-subagent:start",
 			"pi-subagent:end",
 		]);
-		assert.match(messages[1]!.content, /child answer 3/);
+		assert.match(parentCompletions(parent)[1]!.output, /child answer 2/);
+		assert.equal(messages.length, 0);
 		const turnStarts = eventDetails
 			.filter((event) => event.name === "pi-subagent:turn-start")
 			.map((event) => (event.data as { turnId: string }).turnId);
@@ -2914,9 +2894,8 @@ test("a resident agent waiting on descendants can accept a follow-up", async () 
 				agent: "scout",
 				description: "waiting parent",
 				prompt: "Complete while a descendant remains active.",
-				run_in_background: true,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 		);
 		assert.equal(outcome.kind, "continuable");
 		const active = (
@@ -2939,7 +2918,12 @@ test("a resident agent waiting on descendants can accept a follow-up", async () 
 			outcome.details.agentId,
 			"Continue while the descendant is still active.",
 		);
+		const followup = coordinator.followupTask(
+			parent,
+			outcome.details.agentId,
+		);
 		await waitUntil(() => requests === 2);
+		await followup;
 		await active.currentRun;
 		const starts = eventDetails
 			.filter((event) => event.name === "pi-subagent:turn-start")
@@ -2954,84 +2938,58 @@ test("a resident agent waiting on descendants can accept a follow-up", async () 
 	}
 });
 
-test("a follow-up waits behind an internally queued wakeup", async () => {
-	const { coordinator, parent } = await fixture({ delayMs: 50 });
+test("a follow-up cannot start while the previous turn is still running", async () => {
+	const { coordinator, parent } = await fixture({ delayMs: 80 });
 	try {
-		coordinator.configureBackgroundRuns(1);
-		const settings = {
-			...DEFAULT_SETTINGS,
-			defaultBackground: true,
-			maxConcurrentBackgroundRuns: 1,
-		};
-		const waiting = await coordinator.delegate(
+		const outcome = await coordinator.delegate(
 			parent,
 			"spawn",
 			{
 				agent: "scout",
-				description: "internal wakeup target",
-				prompt: "Finish while retaining a descendant.",
-				run_in_background: true,
+				description: "busy follow-up target",
+				prompt: "Finish the initial turn.",
 			},
-			settings,
+			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 		);
-		assert.equal(waiting.kind, "continuable");
-		const active = (
-			coordinator as unknown as {
-				active: Map<
-					string,
-					{
-						ownedChildren: Set<string>;
-						currentRun?: Promise<unknown>;
-					}
-				>;
-				startInternalMessage(
-					activation: unknown,
-					customType: string,
-					content: string,
-					details: {
-						kind: "settled";
-						childAgentId: string;
-						label: string;
-						stopReason: "completed";
-					},
-				): void;
-			}
-		);
-		const target = active.active.get(waiting.details.agentId);
-		assert.ok(target);
-		target.ownedChildren.add("test-descendant");
-		await target.currentRun;
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		await waitForChildReady(coordinator, parent, outcome.details.agentId);
 
-		const holder = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "internal wakeup capacity holder",
-				prompt: "Hold the only slot.",
-				run_in_background: true,
-			},
-			settings,
-		);
-		assert.equal(holder.kind, "continuable");
-
-		active.startInternalMessage(
-			target,
-			"pi-subagent/settled",
-			"A descendant completed.",
-			{
-				kind: "settled",
-				childAgentId: "test-descendant",
-				label: "test descendant",
-				stopReason: "completed",
-			},
-		);
 		await coordinator.sendMessage(
 			parent,
-			waiting.details.agentId,
-			"Follow the internal wakeup without failing.",
+			outcome.details.agentId,
+			"Run the first follow-up.",
 		);
-		await waitUntil(() => target.currentRun === undefined);
+		await coordinator.followupTask(parent, outcome.details.agentId);
+		// The accepted turn still owns the child, so the next batch cannot
+		// start; the message stays pending instead of being lost.
+		await coordinator.sendMessage(
+			parent,
+			outcome.details.agentId,
+			"Queue this behind the running turn.",
+		);
+		await assert.rejects(
+			() => coordinator.followupTask(parent, outcome.details.agentId),
+			/already has a scheduled or running turn/,
+		);
+		const queued = await coordinator.list(parent, "children");
+		const target = queued.find(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.agentId === outcome.details.agentId,
+		);
+		assert.equal(
+			target?.kind === "child" ? target.pendingMessages : undefined,
+			1,
+		);
+
+		await waitForCompletions(parent, 2);
+		const retried = await coordinator.followupTask(
+			parent,
+			outcome.details.agentId,
+		);
+		assert.equal(retried.claimedMessages, 1);
+		await waitForCompletions(parent, 3);
 	} finally {
 		await coordinator.shutdown();
 	}
@@ -3054,7 +3012,7 @@ test("background turns obey the configured concurrency limit", async () => {
 		coordinator.configureBackgroundRuns(2);
 		const settings = {
 			...DEFAULT_SETTINGS,
-			defaultBackground: true,
+			runtimeMode: "background" as const,
 			maxConcurrentBackgroundRuns: 2,
 		};
 		const outcomes = await Promise.all(
@@ -3066,7 +3024,6 @@ test("background turns obey the configured concurrency limit", async () => {
 						agent: "scout",
 						description,
 						prompt: `Task ${description}.`,
-						run_in_background: true,
 					},
 					settings,
 				),
@@ -3076,7 +3033,7 @@ test("background turns obey the configured concurrency limit", async () => {
 			outcomes.every((outcome) => outcome.kind === "continuable"),
 			true,
 		);
-		await waitUntil(() => messages.length === 3);
+		await waitForCompletions(parent, 3);
 		assert.equal(maxActiveStreams, 2);
 		assert.equal(activeStreams, 0);
 	} finally {
@@ -3092,7 +3049,7 @@ test("interrupt cancels a background turn while it waits for capacity", async ()
 		coordinator.configureBackgroundRuns(1);
 		const settings = {
 			...DEFAULT_SETTINGS,
-			defaultBackground: true,
+			runtimeMode: "background" as const,
 			maxConcurrentBackgroundRuns: 1,
 		};
 		const first = await coordinator.delegate(
@@ -3102,7 +3059,6 @@ test("interrupt cancels a background turn while it waits for capacity", async ()
 				agent: "scout",
 				description: "capacity holder",
 				prompt: "Hold the only background slot.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -3116,7 +3072,6 @@ test("interrupt cancels a background turn while it waits for capacity", async ()
 				agent: "scout",
 				description: "queued child",
 				prompt: "This should be interrupted while queued.",
-				run_in_background: true,
 			},
 			settings,
 			undefined,
@@ -3127,7 +3082,8 @@ test("interrupt cancels a background turn while it waits for capacity", async ()
 		await waitUntil(() => queuedAgentId !== undefined);
 		await coordinator.interrupt(parent, queuedAgentId!);
 		await assert.rejects(queued, /was interrupted/);
-		await waitUntil(() => messages.length === 1);
+		await waitForCompletions(parent, 1);
+		assert.equal(messages.length, 0);
 		assert.deepEqual(
 			eventDetails.filter(
 				(event) =>
@@ -3142,8 +3098,8 @@ test("interrupt cancels a background turn while it waits for capacity", async ()
 	}
 });
 
-test("interrupt cancels a cold follow-up while it waits for capacity", async () => {
-	const { coordinator, parent, messages } = await fixture({ delayMs: 100 });
+test("interrupt cancels a cold follow-up while it waits for capacity and keeps its batch", async () => {
+	const { coordinator, parent } = await fixture({ delayMs: 100 });
 	try {
 		coordinator.configureBackgroundRuns(4);
 		const initial = await coordinator.delegate(
@@ -3153,16 +3109,15 @@ test("interrupt cancels a cold follow-up while it waits for capacity", async () 
 				agent: "scout",
 				description: "cold follow-up target",
 				prompt: "Create the durable target.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				defaultBackground: true,
+				runtimeMode: "background" as const,
 				maxConcurrentBackgroundRuns: 4,
 			},
 		);
 		assert.equal(initial.kind, "continuable");
-		await waitUntil(() => messages.length === 1);
+		await waitForCompletions(parent, 1);
 		coordinator.configureBackgroundRuns(1);
 
 		const holder = await coordinator.delegate(
@@ -3172,20 +3127,23 @@ test("interrupt cancels a cold follow-up while it waits for capacity", async () 
 				agent: "scout",
 				description: "follow-up capacity holder",
 				prompt: "Hold the only slot.",
-				run_in_background: true,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				defaultBackground: true,
+				runtimeMode: "background" as const,
 				maxConcurrentBackgroundRuns: 1,
 			},
 		);
 		assert.equal(holder.kind, "continuable");
 
-		const firstFollowUp = coordinator.sendMessage(
+		await coordinator.sendMessage(
 			parent,
 			initial.details.agentId,
 			"Queue the first cold follow-up.",
+		);
+		const firstFollowUp = coordinator.followupTask(
+			parent,
+			initial.details.agentId,
 		);
 		await waitUntil(async () => {
 			const entries = await coordinator.list(parent, "children");
@@ -3196,30 +3154,48 @@ test("interrupt cancels a cold follow-up while it waits for capacity", async () 
 				entry.status === "running",
 			);
 		});
-		const secondController = new AbortController();
-		const secondFollowUp = coordinator.sendMessage(
-			parent,
-			initial.details.agentId,
-			"Queue the second cold follow-up behind the first.",
-			secondController.signal,
-		);
-		secondController.abort(new Error("cancel second follow-up"));
-		await assert.rejects(secondFollowUp, /cancel second follow-up/);
 		await coordinator.interrupt(parent, initial.details.agentId);
 		await assert.rejects(firstFollowUp, /was interrupted/);
-		await waitUntil(() => messages.length === 2);
+		// The unclaimed batch survives the interruption and stays retryable.
+		await waitForChildStatus(
+			coordinator,
+			parent,
+			initial.details.agentId,
+			"ready",
+		);
+		assert.equal(parentCompletions(parent).length, 1);
+		const pending = await coordinator.list(parent, "children");
+		const pendingEntry = pending.find(
+			(entry) =>
+				entry.kind === "child"
+				&& entry.agentId === initial.details.agentId,
+		);
+		assert.equal(
+			pendingEntry?.kind === "child"
+				? pendingEntry.pendingMessages
+				: undefined,
+			1,
+		);
+		// The capacity holder settles on its own before the batch is retried.
+		await waitForCompletions(parent, 2);
+		const retried = await coordinator.followupTask(
+			parent,
+			initial.details.agentId,
+		);
+		assert.equal(retried.claimedMessages, 1);
+		await waitForCompletions(parent, 3);
 	} finally {
 		await coordinator.shutdown();
 	}
 });
 
-test("interrupting a queued resident follow-up does not suppress later settlement", async () => {
-	const { coordinator, parent, messages } = await fixture({ delayMs: 60 });
+test("interrupting a queued resident follow-up keeps later completions flowing", async () => {
+	const { coordinator, parent } = await fixture({ delayMs: 60 });
 	try {
 		coordinator.configureBackgroundRuns(1);
 		const settings = {
 			...DEFAULT_SETTINGS,
-			defaultBackground: true,
+			runtimeMode: "background" as const,
 			maxConcurrentBackgroundRuns: 1,
 		};
 		const waiting = await coordinator.delegate(
@@ -3229,7 +3205,6 @@ test("interrupting a queued resident follow-up does not suppress later settlemen
 				agent: "scout",
 				description: "resident waiting child",
 				prompt: "Finish while retaining a descendant.",
-				run_in_background: true,
 			},
 			settings,
 		);
@@ -3257,16 +3232,19 @@ test("interrupting a queued resident follow-up does not suppress later settlemen
 				agent: "scout",
 				description: "resident capacity holder",
 				prompt: "Hold the slot during the interrupted follow-up.",
-				run_in_background: true,
 			},
 			settings,
 		);
 		assert.equal(holder.kind, "continuable");
 
-		const interrupted = coordinator.sendMessage(
+		await coordinator.sendMessage(
 			parent,
 			waiting.details.agentId,
 			"Queue this resident follow-up.",
+		);
+		const interrupted = coordinator.followupTask(
+			parent,
+			waiting.details.agentId,
 		);
 		await waitUntil(async () => {
 			const entries = await coordinator.list(parent, "children");
@@ -3281,13 +3259,14 @@ test("interrupting a queued resident follow-up does not suppress later settlemen
 		await assert.rejects(interrupted, /was interrupted/);
 		await waitUntil(() => active.currentRun === undefined);
 		assert.equal(active.suppressSettlement, false);
+		assert.equal(parentCompletions(parent).length, 1);
 
-		await waitUntil(() => messages.length === 1);
 		await coordinator.sendMessage(
 			parent,
 			waiting.details.agentId,
 			"Run successfully after the interruption.",
 		);
+		await coordinator.followupTask(parent, waiting.details.agentId);
 		await waitUntil(() => active.currentRun === undefined);
 		active.ownedChildren.delete("test-descendant");
 		await (
@@ -3295,8 +3274,8 @@ test("interrupting a queued resident follow-up does not suppress later settlemen
 				finalizeContinuable(activation: unknown): Promise<void>;
 			}
 		).finalizeContinuable(active);
-		await waitUntil(() => messages.length === 2);
-		assert.match(messages[1]!.content, /finished/);
+		await waitForCompletions(parent, 2);
+		assert.match(parentCompletions(parent)[1]!.output, /child answer 2/);
 	} finally {
 		await coordinator.shutdown();
 	}
@@ -3313,9 +3292,8 @@ test("shutdown rejects a send_message already queued on the agent lock", async (
 				agent: "scout",
 				description: "shutdown child",
 				prompt: "Stay active during shutdown.",
-				run_in_background: true,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 		);
 		assert.equal(outcome.kind, "continuable");
 
@@ -3363,9 +3341,8 @@ test("concurrent shutdown callers wait for an in-flight delegation", async () =>
 			agent: "scout",
 			description: "in-flight foreground child",
 			prompt: "Remain active until shutdown.",
-			run_in_background: false,
 		},
-		{ ...DEFAULT_SETTINGS, defaultBackground: false },
+		{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
 	);
 	await waitUntil(() =>
 		eventDetails.some((event) => event.name === "pi-subagent:turn-start"),
@@ -3387,7 +3364,7 @@ test("concurrent shutdown callers wait for an in-flight delegation", async () =>
 });
 
 test("interrupt stops only the live activation and preserves its resumable session", async () => {
-	const { coordinator, parent, messages } = await fixture({ delayMs: 100 });
+	const { coordinator, parent } = await fixture({ delayMs: 100 });
 	try {
 		const outcome = await coordinator.delegate(
 			parent,
@@ -3396,14 +3373,13 @@ test("interrupt stops only the live activation and preserves its resumable sessi
 				agent: "scout",
 				description: "interruptible scout",
 				prompt: "Keep working.",
-				run_in_background: true,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 		);
 		assert.equal(outcome.kind, "continuable");
 		await coordinator.interrupt(parent, outcome.details.agentId);
-		await waitUntil(() => messages.length === 1);
-		assert.match(messages[0].content, /was interrupted/);
+		await waitForCompletions(parent, 1);
+		assert.equal(parentCompletions(parent)[0]!.stopReason, "aborted");
 		const entries = await coordinator.list(parent, "children");
 		assert.equal(entries[0]?.kind, "child");
 		if (entries[0]?.kind === "child") assert.equal(entries[0].status, "ready");
@@ -3413,7 +3389,7 @@ test("interrupt stops only the live activation and preserves its resumable sessi
 });
 
 test("agent ids are a durable namespace distinct from pi session ids", async () => {
-	const { coordinator, parent, messages } = await fixture();
+	const { coordinator, parent } = await fixture();
 	try {
 		const outcome = await coordinator.delegate(
 			parent,
@@ -3422,9 +3398,8 @@ test("agent ids are a durable namespace distinct from pi session ids", async () 
 				agent: "scout",
 				description: "id semantics scout",
 				prompt: "Inspect it.",
-				run_in_background: true,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 		);
 		assert.equal(outcome.kind, "continuable");
 		if (outcome.kind !== "continuable") return;
@@ -3439,7 +3414,7 @@ test("agent ids are a durable namespace distinct from pi session ids", async () 
 		assert.notEqual(parent.agentId, parent.sessionManager.getSessionId());
 		// The child session file is flushed once its first assistant message
 		// lands; wait for the run to settle before reading it back.
-		await waitUntil(() => messages.length === 1);
+		await waitForCompletions(parent, 1);
 
 		// The child session records its agent id and descriptor, and the
 		// descriptor's parent chain points at the parent's durable agent id.
@@ -3481,7 +3456,7 @@ test("agent ids are a durable namespace distinct from pi session ids", async () 
 });
 
 test("resumed children keep their agent id across cold starts", async () => {
-	const { coordinator, parent, messages } = await fixture();
+	const { coordinator, parent } = await fixture();
 	try {
 		const outcome = await coordinator.delegate(
 			parent,
@@ -3490,17 +3465,17 @@ test("resumed children keep their agent id across cold starts", async () => {
 				agent: "scout",
 				description: "resumable scout",
 				prompt: "Inspect it.",
-				run_in_background: true,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 		);
 		assert.equal(outcome.kind, "continuable");
 		if (outcome.kind !== "continuable") return;
 		const agentId = outcome.details.agentId;
-		await waitUntil(() => messages.length === 1);
+		await waitForCompletions(parent, 1);
 
 		await coordinator.sendMessage(parent, agentId, "Inspect one more thing.");
-		await waitUntil(() => messages.length === 2);
+		await coordinator.followupTask(parent, agentId);
+		await waitForCompletions(parent, 2);
 		const entries = await coordinator.list(parent, "children");
 		assert.equal(entries.length, 1);
 		assert.equal(entries[0]?.kind, "child");
@@ -3521,7 +3496,7 @@ test("fork children get a fresh agent id while chaining to the parent agent", as
 				description: "forked scout",
 				prompt: "Inspect it.",
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: false },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
 		);
 		assert.equal(outcome.kind, "foreground");
 		if (outcome.kind !== "foreground") return;
@@ -3535,7 +3510,7 @@ test("fork children get a fresh agent id while chaining to the parent agent", as
 	}
 });
 
-test("continuable child can explicitly report before its independent settlement notice", async () => {
+test("continuable child can explicitly report before its quiet completion", async () => {
 	const { coordinator, parent, messages } = await fixture({ reportFirst: true });
 	try {
 		await coordinator.delegate(
@@ -3545,35 +3520,32 @@ test("continuable child can explicitly report before its independent settlement 
 				agent: "scout",
 				description: "reporting scout",
 				prompt: "Report a finding.",
-				run_in_background: true,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: true },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 		);
-		await waitUntil(() => messages.length === 2);
-		assert.match(messages[0].content, /reported:[\s\S]*finding 1/);
-		assert.match(messages[1].content, /closing message:[\s\S]*child answer 2/);
+		await waitUntil(() => messages.length === 1);
+		assert.match(messages[0]!.content, /reported:[\s\S]*finding 1/);
+		await waitForCompletions(parent, 1);
+		assert.match(parentCompletions(parent)[0]!.output, /child answer 2/);
 	} finally {
 		await coordinator.shutdown();
 	}
 });
 
-test("mailbox-v2 keeps explicit report delivery while completion stays quiet", async () => {
-	const { coordinator, parent, messages } = await fixture({ reportFirst: true });
+test("a report is delivered without starting or queueing a parent turn", async () => {
+	const { coordinator, parent, messages, eventDetails } = await fixture({
+		reportFirst: true,
+	});
 	try {
 		const outcome = await coordinator.delegate(
 			parent,
 			"spawn",
 			{
 				agent: "scout",
-				description: "mailbox reporting scout",
+				description: "reporting scout",
 				prompt: "Report a finding.",
-				run_in_background: true,
 			},
-			{
-				...DEFAULT_SETTINGS,
-				backgroundProtocol: "mailbox-v2",
-				reportDelivery: "wakeup",
-			},
+			DEFAULT_SETTINGS,
 		);
 		assert.equal(outcome.kind, "continuable");
 		if (outcome.kind !== "continuable") return;
@@ -3584,6 +3556,14 @@ test("mailbox-v2 keeps explicit report delivery while completion stays quiet", a
 		);
 		assert.equal(messages.length, 1);
 		assert.match(messages[0]!.content, /reported:[\s\S]*finding 1/);
+		// The report is recorded for the parent session without waking it: no
+		// additional parent turn, scheduler slot or activation is created.
+		assert.equal(
+			eventDetails.filter(
+				(event) => event.name === "pi-subagent:turn-start",
+			).length,
+			1,
+		);
 		const listed = await coordinator.list(parent, "children");
 		const child = listed.find(
 			(entry) =>
@@ -3608,9 +3588,8 @@ test("continuable mode fails loud for an ephemeral parent", async () => {
 						agent: "scout",
 						description: "ephemeral child",
 						prompt: "Inspect it.",
-						run_in_background: true,
 					},
-					{ ...DEFAULT_SETTINGS, defaultBackground: true },
+					{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
 				),
 			/require a persisted parent session/,
 		);
@@ -3619,7 +3598,7 @@ test("continuable mode fails loud for an ephemeral parent", async () => {
 	}
 });
 
-test("foreground-only mode ignores the background default and waits for the result", async () => {
+test("foreground mode waits for the child result", async () => {
 	const { coordinator, parent, events } = await fixture();
 	try {
 		const outcome = await coordinator.delegate(
@@ -3632,8 +3611,7 @@ test("foreground-only mode ignores the background default and waits for the resu
 			},
 			{
 				...DEFAULT_SETTINGS,
-				enableRunInBackground: false,
-				defaultBackground: true,
+				runtimeMode: "foreground" as const,
 			},
 		);
 		assert.equal(outcome.kind, "foreground");
@@ -3644,34 +3622,37 @@ test("foreground-only mode ignores the background default and waits for the resu
 	}
 });
 
-test("foreground-only mode rejects a forced background call before starting a child", async () => {
+test("foreground mode requires a fresh child for every delegation", async () => {
 	const { coordinator, parent, events } = await fixture();
 	try {
-		await assert.rejects(
-			() =>
-				coordinator.delegate(
-					parent,
-					"spawn",
-					{
-						agent: "scout",
-						description: "forbidden background scout",
-						prompt: "Inspect it.",
-						run_in_background: true,
-					},
-					{
-						...DEFAULT_SETTINGS,
-						enableRunInBackground: false,
-					},
-				),
-			/foreground-only mode/,
-		);
-		assert.deepEqual(events, []);
+		for (const description of ["first scout", "second scout"]) {
+			const outcome = await coordinator.delegate(
+				parent,
+				"spawn",
+				{
+					agent: "scout",
+					description,
+					prompt: "Inspect it.",
+				},
+				{
+					...DEFAULT_SETTINGS,
+					runtimeMode: "foreground" as const,
+				},
+			);
+			assert.equal(outcome.kind, "foreground");
+		}
+		assert.deepEqual(events, [
+			"pi-subagent:start",
+			"pi-subagent:end",
+			"pi-subagent:start",
+			"pi-subagent:end",
+		]);
 	} finally {
 		await coordinator.shutdown();
 	}
 });
 
-test("foreground-only children hide background lifecycle controls", async () => {
+test("foreground children hide background lifecycle controls", async () => {
 	const observedTools: string[][] = [];
 	const { coordinator, parent } = await fixture({
 		onRequestTools: (tools) => observedTools.push(tools),
@@ -3687,7 +3668,7 @@ test("foreground-only children hide background lifecycle controls", async () => 
 			},
 			{
 				...DEFAULT_SETTINGS,
-				enableRunInBackground: false,
+				runtimeMode: "foreground" as const,
 			},
 		);
 		assert.equal(outcome.kind, "foreground");
@@ -3707,7 +3688,7 @@ test("foreground-only children hide background lifecycle controls", async () => 
 			() => {
 				throw new Error("activation should not be read");
 			},
-			false,
+			"foreground",
 		);
 		for (const [toolName, args] of [
 			[
@@ -3762,9 +3743,8 @@ test("nested delegation tools enumerate the available agent definitions", async 
 				agent: "worker",
 				description: "inspect nested schema",
 				prompt: "Inspect it.",
-				run_in_background: false,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: false },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
 		);
 		for (const name of ["subagent", "subagent_fork"]) {
 			assert.deepEqual(observed.get(name), ["planner", "reviewer", "scout", "worker"]);
@@ -3787,9 +3767,8 @@ test("worker mutation policy falls back to Pi edit and write tools", async () =>
 				agent: "worker",
 				description: "apply a focused change",
 				prompt: "Make the change.",
-				run_in_background: false,
 			},
-			{ ...DEFAULT_SETTINGS, defaultBackground: false },
+			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
 		);
 		assert.equal(outcome.kind, "foreground");
 		assert.equal(observedTools.length, 1);
@@ -3844,11 +3823,10 @@ export default function modelTools(pi) {
 				agent: "worker",
 				description: "apply a focused change",
 				prompt: "Make the change.",
-				run_in_background: false,
 			},
 			{
 				...DEFAULT_SETTINGS,
-				defaultBackground: false,
+				runtimeMode: "foreground" as const,
 				inheritExtensions: true,
 			},
 		);

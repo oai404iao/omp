@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	descriptorTaskPath,
-	legacyTaskPath,
 	numberedTaskName,
 	resolveTaskPath,
 	slugTaskName,
@@ -10,9 +9,7 @@ import {
 	validateTaskName,
 	validateTaskPath,
 } from "../src/task-path.ts";
-import type { SubagentDescriptor } from "../src/types.ts";
 
-const AGENT_ID = "0194f4d8-87f8-7a6f-8f0f-111111111111";
 
 test("task paths validate canonical names and nested roots", () => {
 	assert.equal(validateTaskName("review_auth-2"), "review_auth-2");
@@ -54,17 +51,4 @@ test("generated task names are readable, bounded, and disambiguated", () => {
 	assert.equal(numberedTaskName("x".repeat(64), 12).length, 64);
 });
 
-test("legacy descriptors receive a deterministic readable compatibility path", () => {
-	const descriptor = {
-		version: 2,
-		agentId: AGENT_ID,
-	} as SubagentDescriptor;
-	assert.equal(
-		descriptorTaskPath(descriptor),
-		legacyTaskPath(AGENT_ID),
-	);
-	assert.equal(
-		resolveTaskPath("/root", legacyTaskPath(AGENT_ID)),
-		legacyTaskPath(AGENT_ID),
-	);
-});
+

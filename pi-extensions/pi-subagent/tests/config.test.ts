@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { loadSettings } from "../src/config.ts";
+import { DEFAULT_SETTINGS, loadSettings } from "../src/config.ts";
 
 const roots: string[] = [];
 
@@ -28,12 +28,9 @@ test("global and trusted project settings merge", () => {
 		join(agentDir, "subagent.json"),
 		JSON.stringify({
 			maxDepth: 5,
-			syncBundledAgents: true,
-			enableRunInBackground: false,
+			runtimeMode: "foreground",
 			maxConcurrentBackgroundRuns: 7,
 			maxIdleRuntimes: 5,
-			backgroundProtocol: "mailbox-v2",
-			reportDelivery: "quiet",
 			inheritExtensions: true,
 			openAIIdentity: true,
 		}),
@@ -51,15 +48,22 @@ test("global and trusted project settings merge", () => {
 	const loaded = loadSettings({ cwd: project, projectTrusted: true, agentDir });
 	assert.equal(loaded.settings.maxDepth, 2);
 	assert.equal(loaded.settings.agentScope, "both");
-	assert.equal(loaded.settings.reportDelivery, "quiet");
 	assert.equal(loaded.settings.inheritExtensions, true);
 	assert.equal(loaded.settings.openAIIdentity, true);
-	assert.equal(loaded.settings.enableRunInBackground, false);
+	assert.equal(loaded.settings.runtimeMode, "foreground");
 	assert.equal(loaded.settings.maxConcurrentBackgroundRuns, 2);
 	assert.equal(loaded.settings.maxIdleRuntimes, 1);
-	assert.equal(loaded.settings.backgroundProtocol, "mailbox-v2");
-	assert.equal("syncBundledAgents" in loaded.settings, false);
 	assert.equal(loaded.sources.length, 2);
+	assert.deepEqual(Object.keys(loaded.settings).sort(), [
+		"agentScope",
+		"inheritExtensions",
+		"maxConcurrentBackgroundRuns",
+		"maxDepth",
+		"maxIdleRuntimes",
+		"maxOutputBytes",
+		"openAIIdentity",
+		"runtimeMode",
+	]);
 });
 
 test("untrusted project configuration is not read", () => {
@@ -71,12 +75,7 @@ test("untrusted project configuration is not read", () => {
 	writeFileSync(join(project, ".pi", "subagent.json"), "{not-json");
 
 	const loaded = loadSettings({ cwd: project, projectTrusted: false, agentDir });
-	assert.equal(loaded.settings.maxDepth, 3);
-	assert.equal("syncBundledAgents" in loaded.settings, false);
-	assert.equal(loaded.settings.openAIIdentity, false);
-	assert.equal(loaded.settings.maxConcurrentBackgroundRuns, 4);
-	assert.equal(loaded.settings.maxIdleRuntimes, 0);
-	assert.equal(loaded.settings.backgroundProtocol, "legacy");
+	assert.deepEqual(loaded.settings, DEFAULT_SETTINGS);
 	assert.deepEqual(loaded.sources, []);
 });
 
@@ -84,64 +83,54 @@ test("invalid settings fail loud", () => {
 	const root = tempRoot();
 	const agentDir = join(root, "agent");
 	mkdirSync(agentDir, { recursive: true });
-	writeFileSync(join(agentDir, "subagent.json"), JSON.stringify({ maxDepth: -1 }));
-	assert.throws(
-		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
-		/maxDepth must be a safe integer/,
-	);
-	writeFileSync(
-		join(agentDir, "subagent.json"),
-		JSON.stringify({ maxConcurrentBackgroundRuns: 0 }),
-	);
-	assert.throws(
-		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
-		/maxConcurrentBackgroundRuns must be a safe integer/,
-	);
-	writeFileSync(
-		join(agentDir, "subagent.json"),
-		JSON.stringify({ maxIdleRuntimes: -1 }),
-	);
-	assert.throws(
-		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
-		/maxIdleRuntimes must be a safe integer/,
-	);
-	writeFileSync(
-		join(agentDir, "subagent.json"),
-		JSON.stringify({ backgroundProtocol: "mailbox-v3" }),
-	);
-	assert.throws(
-		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
-		/backgroundProtocol must be "legacy" or "mailbox-v2"/,
-	);
+	const configPath = join(agentDir, "subagent.json");
+	for (const [body, pattern] of [
+		[{ maxDepth: -1 }, /maxDepth must be a safe integer/],
+		[{ maxConcurrentBackgroundRuns: 0 }, /maxConcurrentBackgroundRuns must be a safe integer/],
+		[{ maxIdleRuntimes: -1 }, /maxIdleRuntimes must be a safe integer/],
+		[{ runtimeMode: "sometimes" }, /runtimeMode must be "foreground" or "background"/],
+		[{ agentScope: "everyone" }, /agentScope must be "user", "project", or "both"/],
+		[{ maxOutputBytes: 10 }, /maxOutputBytes must be a safe integer/],
+		[{ inheritExtensions: "yes" }, /inheritExtensions must be a boolean/],
+	] as const) {
+		writeFileSync(configPath, JSON.stringify(body));
+		assert.throws(
+			() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
+			pattern,
+		);
+	}
 });
 
-test("the retired user-level syncBundledAgents setting is validated then ignored", () => {
+test("retired settings and the removed report delivery key fail loud", () => {
 	const root = tempRoot();
 	const agentDir = join(root, "agent");
 	mkdirSync(agentDir, { recursive: true });
-	writeFileSync(join(agentDir, "subagent.json"), JSON.stringify({ syncBundledAgents: false }));
+	const configPath = join(agentDir, "subagent.json");
+	for (const retired of [
+		"enableRunInBackground",
+		"defaultBackground",
+		"backgroundProtocol",
+		"syncBundledAgents",
+		"reportDelivery",
+	]) {
+		writeFileSync(configPath, JSON.stringify({ [retired]: true }));
+		assert.throws(
+			() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
+			new RegExp(`unknown setting "${retired}"`),
+			`${retired} must be rejected`,
+		);
+	}
+});
+
+test("configuration is never rewritten by the extension", () => {
+	const root = tempRoot();
+	const agentDir = join(root, "agent");
+	mkdirSync(agentDir, { recursive: true });
+	const configPath = join(agentDir, "subagent.json");
+	const original = `${JSON.stringify({ runtimeMode: "foreground", maxDepth: 2 }, null, 2)}\n`;
+	writeFileSync(configPath, original);
 	const loaded = loadSettings({ cwd: root, projectTrusted: false, agentDir });
-	assert.equal("syncBundledAgents" in loaded.settings, false);
-
-	writeFileSync(join(agentDir, "subagent.json"), JSON.stringify({ syncBundledAgents: "yes" }));
-	assert.throws(
-		() => loadSettings({ cwd: root, projectTrusted: false, agentDir }),
-		/syncBundledAgents must be a boolean/,
-	);
-});
-
-test("the retired syncBundledAgents compatibility key remains user-level only", () => {
-	const root = tempRoot();
-	const agentDir = join(root, "agent");
-	const project = join(root, "repo");
-	mkdirSync(agentDir, { recursive: true });
-	mkdirSync(join(project, ".pi"), { recursive: true });
-	writeFileSync(
-		join(project, ".pi", "subagent.json"),
-		JSON.stringify({ syncBundledAgents: true }),
-	);
-	assert.throws(
-		() => loadSettings({ cwd: project, projectTrusted: true, agentDir }),
-		/syncBundledAgents may be configured only in the user-level/,
-	);
+	assert.equal(loaded.settings.runtimeMode, "foreground");
+	assert.equal(loaded.settings.maxDepth, 2);
+	assert.equal(readFileSync(configPath, "utf8"), original);
 });

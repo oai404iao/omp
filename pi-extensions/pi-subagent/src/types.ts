@@ -1,13 +1,17 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 
+/** Current on-disk subagent descriptor version. */
+export const DESCRIPTOR_VERSION = 4;
+
 export type AgentScope = "user" | "project" | "both";
 /** Sources that runtime discovery is allowed to activate. */
 export type AgentSource = "user" | "project";
-/** `bundled` is retained only for reading descriptors written by older releases. */
-export type AgentSnapshotSource = AgentSource | "bundled";
-export type ReportDelivery = "wakeup" | "quiet";
-export type BackgroundProtocol = "legacy" | "mailbox-v2";
+/**
+ * Single execution mode. `foreground` waits for every child's final answer;
+ * `background` starts durable mailbox children.
+ */
+export type RuntimeMode = "foreground" | "background";
 export type SubagentMode = "one-shot" | "continuable";
 export type SubagentProviderName = "spawn" | "fork";
 export type SubagentStopReason = "completed" | "aborted" | "error" | "max-tokens";
@@ -24,12 +28,9 @@ export interface SubagentTask {
 export interface SubagentSettings {
 	agentScope: AgentScope;
 	maxDepth: number;
-	enableRunInBackground: boolean;
-	defaultBackground: boolean;
+	runtimeMode: RuntimeMode;
 	maxConcurrentBackgroundRuns: number;
 	maxIdleRuntimes: number;
-	backgroundProtocol?: BackgroundProtocol;
-	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
 	openAIIdentity: boolean;
 	maxOutputBytes: number;
@@ -53,7 +54,7 @@ export interface AgentSnapshot {
 	model?: string;
 	thinking?: ThinkingLevel;
 	systemPrompt: string;
-	source: AgentSnapshotSource;
+	source: AgentSource;
 }
 
 export interface ResolvedModel {
@@ -64,12 +65,9 @@ export interface ResolvedModel {
 export interface SubagentRuntimeSnapshot {
 	agentScope: AgentScope;
 	maxDepth: number;
-	enableRunInBackground: boolean;
-	defaultBackground: boolean;
+	runtimeMode: RuntimeMode;
 	maxConcurrentBackgroundRuns: number;
 	maxIdleRuntimes: number;
-	backgroundProtocol: BackgroundProtocol;
-	reportDelivery: ReportDelivery;
 	inheritExtensions: boolean;
 	openAIIdentity: boolean;
 	maxOutputBytes: number;
@@ -96,19 +94,11 @@ interface SubagentDescriptorBase {
 	runtime: SubagentRuntimeSnapshot;
 }
 
-export interface SubagentDescriptorV2 extends SubagentDescriptorBase {
-	version: 2;
-}
-
-export interface SubagentDescriptorV3 extends SubagentDescriptorBase {
-	version: 3;
+export interface SubagentDescriptor extends SubagentDescriptorBase {
+	version: typeof DESCRIPTOR_VERSION;
 	task: SubagentTask;
 	context: ContextInheritance;
 }
-
-export type SubagentDescriptor =
-	| SubagentDescriptorV2
-	| SubagentDescriptorV3;
 
 export interface SubagentUsage extends Usage {
 	turns: number;
@@ -192,11 +182,10 @@ export interface CatalogDiagnostic {
 export type CatalogEntry = CatalogChild | CatalogDiagnostic;
 
 export interface ParentMessageDetails {
-	kind: "report" | "settled";
+	kind: "report";
 	childAgentId: string;
 	taskPath?: string;
 	label: string;
-	stopReason?: SubagentStopReason;
 	truncated?: boolean;
 }
 

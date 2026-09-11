@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { DESCRIPTOR_CUSTOM_TYPE, foldDescriptor, parseDescriptor } from "../src/descriptor.ts";
+import {
+	DESCRIPTOR_CUSTOM_TYPE,
+	DESCRIPTOR_VERSION,
+	descriptorContext,
+	foldDescriptor,
+	parseDescriptor,
+} from "../src/descriptor.ts";
 import type { SubagentDescriptor } from "../src/types.ts";
 
 function descriptor(label = "inspect auth"): SubagentDescriptor {
 	return {
-		version: 2,
+		version: DESCRIPTOR_VERSION,
 		mode: "continuable",
 		provider: "spawn",
 		label,
@@ -30,24 +36,13 @@ function descriptor(label = "inspect auth"): SubagentDescriptor {
 		runtime: {
 			agentScope: "user",
 			maxDepth: 3,
-			enableRunInBackground: true,
-			defaultBackground: true,
+			runtimeMode: "background",
 			maxConcurrentBackgroundRuns: 4,
 			maxIdleRuntimes: 0,
-			backgroundProtocol: "legacy",
-			reportDelivery: "wakeup",
 			inheritExtensions: false,
 			openAIIdentity: false,
 			maxOutputBytes: 51200,
 		},
-	};
-}
-
-function currentDescriptor(): SubagentDescriptor {
-	const legacy = descriptor();
-	return {
-		...legacy,
-		version: 3,
 		task: {
 			name: "inspect-auth",
 			path: "/root/inspect-auth",
@@ -75,25 +70,16 @@ test("descriptor parser returns a detached validated value", () => {
 	const parsed = parseDescriptor(input);
 	assert.deepEqual(parsed, input);
 	assert.notEqual(parsed.agent.tools, input.agent.tools);
-});
-
-test("v3 descriptors persist readable paths and context policy", () => {
-	const input = currentDescriptor();
-	const parsed = parseDescriptor(input);
-	assert.deepEqual(parsed, input);
-	assert.equal(parsed.version, 3);
-	if (parsed.version !== 3 || input.version !== 3) return;
 	assert.notEqual(parsed.task, input.task);
 	assert.notEqual(parsed.context, input.context);
 });
 
-test("v3 descriptors reject inconsistent paths and context", () => {
-	const wrongPath = currentDescriptor();
-	if (wrongPath.version !== 3) return;
+test("descriptors reject inconsistent paths and context", () => {
+	const wrongPath = descriptor();
 	wrongPath.task.path = "/root/another-name";
 	assert.throws(() => parseDescriptor(wrongPath), /must end with task.name/);
 
-	const wrongContext = currentDescriptor() as SubagentDescriptor & {
+	const wrongContext = descriptor() as SubagentDescriptor & {
 		context: { mode: "fresh"; completedTurns: number };
 	};
 	wrongContext.context = { mode: "fresh", completedTurns: 2 };
@@ -103,71 +89,84 @@ test("v3 descriptors reject inconsistent paths and context", () => {
 	);
 });
 
-test("legacy descriptors default to background-enabled behavior", () => {
-	const input = descriptor() as SubagentDescriptor & {
-		runtime: Omit<SubagentDescriptor["runtime"], "enableRunInBackground">;
+test("descriptors require a runtime mode", () => {
+	const input = descriptor() as unknown as {
+		runtime: Record<string, unknown>;
 	};
-	delete (input.runtime as Partial<SubagentDescriptor["runtime"]>).enableRunInBackground;
-	const parsed = parseDescriptor(input);
-	assert.equal(parsed.runtime.enableRunInBackground, true);
+	delete input.runtime.runtimeMode;
+	assert.throws(
+		() => parseDescriptor(input),
+		/runtime\.runtimeMode must be "foreground" or "background"/,
+	);
 });
 
-test("legacy descriptors receive the default background concurrency limit", () => {
-	const input = descriptor() as SubagentDescriptor & {
-		runtime: Omit<
-			SubagentDescriptor["runtime"],
-			"maxConcurrentBackgroundRuns"
-		>;
+test("descriptors reject an unknown runtime mode", () => {
+	const input = descriptor() as unknown as {
+		runtime: Record<string, unknown>;
 	};
-	delete (
-		input.runtime as Partial<SubagentDescriptor["runtime"]>
-	).maxConcurrentBackgroundRuns;
-	const parsed = parseDescriptor(input);
-	assert.equal(parsed.runtime.maxConcurrentBackgroundRuns, 4);
+	input.runtime.runtimeMode = "sometimes";
+	assert.throws(
+		() => parseDescriptor(input),
+		/runtime\.runtimeMode must be "foreground" or "background"/,
+	);
 });
 
-test("legacy descriptors receive a disabled idle runtime cache", () => {
-	const input = descriptor() as SubagentDescriptor & {
-		runtime: Omit<SubagentDescriptor["runtime"], "maxIdleRuntimes">;
-	};
-	delete (
-		input.runtime as Partial<SubagentDescriptor["runtime"]>
-	).maxIdleRuntimes;
-	assert.equal(parseDescriptor(input).runtime.maxIdleRuntimes, 0);
+test("descriptors reject retired runtime switches", () => {
+	for (const retired of [
+		"enableRunInBackground",
+		"defaultBackground",
+		"backgroundProtocol",
+		"syncBundledAgents",
+		"reportDelivery",
+	]) {
+		const input = descriptor() as unknown as {
+			runtime: Record<string, unknown>;
+		};
+		input.runtime[retired] = true;
+		const parsed = parseDescriptor(input);
+		assert.equal(
+			retired in parsed.runtime,
+			false,
+			`${retired} must not survive parsing`,
+		);
+	}
 });
 
-test("legacy descriptors receive the legacy background protocol", () => {
-	const input = descriptor() as SubagentDescriptor & {
-		runtime: Omit<SubagentDescriptor["runtime"], "backgroundProtocol">;
-	};
-	delete (
-		input.runtime as Partial<SubagentDescriptor["runtime"]>
-	).backgroundProtocol;
-	const parsed = parseDescriptor(input);
-	assert.equal(parsed.runtime.backgroundProtocol, "legacy");
+test("descriptors reject every other persisted version", () => {
+	for (const version of [1, 2, 3, 5]) {
+		const folded = foldDescriptor([
+			customEntry("old", { ...descriptor(), version }),
+		]);
+		assert.equal(folded.kind, "corrupt");
+		if (folded.kind === "corrupt") {
+			assert.match(folded.message, /unsupported descriptor version/);
+			assert.match(folded.message, new RegExp(`version ${DESCRIPTOR_VERSION}`));
+		}
+	}
 });
 
-test("mailbox-v2 descriptors retain their protocol snapshot", () => {
-	const input = descriptor();
-	input.runtime.backgroundProtocol = "mailbox-v2";
-	assert.equal(parseDescriptor(input).runtime.backgroundProtocol, "mailbox-v2");
+test("descriptors reject retired agent snapshot sources", () => {
+	const folded = foldDescriptor([
+		customEntry("bundled", {
+			...descriptor(),
+			agent: { ...descriptor().agent, source: "bundled" },
+		}),
+	]);
+	assert.equal(folded.kind, "corrupt");
+	if (folded.kind === "corrupt") {
+		assert.match(folded.message, /agent\.source is unsupported: bundled/);
+	}
 });
 
-test("legacy syncBundledAgents snapshots are validated then discarded", () => {
-	const input = descriptor() as SubagentDescriptor & {
-		runtime: SubagentDescriptor["runtime"] & { syncBundledAgents: boolean };
-	};
-	input.runtime.syncBundledAgents = false;
-	const parsed = parseDescriptor(input);
-	assert.equal("syncBundledAgents" in parsed.runtime, false);
-});
-
-test("legacy bundled agent snapshots remain readable", () => {
-	const input = descriptor() as SubagentDescriptor & {
-		agent: SubagentDescriptor["agent"] & { source: "bundled" };
-	};
-	input.agent.source = "bundled";
-	assert.equal(parseDescriptor(input).agent.source, "bundled");
+test("persisted context policy is copied out of the descriptor", () => {
+	const parsed = parseDescriptor(descriptor());
+	assert.deepEqual(descriptorContext(parsed), {
+		mode: "last_n_completed",
+		completedTurns: 2,
+	});
+	const context = descriptorContext(parsed);
+	context.mode = "fresh";
+	assert.equal(parsed.context.mode, "last_n_completed");
 });
 
 test("descriptor folding is last-wins for fork seeds", () => {
@@ -178,7 +177,7 @@ test("descriptor folding is last-wins for fork seeds", () => {
 	if (folded.kind === "valid") assert.equal(folded.descriptor.label, "child");
 });
 
-test("malformed current descriptors fold to a diagnostic", () => {
+test("malformed descriptors fold to a diagnostic", () => {
 	const malformed = { ...descriptor(), depth: -1 };
 	const folded = foldDescriptor([customEntry("bad", malformed)]);
 	assert.equal(folded.kind, "corrupt");
@@ -191,13 +190,4 @@ test("descriptor agent ids must be UUIDv7", () => {
 		assert.equal(folded.kind, "corrupt");
 		if (folded.kind === "corrupt") assert.match(folded.message, /agent id/);
 	}
-});
-
-test("v1 descriptors are rejected as failed legacy data", () => {
-	const legacy = { ...descriptor(), version: 1 };
-	delete (legacy as Partial<SubagentDescriptor>).agentId;
-	delete (legacy as Partial<SubagentDescriptor>).parentAgentId;
-	const folded = foldDescriptor([customEntry("legacy", legacy)]);
-	assert.equal(folded.kind, "corrupt");
-	if (folded.kind === "corrupt") assert.match(folded.message, /version/);
 });

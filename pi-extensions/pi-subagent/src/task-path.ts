@@ -4,7 +4,6 @@ import type {
 } from "./types.ts";
 
 export const ROOT_TASK_PATH = "/root";
-export const LEGACY_TASK_NAMESPACE = ".legacy";
 export const MAX_TASK_NAME_LENGTH = 64;
 export const MAX_TASK_PATH_LENGTH = 4096;
 
@@ -34,7 +33,7 @@ export function validateTaskName(value: string): string {
 			"task_name must contain 1-64 lowercase ASCII letters, digits, hyphens, or underscores and start with a letter or digit",
 		);
 	}
-	if (value === "root" || value === LEGACY_TASK_NAMESPACE) {
+	if (value === "root") {
 		throw new Error(`task_name "${value}" is reserved`);
 	}
 	return value;
@@ -44,21 +43,7 @@ export function validateTaskPath(path: string): string {
 	if (path === ROOT_TASK_PATH) return path;
 	const segments = pathSegments(path);
 	for (let index = 1; index < segments.length; index++) {
-		const segment = segments[index]!;
-		if (
-			index === 1
-			&& segment === LEGACY_TASK_NAMESPACE
-		) {
-			const legacyId = segments[index + 1];
-			if (!legacyId || !AGENT_ID_PATTERN.test(legacyId)) {
-				throw new Error(
-					`legacy task paths must use ${ROOT_TASK_PATH}/${LEGACY_TASK_NAMESPACE}/<agent-id>`,
-				);
-			}
-			index++;
-			continue;
-		}
-		validateTaskName(segment);
+		validateTaskName(segments[index]!);
 	}
 	return path;
 }
@@ -70,29 +55,16 @@ export function taskPath(parentPath: string, name: string): string {
 	return validateTaskPath(path);
 }
 
-export function legacyTaskPath(agentId: string): string {
-	if (!AGENT_ID_PATTERN.test(agentId)) {
-		throw new Error("legacy task path requires a UUIDv7 agent id");
-	}
-	return `${ROOT_TASK_PATH}/${LEGACY_TASK_NAMESPACE}/${agentId}`;
-}
-
 export function descriptorTaskPath(
 	descriptor: SubagentDescriptor,
 ): string {
-	return descriptor.version === 3
-		? descriptor.task.path
-		: legacyTaskPath(descriptor.agentId);
+	return descriptor.task.path;
 }
 
 export function descriptorTask(
 	descriptor: SubagentDescriptor,
 ): SubagentTask {
-	if (descriptor.version === 3) return { ...descriptor.task };
-	return {
-		name: descriptor.agentId,
-		path: legacyTaskPath(descriptor.agentId),
-	};
+	return { ...descriptor.task };
 }
 
 export function validateDescriptorTask(task: SubagentTask): SubagentTask {
@@ -114,10 +86,7 @@ export function slugTaskName(value: string): string {
 		.replace(/^[-_]+|[-_]+$/g, "")
 		.slice(0, MAX_TASK_NAME_LENGTH)
 		.replace(/[-_]+$/g, "");
-	const candidate =
-		!normalized || normalized === "root" || normalized === LEGACY_TASK_NAMESPACE
-			? "task"
-			: normalized;
+	const candidate = !normalized || normalized === "root" ? "task" : normalized;
 	return validateTaskName(candidate);
 }
 
@@ -163,17 +132,6 @@ export function resolveTaskPath(
 				throw new Error(`task path reference cannot escape ${ROOT_TASK_PATH}`);
 			}
 			segments.pop();
-			continue;
-		}
-		if (segment === LEGACY_TASK_NAMESPACE) {
-			segments.push(segment);
-			continue;
-		}
-		if (
-			segments.at(-1) === LEGACY_TASK_NAMESPACE
-			&& AGENT_ID_PATTERN.test(segment)
-		) {
-			segments.push(segment);
 			continue;
 		}
 		validateTaskName(segment);

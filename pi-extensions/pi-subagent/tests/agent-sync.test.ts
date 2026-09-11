@@ -72,7 +72,7 @@ test("same-version restarts preserve edits, then an update backs up and replaces
 	assert.equal(readFileSync(userScout, "utf8"), "bundled scout v2\n");
 });
 
-test("same-version deletion is authoritative until the package version changes", () => {
+test("a deleted preset is never restored by a later package version", () => {
 	const root = tempRoot();
 	const bundledDir = join(root, "bundled");
 	const agentDir = join(root, "agent");
@@ -87,11 +87,88 @@ test("same-version deletion is authoritative until the package version changes",
 	assert.deepEqual(restart.installed, []);
 	assert.deepEqual(restart.updated, []);
 	assert.deepEqual(restart.removed, []);
+	assert.deepEqual(restart.retired, ["scout.md"]);
+	assert.equal(restart.retirementChanged, true);
 	assert.deepEqual(restart.backups, []);
 
 	const update = syncBundledAgents({ bundledDir, agentDir, packageVersion: "2.0.0" });
-	assert.deepEqual(update.installed, ["scout.md"]);
-	assert.equal(readFileSync(userScout, "utf8"), "bundled scout v1\n");
+	assert.deepEqual(update.installed, []);
+	assert.deepEqual(update.retired, ["scout.md"]);
+	assert.equal(update.retirementChanged, false);
+	assert.equal(existsSync(userScout), false);
+	assert.equal(
+		JSON.parse(readFileSync(update.manifestPath, "utf8")).retired.join(","),
+		"scout.md",
+	);
+
+	// The deletion is recorded once and reported only when it changes, but the
+	// durable retirement list stays observable.
+	const settled = syncBundledAgents({ bundledDir, agentDir, packageVersion: "2.0.0" });
+	assert.deepEqual(settled.retired, ["scout.md"]);
+	assert.equal(settled.retirementChanged, false);
+	assert.deepEqual(settled.installed, []);
+});
+
+test("a deletion recorded by an older release is honored on upgrade", () => {
+	const root = tempRoot();
+	const bundledDir = join(root, "bundled");
+	const agentDir = join(root, "agent");
+	writeBundled(bundledDir, "scout", "bundled scout\n");
+	writeBundled(bundledDir, "worker", "bundled worker\n");
+	const first = syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+	const manifest = JSON.parse(readFileSync(first.manifestPath, "utf8"));
+	delete manifest.retired;
+	writeFileSync(first.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+	unlinkSync(join(agentDir, "agents", "scout.md"));
+
+	const update = syncBundledAgents({ bundledDir, agentDir, packageVersion: "2.0.0" });
+	assert.deepEqual(update.retired, ["scout.md"]);
+	assert.deepEqual(update.installed, []);
+	assert.equal(existsSync(join(agentDir, "agents", "scout.md")), false);
+	assert.equal(existsSync(join(agentDir, "agents", "worker.md")), true);
+});
+
+test("a preset added by a later release is still installed after deletions", () => {
+	const root = tempRoot();
+	const bundledDir = join(root, "bundled");
+	const agentDir = join(root, "agent");
+	writeBundled(bundledDir, "scout", "bundled scout v1\n");
+	writeBundled(bundledDir, "worker", "bundled worker v1\n");
+	syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+	unlinkSync(join(agentDir, "agents", "worker.md"));
+	syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+
+	writeBundled(bundledDir, "planner", "bundled planner v1\n");
+	const update = syncBundledAgents({ bundledDir, agentDir, packageVersion: "2.0.0" });
+	assert.deepEqual(update.installed, ["planner.md"]);
+	assert.equal(existsSync(join(agentDir, "agents", "worker.md")), false);
+	assert.equal(readFileSync(join(agentDir, "agents", "planner.md"), "utf8"), "bundled planner v1\n");
+});
+
+test("recreating a deleted preset makes it a managed preset again", () => {
+	const root = tempRoot();
+	const bundledDir = join(root, "bundled");
+	const agentDir = join(root, "agent");
+	writeBundled(bundledDir, "scout", "bundled scout v1\n");
+	syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+	const userScout = join(agentDir, "agents", "scout.md");
+	unlinkSync(userScout);
+	syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+
+	writeFileSync(userScout, "restored custom scout\n");
+	const restored = syncBundledAgents({ bundledDir, agentDir, packageVersion: "1.0.0" });
+	assert.deepEqual(restored.restored, ["scout.md"]);
+	assert.deepEqual(restored.retired, []);
+	assert.equal(restored.retirementChanged, true);
+	assert.equal(readFileSync(userScout, "utf8"), "restored custom scout\n");
+
+	writeBundled(bundledDir, "scout", "bundled scout v2\n");
+	const update = syncBundledAgents({ bundledDir, agentDir, packageVersion: "2.0.0" });
+	assert.deepEqual(update.updated, ["scout.md"]);
+	assert.deepEqual(update.installed, []);
+	assert.equal(update.backups.length, 1);
+	assert.equal(readFileSync(update.backups[0].path, "utf8"), "restored custom scout\n");
+	assert.equal(readFileSync(userScout, "utf8"), "bundled scout v2\n");
 });
 
 test("deleting every initialized role leaves the same-version catalog empty", () => {

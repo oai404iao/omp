@@ -4,7 +4,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_SETTINGS, loadSettings } from "./config.ts";
 import {
 	REPORT_CUSTOM_TYPE,
-	SETTLED_CUSTOM_TYPE,
 	SubagentCoordinator,
 	type DelegationInput,
 } from "./coordinator.ts";
@@ -60,11 +59,21 @@ function disableOwnedTools(
 }
 
 function assertBackgroundControlsEnabled(settings: SubagentSettings, toolName: string): void {
-	if (!settings.enableRunInBackground) {
+	if (settings.runtimeMode === "foreground") {
 		throw new Error(
-			`tool "${toolName}" is unavailable in foreground-only mode (enableRunInBackground: false)`,
+			`tool "${toolName}" is unavailable in foreground-only mode (runtimeMode: "foreground")`,
 		);
 	}
+}
+
+function modeDescription(settings: SubagentSettings): string {
+	return settings.runtimeMode === "foreground"
+		? "Delegate a complete task to a named child path with selectable completed-turn context. " +
+				"This foreground-only tool waits for the child and returns its final answer. " +
+				"Independent sibling calls may still execute in parallel."
+		: "Delegate a complete task to a named child path with selectable completed-turn context. " +
+				"Background mode is continuable and returns a readable path plus durable id; use send_message to enqueue, followup_task to start, and wait_agent for quiet completions. " +
+				"Start independent children together in one assistant message.";
 }
 
 function registerDelegationTool(
@@ -73,48 +82,30 @@ function registerDelegationTool(
 	settings: SubagentSettings,
 	agentDiscovery?: AgentDiscoveryResult,
 ): unknown {
-	const { enableRunInBackground, defaultBackground } = settings;
+	const foregroundOnly = settings.runtimeMode === "foreground";
 	const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
-	const description = !enableRunInBackground
-		? "Delegate a complete task to a named child path with selectable completed-turn context. " +
-			"This foreground-only tool waits for the child and returns its final answer. " +
-			"Independent sibling calls may still execute in parallel."
-		: defaultBackground
-		? "Delegate a complete task to a named child path with selectable completed-turn context. " +
-			(settings.backgroundProtocol === "mailbox-v2"
-				? "Background mode is continuable and returns a readable path plus durable id; use send_message to enqueue, followup_task to start, and wait_agent for quiet completions. "
-				: "Background mode is continuable and returns a readable path plus durable id; use send_message for later FIFO turns. ") +
-			"Start independent children together in one assistant message."
-		: "Delegate a complete task to a named child path with selectable completed-turn context. " +
-			"This tool waits for the result by default; set run_in_background to true to return a readable path plus durable id.";
-	const promptGuidelines = (!enableRunInBackground
+	const promptGuidelines = (foregroundOnly
 		? [
 				"Use subagent for focused independent work and give it a complete standalone prompt.",
 				"This subagent tool is foreground-only: every call waits for and returns the child's final answer.",
 				"Independent subagent calls can still be issued together in one assistant message and execute in parallel.",
 			]
-		: defaultBackground
-			? [
-					"Use subagent for focused independent work and give it a complete standalone prompt.",
-					"Call subagent multiple times in one assistant message when delegations are independent.",
-					"Keep useful parent work moving after a background subagent starts; use foreground only when the next action needs its result.",
-				]
-			: [
-					"Use subagent for focused independent work and give it a complete standalone prompt.",
-					"Subagent calls wait for the result by default; request background mode only when work can continue independently.",
-					"Independent subagent calls can still be issued together in one assistant message and execute in parallel.",
-				]).concat([
+		: [
+				"Use subagent for focused independent work and give it a complete standalone prompt.",
+				"Call subagent multiple times in one assistant message when delegations are independent.",
+				"Every child is durable: continue parent work, then use send_message plus followup_task to give it more work and wait_agent for its completion updates.",
+			]).concat([
 					"Set task_name when a stable readable path will help later control calls; otherwise a name is generated from description.",
 					"Use fresh context by default and request all_completed or last_n_completed only when parent history materially helps.",
 				]);
-	const parameters = delegationParameters(enableRunInBackground, agentNames);
+	const parameters = delegationParameters(agentNames);
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
-		description,
-		promptSnippet: enableRunInBackground
-			? "Delegate focused work to named child agents"
-			: "Run focused independent work in foreground child agents",
+		description: modeDescription(settings),
+		promptSnippet: foregroundOnly
+			? "Run focused independent work in foreground child agents"
+			: "Delegate focused work to named child agents",
 		promptGuidelines,
 		executionMode: "parallel",
 		parameters,
@@ -136,7 +127,7 @@ function registerDelegationTool(
 			return coordinator.outcomeToolResult(outcome);
 		},
 		renderCall(args, theme) {
-			return renderDelegationCall(args, theme, "spawn");
+			return renderDelegationCall(args, theme, "spawn", settings.runtimeMode);
 		},
 		renderResult(result, options, theme) {
 			return renderDelegationResult(
@@ -157,16 +148,16 @@ function registerForkDelegationTool(
 	agentDiscovery?: AgentDiscoveryResult,
 ): unknown {
 	const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
-	const parameters = forkDelegationParameters(
-		agentNames,
-		settings.enableRunInBackground,
-	);
+	const parameters = forkDelegationParameters(agentNames);
 	pi.registerTool({
 		name: "subagent_fork",
 		label: "Subagent Fork",
 		description:
 			"Delegate a task to a child seeded with all completed turns in this conversation. " +
-			"The current in-flight tool-calling turn is excluded. It is foreground by default; request background mode for a continuable fork.",
+			"The current in-flight tool-calling turn is excluded. " +
+			(settings.runtimeMode === "foreground"
+				? "This foreground-only tool waits for the child's final answer."
+				: "The fork is continuable and returns a readable path plus durable id."),
 		promptSnippet: "Delegate context-dependent work to a child seeded with completed turns",
 		promptGuidelines: [
 			"Use subagent_fork only when completed conversation history materially helps the delegated task.",
@@ -191,7 +182,7 @@ function registerForkDelegationTool(
 			return coordinator.outcomeToolResult(outcome);
 		},
 		renderCall(args, theme) {
-			return renderDelegationCall(args, theme, "fork");
+			return renderDelegationCall(args, theme, "fork", settings.runtimeMode);
 		},
 		renderResult(result, options, theme) {
 			return renderDelegationResult(
@@ -226,7 +217,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		name: "send_message",
 		label: "Send Message",
 		description:
-			"Send a message to a direct continuable child. Legacy children start or join a FIFO turn; mailbox-v2 children only durably enqueue it and require followup_task to execute. " +
+			"Send a message to a direct continuable child. It is durably appended to the child's FIFO mailbox and requires followup_task to start a turn. " +
 			"This call returns acceptance only, never the child's answer.",
 		promptSnippet: "Send or enqueue a message for a direct continuable subagent",
 		executionMode: "parallel",
@@ -244,10 +235,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				content: [
 					{
 						type: "text",
-						text:
-							delivery.kind === "mailbox-v2"
-								? `message ${delivery.messageId} durably enqueued for ${delivery.taskPath}; ${delivery.pendingMessages} pending`
-								: `message queued as the next turn for ${delivery.taskPath}`,
+						text: `message ${delivery.messageId} durably enqueued for ${delivery.taskPath}; ${delivery.pendingMessages} pending`,
 					},
 				],
 				details: {
@@ -255,12 +243,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 					action: "send",
 					agentId: delivery.agentId,
 					taskPath: delivery.taskPath,
-					...(delivery.kind === "mailbox-v2"
-						? {
-								messageId: delivery.messageId,
-								pendingMessages: delivery.pendingMessages,
-							}
-						: {}),
+					messageId: delivery.messageId,
+					pendingMessages: delivery.pendingMessages,
 				} satisfies ControlDetails,
 			};
 		},
@@ -270,9 +254,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		name: "followup_task",
 		label: "Follow-up Task",
 		description:
-			"For a direct mailbox-v2 continuable child, atomically claim its current pending FIFO mailbox and start exactly one scheduled turn. " +
+			"For a direct continuable child, atomically claim its current pending FIFO mailbox and start exactly one scheduled turn. " +
 			"This call returns turn acceptance, not the child's answer.",
-		promptSnippet: "Start one mailbox-v2 child turn from queued messages",
+		promptSnippet: "Start one child turn from queued mailbox messages",
 		executionMode: "parallel",
 		parameters: FollowupTaskParameters,
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -306,8 +290,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		name: "wait_agent",
 		label: "Wait Agent",
 		description:
-			"Wait event-driven for unread completion updates from direct mailbox-v2 children. Existing updates return immediately; timeout does not consume later updates.",
-		promptSnippet: "Wait for quiet mailbox-v2 child completion updates",
+			"Wait event-driven for unread completion updates from direct children. Existing updates return immediately; timeout does not consume later updates.",
+		promptSnippet: "Wait for quiet child completion updates",
 		parameters: WaitAgentParameters,
 		async execute(toolCallId, params, signal, _onUpdate, ctx) {
 			assertBackgroundControlsEnabled(sessionSettings, "wait_agent");
@@ -371,7 +355,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		label: "List Agents",
 		description:
 			"List direct continuable children or all descendants. running means an active turn, idle means resident between turns, " +
-			"ready means persisted and cold-resumable, and mailbox-v2 children show pending task messages separately from unread completion updates.",
+			"ready means persisted and cold-resumable, and children show pending task messages separately from unread completion updates.",
 		promptSnippet: "List continuable child agents and their lifecycle status",
 		parameters: ListAgentsParameters,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -386,7 +370,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	for (const customType of [REPORT_CUSTOM_TYPE, SETTLED_CUSTOM_TYPE]) {
+	for (const customType of [REPORT_CUSTOM_TYPE]) {
 		pi.registerMessageRenderer<ParentMessageDetails>(customType, (message, options, theme) => {
 			const content =
 				typeof message.content === "string"
@@ -411,21 +395,19 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				);
 			const parent = await coordinator.parentFromContext(ctx);
 			const entries = await coordinator.list(parent, "descendants");
-			const schedulingMode = !sessionSettings.enableRunInBackground
-				? "foreground-only"
-				: sessionSettings.defaultBackground
-					? "background-first"
-					: "foreground-first";
 			const sections = [
-				`Mode: ${schedulingMode}`,
+				`Mode: ${sessionSettings.runtimeMode}`,
 				`Background concurrency: ${sessionSettings.maxConcurrentBackgroundRuns}`,
 				`Idle runtime LRU: ${sessionSettings.maxIdleRuntimes}`,
-				`Background protocol: ${sessionSettings.backgroundProtocol ?? "legacy"}`,
+				"Background protocol: durable mailbox",
 				`OpenAI identity inline: ${sessionSettings.openAIIdentity ? "enabled" : "disabled"}`,
 				agentSync?.diagnostics.length
 					? "Bundled templates: initialization skipped (see diagnostics)"
 					: `Bundled templates: initialization only (${agentSync?.packageVersion ?? "not initialized"})`,
 				`User agent dir: ${agentSync?.userAgentsDir ?? coordinator.getUserAgentsDir()}`,
+				agentSync && agentSync.retired.length > 0
+					? `Deleted presets (never restored): ${agentSync.retired.join(", ")}`
+					: null,
 				`Agents:\n${formatAgentCatalog(discovery.agents)}`,
 				`Children:\n${coordinator.formatCatalog(entries, "descendants")}`,
 			];
@@ -464,31 +446,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		if (sessionDiscovery.agents.length === 0) {
 			disableOwnedTools(pi, registeredParameters);
 		}
-		if (!sessionSettings.enableRunInBackground) {
+		if (sessionSettings.runtimeMode === "foreground") {
 			disableOwnedTools(pi, backgroundControlParameters);
-		} else if (sessionSettings.backgroundProtocol !== "mailbox-v2") {
-			let hasMailboxChild = true;
-			try {
-				const parent = await coordinator.parentFromContext(ctx);
-				const entries = await coordinator.list(parent, "descendants");
-				hasMailboxChild = entries.some(
-					(entry) =>
-						entry.kind === "child"
-						&& entry.descriptor.runtime.backgroundProtocol === "mailbox-v2",
-				);
-			} catch {
-				// Keep the control available when catalog inspection fails so a
-				// transient diagnostic cannot strand an existing mailbox child.
-			}
-			if (!hasMailboxChild) {
-				disableOwnedTools(
-					pi,
-					new Map<string, unknown>([
-						["followup_task", FollowupTaskParameters],
-						["wait_agent", WaitAgentParameters],
-					]),
-				);
-			}
 		}
 		if (!agentSyncNotified && agentSync) {
 			agentSyncNotified = true;
@@ -502,6 +461,14 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			if (agentSync.removed.length > 0) {
 				lines.push(`retired: ${agentSync.removed.join(", ")}`);
 			}
+			if (agentSync.retirementChanged && agentSync.retired.length > 0) {
+				lines.push(
+					`deleted by you (not restored): ${agentSync.retired.join(", ")}`,
+				);
+			}
+			if (agentSync.restored.length > 0) {
+				lines.push(`restored as managed presets: ${agentSync.restored.join(", ")}`);
+			}
 			if (agentSync.backups.length > 0) {
 				lines.push("backups:", ...agentSync.backups.map((backup) => `- ${backup.name}: ${backup.path}`));
 			}
@@ -509,6 +476,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				agentSync.installed.length > 0 ||
 				agentSync.updated.length > 0 ||
 				agentSync.removed.length > 0 ||
+				(agentSync.retirementChanged && agentSync.retired.length > 0) ||
+				agentSync.restored.length > 0 ||
 				agentSync.backups.length > 0
 			) {
 				ctx.ui.notify(lines.join("\n"), "info");

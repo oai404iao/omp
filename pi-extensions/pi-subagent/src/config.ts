@@ -1,24 +1,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import type {
-	AgentScope,
-	BackgroundProtocol,
-	ReportDelivery,
-	SubagentSettings,
-} from "./types.ts";
+import type { AgentScope, RuntimeMode, SubagentSettings } from "./types.ts";
 
 export const CONFIG_FILE_NAME = "subagent.json";
 
 export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	agentScope: "user",
 	maxDepth: 3,
-	enableRunInBackground: true,
-	defaultBackground: true,
+	runtimeMode: "background",
 	maxConcurrentBackgroundRuns: 4,
 	maxIdleRuntimes: 0,
-	backgroundProtocol: "legacy",
-	reportDelivery: "wakeup",
 	inheritExtensions: false,
 	openAIIdentity: false,
 	maxOutputBytes: 50 * 1024,
@@ -27,14 +19,10 @@ export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 const CONFIG_KEYS = new Set([
 	"$schema",
 	"agentScope",
-	"syncBundledAgents",
 	"maxDepth",
-	"enableRunInBackground",
-	"defaultBackground",
+	"runtimeMode",
 	"maxConcurrentBackgroundRuns",
 	"maxIdleRuntimes",
-	"backgroundProtocol",
-	"reportDelivery",
 	"inheritExtensions",
 	"openAIIdentity",
 	"maxOutputBytes",
@@ -91,14 +79,9 @@ function parseAgentScope(value: unknown, source: string): AgentScope {
 	throw new Error(`${source}: agentScope must be "user", "project", or "both"`);
 }
 
-function parseReportDelivery(value: unknown, source: string): ReportDelivery {
-	if (value === "wakeup" || value === "quiet") return value;
-	throw new Error(`${source}: reportDelivery must be "wakeup" or "quiet"`);
-}
-
-function parseBackgroundProtocol(value: unknown, source: string): BackgroundProtocol {
-	if (value === "legacy" || value === "mailbox-v2") return value;
-	throw new Error(`${source}: backgroundProtocol must be "legacy" or "mailbox-v2"`);
+function parseRuntimeMode(value: unknown, source: string): RuntimeMode {
+	if (value === "foreground" || value === "background") return value;
+	throw new Error(`${source}: runtimeMode must be "foreground" or "background"`);
 }
 
 function parseBoolean(value: unknown, key: string, source: string): boolean {
@@ -129,20 +112,12 @@ function applyConfig(
 	settings: SubagentSettings,
 	config: ConfigRecord,
 	source: string,
-	options: { allowSyncBundledAgents: boolean },
 ): SubagentSettings {
-	if (config.syncBundledAgents !== undefined && !options.allowSyncBundledAgents) {
-		throw new Error(`${source}: syncBundledAgents may be configured only in the user-level subagent.json`);
-	}
-	if (config.syncBundledAgents !== undefined) {
-		// Compatibility with 0.2/0.3 configuration files. Bundled templates are
-		// now always initialized on first install/version change, and this
-		// retired switch no longer controls runtime discovery or writes.
-		parseBoolean(config.syncBundledAgents, "syncBundledAgents", source);
-	}
 	return {
 		agentScope:
-			config.agentScope === undefined ? settings.agentScope : parseAgentScope(config.agentScope, source),
+			config.agentScope === undefined
+				? settings.agentScope
+				: parseAgentScope(config.agentScope, source),
 		maxDepth:
 			config.maxDepth === undefined
 				? settings.maxDepth
@@ -150,14 +125,10 @@ function applyConfig(
 						minimum: 0,
 						maximum: Number.MAX_SAFE_INTEGER,
 					}),
-		enableRunInBackground:
-			config.enableRunInBackground === undefined
-				? settings.enableRunInBackground
-				: parseBoolean(config.enableRunInBackground, "enableRunInBackground", source),
-		defaultBackground:
-			config.defaultBackground === undefined
-				? settings.defaultBackground
-				: parseBoolean(config.defaultBackground, "defaultBackground", source),
+		runtimeMode:
+			config.runtimeMode === undefined
+				? settings.runtimeMode
+				: parseRuntimeMode(config.runtimeMode, source),
 		maxConcurrentBackgroundRuns:
 			config.maxConcurrentBackgroundRuns === undefined
 				? settings.maxConcurrentBackgroundRuns
@@ -182,14 +153,6 @@ function applyConfig(
 							maximum: Number.MAX_SAFE_INTEGER,
 						},
 					),
-		backgroundProtocol:
-			config.backgroundProtocol === undefined
-				? settings.backgroundProtocol
-				: parseBackgroundProtocol(config.backgroundProtocol, source),
-		reportDelivery:
-			config.reportDelivery === undefined
-				? settings.reportDelivery
-				: parseReportDelivery(config.reportDelivery, source),
 		inheritExtensions:
 			config.inheritExtensions === undefined
 				? settings.inheritExtensions
@@ -214,7 +177,7 @@ export function loadSettings(options: LoadSettingsOptions): LoadedSettings {
 	const userPath = join(options.agentDir ?? getAgentDir(), CONFIG_FILE_NAME);
 	const userConfig = readConfig(userPath);
 	if (userConfig) {
-		settings = applyConfig(settings, userConfig, userPath, { allowSyncBundledAgents: true });
+		settings = applyConfig(settings, userConfig, userPath);
 		sources.push(userPath);
 	}
 
@@ -223,7 +186,7 @@ export function loadSettings(options: LoadSettingsOptions): LoadedSettings {
 		if (projectPath) {
 			const projectConfig = readConfig(projectPath);
 			if (projectConfig) {
-				settings = applyConfig(settings, projectConfig, projectPath, { allowSyncBundledAgents: false });
+				settings = applyConfig(settings, projectConfig, projectPath);
 				sources.push(projectPath);
 			}
 		}

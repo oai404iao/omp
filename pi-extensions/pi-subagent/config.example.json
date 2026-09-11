@@ -2,12 +2,9 @@
   "$schema": "./config.schema.json",
   "agentScope": "user",
   "maxDepth": 3,
-  "enableRunInBackground": true,
-  "defaultBackground": true,
+  "runtimeMode": "background",
   "maxConcurrentBackgroundRuns": 4,
   "maxIdleRuntimes": 0,
-  "backgroundProtocol": "legacy",
-  "reportDelivery": "wakeup",
   "inheritExtensions": false,
   "openAIIdentity": false,
   "maxOutputBytes": 51200

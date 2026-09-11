@@ -9,7 +9,6 @@ export function renderDelegationCall(
 		task_name?: string;
 		description?: string;
 		prompt?: string;
-		run_in_background?: boolean;
 		context?: { mode?: string };
 	},
 	theme: {
@@ -17,17 +16,10 @@ export function renderDelegationCall(
 		bold(text: string): string;
 	},
 	provider: "spawn" | "fork",
+	runtimeMode: "foreground" | "background" = "background",
 ): Text {
-	const mode =
-		provider === "fork"
-			? args.run_in_background === true
-				? "fork · background"
-				: "fork · foreground"
-			: args.run_in_background === false
-				? `${args.context?.mode ?? "fresh"} · foreground`
-				: args.run_in_background === true
-					? `${args.context?.mode ?? "fresh"} · background`
-					: `${args.context?.mode ?? "fresh"} · configured default`;
+	const contextMode = provider === "fork" ? "all_completed" : (args.context?.mode ?? "fresh");
+	const mode = `${contextMode} · ${runtimeMode}`;
 	let text =
 		theme.fg("toolTitle", theme.bold(provider === "fork" ? "subagent_fork " : "subagent ")) +
 		theme.fg("accent", args.agent ?? "…") +
@@ -109,13 +101,11 @@ export function renderParentMessage(
 	},
 ): Text | Markdown {
 	if (expanded) return new Markdown(content, outputPad, 0, getMarkdownTheme());
-	const kind = details?.kind === "report" ? "report" : "settled";
-	const icon = details?.stopReason && details.stopReason !== "completed" ? "◐" : "●";
 	const label = details?.label ? ` — ${details.label}` : "";
 	return new Text(
-		theme.fg("accent", icon) +
+		theme.fg("accent", "●") +
 			" " +
-			theme.fg("toolTitle", theme.bold(`subagent ${kind}`)) +
+			theme.fg("toolTitle", theme.bold("subagent report")) +
 			theme.fg(
 				"muted",
 				` ${details?.taskPath ?? details?.childAgentId ?? "unknown"}${label}`,
