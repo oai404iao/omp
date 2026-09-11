@@ -37,7 +37,7 @@ try {
     join(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
     "--offline", "--no-extensions", "--no-skills", "--no-prompt-templates",
     "--no-context-files", "--no-themes", "--no-approve",
-    "-e", join(root, "pi-extensions/pi-codex-minimal-tools/src/index.ts"), "--list-models",
+    "-e", join(root, "pi-extensions/pi-codex-minimal-tools/index.ts"), "--list-models",
   ], { cwd: temporary, encoding: "utf8", env, timeout: 60000 });
   assert.equal(cli.status, 0, cli.stdout + cli.stderr);
   assert.doesNotMatch(cli.stdout + cli.stderr, /Failed to load extension|ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED/);

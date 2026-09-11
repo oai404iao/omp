@@ -95,6 +95,17 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   if (kind !== "library" && (!Array.isArray(manifest.pi?.extensions) || manifest.pi.extensions.length === 0)) {
     report(`${manifest.name}: pi.extensions must contain at least one entry`);
   }
+  if (
+    kind !== "library"
+    && Array.isArray(manifest.pi?.extensions)
+    && manifest.pi.extensions.length > 0
+    && (
+      manifest.pi.extensions.length !== 1
+      || normalizePackagePath(manifest.pi.extensions[0]) !== "index.ts"
+    )
+  ) {
+    report(`${manifest.name}: pi.extensions must contain only ./index.ts`);
+  }
   if (kind === "library" && manifest.pi?.extensions?.length) {
     report(`${manifest.name}: runtime library must not auto-register Pi extensions`);
   }

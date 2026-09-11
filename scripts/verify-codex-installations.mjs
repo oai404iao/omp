@@ -129,8 +129,8 @@ try {
     if (!["bundle", "web"].includes(label)) rmSync(path, { recursive: true, force: true });
   }
   // Physically separate runtime copies, not merely different API wrappers.
-  const bundle = join(consumers.get("bundle"), "node_modules", prefix + "pi-codex-minimal-tools/src/index.ts");
-  const web = join(consumers.get("web"), "node_modules", prefix + "pi-codex-web-search/src/index.ts");
+  const bundle = join(consumers.get("bundle"), "node_modules", prefix + "pi-codex-minimal-tools/index.ts");
+  const web = join(consumers.get("web"), "node_modules", prefix + "pi-codex-web-search/index.ts");
   const allTools = ["apply_patch", "view_image", "web_search", "image_generation"];
   runProbes("bundle", [[bundle, web], [web, bundle]], allTools, true);
   console.log(`✓ Codex: ${checks} production tarball/Pi ${piVersion()} combinations; locked offline npm ci; no external links or capability leakage`);

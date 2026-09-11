@@ -27,7 +27,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./index.ts"
     ]
   },
   "peerDependencies": {
@@ -56,6 +56,7 @@
     "check": "npm run typecheck && npm test"
   },
   "files": [
+    "index.ts",
     "agents/",
     "LICENSES/",
     "provenance/",

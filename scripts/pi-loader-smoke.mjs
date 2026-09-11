@@ -17,7 +17,7 @@ const warn = console.warn;
 console.warn = (...args) => warnings.push(args.join(" "));
 let loaded;
 try {
-  loaded = await loadExtensions([join(root, "pi-extensions/pi-tree-continue/src/index.ts")], process.cwd());
+  loaded = await loadExtensions([join(root, "pi-extensions/pi-tree-continue/index.ts")], process.cwd());
 } finally { console.warn = warn; }
 assert.deepEqual(loaded.errors, []);
 const commands = loaded.extensions.flatMap(extension => [...extension.commands.keys()]);

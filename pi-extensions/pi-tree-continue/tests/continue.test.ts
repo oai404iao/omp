@@ -87,7 +87,7 @@ async function harness(): Promise<Harness> {
 		agentDir,
 		settingsManager,
 		noExtensions: true,
-		additionalExtensionPaths: [join(resolve(import.meta.dirname, ".."), "src", "index.ts")],
+		additionalExtensionPaths: [join(resolve(import.meta.dirname, ".."), "index.ts")],
 		noSkills: true,
 		noPromptTemplates: true,
 		noThemes: true,
