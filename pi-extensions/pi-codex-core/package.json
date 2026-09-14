@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-core",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0",
   "private": false,
   "description": "Unpublished pi-codex-core workspace for the staged Codex split",
   "type": "module",
@@ -49,7 +49,7 @@
     "socks-proxy-agent": "^10.1.0",
     "undici": "^8.10.0",
     "ws": "^8.21.1",
-    "@oai404iao/pi-codex-runtime": "0.1.0-alpha.1"
+    "@oai404iao/pi-codex-runtime": "0.1.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.85.1",

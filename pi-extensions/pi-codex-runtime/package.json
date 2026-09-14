@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-runtime",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0",
   "private": false,
   "description": "Unpublished pi-codex-runtime workspace for the staged Codex split",
   "type": "module",
