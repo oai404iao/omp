@@ -1,5 +1,22 @@
 # @oai404iao/pi-codex-core
 
+## 0.2.0
+
+### Minor Changes
+
+- 99f497f: Add the global `webSocketEnabled` setting. It defaults to `true`; setting it to
+  `false` forces Responses SSE and disables WebSocket prewarm across model
+  profiles without changing their catalog values.
+  
+  Remove deprecated per-model compatibility keys from `config.schema.json`.
+  Their one-version runtime migration remains available, but new configuration
+  and editor completion now expose only supported global settings.
+
+### Patch Changes
+
+- Updated dependencies [99f497f]
+  - @oai404iao/pi-codex-runtime@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

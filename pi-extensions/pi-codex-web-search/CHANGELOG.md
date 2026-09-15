@@ -1,5 +1,13 @@
 # @oai404iao/pi-codex-web-search
 
+## 0.1.1
+
+### Patch Changes
+
+- 99f497f: Update exact workspace dependency pins for the pending dependency releases.
+- Updated dependencies [99f497f]
+  - @oai404iao/pi-codex-runtime@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
