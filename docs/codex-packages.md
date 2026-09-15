@@ -57,6 +57,9 @@ standalone and direct-fallback execution without changing Responses mode,
 transport, compaction, patch, web-search, image input or historical replay.
 Per-model `tools.imageGeneration:false` remains an independent profile override.
 
+Global `config.json.webSocketEnabled:false` forces Responses SSE and disables
+WebSocket prewarm across model profiles without rewriting their catalog values.
+
 Standalone clients obtain authentication from Pi's model registry. Without core:
 
 - Catalog-supported `standalone` web/image profiles execute directly.

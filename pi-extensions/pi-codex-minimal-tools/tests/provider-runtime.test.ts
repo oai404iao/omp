@@ -55,6 +55,40 @@ for (const transport of ["sse", "websocket"] as const) {
 	});
 }
 
+test("global WebSocket gate forces SSE over a session transport override", async () => {
+	await withCodexSettings({ webSocketEnabled: false }, async cwd => {
+		const server = await startWebSocketServer([() => events]);
+		let requestCount = 0;
+		try {
+			globalThis.fetch = async () => {
+				requestCount++;
+				return sseResponse();
+			};
+			const harness = createProviderHarness({
+				register: registerResponsesProviderRuntime,
+				cwd,
+			});
+			const output = await harness.providers.openai.streamSimple(
+				{ ...responsesModel, baseUrl: server.url },
+				{
+					messages: [{ role: "user", content: "fixture", timestamp: 0 }],
+					tools: [],
+				},
+				{
+					apiKey: "test-key",
+					transport: "websocket",
+					sessionId: "lifecycle-test",
+				},
+			).result();
+			assert.equal(output.stopReason, "stop");
+			assert.equal(requestCount, 1);
+		} finally {
+			closeProviderWebSocketSessions();
+			await server.close();
+		}
+	});
+});
+
 test("legacy registration captures display ownership before network I/O, not when the response arrives", async () => {
 	await withCodexSettings({ openaiTransport: "sse", openaiWebSocketPrewarm: false }, async cwd => {
 		const response = deferred<Response>();

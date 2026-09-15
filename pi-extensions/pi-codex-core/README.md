@@ -16,8 +16,10 @@ old web/image items does not enable their endpoints.
 
 Uses the existing
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json` configuration
-and Pi authentication. Add matching web/image capability packages when needed;
-the broker deduplicates cooperating installations. Mixed runtime versions fail.
+and Pi authentication. Set global `config.json.webSocketEnabled` to `false` to
+force SSE and disable WebSocket prewarm across profiles. Add matching web/image
+capability packages when needed; the broker deduplicates cooperating
+installations. Mixed runtime versions fail.
 
 `./internal/*` is implementation wiring, not a stable public API.
 See [the package guide](../../docs/codex-packages.md). From repository root:

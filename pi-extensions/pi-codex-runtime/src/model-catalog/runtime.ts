@@ -96,8 +96,12 @@ export function loadModelSettings(
 		...baseSettings,
 		providerShimActive,
 		nativeProviderTools: providerShimActive && usesProviderToolRewrite,
-		openaiTransport: effective.responses.transport,
-		openaiWebSocketPrewarm: effective.responses.websocketPrewarm,
+		openaiTransport: baseSettings.webSocketEnabled
+			? effective.responses.transport
+			: "sse",
+		openaiWebSocketPrewarm:
+			baseSettings.webSocketEnabled
+			&& effective.responses.websocketPrewarm,
 		compactionMode: providerShimActive ? effective.compaction : "pi",
 		requestProfile,
 		apiKeyMode: endpointUsesApiKey(effective.responses.endpoint, model),
