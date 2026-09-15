@@ -151,11 +151,14 @@ export function createCodexStream<TApi extends Api>(
 			const bodyJson = JSON.stringify(withSseRequestMetadata(body, websocketRequestMetadata));
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
 			const configuredTransport: ProviderTransport = settings.openaiTransport;
-			// Pi exposes a session transport setting through stream options. Treat
-			// explicit non-auto values as overrides; otherwise use the model profile.
-			const transport: ProviderTransport = options?.transport && options.transport !== "auto"
-				? options.transport
-				: configuredTransport;
+			// Pi exposes a session transport setting through stream options. When
+			// the global gate permits WebSocket, explicit non-auto values override
+			// the model profile.
+			const transport: ProviderTransport = !settings.webSocketEnabled
+				? "sse"
+				: options?.transport && options.transport !== "auto"
+					? options.transport
+					: configuredTransport;
 
 			const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport });
 			const fallbackKey = webSocketFallbackKey(

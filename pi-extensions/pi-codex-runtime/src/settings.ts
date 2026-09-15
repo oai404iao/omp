@@ -6,50 +6,59 @@ import type { CodexRequestProfileOverride } from "./codex-request-profile.js";
 export const PACKAGE_NAME = "pi-codex-minimal-tools";
 export const CONFIG_FILE_NAME = "config.json";
 
-export interface CodexMinimalToolsSettings {
+export interface CodexGlobalSettings {
 	enabled: boolean;
 	glyphStyle: "unicode" | "ascii";
 	autoEnable: boolean;
-	nativeProviderTools: boolean;
-	openaiTransport: "sse" | "websocket" | "websocket-cached" | "auto";
-	openaiWebSocketPrewarm: boolean;
+	webSocketEnabled: boolean;
 	fastMode: boolean;
-	compactionMode: "pi" | "responses" | "responses-compact";
-	requestProfile: CodexRequestProfileOverride;
-	apiKeyMode: boolean;
 	imageGeneration: boolean;
-	webSearchEnabled: boolean;
 	imageOutputDir: string;
 	imageModel: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1";
 	directImageApiFallback: boolean;
-	viewImage: boolean;
 	viewImageWorkspaceOnly: boolean;
-	applyPatchEnabled: boolean;
-	additionalModelIds: string[];
 	deferApplyPatchRendering: boolean;
 }
 
-export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
+export interface CodexMinimalToolsSettings extends CodexGlobalSettings {
+	nativeProviderTools: boolean;
+	openaiTransport: "sse" | "websocket" | "websocket-cached" | "auto";
+	openaiWebSocketPrewarm: boolean;
+	compactionMode: "pi" | "responses" | "responses-compact";
+	requestProfile: CodexRequestProfileOverride;
+	apiKeyMode: boolean;
+	webSearchEnabled: boolean;
+	viewImage: boolean;
+	applyPatchEnabled: boolean;
+	additionalModelIds: string[];
+}
+
+export const DEFAULT_GLOBAL_SETTINGS: Readonly<CodexGlobalSettings> = {
 	enabled: true,
 	glyphStyle: "unicode",
 	autoEnable: true,
-	nativeProviderTools: true,
-	openaiTransport: "sse",
-	openaiWebSocketPrewarm: true,
+	webSocketEnabled: true,
 	fastMode: false,
-	compactionMode: "pi",
-	requestProfile: {},
-	apiKeyMode: false,
 	imageGeneration: true,
-	webSearchEnabled: false,
 	imageOutputDir: ".pi/openai-codex-images",
 	imageModel: "gpt-image-2",
 	directImageApiFallback: false,
-	viewImage: false,
 	viewImageWorkspaceOnly: false,
+	deferApplyPatchRendering: false,
+};
+
+export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
+	...DEFAULT_GLOBAL_SETTINGS,
+	nativeProviderTools: true,
+	openaiTransport: "sse",
+	openaiWebSocketPrewarm: true,
+	compactionMode: "pi",
+	requestProfile: {},
+	apiKeyMode: false,
+	webSearchEnabled: false,
+	viewImage: false,
 	applyPatchEnabled: true,
 	additionalModelIds: [],
-	deferApplyPatchRendering: false,
 };
 
 type SettingsRecord = Record<string, unknown>;
@@ -188,6 +197,7 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		enabled: boolSetting(raw, "enabled"),
 		glyphStyle: glyphStyleSetting(raw),
 		autoEnable: boolSetting(raw, "autoEnable"),
+		webSocketEnabled: boolSetting(raw, "webSocketEnabled"),
 		nativeProviderTools: boolSetting(raw, "nativeProviderTools"),
 		openaiTransport: openaiTransportSetting(raw),
 		openaiWebSocketPrewarm: boolSetting(raw, "openaiWebSocketPrewarm"),

@@ -122,19 +122,24 @@ test("ready prewarm remains one-shot and lifecycle instances do not share task o
 	});
 });
 
-test("SSE sessions do not request auth or start speculative network work", async () => {
-	await withCodexSettings({ openaiTransport: "sse", openaiWebSocketPrewarm: true }, async () => {
-		const lifecycle = createStartupPrewarmLifecycle(pi);
-		const ctx = eventContext();
-		let authCalls = 0;
-		ctx.modelRegistry.getApiKeyAndHeaders = async () => { authCalls++; throw new Error("unexpected auth lookup"); };
-		lifecycle.reset();
-		try {
-			lifecycle.start(ctx);
-			await lifecycle.get("lifecycle-test", responsesModel);
-			assert.equal(authCalls, 0, "SSE must not prewarm");
-		} finally {
+for (const [name, settings] of [
+	["SSE sessions", { openaiTransport: "sse", openaiWebSocketPrewarm: true }],
+	["globally disabled WebSocket sessions", { webSocketEnabled: false }],
+] as const) {
+	test(`${name} do not request auth or start speculative network work`, async () => {
+		await withCodexSettings(settings, async () => {
+			const lifecycle = createStartupPrewarmLifecycle(pi);
+			const ctx = eventContext();
+			let authCalls = 0;
+			ctx.modelRegistry.getApiKeyAndHeaders = async () => { authCalls++; throw new Error("unexpected auth lookup"); };
 			lifecycle.reset();
-		}
+			try {
+				lifecycle.start(ctx);
+				await lifecycle.get("lifecycle-test", responsesModel);
+				assert.equal(authCalls, 0, "SSE must not prewarm");
+			} finally {
+				lifecycle.reset();
+			}
+		});
 	});
-});
+}

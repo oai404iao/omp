@@ -165,13 +165,19 @@ The request includes:
 - the model truncation budget (10,000 tokens for the bundled 5.6 standalone
   profiles), independent of `response_length`.
 
-## Image implementations
+## Package-wide gates
 
 Global `config.json.imageGeneration:false` gates all image-generation
 implementations after profile resolution. It is not a legacy model-profile
 patch and therefore cannot reset Responses mode, transport, compaction, patch,
 web-search or Fast behavior. Per-model `tools.imageGeneration:false` remains
 the profile-level control.
+
+Global `config.json.webSocketEnabled:false` is applied at the same final gate
+stage. It forces the derived runtime transport to SSE and disables prewarm
+while preserving the profile's configured transport and prewarm values.
+
+## Image implementations
 
 Hosted image generation is the Responses `image_generation` tool.
 

@@ -112,6 +112,7 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
   "enabled": true,
   "glyphStyle": "unicode",
   "autoEnable": true,
+  "webSocketEnabled": true,
   "fastMode": false,
   "imageGeneration": true,
   "imageOutputDir": ".pi/openai-codex-images",
@@ -127,6 +128,7 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `enabled` | Enable all package behavior. |
 | `glyphStyle` | Use `unicode` or `ascii` UI glyphs. |
 | `autoEnable` | Add supported package tools automatically. |
+| `webSocketEnabled` | Global Responses WebSocket master switch. Set `false` to force SSE and disable WebSocket prewarm for every model profile. |
 | `fastMode` | Global user toggle; only profiles with `fast` are affected. |
 | `imageGeneration` | Global master switch. Set `false` to omit image tools, `/image-gen`, presentation, hosted injection, standalone requests, and direct fallback without changing other model behavior. |
 | `imageOutputDir` | Generated-image output directory. Relative paths resolve from the workspace root. |
@@ -136,8 +138,9 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `deferApplyPatchRendering` | Use Pi's fallback renderer instead of the streaming patch preview. |
 
 The older model-level keys remain readable for one migration version, but are
-deprecated. `imageGeneration` is the exception: it remains the supported global
-master switch. See [Legacy migration](#legacy-migration).
+deprecated and no longer appear in `config.schema.json`. `imageGeneration` is
+the exception: it remains the supported global master switch. See
+[Legacy migration](#legacy-migration).
 
 ### Per-Model Catalog
 
@@ -372,6 +375,11 @@ returned to the model before the saved-path text. `/image-gen` selects any
 loaded image-capable model with an enabled catalog profile.
 
 ## WebSocket And Compaction
+
+Global `config.json.webSocketEnabled:false` forces `sse` and disables
+WebSocket prewarm without changing the selected per-model profile. When it is
+`true` (the default), each profile's `responses.transport` and
+`responses.websocketPrewarm` values apply.
 
 `transport` values:
 

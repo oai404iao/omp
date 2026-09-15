@@ -15,7 +15,9 @@ Configuration paths remain
 This package ships the canonical schemas and default catalog, including the
 `openai-codex/gpt-6-astra` Responses Lite profile. The global
 `config.json.imageGeneration:false` setting gates image capability derivation
-without replacing the selected model profile.
+without replacing the selected model profile. Likewise,
+`config.json.webSocketEnabled:false` forces SSE and disables WebSocket prewarm
+without changing that profile.
 `./subagent-inline` supplies the existing SDK identity integration.
 `./internal/*` is implementation wiring, not a stable public API.
 

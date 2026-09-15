@@ -118,6 +118,26 @@ test("global image gate preserves the selected model protocol profile", () => wi
 	assert.equal(settings.webSearchImplementation, "standalone");
 }));
 
+test("global WebSocket gate preserves the model profile while forcing SSE", () => withAgentDir(() => {
+	const settings = loadModelSettings(
+		{
+			provider: "openai-codex",
+			id: "gpt-6-astra",
+			api: "openai-codex-responses",
+		},
+		undefined,
+		{ ...DEFAULT_SETTINGS, webSocketEnabled: false },
+	);
+	assert.equal(settings.modelProfile?.effective.responses.transport, "auto");
+	assert.equal(settings.modelProfile?.effective.responses.websocketPrewarm, true);
+	assert.equal(settings.webSocketEnabled, false);
+	assert.equal(settings.openaiTransport, "sse");
+	assert.equal(settings.openaiWebSocketPrewarm, false);
+	assert.equal(settings.providerShimActive, true);
+	assert.equal(settings.requestProfile.responsesMode, "lite");
+	assert.equal(settings.compactionMode, "responses");
+}));
+
 test("user entries deep-override bundled profiles by exact provider/model id", () => withAgentDir((agentDir) => {
 	writeModels(agentDir, {
 		version: 1,

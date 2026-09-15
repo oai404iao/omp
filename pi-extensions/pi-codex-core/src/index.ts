@@ -117,6 +117,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`autoEnable: ${settings.autoEnable}`,
 		`provider shim: ${modelSettings.providerShimActive ? "active" : "inactive"}`,
 		`responses endpoint: ${modelSettings.apiKeyMode ? "openai" : "codex"}`,
+		`Responses WebSocket enabled: ${settings.webSocketEnabled}`,
 		`responses transport: ${modelSettings.openaiTransport}`,
 		`Responses WebSocket prewarm: ${modelSettings.openaiWebSocketPrewarm}`,
 		`fast mode: ${settings.fastMode ? modelSettings.fastServiceTier ?? "on (unsupported)" : "off"}${fastModeTier ? ", active" : ""}`,
