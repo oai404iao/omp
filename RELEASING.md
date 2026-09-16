@@ -262,7 +262,8 @@ Official references:
    `npm-publish` environment deployment.
 6. The read-only job reruns checks and packs immutable release artifacts.
 7. The protected OIDC job validates repository/license metadata, publishes the
-   exact tarballs, atomically pushes package tags, and creates package-specific
+   exact tarballs, waits for each package's exact npm metadata and dist-tag to
+   become visible, atomically pushes package tags, and creates package-specific
    GitHub Releases from their changelogs.
 
 Tags use Changesets' package-level format:
@@ -279,13 +280,22 @@ clean-install smoke tests pass.
 ## Recovery
 
 - Never overwrite an npm version.
+- After a successful `npm publish`, only the read-side registry checks are
+  retried. Exact-version metadata and dist-tags use cache-revalidating
+  `--prefer-online` lookups with capped exponential backoff for up to three
+  minutes per newly published package. The workflow never blindly retries the
+  irreversible publish command.
+  The timeout, initial delay, and maximum delay are controlled by
+  `NPM_REGISTRY_PROPAGATION_TIMEOUT_MS`,
+  `NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS`, and
+  `NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS`.
 - A release-lock entry is evidence that a version was already published.
   If its metadata lookup returns E404, preparation stops as pending verification
   without packing or publishing that version. Do not remove the lock to proceed.
 - If npm succeeds only for part of a release, the workflow reconciles each
   published package's npm `gitHead` but creates no new tags or GitHub Releases.
-  A clean rerun recovers missing tags/Releases and publishes only versions
-  still absent from npm.
+  If registry visibility still exceeds the bounded wait, a clean rerun recovers
+  missing tags/Releases and publishes only versions still absent from npm.
 - Recovery also verifies `latest` for stable versions and `next` for
   prereleases. Dist-tag mistakes fail with an interactive repair instruction;
   the OIDC workflow does not silently rewrite package tags.

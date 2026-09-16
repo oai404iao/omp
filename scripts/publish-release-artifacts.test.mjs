@@ -87,12 +87,27 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.CALL_LOG, "npm " + args.join(" ") + "\\n");
+function isDelayed(kind, target, attempts) {
+  if (!target || args[1] !== target || !attempts) return false;
+  let state = {};
+  try {
+    state = JSON.parse(fs.readFileSync(process.env.FAKE_REGISTRY_STATE, "utf8"));
+  } catch {}
+  state[kind] = (state[kind] ?? 0) + 1;
+  fs.writeFileSync(process.env.FAKE_REGISTRY_STATE, JSON.stringify(state));
+  return state[kind] <= Number(attempts);
+}
 if (args[0] === "publish") process.exit(args[1] === process.env.FAIL_PUBLISH_PATH ? 1 : 0);
 if (args[0] !== "view") process.exit(1);
 if (args[2] === "version") {
+  if (isDelayed("version", process.env.DELAY_VERSION_SPEC, process.env.DELAY_VERSION_ATTEMPTS)) {
+    console.error("npm error code E404\\nnpm error 404 Not Found");
+    process.exit(1);
+  }
   console.log(JSON.stringify(JSON.parse(process.env.FAKE_PACKAGES)[args[1]]));
 } else if (args[2] === "dist-tags") {
-  console.log(JSON.stringify(JSON.parse(process.env.FAKE_DIST_TAGS)[args[1]]
+  const delayed = isDelayed("distTag", process.env.DELAY_DIST_TAG_FOR, process.env.DELAY_DIST_TAG_ATTEMPTS);
+  console.log(JSON.stringify(delayed ? { latest: "0.9.0" } : JSON.parse(process.env.FAKE_DIST_TAGS)[args[1]]
     ?? { latest: args[1] === process.env.WRONG_DIST_TAG_FOR ? "0.9.0" : "1.0.0" }));
 } else if (args[2] === "versions") {
   const value = JSON.parse(process.env.FAKE_VERSIONS)[args[1]];
@@ -123,9 +138,17 @@ if (args[2] === "version") {
         FAKE_COMMIT: commit,
         GITHUB_SHA: commit,
         WRONG_DIST_TAG_FOR: wrongDistTagFor ?? "",
+        FAKE_REGISTRY_STATE: join(temporaryDirectory, "registry-state.json"),
+        DELAY_VERSION_SPEC: options.delayVersionSpec ?? "",
+        DELAY_VERSION_ATTEMPTS: String(options.delayVersionAttempts ?? 0),
+        DELAY_DIST_TAG_FOR: options.delayDistTagFor ?? "",
+        DELAY_DIST_TAG_ATTEMPTS: String(options.delayDistTagAttempts ?? 0),
         FAKE_PACKAGES: JSON.stringify(registryPackages),
         FAKE_DIST_TAGS: JSON.stringify(options.distTags ?? {}),
         FAKE_VERSIONS: JSON.stringify(options.versions ?? {}),
+        NPM_REGISTRY_PROPAGATION_TIMEOUT_MS: String(options.propagationTimeoutMs ?? 1_000),
+        NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS: String(options.propagationInitialDelayMs ?? 1),
+        NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS: String(options.propagationMaxDelayMs ?? 2),
         FAIL_PUBLISH_PATH: options.failPublishFor
           ? join(temporaryDirectory, `${options.failPublishFor.split("/").at(-1)}.tgz`) : "",
       },
@@ -240,6 +263,60 @@ test("publisher reorders a shuffled batch and verifies dependency visibility bef
   assert.match(publish[0], /runtime\.tgz/);
   assert.match(publish[1], /bundle\.tgz/);
   assert.ok(calls.indexOf(`npm view ${runtime}@1.0.0`) < calls.indexOf(publish[1]));
+});
+
+test("publisher waits for fresh exact-version metadata without republishing", () => {
+  const runtime = "@oai404iao/runtime", bundle = "@oai404iao/bundle";
+  const values = [bundle, runtime].map(name => ({ ...candidate(name), mode: "publish" }));
+  const { process, result, calls } = runPublisher(values, undefined, {
+    dependencies: { [bundle]: { [runtime]: "1.0.0" } },
+    delayVersionSpec: `${runtime}@1.0.0`,
+    delayVersionAttempts: 3,
+  });
+  assert.equal(process.status, 0, process.stderr);
+  assert.equal(result.ok, true);
+  const lines = calls.trim().split("\n");
+  const runtimePublishes = lines.filter(line => /^npm publish .*runtime\.tgz/.test(line));
+  const bundlePublishIndex = lines.findIndex(line => /^npm publish .*bundle\.tgz/.test(line));
+  const runtimeLookupsBeforeBundle = lines.slice(0, bundlePublishIndex)
+    .filter(line => line.startsWith(`npm view ${runtime}@1.0.0 version`));
+  assert.equal(runtimePublishes.length, 1);
+  assert.ok(runtimeLookupsBeforeBundle.length >= 4);
+  assert.match(runtimeLookupsBeforeBundle[0], /--prefer-online --prefer-offline=false --offline=false/);
+});
+
+test("publisher waits for dist-tag propagation before publishing dependents", () => {
+  const runtime = "@oai404iao/runtime", bundle = "@oai404iao/bundle";
+  const values = [bundle, runtime].map(name => ({ ...candidate(name), mode: "publish" }));
+  const { process, result, calls } = runPublisher(values, undefined, {
+    dependencies: { [bundle]: { [runtime]: "1.0.0" } },
+    delayDistTagFor: runtime,
+    delayDistTagAttempts: 3,
+  });
+  assert.equal(process.status, 0, process.stderr);
+  assert.equal(result.ok, true);
+  const lines = calls.trim().split("\n");
+  const bundlePublishIndex = lines.findIndex(line => /^npm publish .*bundle\.tgz/.test(line));
+  const tagLookupsBeforeBundle = lines.slice(0, bundlePublishIndex)
+    .filter(line => line.startsWith(`npm view ${runtime} dist-tags`));
+  assert.ok(tagLookupsBeforeBundle.length >= 4);
+});
+
+test("propagation timeout remains fail-closed and never retries npm publish", () => {
+  const runtime = "@oai404iao/runtime", bundle = "@oai404iao/bundle";
+  const values = [bundle, runtime].map(name => ({ ...candidate(name), mode: "publish" }));
+  const { process, result, calls } = runPublisher(values, undefined, {
+    dependencies: { [bundle]: { [runtime]: "1.0.0" } },
+    delayVersionSpec: `${runtime}@1.0.0`,
+    delayVersionAttempts: 100,
+    propagationTimeoutMs: 1,
+  });
+  assert.equal(process.status, 0, process.stderr);
+  assert.equal(result.ok, false);
+  assert.match(result.publishWarnings[0].message, /npm registry did not converge/);
+  assert.equal(calls.split("\n").filter(line => /^npm publish .*runtime\.tgz/.test(line)).length, 1);
+  assert.doesNotMatch(calls, /^npm publish .*bundle\.tgz/m);
+  assert.doesNotMatch(calls, /^git tag /m);
 });
 
 for (const failure of ["failPublishFor", "wrongIntegrityFor"]) {

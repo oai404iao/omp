@@ -26,17 +26,37 @@ const resultPath = resolve(root, resultArgument);
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const commit = currentCommit();
 
+function positiveMilliseconds(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+const propagationTimeoutMs = positiveMilliseconds("NPM_REGISTRY_PROPAGATION_TIMEOUT_MS", 180_000);
+const propagationInitialDelayMs = positiveMilliseconds("NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS", 2_000);
+const propagationMaxDelayMs = positiveMilliseconds("NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS", 15_000);
+if (propagationInitialDelayMs > propagationMaxDelayMs) {
+  throw new Error("NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS must not exceed NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS");
+}
+
 function wait(milliseconds) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
-function lookupWithPropagationRetry(name, version) {
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
-    const published = lookupPublishedVersion(name, version);
-    if (published.exists || attempt === 6) return published;
-    wait(2_000);
+class RegistryPropagationPending extends Error {}
+
+function lookupCandidateVersion(candidate) {
+  try {
+    return lookupPublishedVersion(candidate.name, candidate.version);
+  } catch (error) {
+    throw new RegistryPropagationPending(
+      `npm metadata lookup failed for ${candidate.name}@${candidate.version}: ${String(error.message ?? error)}`,
+    );
   }
-  return { exists: false };
 }
 
 if (manifest.schemaVersion !== 1 || manifest.commit !== commit) {
@@ -59,10 +79,20 @@ for (const candidate of candidates) {
 }
 
 function verifyCandidateTags(candidate) {
+  const pending = [];
   const unresolved = [];
-  const distTags = lookupDistTags(candidate.name);
+  let distTags;
+  try {
+    distTags = lookupDistTags(candidate.name);
+  } catch (error) {
+    throw new RegistryPropagationPending(
+      `npm dist-tag lookup failed for ${candidate.name}: ${String(error.message ?? error)}`,
+    );
+  }
   if (distTags[candidate.distTag] !== candidate.version) {
-    unresolved.push(`${candidate.name}@${candidate.version} is not assigned to npm dist-tag ${candidate.distTag}; fix it interactively`);
+    pending.push(
+      `${candidate.name}@${candidate.version} is not assigned to npm dist-tag ${candidate.distTag}`,
+    );
   }
   if (candidate.prerelease && distTags.latest === candidate.version) {
     let initialAlias = false;
@@ -81,7 +111,61 @@ function verifyCandidateTags(candidate) {
       console.log(`ℹ accepted locked first-bootstrap latest/next alias for ${candidate.name}@${candidate.version}`);
     }
   }
-  return unresolved;
+  return { pending, unresolved };
+}
+
+function verifyCandidateRegistryState(candidate) {
+  const published = lookupCandidateVersion(candidate);
+  if (!published.exists) {
+    throw new RegistryPropagationPending(
+      `Dependency release is not registry-visible with the expected identity: ${candidate.name}`,
+    );
+  }
+  if (published.gitHead !== candidate.sourceCommit) {
+    throw new Error(`Dependency release is not registry-visible with the expected identity: ${candidate.name}`);
+  }
+  assertLockedPublishedArtifact(candidate.name, candidate.version, published);
+  if (published.integrity !== candidate.integrity) {
+    throw new Error(`Published integrity mismatch: ${candidate.name}`);
+  }
+  const tagErrors = verifyCandidateTags(candidate);
+  if (tagErrors.unresolved.length > 0) throw new Error(tagErrors.unresolved.join("; "));
+  if (tagErrors.pending.length > 0) throw new RegistryPropagationPending(tagErrors.pending.join("; "));
+}
+
+function verifyNewlyPublishedCandidate(candidate) {
+  const startedAt = Date.now();
+  let attempt = 1;
+  let delayMs = propagationInitialDelayMs;
+  for (;;) {
+    try {
+      verifyCandidateRegistryState(candidate);
+      if (attempt > 1) {
+        console.log(
+          `✓ npm registry converged for ${candidate.name}@${candidate.version} after ${attempt} attempts`,
+        );
+      }
+      return;
+    } catch (error) {
+      if (!(error instanceof RegistryPropagationPending)) throw error;
+      const elapsedMs = Date.now() - startedAt;
+      const remainingMs = propagationTimeoutMs - elapsedMs;
+      if (remainingMs <= 0) {
+        throw new Error(
+          `npm registry did not converge for ${candidate.name}@${candidate.version} within `
+          + `${propagationTimeoutMs}ms: ${error.message}`,
+        );
+      }
+      const nextDelayMs = Math.min(delayMs, remainingMs);
+      console.log(
+        `… waiting for npm registry propagation of ${candidate.name}@${candidate.version} `
+        + `(attempt ${attempt}, retry in ${nextDelayMs}ms): ${error.message}`,
+      );
+      wait(nextDelayMs);
+      delayMs = Math.min(delayMs * 2, propagationMaxDelayMs);
+      attempt += 1;
+    }
+  }
 }
 
 const publishWarnings = publishOrderedBatch(candidates, {
@@ -108,16 +192,8 @@ const publishWarnings = publishOrderedBatch(candidates, {
     }
   },
   verify(candidate) {
-    const published = lookupWithPropagationRetry(candidate.name, candidate.version);
-    if (!published.exists || published.gitHead !== candidate.sourceCommit) {
-      throw new Error(`Dependency release is not registry-visible with the expected identity: ${candidate.name}`);
-    }
-    assertLockedPublishedArtifact(candidate.name, candidate.version, published);
-    if (published.integrity !== candidate.integrity) {
-      throw new Error(`Published integrity mismatch: ${candidate.name}`);
-    }
-    const tagErrors = verifyCandidateTags(candidate);
-    if (tagErrors.length > 0) throw new Error(tagErrors.join("; "));
+    if (candidate.mode === "publish") verifyNewlyPublishedCandidate(candidate);
+    else verifyCandidateRegistryState(candidate);
   },
 });
 
@@ -126,7 +202,7 @@ const tagsToCreate = [];
 const unresolved = [];
 for (const candidate of candidates) {
   const candidateUnresolved = [];
-  const published = lookupWithPropagationRetry(candidate.name, candidate.version);
+  const published = lookupPublishedVersion(candidate.name, candidate.version);
   if (!published.exists) {
     candidateUnresolved.push(`${candidate.name}@${candidate.version} is not published`);
     unresolved.push(...candidateUnresolved);
@@ -145,7 +221,11 @@ for (const candidate of candidates) {
     continue;
   }
 
-  candidateUnresolved.push(...verifyCandidateTags(candidate));
+  const tagErrors = verifyCandidateTags(candidate);
+  candidateUnresolved.push(
+    ...tagErrors.pending.map(message => `${message}; fix it interactively`),
+    ...tagErrors.unresolved,
+  );
 
   const tagCommit = existingTagCommit(candidate.tag);
   if (tagCommit && tagCommit !== candidate.sourceCommit) {
@@ -191,7 +271,7 @@ writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
 for (const release of releases) console.log(`✓ reconciled ${release.tag}`);
 for (const message of unresolved) console.error(`✗ ${message}`);
 for (const warning of publishWarnings) {
-  console.error(`! release step did not verify for ${warning.name}; registry state was reconciled afterward`);
+  console.error(`! release step did not verify for ${warning.name}: ${warning.message}`);
 }
 if (!ok) {
   console.error("! npm release finalization is deferred until a clean recovery run; no new tags were created");

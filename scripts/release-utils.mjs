@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { registry, root } from "./workspaces.mjs";
 
 export const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const onlineRegistryOptions = ["--prefer-online", "--prefer-offline=false", "--offline=false"];
 const publishedArtifactLock = JSON.parse(
   readFileSync(resolve(root, "release-locks/npm-published-artifacts.json"), "utf8"),
 );
@@ -33,7 +34,17 @@ export function tagFor(name, version) {
 export function lookupPublishedVersion(name, version) {
   const result = spawnSync(
     npm,
-    ["view", `${name}@${version}`, "version", "gitHead", "dist.integrity", "--json", "--registry", registry],
+    [
+      "view",
+      `${name}@${version}`,
+      "version",
+      "gitHead",
+      "dist.integrity",
+      "--json",
+      ...onlineRegistryOptions,
+      "--registry",
+      registry,
+    ],
     {
       cwd: root,
       encoding: "utf8",
@@ -97,7 +108,7 @@ export function assertLockedPublishedArtifact(name, version, published) {
 export function lookupDistTags(name) {
   const result = spawnSync(
     npm,
-    ["view", name, "dist-tags", "--json", "--registry", registry],
+    ["view", name, "dist-tags", "--json", ...onlineRegistryOptions, "--registry", registry],
     {
       cwd: root,
       encoding: "utf8",
@@ -115,9 +126,11 @@ export function lookupDistTags(name) {
 }
 
 export function lookupPublishedVersions(name) {
-  const result = spawnSync(npm, ["view", name, "versions", "--json", "--prefer-online", "--registry", registry], {
-    cwd: root, encoding: "utf8", env: { ...process.env, npm_config_loglevel: "error" },
-  });
+  const result = spawnSync(
+    npm,
+    ["view", name, "versions", "--json", ...onlineRegistryOptions, "--registry", registry],
+    { cwd: root, encoding: "utf8", env: { ...process.env, npm_config_loglevel: "error" } },
+  );
   if (result.status !== 0) throw new Error(`npm version-history lookup failed for ${name}`);
   const value = JSON.parse(result.stdout);
   const versions = typeof value === "string" ? [value] : value;
