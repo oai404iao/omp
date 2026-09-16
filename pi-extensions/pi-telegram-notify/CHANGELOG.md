@@ -1,5 +1,11 @@
 # @oai404iao/pi-telegram-notify
 
+## 0.2.1
+
+### Patch Changes
+
+- ca0bc80: Suppress Telegram notifications in subagent sessions. Send safely escaped MarkdownV2 notifications with multiline summaries up to 3000 UTF-16 units and boundary-aware truncation.
+
 ## 0.2.0
 
 ### Minor Changes
