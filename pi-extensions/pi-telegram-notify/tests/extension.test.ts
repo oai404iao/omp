@@ -31,14 +31,16 @@ class FakeEventBus {
 
 function fakePi() {
 	const handlers: Record<string, ExtensionHandler[]> = {};
+	const commands: Record<string, { handler: (args: string, ctx: any) => Promise<void> }> = {};
 	const events = new FakeEventBus();
 	return {
 		events,
 		handlers,
+		commands,
 		on(event: string, handler: ExtensionHandler) {
 			(handlers[event] ??= []).push(handler);
 		},
-		registerCommand() {},
+		registerCommand(name: string, command: typeof commands[string]) { commands[name] = command; },
 	};
 }
 
@@ -61,15 +63,13 @@ function assistantEntry(id: string, stopReason: string, text: string, parentId: 
 	};
 }
 
-function context(getBranch: () => unknown[], cwd = "/private/work/project") {
+function context(getBranch: () => unknown[], cwd = "/private/work/project", getEntries = getBranch) {
 	return {
 		cwd,
 		hasUI: true,
 		sessionManager: {
 			getBranch,
-			getEntries(): never {
-				throw new Error("the extension must not inspect all session entries");
-			},
+			getEntries,
 		},
 	};
 }
@@ -117,6 +117,81 @@ function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function childDescriptor(provider = "spawn") {
+	return {
+		type: "custom",
+		customType: "pi-subagent/descriptor",
+		id: "descriptor",
+		parentId: null,
+		timestamp: "2026-01-01T00:00:00.000Z",
+		data: { provider },
+	};
+}
+
+test("spawn and fork children never send completion, error, waiting, or test notifications", () => withHarness(async ({ pi, requests }) => {
+	for (const provider of ["spawn", "fork"]) {
+		const branch: unknown[] = [childDescriptor(provider)];
+		const ctx = { ...context(() => branch), ui: { notify() {} } };
+		await emit(pi, "session_start", ctx, { reason: "startup" });
+		await emit(pi, "before_agent_start", ctx, { prompt: "child task" });
+		for (const stopReason of ["stop", "length", "error"]) {
+			branch.push(assistantEntry(stopReason, stopReason, "child result"));
+			await emit(pi, "agent_settled", ctx);
+		}
+		await emit(pi, "tool_call", ctx, {
+			toolName: "ask_user_question", toolCallId: "child-question",
+			input: { question: "child question" },
+		});
+		await delay(150);
+		pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "child question" }] });
+		await pi.commands["telegram-notify"]!.handler("test", ctx);
+		await pi.commands["telegram-notify:test"]!.handler("", ctx);
+		await emit(pi, "session_shutdown", ctx);
+	}
+	assert.equal(requests.length, 0);
+}));
+
+test("checks descriptors appended after startup and before delayed delivery", () => withHarness(async ({ pi, requests }) => {
+	const branch: unknown[] = [];
+	const ctx = context(() => branch);
+	await emit(pi, "session_start", ctx);
+	await emit(pi, "tool_call", ctx, {
+		toolName: "ask_user_question", toolCallId: "pending-child",
+		input: { question: "must remain silent" },
+	});
+	branch.push(childDescriptor(), assistantEntry("child-final", "stop", "silent child"));
+	await delay(150);
+	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "another child question" }] });
+	await emit(pi, "agent_settled", ctx);
+	assert.equal(requests.length, 0);
+
+	await emit(pi, "session_shutdown", ctx);
+	const parentCtx = { ...context(() => [assistantEntry("parent-final", "stop", "parent result")]), hasUI: false };
+	await emit(pi, "session_start", parentCtx);
+	await emit(pi, "agent_settled", parentCtx);
+	assert.equal(requests.length, 1, "ordinary non-UI parent sessions still notify after a child session");
+	assert.match(requests[0]!.text, /parent result/);
+}));
+
+test("child identity survives navigation before the descriptor on another branch", () => withHarness(async ({ pi, requests }) => {
+	const branch = [assistantEntry("inherited-final", "stop", "inherited result")];
+	const entries = [...branch, childDescriptor("fork")];
+	const ctx = {
+		...context(() => branch, "/work/child", () => entries),
+		ui: { notify() {} },
+	};
+	await emit(pi, "session_start", ctx);
+	await emit(pi, "agent_settled", ctx);
+	await emit(pi, "tool_call", ctx, {
+		toolName: "ask_user_question", toolCallId: "navigated-question",
+		input: { question: "still a child" },
+	});
+	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "still a child" }] });
+	await pi.commands["telegram-notify:test"]!.handler("", ctx);
+	await delay(150);
+	assert.equal(requests.length, 0);
+}));
+
 test("registers agent_settled without agent_end and deduplicates the active-branch assistant entry", () => withHarness(async ({ pi, requests }) => {
 	assert.equal(pi.handlers.agent_settled?.length, 1);
 	assert.equal(pi.handlers.agent_end, undefined);
@@ -128,7 +203,9 @@ test("registers agent_settled without agent_end and deduplicates the active-bran
 		activeAssistant,
 		{ type: "label", id: "label", parentId: activeAssistant.id, timestamp: "2026-01-01T00:00:02.000Z" },
 	];
-	const ctx = context(() => branch);
+	const ctx = context(() => branch, "/private/work/project", () => [
+		...branch, assistantEntry("off-branch", "error", "must not notify this error"),
+	]);
 
 	await emit(pi, "session_start", ctx, { reason: "startup" });
 	await emit(pi, "before_agent_start", ctx, { prompt: "implement the fix" });
@@ -136,8 +213,8 @@ test("registers agent_settled without agent_end and deduplicates the active-bran
 	await emit(pi, "agent_settled", ctx);
 
 	assert.equal(requests.length, 1);
-	assert.match(requests[0]!.text, /项目: \/private\/work\/project/);
-	assert.match(requests[0]!.text, /状态: 完成/);
+	assert.match(requests[0]!.text, /\*项目:\* `\/private\/work\/project`/);
+	assert.match(requests[0]!.text, /\*状态:\* 完成/);
 	assert.match(requests[0]!.text, /active branch result/);
 
 	await emit(pi, "session_shutdown", ctx, { reason: "reload" });
@@ -162,7 +239,7 @@ test("does not notify an intermediate retry error and settled reports only the f
 	await emit(pi, "agent_settled", ctx);
 
 	assert.equal(requests.length, 1);
-	assert.match(requests[0]!.text, /状态: 完成/);
+	assert.match(requests[0]!.text, /\*状态:\* 完成/);
 	assert.match(requests[0]!.text, /retry eventually succeeded/);
 	assert.doesNotMatch(requests[0]!.text, /temporary provider failure/);
 }));
@@ -190,10 +267,10 @@ test("concurrent ask-user aliases consume one pending per rpiv by exact match th
 	await delay(150);
 
 	assert.equal(requests.length, 2);
-	assert.match(requests[0]!.text, /状态: 等待回复/);
-	assert.match(requests[0]!.text, /项目: \/private\/work\/second-alias/);
+	assert.match(requests[0]!.text, /\*状态:\* 等待回复/);
+	assert.match(requests[0]!.text, /\*项目:\* `\/private\/work\/second-alias`/);
 	assert.match(requests[0]!.text, /second question/);
-	assert.match(requests[1]!.text, /项目: \/private\/work\/first-alias/);
+	assert.match(requests[1]!.text, /\*项目:\* `\/private\/work\/first-alias`/);
 	assert.match(requests[1]!.text, /authoritative first/);
 
 	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "authoritative without pending" }] });
@@ -221,9 +298,9 @@ test("an unmatched rpiv event consumes only the oldest concurrent pending call",
 	await delay(150);
 
 	assert.equal(requests.length, 2);
-	assert.match(requests[0]!.text, /项目: \/private\/work\/oldest/);
+	assert.match(requests[0]!.text, /\*项目:\* `\/private\/work\/oldest`/);
 	assert.match(requests[0]!.text, /unmatched authoritative/);
-	assert.match(requests[1]!.text, /项目: \/private\/work\/newer/);
+	assert.match(requests[1]!.text, /\*项目:\* `\/private\/work\/newer`/);
 	assert.match(requests[1]!.text, /newer fallback/);
 }));
 
@@ -239,7 +316,7 @@ test("late rpiv suppresses only its sent fallback and leaves another question pe
 	});
 	await delay(150);
 	assert.equal(requests.length, 1);
-	assert.match(requests[0]!.text, /项目: \/private\/work\/sent-fallback/);
+	assert.match(requests[0]!.text, /\*项目:\* `\/private\/work\/sent-fallback`/);
 	assert.match(requests[0]!.text, /fallback already sent/);
 
 	await emit(pi, "tool_call", pendingCtx, {
@@ -254,7 +331,7 @@ test("late rpiv suppresses only its sent fallback and leaves another question pe
 	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "pending authoritative" }] });
 	await delay(150);
 	assert.equal(requests.length, 2, "the other pending question must emit exactly once");
-	assert.match(requests[1]!.text, /项目: \/private\/work\/still-pending/);
+	assert.match(requests[1]!.text, /\*项目:\* `\/private\/work\/still-pending`/);
 	assert.match(requests[1]!.text, /pending authoritative/);
 }));
 

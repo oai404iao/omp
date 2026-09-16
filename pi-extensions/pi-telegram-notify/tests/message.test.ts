@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	formatNotification,
+	isSubagentSession,
 	lastAssistantMessageEntry,
 	questionSummaryFromInput,
 	questionSummaryFromPromptEvent,
@@ -9,12 +10,55 @@ import {
 	truncateSummary,
 } from "../src/message.js";
 
-test("notification contains project, Chinese status, and a 30-character summary", () => {
-	const message = formatNotification("/work/demo", "waiting", "这是一个很长的中文问题，用于确认摘要只保留最开始的三十个字符并且不会拆坏字符。");
-	assert.equal(message.split("\n")[0], "项目: /work/demo");
-	assert.equal(message.split("\n")[1], "状态: 等待回复");
-	assert.match(message.split("\n")[2]!, /^概要: /);
-	assert.equal(Array.from(truncateSummary("这是一个很长的中文问题，用于确认摘要只保留最开始的三十个字符并且不会拆坏字符。")).length, 31);
+test("notification uses MarkdownV2 labels and code paths and preserves multiline summaries", () => {
+	const summary = "这是一个很长的中文问题，用于确认摘要不再只保留最开始的三十个字符。\n\n第二段\n  缩进";
+	assert.equal(formatNotification("/work/demo", "waiting", summary),
+		`*项目:* \`/work/demo\`\n*状态:* 等待回复\n\n*概要:*\n${summary}`);
+	assert.equal(truncateSummary("  line one\r\n\r\n  line two  "), "line one\n\n  line two");
+});
+
+test("escapes all MarkdownV2 punctuation and code delimiters in dynamic content", () => {
+	const punctuation = "_*[]()~`>#+-=|{}.!\\";
+	const escaped = Array.from(punctuation, (character) => `\\${character}`).join("");
+	assert.equal(formatNotification("/work/a_`b\\c", "error", punctuation),
+		"*项目:* `/work/a_\\`b\\\\c`\n*状态:* 错误\n\n*概要:*\n" + escaped);
+	assert.match(formatNotification("", "completed", " \n "), /Pi 任务已完成$/);
+});
+
+test("summaries allow 3000 UTF-16 units including ellipsis without splitting emoji", () => {
+	assert.equal(truncateSummary("中".repeat(3000)), "中".repeat(3000));
+	assert.equal(truncateSummary("中".repeat(3001)), "中".repeat(2999) + "…");
+	assert.equal(truncateSummary("😀".repeat(2000)), "😀".repeat(1499) + "…");
+	assert.equal(truncateSummary("abcdef", 1), "…");
+	assert.equal(truncateSummary("abcdef", 0), "");
+});
+
+test("truncation prefers nearby paragraph, line, and word boundaries", () => {
+	for (const separator of ["\n\n", "\n", " "]) {
+		assert.equal(truncateSummary("a".repeat(85) + separator + "b".repeat(30), 100), "a".repeat(85) + "…");
+	}
+	assert.equal(truncateSummary("short " + "b".repeat(120), 100).length, 100);
+});
+
+test("long paths and escaped summaries stay within Telegram's parsed text limit", () => {
+	for (const content of ["中", "😀", "\\", "*", "`"]) {
+		const message = formatNotification(content.repeat(5000), "waiting", content.repeat(5000));
+		// Remove only the generated entities and escapes; the source Markdown can
+		// exceed 4096 because Telegram measures text after entity parsing.
+		const parsed = message
+			.replace("*项目:* `", "项目: ").replace("`\n*状态:*", "\n状态:")
+			.replace("*概要:*", "概要:").replace(/\\(.)/gs, "$1");
+		assert.ok(parsed.length <= 4096);
+		assert.equal(Buffer.from(parsed).toString(), parsed);
+		assert.match(message, /…$/);
+	}
+});
+
+test("only child descriptor entries suppress notifications", () => {
+	assert.equal(isSubagentSession([]), false);
+	assert.equal(isSubagentSession([{ type: "custom", customType: "pi-subagent/agent" }] as any), false);
+	assert.equal(isSubagentSession([{ type: "custom_message", customType: "pi-subagent/descriptor" }] as any), false);
+	assert.equal(isSubagentSession([{ type: "custom", customType: "pi-subagent/descriptor", data: null }] as any), true);
 });
 
 test("classifies completed, error, and non-terminal assistant messages", () => {
