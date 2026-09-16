@@ -72,7 +72,8 @@ jobs:
   publish:
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Leave room for bounded registry read-after-write waits across a full batch.
+    timeout-minutes: 40
     environment: npm-publish
     permissions:
       contents: write
@@ -110,6 +111,9 @@ jobs:
       - name: Publish exact tarballs and reconcile registry state
         env:
           NPM_CONFIG_PROVENANCE: "true"
+          NPM_REGISTRY_PROPAGATION_TIMEOUT_MS: "180000"
+          NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS: "2000"
+          NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS: "15000"
         run: node scripts/publish-release-artifacts.mjs .release-input/manifest.json .release-input/result.json
 
       - name: Push tags and create idempotent GitHub Releases
