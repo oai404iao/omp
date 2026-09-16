@@ -32,7 +32,7 @@ export function telegramEndpoint(botToken: string): string {
 }
 
 /**
- * Deliver one plain-text Bot API message. Callers should catch failures so a
+ * Deliver one preformatted MarkdownV2 Bot API message. Callers should catch failures so a
  * notification outage never changes Pi's task execution.
  */
 export async function sendTelegramMessage(
@@ -51,6 +51,7 @@ export async function sendTelegramMessage(
 			body: JSON.stringify({
 				chat_id: settings.chatId,
 				text,
+				parse_mode: "MarkdownV2",
 				disable_web_page_preview: true,
 			}),
 			signal: controller.signal,

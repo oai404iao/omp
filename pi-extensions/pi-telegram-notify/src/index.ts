@@ -1,6 +1,7 @@
-import type { ExtensionAPI, ExtensionCommandContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import {
 	formatNotification,
+	isSubagentSession,
 	lastAssistantMessageEntry,
 	questionSummaryFromInput,
 	questionSummaryFromPromptEvent,
@@ -44,9 +45,13 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 	let lastTaskSummary = "";
 	let lastHandledAssistantEntryId: string | undefined;
 	let unsubscribeAskUserPrompt: (() => void) | undefined;
+	let sessionContext: ExtensionContext | undefined;
 	const pendingQuestionNotifications = new Map<string, PendingQuestionNotification>();
 
 	const send = (status: "completed" | "error" | "waiting", summary: string, cwd = currentCwd): void => {
+		// Child descriptors can be appended after session_start. Check at delivery
+		// time too, including delayed question fallbacks and event-bus callbacks.
+		if (!sessionContext || isSubagentSession(sessionContext.sessionManager.getEntries())) return;
 		const settings = loadSettings();
 		if (!settings.enabled || !isConfigured(settings)) return;
 
@@ -96,6 +101,7 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		clearQuestionFallbacks();
 		unsubscribeAskUserPromptEvent();
+		sessionContext = ctx;
 		currentCwd = ctx.cwd;
 		lastTaskSummary = "";
 		lastHandledAssistantEntryId = undefined;
@@ -118,6 +124,7 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		clearQuestionFallbacks();
 		unsubscribeAskUserPromptEvent();
+		sessionContext = undefined;
 		currentCwd = process.cwd();
 		lastTaskSummary = "";
 		lastHandledAssistantEntryId = undefined;
@@ -132,7 +139,7 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 	// rpiv event. A short grace period lets the authoritative event win.
 	pi.on("tool_call", (event, ctx) => {
 		currentCwd = ctx.cwd;
-		if (!ctx.hasUI || !isAskUserQuestion(event)) return;
+		if (!ctx.hasUI || !isAskUserQuestion(event) || isSubagentSession(ctx.sessionManager.getEntries())) return;
 
 		clearQuestionFallback(event.toolCallId);
 		const summary = questionSummaryFromInput(event.input) || "等待用户回复";
@@ -158,7 +165,9 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 
 	pi.on("agent_settled", (_event, ctx) => {
 		currentCwd = ctx.cwd;
-		const assistantEntry = lastAssistantMessageEntry(ctx.sessionManager.getBranch());
+		if (isSubagentSession(ctx.sessionManager.getEntries())) return;
+		const branch = ctx.sessionManager.getBranch();
+		const assistantEntry = lastAssistantMessageEntry(branch);
 		if (!assistantEntry || assistantEntry.id === lastHandledAssistantEntryId) return;
 		lastHandledAssistantEntryId = assistantEntry.id;
 
@@ -167,6 +176,10 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 	});
 
 	const sendTest = async (ctx: ExtensionCommandContext): Promise<void> => {
+		if (isSubagentSession(ctx.sessionManager.getEntries())) {
+			ctx.ui.notify("Telegram notifications are disabled in subagent sessions.", "info");
+			return;
+		}
 		const settings = loadSettings();
 		if (!settings.enabled || !isConfigured(settings)) {
 			ctx.ui.notify(`Telegram Notify is not configured. Edit ${configPath()}`, "warning");
