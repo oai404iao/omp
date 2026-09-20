@@ -28,6 +28,7 @@ export async function processWebSocketStream<TApi extends Api>(
 	requestMetadata: WebSocketRequestMetadata,
 	profileHash?: string,
 	startupPrewarm?: Promise<void>,
+	grammarToolInputProperties?: ReadonlyMap<string, string>,
 ): Promise<void> {
 	let streamStarted = false;
 	let disableCachedContext = false;
@@ -104,6 +105,7 @@ export async function processWebSocketStream<TApi extends Api>(
 				requestPrompt,
 				webSearchCitationSources,
 				historicalCitationSources,
+				grammarToolInputProperties,
 			);
 			if (options?.signal?.aborted) {
 				keepConnection = false;

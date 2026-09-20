@@ -12,7 +12,7 @@ Gitea remote is retained as a migration backup.
 
 ## Packages
 
-All ten npm workspace packages use the `@oai404iao` scope. Scope naming does
+All eleven npm workspace packages use the `@oai404iao` scope. Scope naming does
 not change the private/public eligibility below.
 
 | Package | Checkout version | Release track |
@@ -27,6 +27,7 @@ not change the private/public eligibility below.
 | `@oai404iao/pi-codex-core` | `0.1.0-alpha.1` | published alpha; guarded recovery |
 | `@oai404iao/pi-codex-web-search` | `0.1.0-alpha.1` | published alpha; guarded recovery |
 | `@oai404iao/pi-codex-imagegen` | `0.1.0-alpha.1` | published alpha; guarded recovery |
+| [`@oai404iao/pi-code-mode`](pi-extensions/pi-code-mode/README.md) | `0.1.0` | private; S1 local evaluation, publication blocked |
 
 The scoped npm packages use independent versions. These rows describe the
 checkout; verified registry observations are recorded separately. Guarded

@@ -10,6 +10,11 @@ Catalog-supported standalone profiles call `alpha/search` using Pi's model
 registry authentication. Hosted profiles require core; without it the tool stays
 inactive and explicit execution reports the missing provider capability.
 
+Optional Code Mode discovery offers `codex_web__web_search` on standalone
+profiles only, reusing the same authentication/client and capturing turn identity
+and history before auth I/O. It requires an exact Code Mode grant and adds no
+Code Mode dependency. Hosted placeholders remain direct; no direct tool is hidden.
+
 When core is present, the broker contributes response-local search capture and
 citation signatures without a second provider registration.
 Uses the existing

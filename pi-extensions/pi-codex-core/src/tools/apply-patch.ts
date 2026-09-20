@@ -26,17 +26,19 @@ export function applyPatchTargetPaths(input: string, cwd: string): string[] {
 }
 
 async function withMutationQueue(path: string, fn: () => Promise<void>): Promise<void> {
+	let queue: ((path: string, fn: () => Promise<void>) => Promise<void>) | undefined;
 	try {
 		const mod = await import("@earendil-works/pi-coding-agent");
-		const queue = (mod as { withFileMutationQueue?: (path: string, fn: () => Promise<void>) => Promise<void> }).withFileMutationQueue;
-		if (typeof queue === "function") return queue(path, fn);
+		queue = (mod as { withFileMutationQueue?: typeof queue }).withFileMutationQueue;
 	} catch {
 		// Unit tests can run outside Pi without peer dependencies installed.
 	}
+	if (typeof queue === "function") return queue(path, fn);
 	return fn();
 }
 
-export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string): Promise<{ content: Array<{ type: "text"; text: string }>; details: ApplyPatchResult }> {
+export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string, signal?: AbortSignal): Promise<{ content: Array<{ type: "text"; text: string }>; details: ApplyPatchResult }> {
+	signal?.throwIfAborted();
 	if (!params || typeof params.input !== "string") throw new Error("apply_patch requires an input string.");
 	let targets: string[];
 	try {
@@ -47,6 +49,7 @@ export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string
 	}
 	let result: ApplyPatchResult | undefined;
 	const runAt = async (index: number): Promise<void> => {
+		signal?.throwIfAborted();
 		if (index >= targets.length) {
 			result = await applyPatch(params.input, { cwd });
 			return;
@@ -74,9 +77,9 @@ export function createApplyPatchToolDefinition(options: { cwd?: string; deferRen
 			"Use *** End of File in apply_patch when a hunk must match the end of a file.",
 		],
 		parameters: applyPatchToolSchema,
-		async execute(_toolCallId: string, params: ApplyPatchInput, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
+		async execute(_toolCallId: string, params: ApplyPatchInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
 			const cwd = ctx?.cwd ?? options.cwd ?? process.cwd();
-			return executeApplyPatchTool(params, cwd);
+			return executeApplyPatchTool(params, cwd, signal);
 		},
 	};
 	if (!options.deferRendering) Object.assign(definition, createApplyPatchRenderers());

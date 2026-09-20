@@ -6,6 +6,7 @@ import { type ReasoningSummary } from "@oai404iao/pi-codex-runtime/internal/mode
 import { createCodexApplyPatchCustomTool } from "../codex-apply-patch-tool.js";
 import { convertResponsesMessages } from "@oai404iao/pi-codex-runtime/internal/providers/responses/messages";
 import { convertResponsesTools } from "@oai404iao/pi-codex-runtime/internal/providers/responses/tools";
+import { responseGrammarProperties, supportsGrammar } from "@oai404iao/pi-codex-runtime/internal/providers/responses/grammar";
 import { CODEX_TOOL_CALL_PROVIDERS, WEB_SEARCH_RESULTS_INCLUDE, WEB_SEARCH_SOURCES_INCLUDE } from "./constants.js";
 import { stripResponsesLiteImageDetails } from "./lite.js";
 import { clampCodexThinkingLevel, clampReasoningEffort } from "./reasoning.js";
@@ -38,13 +39,13 @@ export function buildRequestBody<TApi extends Api>(
 		// synthesize a logical turn while constructing startup/prewarm bodies.
 		"prewarm",
 	);
-	const messages = convertResponsesMessages(model, context, new Set([...CODEX_TOOL_CALL_PROVIDERS, model.provider]), {
-		includeSystemPrompt: false,
-	});
 	const tools = context.tools && context.tools.length > 0
-		? convertResponsesTools(context.tools, { strict: null }).map((tool) =>
+		? convertResponsesTools(context.tools, { strict: null, supportsOpenAIGrammarTools: supportsGrammar(model) }).map((tool) =>
 			profile.patchTransport === "custom" && tool.type === "function" && tool.name === "apply_patch" ? createCodexApplyPatchCustomTool() : tool)
 		: [];
+	const messages = convertResponsesMessages(model, context, new Set([...CODEX_TOOL_CALL_PROVIDERS, model.provider]), {
+		includeSystemPrompt: false, grammarToolInputProperties: responseGrammarProperties({ tools }, context.tools, true),
+	});
 	const lite = profile.responsesMode === "lite";
 	const liteTools = (): unknown[] => {
 		const namespaces = new Map<string, {

@@ -37,6 +37,7 @@ import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInpu
 import { addPackageTool, ensureCodexServices } from "@oai404iao/pi-codex-runtime";
 
 import { registerResponsesProviderRuntime } from "./extension/provider-runtime.js";
+import { registerPatchContribution } from "./code-mode-adapter.js";
 
 
 
@@ -223,6 +224,7 @@ export default function codexCore(pi: ExtensionAPI): void {
 	};
 	addPackageTool(broker, "view_image", register);
 	addPackageTool(broker, "apply_patch", register);
+	registerPatchContribution(pi);
 	registerDiagnosticCommand(pi);
 	registerFastMode(pi);
 

@@ -24,6 +24,7 @@ const requiredRuntimeFiles = {
     "src/providers/codex-apply-patch.lark",
   ],
   "@oai404iao/pi-keep-defaults": [],
+  "@oai404iao/pi-code-mode": ["THIRD_PARTY_NOTICES.md", "src/limits.ts"],
   "@oai404iao/pi-subagent": [
     "LICENSES/DeepSeek-Harness-MIT.txt",
     "THIRD_PARTY_NOTICES.md",
@@ -157,7 +158,7 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   if (!packOutput) continue;
 
   const packedPaths = new Set(packOutput.files.map((file) => normalizePackagePath(file.path)));
-  if (expectedName.startsWith("@oai404iao/pi-codex-")) {
+  if (expectedName.startsWith("@oai404iao/pi-codex-") || expectedName === "@oai404iao/pi-code-mode") {
     for (const path of readdirSync(resolve(root, directory, "src"), { recursive: true })) {
       if (!path.endsWith(".ts")) continue;
       const runtimePath = `src/${normalizePackagePath(path)}`;

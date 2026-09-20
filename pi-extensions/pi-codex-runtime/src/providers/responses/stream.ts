@@ -5,7 +5,8 @@ import { createResponsesStreamState } from "./stream-state.js";
 import { createResponseTextRenderer } from "./text-renderer.js";
 import { localToolName, parseStreamingJson } from "./text.js";
 import { encodeToolNamespaceSignature } from "./tool-identity.js";
-import type { TextBlock, ThinkingBlock, ToolCallBlock } from "./types.js";
+import type { CustomToolCallState, TextBlock, ThinkingBlock, ToolCallBlock } from "./types.js";
+import { customArguments, updateCustomInput } from "./grammar.js";
 import { type OpenAIResponsesStreamOptions } from "./types.js";
 import { finalizeResponseUsage } from "./usage.js";
 
@@ -97,12 +98,12 @@ export async function processResponsesStream<TApi extends Api>(
 					type: "toolCall",
 					id: `${customItem.call_id}|${itemId}`,
 					name: localToolName(customItem.namespace, customItem.name),
-					arguments: { input },
+					arguments: customArguments(localToolName(customItem.namespace, customItem.name), input, options),
 					...(thoughtSignature ? { thoughtSignature } : {}),
 					partialInput: input,
 				};
 				pushResponseBlock(currentBlock, event.output_index);
-				outputStates.set(event.output_index, {
+				const state: CustomToolCallState = {
 					kind: "custom_tool_call",
 					blockIndex: blockIndex(),
 					block: currentBlock,
@@ -110,8 +111,10 @@ export async function processResponsesStream<TApi extends Api>(
 					sourceItemId: customItem.id,
 					callId: customItem.call_id,
 					input,
-				});
+				};
+				outputStates.set(event.output_index, state);
 				stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
+				if (options?.grammarToolInputProperties?.has(currentBlock.name)) updateCustomInput(state, input, false, output, stream, options);
 			}
 		} else if (event.type === "response.reasoning_summary_part.added") {
 			const state = outputStates.get(event.output_index);
@@ -193,11 +196,12 @@ export async function processResponsesStream<TApi extends Api>(
 			const customEvent = event as unknown as { output_index?: number; item_id?: string; call_id?: string; delta?: string };
 			const state = findCustomToolCallState(customEvent);
 			if (state && typeof customEvent.delta === "string") {
-				state.input += customEvent.delta;
-				state.block.partialInput = state.input;
-				state.block.arguments = { input: state.input };
-				stream.push({ type: "toolcall_delta", contentIndex: state.blockIndex, delta: customEvent.delta, partial: output });
+				updateCustomInput(state, state.input + customEvent.delta, false, output, stream, options);
 			}
+		} else if ((event as { type?: string }).type === "response.custom_tool_call_input.done") {
+			const customEvent = event as unknown as { output_index?: number; item_id?: string; call_id?: string; input?: string };
+			const state = findCustomToolCallState(customEvent);
+			if (state && typeof customEvent.input === "string") updateCustomInput(state, customEvent.input, true, output, stream, options);
 		} else if (event.type === "response.function_call_arguments.delta") {
 			const state = outputStates.get(event.output_index);
 			if (state?.kind === "function_call") {
@@ -309,9 +313,8 @@ export async function processResponsesStream<TApi extends Api>(
 				const thoughtSignature = encodeToolNamespaceSignature(customItem.namespace, customItem.name);
 				const toolCall = state
 					? (() => {
-						state.input = input;
 						state.block.name = localToolName(customItem.namespace, customItem.name);
-						state.block.arguments = { input };
+						updateCustomInput(state, input, true, output, stream, options);
 						if (thoughtSignature) state.block.thoughtSignature = thoughtSignature;
 						delete state.block.partialInput;
 						return state.block;
@@ -321,7 +324,7 @@ export async function processResponsesStream<TApi extends Api>(
 							type: "toolCall",
 							id: `${customItem.call_id}|${customItemId(customItem.id, customItem.call_id)}`,
 							name: localToolName(customItem.namespace, customItem.name),
-							arguments: { input },
+							arguments: customArguments(localToolName(customItem.namespace, customItem.name), input, options),
 							...(thoughtSignature ? { thoughtSignature } : {}),
 						};
 						pushResponseBlock(fallbackToolCall, event.output_index);

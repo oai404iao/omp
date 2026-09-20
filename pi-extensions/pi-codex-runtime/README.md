@@ -10,6 +10,11 @@ Owns shared Codex authentication/headers, wire identity, settings/catalog,
 Responses replay contracts and the session-scoped composition broker.
 Capability-specific HTTP clients, storage and transports live in other packages.
 
+Responses helpers encode/decode generic grammar tools and replay calls/results
+according to the current declaration, preserving legacy custom patch behavior.
+An internal structural event adapter lets owners offer optional Code Mode
+contributions without importing or depending on the private Code Mode package.
+
 Configuration paths remain
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json`.
 This package ships the canonical schemas and default catalog, including the

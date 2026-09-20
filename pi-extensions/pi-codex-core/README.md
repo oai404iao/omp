@@ -14,6 +14,12 @@ Depends only on the shared runtime and its transport libraries; it does not
 install web-search or image-generation clients/presentation. Protocol replay of
 old web/image items does not enable their endpoints.
 
+Grammar-capable models support generic constrained-sampling tools through both
+Standard/Lite SSE and WebSocket, including canonical arguments and JSON/grammar
+history switching. Optional Code Mode discovery offers `codex_core__apply_patch`
+using the existing executor (not root-confined); an exact Code Mode grant is
+required. Core has no dependency on Code Mode and does not hide the direct tool.
+
 Uses the existing
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json` configuration
 and Pi authentication. Set global `config.json.webSocketEnabled` to `false` to

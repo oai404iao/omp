@@ -241,6 +241,7 @@ export async function standaloneWebSearch(
 	signal?: AbortSignal,
 	invocation: StandaloneWebSearchInvocation = {},
 ) {
+	signal?.throwIfAborted();
 	const model = ctx.model;
 	if (!model || !ctx.modelRegistry) throw new Error("No active model is available for standalone web search.");
 	const settings = loadModelSettings(model, ctx.cwd);
@@ -257,15 +258,6 @@ export async function standaloneWebSearch(
 	if (input.image_query?.length && !contentTypes.includes("image")) {
 		throw new Error("Image search is disabled by the current model profile.");
 	}
-	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-	if (!auth.ok) throw new Error(auth.error);
-	if (!hasCodexRequestAuth({
-		modelHeaders: model.headers,
-		auth: { apiKey: auth.apiKey, headers: auth.headers },
-	})) {
-		throw new Error(`No request authentication for provider: ${model.provider}`);
-	}
-
 	const url = resolveCodexApiEndpoint(model.baseUrl, settings.apiKeyMode, "alpha/search");
 	const piSessionId = ctx.sessionManager?.getSessionId();
 	const identity = invocation.identity
@@ -293,6 +285,14 @@ export async function standaloneWebSearch(
 				model: model.id,
 			})
 		: undefined;
+	// A nested cell may survive a user-turn rollover while auth is pending.
+	// Identity and visible history must describe this invocation, not that later turn.
+	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	signal?.throwIfAborted();
+	if (!auth.ok) throw new Error(auth.error);
+	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth: { apiKey: auth.apiKey, headers: auth.headers } })) {
+		throw new Error(`No request authentication for provider: ${model.provider}`);
+	}
 	const response = await fetch(url, {
 		method: "POST",
 		headers: buildCodexJsonHeaders({
@@ -322,6 +322,7 @@ export async function standaloneWebSearch(
 		throw new Error(`Standalone web search failed: HTTP ${response.status}: ${await response.text()}`);
 	}
 	const result = await response.json() as StandaloneSearchResponse;
+	signal?.throwIfAborted();
 	if (typeof result.output !== "string" || !result.output.trim()) {
 		throw new Error("Standalone web search returned no output.");
 	}

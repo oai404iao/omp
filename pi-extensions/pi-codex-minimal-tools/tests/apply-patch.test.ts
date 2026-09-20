@@ -6,10 +6,28 @@ import test from "node:test";
 import { applyPatch, previewApplyPatch } from "../src/patch/apply.js";
 import { parseApplyPatch, parseApplyPatchProgress } from "../src/patch/parser.js";
 import { executeApplyPatchTool } from "../src/tools/apply-patch.js";
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 
 function tempDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-apply-patch-"));
 }
+
+test("apply_patch rechecks abort after acquiring the shared mutation queue", async () => {
+	const cwd = tempDir();
+	const target = join(cwd, "queued.txt");
+	let release!: () => void;
+	const held = withFileMutationQueue(target, () => new Promise<void>((resolve) => { release = resolve; }));
+	await new Promise((resolve) => setImmediate(resolve));
+	const controller = new AbortController();
+	const task = executeApplyPatchTool({ input: "*** Begin Patch\n*** Add File: queued.txt\n+must-not-write\n*** End Patch" }, cwd, controller.signal);
+	const rejected = assert.rejects(task, /aborted/i);
+	await new Promise((resolve) => setImmediate(resolve));
+	controller.abort();
+	release();
+	await held;
+	await rejected;
+	assert.equal(existsSync(target), false);
+});
 
 test("parseApplyPatch parses add/update/delete actions", () => {
 	const parsed = parseApplyPatch(`*** Begin Patch

@@ -6,6 +6,7 @@ import test from "node:test";
 import codexMinimalTools from "../src/index.js";
 import { hasConfiguredModelsLoaded } from "../src/activation.js";
 import { DEFAULT_SETTINGS } from "../src/settings.js";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 
 function fakePi() {
 	const handlers: Record<string, Function[]> = {};
@@ -13,6 +14,7 @@ function fakePi() {
 	const providers: Array<{ name: string; value: any }> = [];
 	let activeTools = ["read", "bash"];
 	return {
+		events: createEventBus(),
 		activeTools,
 		handlers,
 		providers,

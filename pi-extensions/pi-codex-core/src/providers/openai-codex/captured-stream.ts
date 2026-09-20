@@ -18,6 +18,7 @@ export async function processCapturedResponsesStream<TApi extends Api>(
 	requestPrompt: string | undefined,
 	webSearchCitationSources: ReadonlyArray<WebSearchCitationSource>,
 	historicalCitationSources: ReadonlyArray<CitationSource>,
+	grammarToolInputProperties?: ReadonlyMap<string, string>,
 ): Promise<{ responseId?: string; responseItems: unknown[] }> {
 	const responseItems: unknown[] = [];
 	let responseId: string | undefined;
@@ -39,6 +40,7 @@ export async function processCapturedResponsesStream<TApi extends Api>(
 		}
 	};
 	await processResponsesStream(captureContinuation() as AsyncIterable<never>, output, stream, model, {
+		grammarToolInputProperties,
 		serviceTier: (options as { serviceTier?: ServiceTier } | undefined)?.serviceTier,
 		resolveServiceTier: resolveCodexServiceTier,
 		applyServiceTierPricing: (usage, serviceTier) =>

@@ -102,6 +102,25 @@ Upgrade the bundle to a broker-enabled release before mixing installations.
 
 ## Verification
 
+### Optional Code Mode integration
+
+The independent, private `pi-code-mode` package is not part of the Codex dependency
+graph. Core and web-search may contribute data-returning adapters over its
+versioned event protocol without importing that package. Explicit grants select
+`codex_core__apply_patch` (exclusive write; existing executor, not root-confined)
+and `codex_web__web_search` (parallel read; standalone profiles only). Installation
+is not authorization. Hosted placeholders and image tools stay direct; Codex
+auto-activation and direct-tool visibility are unchanged.
+
+Core advertises its exact stream function on the optional grammar handshake.
+Runtime handles generic grammar tool declarations, canonical string arguments,
+escaped JSON deltas and replay for Standard/Lite SSE/WS; it does not special-case
+Code Mode's `exec`. Selection still requires explicit model grammar metadata.
+Switching to JSON changes call/result wire types without mutating saved messages.
+See the [Code Mode guide](../pi-extensions/pi-code-mode/README.md) and
+[S3 audit](audits/pi-code-mode-s3.md). Its installation tests independently check
+the standalone package and optional Codex closure, using fixtures, not accounts.
+
 From repository root:
 
 ```bash
