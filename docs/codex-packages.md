@@ -109,8 +109,13 @@ graph. Core and web-search may contribute data-returning adapters over its
 versioned event protocol without importing that package. Explicit grants select
 `codex_core__apply_patch` (exclusive write; existing executor, not root-confined)
 and `codex_web__web_search` (parallel read; standalone profiles only). Installation
-is not authorization. Hosted placeholders and image tools stay direct; Codex
-auto-activation and direct-tool visibility are unchanged.
+is not authorization. Hosted placeholders and image tools stay direct. Since U3,
+patch and standalone search cooperate with Code Mode's optional direct-owner
+factory: `hide-bridged` can hide explicitly granted counterparts while Codex
+retains logical activation intent and native mutation-tool suppression.
+Without Code Mode, or in its default mixed visibility, direct behavior remains.
+Further declaration/version/owner negotiation work is a proposal, not implemented:
+see [tool interoperability design](plans/pi-code-mode-tool-interop.md).
 
 Core advertises its exact stream function on the optional grammar handshake.
 Runtime handles generic grammar tool declarations, canonical string arguments,
