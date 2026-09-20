@@ -91,7 +91,7 @@ export class Wire {
 		if (this.failure) return Promise.reject(this.failure);
 		signal.throwIfAborted();
 		const key = `${type}:${id}`;
-		if (this.observers.has(key) || this.observers.size >= 4) throw new Error("Host observer budget exceeded");
+		if (this.observers.has(key) || this.observers.size >= LIMITS.maxCells * 2 + 2) throw new Error("Host observer budget exceeded");
 		const promise = new Promise<unknown>((resolve, reject) => {
 			const aborted = () => this.fail(new Error("Code Mode operation cancelled or timed out"));
 			const finish = () => signal.removeEventListener("abort", aborted);

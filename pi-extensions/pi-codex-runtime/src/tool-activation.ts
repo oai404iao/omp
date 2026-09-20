@@ -8,6 +8,7 @@ import {
 import { installCodexIdentityLifecycle } from "./codex-identity-extension.js";
 import { loadModelSettings } from "./model-catalog/runtime.js";
 import { loadSettings } from "./settings.js";
+import { codeModeOwner, OWNER_CHANGED } from "./code-mode-owner.js";
 
 function enableDefinitions(broker: CodexBroker) {
 	for (const tool of broker.tools.values()) {
@@ -40,7 +41,13 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		suppressed.clear();
 		return active;
 	};
+	let latest: ExtensionContext | undefined;
+	let syncing = false;
 	const sync = (ctx: ExtensionContext) => {
+		latest = ctx;
+		if (syncing) return;
+		syncing = true;
+		try {
 		const settings = loadSettings(ctx.cwd);
 		const available = settings.enabled && hasConfiguredModelsLoaded(ctx, settings);
 		if (available) enableDefinitions(broker);
@@ -48,9 +55,17 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		const active = new Set(current);
 		const capabilities = computeToolCapabilities(ctx.model as ModelLike | undefined, settings);
 		const model = loadModelSettings(ctx.model as ModelLike | undefined, ctx.cwd, settings);
+		const controls = new Map<string, NonNullable<ReturnType<typeof codeModeOwner>>>();
 		for (const name of PACKAGE_TOOL_NAMES) {
 			const owned = broker.tools.get(name);
 			if (!owned) continue; // Other extensions retain ownership of uninstalled names.
+			const control = codeModeOwner(pi, name, owned, broker.codeModeDefinitions?.get(name));
+			if (owned.codeModeOwner?.replaced) continue;
+			if (control) {
+				controls.set(name, control);
+				if (control.activeIntent === undefined) continue; // foreign replacement
+				if (control.activeIntent) active.add(name); else active.delete(name);
+			}
 			const hostedWithoutCore = !broker.coreEnabled && (
 				(name === "web_search" && model.webSearchImplementation === "hosted")
 				|| (name === "image_generation" && model.imageGenerationImplementation === "hosted" && !settings.directImageApiFallback)
@@ -59,16 +74,28 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 			if (!desired) active.delete(name);
 			else if (settings.autoEnable) active.add(name);
 		}
-		if (broker.tools.has("apply_patch") && active.has("apply_patch")) {
+		const ownsPatch = broker.tools.has("apply_patch") && !broker.tools.get("apply_patch")?.codeModeOwner?.replaced;
+		if (ownsPatch && active.has("apply_patch")) {
 			for (const name of NATIVE_MUTATION_TOOL_NAMES) {
 				if (active.delete(name) && !suppressed.has(name)) suppressed.set(name, current.indexOf(name));
 			}
 		}
-		const next = current.filter(name => active.has(name));
-		for (const name of active) if (!next.includes(name)) next.push(name);
-		if (!broker.tools.has("apply_patch") || !active.has("apply_patch")) restore(next);
+		const physical = new Set(active);
+		for (const [name, control] of controls) {
+			const projected = control.projectActive(active.has(name));
+			if (projected === undefined) { if (current.includes(name)) physical.add(name); else physical.delete(name); }
+			else if (projected) physical.add(name); else physical.delete(name);
+		}
+		const next = current.filter(name => physical.has(name));
+		for (const name of physical) if (!next.includes(name)) next.push(name);
+		if (!ownsPatch || !active.has("apply_patch")) restore(next);
 		if (next.join("\0") !== current.join("\0")) pi.setActiveTools(next);
+		for (const control of controls.values()) control.reconcile();
+		} finally { syncing = false; }
 	};
+	const offOwner = pi.events.on(OWNER_CHANGED, (message) => {
+		if ((message as { version?: number })?.version === 1 && latest && !broker.closed) sync(latest);
+	});
 	pi.on("session_start", (_event, ctx) => {
 		broker.presentation.clear();
 		sync(ctx);
@@ -77,6 +104,8 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	pi.on("thinking_level_select", (_event, ctx) => sync(ctx));
 	pi.on("agent_end", () => broker.presentation.scheduleFlush());
 	pi.on("session_shutdown", () => {
+		offOwner();
+		for (const tool of broker.tools.values()) tool.codeModeOwner?.control?.dispose();
 		try { broker.presentation.flush(); }
 		finally {
 			broker.presentation.clear();

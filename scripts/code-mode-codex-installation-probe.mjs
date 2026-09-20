@@ -94,11 +94,14 @@ try {
 	assert.equal(searches, 1);
 	assert.equal(readFileSync(join(cwd, "proof.txt"), "utf8"), "installed-patch\n");
 	assert(session.messages.filter((message) => message.role === "toolResult").every((message) => !message.isError));
-	assert(session.getActiveToolNames().includes("apply_patch"), "no implicit S4 ownership claim");
+	assert(!session.getActiveToolNames().includes("apply_patch"), "explicit cooperating patch owner hidden");
+	assert(!session.getActiveToolNames().includes("web_search"), "explicit standalone owner hidden");
 	assert.deepEqual(errors, []);
 	await session.prompt("/code-mode off");
 	assert(!session.getActiveToolNames().includes("exec"));
-	console.log(`PASS isolated S3 Codex+Code Mode tarballs, Lite grammar/exec/wait, real patch/standalone search, Pi ${VERSION}, no package back-edges`);
+	assert(session.getActiveToolNames().includes("apply_patch"));
+	assert(session.getActiveToolNames().includes("web_search"));
+	console.log(`PASS isolated U3 Codex+Code Mode tarballs, Lite grammar/exec/wait, real patch/standalone search, cooperative hide/restore, Pi ${VERSION}, no package back-edges`);
 } finally {
 	await session.abort();
 	await session.prompt("/code-mode off");

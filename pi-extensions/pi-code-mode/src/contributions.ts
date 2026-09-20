@@ -6,11 +6,15 @@ export { createCodeModeDirectBinding, type CodeModeDirectBinding, type DirectToo
 
 export const DISCOVER = "@oai404iao/pi-code-mode:discover/v1";
 export const CHANGED = "@oai404iao/pi-code-mode:changed/v1";
+export const OBSERVERS = "@oai404iao/pi-code-mode:observers/v1";
+export const APPROVALS = "@oai404iao/pi-code-mode:approvals/v1";
 export interface InvocationContext {
 	readonly cellId: string;
 	readonly toolCallId: string;
 	readonly cwd: string;
 	readonly signal: AbortSignal;
+	readonly originToolCallId?: string;
+	readonly epoch?: number;
 	/** Current session context, with the invocation's signal. Never retain it. */
 	readonly pi?: ExtensionContext;
 }
@@ -24,9 +28,13 @@ export interface CodeModeTool {
 	name: string;
 	description: string;
 	parameters: TSchema;
+	/** Optional display contract, not inferred from results or a replacement validator. */
+	outputSchema?: TSchema;
 	effect: "read" | "write" | "process";
 	/** Only explicitly parallel read tools overlap; everything else is exclusive. */
 	parallel?: boolean;
+	/** Explicit approval provider ID. Missing provider/denial fails closed. */
+	approval?: string;
 	/** Optional owner cooperation for hide-bridged. Never inferred by name. */
 	direct?: CodeModeDirectBinding;
 	prepare?(input: unknown): unknown;
@@ -41,8 +49,37 @@ export interface PolicyCall {
 }
 export interface CodeModePolicy {
 	id: string;
+	/** Requires approval for every call covered by this policy. */
+	approval?: string;
 	before?(call: PolicyCall): Promise<void | { block: true; reason?: string }> | void | { block: true; reason?: string };
 	after?(call: PolicyCall, value: JsonValue): Promise<JsonValue> | JsonValue;
+}
+export interface CompletionReceipt {
+	readonly cellId: string; readonly toolCallId: string; readonly name: string;
+	readonly originToolCallId?: string; readonly epoch?: number;
+	readonly state: "completed" | "failed" | "cancelled";
+	readonly queuedAt: number; readonly startedAt?: number; readonly settledAt: number;
+}
+/** Diagnostics only: no parameters/results, no mutation or independent effects. */
+export interface CodeModeObserver { id: string; complete(receipt: CompletionReceipt, signal: AbortSignal): void | Promise<void> }
+export interface CodeModeApproval { id: string; approve(call: PolicyCall): boolean | Promise<boolean> }
+export function registerCodeModeApproval(pi: ExtensionAPI, approval: CodeModeApproval) {
+	let disposed = false;
+	const off = pi.events.on(APPROVALS, (value) => {
+		const request = value as { version?: number; accept?: (approval: CodeModeApproval) => void } | undefined;
+		if (!disposed && request?.version === 1 && typeof request.accept === "function") request.accept(approval);
+	});
+	pi.events.emit(CHANGED, { version: 1 });
+	return () => { if (!disposed) { disposed = true; off(); pi.events.emit(CHANGED, { version: 1 }); } };
+}
+export function registerCodeModeObserver(pi: ExtensionAPI, observer: CodeModeObserver) {
+	let disposed = false;
+	const off = pi.events.on(OBSERVERS, (value) => {
+		const request = value as { version?: number; accept?: (observer: CodeModeObserver) => void } | undefined;
+		if (!disposed && request?.version === 1 && typeof request.accept === "function") request.accept(observer);
+	});
+	pi.events.emit(CHANGED, { version: 1 });
+	return () => { if (!disposed) { disposed = true; off(); pi.events.emit(CHANGED, { version: 1 }); } };
 }
 export interface Discovery {
 	version: 1;

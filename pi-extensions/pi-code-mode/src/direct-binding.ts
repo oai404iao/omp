@@ -26,6 +26,7 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 	if (!isDirectName(name) || !sourcePath || sourcePath.startsWith("<builtin:")) throw new Error("Invalid Code Mode direct binding");
 	let disposed = false;
 	let identity: string | undefined;
+	let schema: unknown;
 	let held = false;
 	let restore = false;
 	let index = 0;
@@ -35,8 +36,8 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 		const tool = pi.getAllTools().find((item) => item.name === name);
 		if (!tool || tool.sourceInfo.path !== sourcePath || ["builtin", "sdk"].includes(tool.sourceInfo.source)) return false;
 		const current = fingerprint(tool);
-		identity ??= current;
-		return current === identity;
+		if (identity === undefined) { identity = current; schema = tool.parameters; }
+		return current === identity && schema === tool.parameters;
 	};
 	const change = (active: boolean) => {
 		const current = pi.getActiveTools();
@@ -75,6 +76,14 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 				};
 			},
 		}) satisfies CodeModeDirectBinding,
+		get activeIntent(): boolean | undefined { return owns() ? held ? restore : pi.getActiveTools().includes(name) : undefined; },
+		/** Batch activation: update logical intent without writing the registry.
+		 * undefined means ownership was lost; preserve the replacement's state. */
+		projectActive(active: boolean): boolean | undefined {
+			if (!owns()) return undefined;
+			if (held) { restore = active; return false; }
+			return active;
+		},
 		setActive(active: boolean): boolean {
 			if (!owns()) return false;
 			if (held) { restore = active; change(false); }

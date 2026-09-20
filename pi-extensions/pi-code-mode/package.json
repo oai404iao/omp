@@ -38,8 +38,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test tests/unit.test.ts tests/extension.test.ts tests/orchestration.test.ts tests/visibility.test.ts tests/visibility-pi.test.ts tests/protocol.test.ts",
-    "test:host": "tsx --test --test-concurrency=1 tests/host.test.ts tests/cells.test.ts tests/providers.test.ts tests/rounds.test.ts tests/grammar-host.test.ts tests/codex-adapters.test.ts",
+    "test": "tsx --test tests/unit.test.ts tests/extension.test.ts tests/orchestration.test.ts tests/visibility.test.ts tests/visibility-pi.test.ts tests/protocol.test.ts tests/host-protocol.test.ts tests/config.test.ts tests/schema-description.test.ts tests/diagnostics.test.ts tests/approvals.test.ts tests/multi-protocol.test.ts",
+    "test:host": "tsx --test --test-concurrency=1 tests/host.test.ts tests/cells.test.ts tests/providers.test.ts tests/rounds.test.ts tests/grammar-host.test.ts tests/codex-adapters.test.ts tests/multi-cells.test.ts",
     "check": "npm run typecheck && npm test"
   },
   "engines": { "node": ">=22.19.0" }

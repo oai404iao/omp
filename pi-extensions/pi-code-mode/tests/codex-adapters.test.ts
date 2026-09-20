@@ -8,6 +8,7 @@ import codexWeb from "../../pi-codex-web-search/src/index.ts";
 import { registerCodeModePolicy } from "../src/contributions.ts";
 import { piSession, scratch } from "./helpers.ts";
 import { grammarResponse, type FixtureCall } from "./grammar-fixtures.ts";
+import { Type } from "typebox";
 
 const host = process.env.CODE_MODE_TEST_HOST;
 assert(host, "CODE_MODE_TEST_HOST required");
@@ -84,7 +85,7 @@ for (const reverse of [false, true]) test(`S3 optional owners ${reverse ? "rever
 	assert(results.every((message) => !message.isError));
 	assert.match(JSON.stringify(results), /redacted-search/);
 	assert.doesNotMatch(JSON.stringify(results), /private-search-value/);
-	assert(f.session.getActiveToolNames().includes("apply_patch"), "Codex owners have not opted into S4 hiding");
+	assert(f.session.getActiveToolNames().includes("apply_patch"), "mixed keeps cooperating owners direct");
 	deny = true;
 	http.exec(`await tools.codex_core__apply_patch({input:${JSON.stringify(patch("denied.txt"))}})`);
 	await f.session.prompt("Attempt a denied patch.");
@@ -136,4 +137,36 @@ test("S3 optional search: terminate aborts an in-flight owner request and settle
 	const last = [...f.session.messages].reverse().find((message) => message.role === "toolResult");
 	assert(last?.role === "toolResult" && !last.isError);
 	assert.equal((last.details as { state: string }).state, "terminated");
+});
+
+for (const reverse of [false, true]) test(`U3 Codex cooperative hiding survives activation and restores (${reverse})`, async (t) => {
+	await configure(t);
+	const f = await piSession(t, { host, grant: true, tools: "codex_core__apply_patch,codex_web__web_search",
+		visibility: "hide-bridged", factoryFirst: reverse, factories: reverse ? [codexWeb, codexCore, codexWeb, codexCore] : [codexCore, codexWeb] });
+	await until(() => !f.session.getActiveToolNames().includes("apply_patch") && !f.session.getActiveToolNames().includes("web_search"));
+	assert(!f.session.getActiveToolNames().includes("apply_patch"));
+	assert(!f.session.getActiveToolNames().includes("web_search"));
+	f.session.setThinkingLevel("low");
+	assert(!f.session.getActiveToolNames().includes("apply_patch"));
+	assert(!f.session.getActiveToolNames().includes("web_search"));
+	await f.session.prompt("/code-mode off");
+	assert(f.session.getActiveToolNames().includes("apply_patch"));
+	assert(f.session.getActiveToolNames().includes("web_search"));
+	assert.deepEqual(f.errors, []);
+});
+
+test("U3 Codex cannot claim a foreign first-registration winner by name", async (t) => {
+	await configure(t);
+	const f = await piSession(t, { host, grant: true, tools: "codex_core__apply_patch", visibility: "hide-bridged",
+		expectedToolConflict: "apply_patch",
+		factories: [(pi) => pi.registerTool({ name: "apply_patch", label: "Foreign", description: "Foreign first owner",
+			parameters: Type.Object({}), async execute() { return { content: [], details: {} }; } }), codexCore] });
+	await delay(30); // contribution refresh must finish before checking ownership
+	assert.equal(f.session.getAllTools().find((tool) => tool.name === "apply_patch")?.description, "Foreign first owner");
+	assert(f.session.getActiveToolNames().includes("apply_patch"));
+	f.session.setActiveToolsByName(f.session.getActiveToolNames().filter((name) => name !== "apply_patch"));
+	f.session.setThinkingLevel("low");
+	assert(!f.session.getActiveToolNames().includes("apply_patch"), "old owner must not reactivate foreign tool");
+	await f.session.prompt("/code-mode off");
+	assert(!f.session.getActiveToolNames().includes("apply_patch"));
 });

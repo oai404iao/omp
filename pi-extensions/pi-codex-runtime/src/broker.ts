@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createRequire } from "node:module";
 import type { PackageToolName } from "./capabilities.js";
 import type { ProviderPresentation } from "./extension/provider-presentation.js";
+import type { OwnerState } from "./code-mode-owner.js";
 
 export const CODEX_BROKER_CHANNEL = "@oai404iao/pi-codex:broker";
 export const CODEX_RUNTIME_VERSION: string = createRequire(import.meta.url)("../package.json").version;
@@ -10,6 +11,7 @@ const CACHE = Symbol.for("@oai404iao/pi-codex/broker/v1");
 export interface InstalledTool {
 	register(): void;
 	registered: boolean;
+	codeModeOwner?: OwnerState;
 }
 
 export interface CodexBroker {
@@ -18,6 +20,7 @@ export interface CodexBroker {
 	readonly closed: boolean;
 	readonly tools: Map<PackageToolName, InstalledTool>;
 	coreEnabled: boolean;
+	codeModeDefinitions?: Map<string, { parameters: unknown; description: string }>;
 	claim(name: string): boolean;
 	addPresentation(name: string, presentation: ProviderPresentation): void;
 	presentation: ProviderPresentation;

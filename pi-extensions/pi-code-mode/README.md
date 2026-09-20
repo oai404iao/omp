@@ -12,14 +12,18 @@ the defaults; Codex integration is optional.
 ## Requirements and authorization
 
 - Pi 0.85.1 or compatible; Node >=22.19.
-- Linux x64, `/usr/bin/systemd-run`, `/usr/bin/systemctl`, `/usr/bin/env`,
+- Linux x64 **glibc >=2.39 and OpenSSL 3** for the current local patched artifact,
+  `/usr/bin/systemd-run`, `/usr/bin/systemctl`, `/usr/bin/env`,
   a user systemd manager and effective cgroup v2 memory/pids/CPU controllers.
   The optional process adapter additionally uses `/bin/bash`.
-- An extracted, regular (not symlink) executable for `codex-code-mode-host`
-  `rust-v0.145.0`, SHA-256
-  `60bf16414be5333f09ff082540082304c7352931ef64bdeb170d4c35a82e6ef8`.
-  Asset URL/hash/license are pinned in `src/limits.ts` and
-  `THIRD_PARTY_NOTICES.md`. No automatic download or unsafe fallback.
+- A regular (not symlink) executable for the local patched `codex-code-mode-host`
+  **`rust-v0.155.1+pi-v8-sort.1`**, SHA-256
+  `4c5824da1cdf4652ce08e13ed572a7d488814d9fe0f9dd6ac0ce683422c27690`.
+  Identity/build metadata lives in `src/host-manifest.json`; see
+  [`build recipe`](../../scripts/code-mode-host-build.md) and `THIRD_PARTY_NOTICES.md`.
+  Official 0.155.1/old 0.145.0 binaries are rejected. This artifact backports the
+  upstream V8 array-sort optimization workaround; it is **not** an official musl
+  release or a general security certification. No automatic download/fallback.
 
 ```sh
 pi -e ./pi-extensions/pi-code-mode \
@@ -28,9 +32,44 @@ pi -e ./pi-extensions/pi-code-mode \
 
 `/code-mode on` asks for a session-local cwd read grant and shows any additional
 capabilities selected by CLI flags. `/code-mode off` revokes and stops work;
-`/code-mode status` reports grants and the current cell;
-`/code-mode terminate` requests termination (may still need `wait` to settle).
+`/code-mode status` reports grants; `/code-mode cells` lists retained IDs/states.
+`/code-mode terminate <id>` requests precise termination; `terminate all` requests
+all cells atomically. Bare `terminate` requires exactly one retained cell (or an
+active doctor probe). Commands do not consume output/usage: use `wait` to settle.
 Loading alone grants nothing and starts no Host.
+
+## User configuration and diagnostics
+
+Optional `<agentDir>/extensions/pi-code-mode/config.json`:
+
+```json
+{
+  "version": 1,
+  "hostPath": "/absolute/path/to/patched/codex-code-mode-host",
+  "protocol": "auto",
+  "visibility": "mixed",
+  "maxCells": 1
+}
+```
+
+Defaults < user config < explicit CLI < current-session commands. Reload reads
+the file and CLI again; commands do not save changes. Unknown keys/version/types
+fail closed. There is no project-level config or persistent grant in this file:
+`readRoot`, `write`, `process` and external `tools` are deliberately rejected.
+With hostPath configured, `/code-mode on` can ask for a current-session grant.
+`maxCells` is an integer 1–4, default 1; opt into two cells with `"maxCells": 2`
+or `--code-mode-max-cells 2`. This changes shared Host slots, not authority.
+
+`/code-mode doctor` checks the pinned file/hash/platform, user systemd manager,
+available controllers, configured protocol and available/granted contributions.
+It starts no Host, downloads nothing and grants nothing. Static controller
+availability is not an enforcement proof. `/code-mode doctor host` additionally
+runs an isolated, supervised `1+1` check with no nested tools, then stops that
+Host; it does not enable normal Code Mode or use provider credentials.
+`off`/`terminate`, context replacement and shutdown cancel an in-flight doctor
+probe; shutdown waits for its separate Host cleanup.
+Diagnostics report **configuration/CLI**, not unsaved protocol command overrides;
+`/code-mode status` reports the live runtime selection.
 
 For headless use, explicitly authorize cwd:
 
@@ -73,16 +112,24 @@ deadline, default/max 300000 ms, and may only reduce it. `wait` never extends it
 estimate**, not tokenizer accounting or a limit on status/trace metadata.
 
 Each response includes an opaque `cm-…` cell ID, state, bounded data and details.
-States: `running`, `settling`, `terminating`, `completed`, `terminated`, `failed`.
+Details include wall time, cumulative Host-operation nanoseconds (not CPU time),
+origin tool call, epoch, error kind, runtime-reset/Host-completed flags and changed
+nested traces with queue/start/settle timestamps. Traces contain no arguments or
+results. At most 32 entries with bounded names/IDs are paged within a 16 KiB trace
+budget; `hasMoreTraces` requires another wait before the ID is consumed.
+Later observations omit unchanged entries. Observation abort consumes none.
+States: `running`, `awaiting_approval`, `settling`, `terminating`, `completed`, `terminated`, `failed`.
 Use `wait` while nonterminal and while `hasMoreOutput` is true. Output pagination
 preserves whitespace and Unicode boundaries. A terminal result with all output
-collected consumes the ID; only then may another `exec` start. A busy error
-includes the retained ID, including after a cancelled initial observation.
+and traces collected consumes the ID and releases a slot. Terminal unread cells
+still occupy capacity. A full/blocked error includes all retained IDs, including
+after a cancelled initial observation. Default capacity 1 preserves serial use;
+opt-in cells share ONE Host, volatile store and execution scheduler.
 
-Only one public observer is permitted. Cancelling an observation consumes
+Only one public observer **per cell** is permitted. Cancelling an observation consumes
 nothing and does **not** itself kill the cell. Pi agent interruption/Esc cancels
-the cell separately, even after `exec` returned. Normal `agent_end` does not:
-the cell can continue across model turns and later user prompts.
+all session cells separately, even after `exec` returned. Normal `agent_end` does
+not: cells can continue across model turns and later user prompts.
 
 `wait({cell_id,terminate:true})` first stops dispatch and aborts nested work,
 then terminates the Host cell and waits for already-started effects to settle.
@@ -94,10 +141,17 @@ Unresponsive I/O or noncooperative contributions can delay settlement.
 Every cell gets a fresh JS environment. `store(key,jsonValue)` and `load(key)`
 share only volatile Host JSON state, bounded by Host memory. Normal termination
 discards that cell's pending store writes and preserves earlier committed data.
+Each cell reads its own initial snapshot; successful completion merges only keys
+it wrote. Concurrent writes to the same key follow actual commit order, not
+invocation order. This is not a transaction or live shared JS object.
 Cancellation racing an already-completed Host result cannot undo its commit.
-Script/protocol failure resets the runtime/store. Model change, tree navigation,
+Script/protocol failure, OOM or a hard watchdog resets ALL still-active siblings
+and the shared store. A normal targeted cancellation does not reset siblings.
+No replacement Host/effects are admitted while the failed epoch still settles.
+Model change, tree navigation,
 session replacement, reload, contribution refresh/disposal and off also reset it.
-Five minutes idle or one hour Host lifetime loses it too. Reload never restores
+Five minutes idle (after all IDs are collected) or one hour Host lifetime loses
+it too. Reload never restores
 an old ID or replays code; explicit CLI grants may authorize the new session.
 
 ```js
@@ -109,9 +163,22 @@ text(load("previews"));
 ```
 
 Only explicitly emitted `text(value)` reaches model-visible business output.
+The supported Host helpers also include `ALL_TOOLS` (authorized name/description
+metadata), `setTimeout`/`clearTimeout`, `yield_control()` and `exit()`.
+Await timers explicitly; pending callbacks alone do not keep a cell alive.
+`yield_control()` flushes to the Host observation path, not an immediate new Pi
+turn or extended deadline. `exit()` ends the script successfully; await effects
+first. These helpers do not expose ungranted tools.
 Image/audio/notification helpers, arbitrary imports, direct filesystem/network
 APIs and automatic wrapping of arbitrary Pi tools are unsupported.
 Script failures are real Pi error results, retaining partial data/usage.
+Text overflow instead retains a UTF-8-safe prefix, marks `truncated/droppedBytes`,
+stops dispatch and terminates/settles the cell. It remains a failure; a later user
+terminate cannot turn it into success. Discarded bytes are not `hasMoreOutput`.
+Once settlement is confirmed, this path can keep the Host and earlier store.
+If `hostCompleted` is already true, that cell's store writes may have committed.
+Script errors, unsupported content and unexplained protocol/MissingCell failures
+still reset the runtime/store. Unconfirmed Host or process stop blocks reuse.
 
 ## Protocol and provider switching
 
@@ -160,6 +227,30 @@ reset volatile cells/store according to the lifecycle above.
 
 ## Optional Codex contributions
 
+### Explicit nested approval
+
+Tools and policies can declare `approval: "user"` (or a custom provider ID).
+Register custom providers with `registerCodeModeApproval(pi, { id, approve })`
+from the public `/contributions` export. Discovery uses
+`@oai404iao/pi-code-mode:approvals/v1`; disposal invalidates old cell snapshots.
+Missing providers, denial, exceptions, non-`true` results and cancellation fail
+closed. No approval is implicitly added to existing grants/tools.
+
+Order: normalize/freeze/validate → before policies → deduplicated approvals →
+execution scheduler → invoke → after policies. Approval sees the same frozen
+final arguments as invocation. It does not acquire a worker or the write gate.
+One session owns a FIFO queue (16 pending maximum); aborted active dialogs keep
+their slot until the provider actually settles. A stuck dialog blocks new work,
+not a second overlapping prompt. Refresh/off/model/tree invalidate late approval.
+
+The built-in `user` provider uses Pi `ui.confirm` with the cell's abort signal;
+headless execution cannot silently approve. Large argument previews are bounded
+and show full byte length/SHA256; approval authorizes the entire hashed input.
+`awaiting_approval` is visible in observations/traces. Positive-yield observations
+hold for an outstanding human prompt (up to cell cancellation/deadline), rather
+than generating polling tool calls; zero-yield remains nonblocking. Do not
+re-execute or bypass a pending approval. This is not a forged native Pi hook.
+
 Install the owners separately and grant exact names, for example:
 
 ```sh
@@ -185,8 +276,9 @@ these packages to Code Mode; they use the versioned contribution event protocol.
 Nested policies and cancellation still apply, not native direct-tool hooks.
 Hosted placeholders, `view_image` and `image_generation` remain direct: their
 multimodal/control contracts are not silently converted to text.
-These Codex contributions do not offer S4 direct bindings, so `hide-bridged`
-does **not** hide their counterparts or alter existing Codex auto-activation.
+These Codex contributions now offer cooperative direct bindings: `hide-bridged`
+hides explicitly granted patch/standalone-search counterparts. Owner activation
+still determines logical availability; hosted/image tools are never claimed.
 
 ## Local adapters
 
@@ -260,9 +352,20 @@ and resets the old cell before updating the actual model-visible exec catalog.
 Callbacks are trusted extension code: do not mutate captured behavior secretly.
 Helpers create no Host/background resources.
 
+Exec's catalog uses bounded TypeScript-style signatures rather than full JSON
+Schema. These are display hints, not TypeScript execution or new validation:
+Common integer/range/length/pattern constraints and descriptions are shown in
+bounded annotations; all constraints still apply through the original schema.
+Unsupported/recursive/deep types fall back conservatively to `unknown`.
+An owner may supply optional `outputSchema` (8 KiB, cloned/frozen) for the return
+hint; without it the return type is `unknown`. It is descriptive metadata, not
+a replacement for finite-JSON/result limits or a promise of result validation
+against that output schema. Inner input schemas are not sent redundantly to a
+Host that discards them; the Pi bridge keeps and validates the originals.
+
 `effect` is `read|write|process`; only explicitly `parallel:true` reads overlap.
 Writes/processes and unspecified parallelism are exclusive FIFO barriers.
-The four-worker, sixteen-queued scheduler is **bridge-local**, not a global
+The four-worker, sixteen-queued scheduler is **session-wide across all cells**, not a global
 lock against direct Pi tools or external processes.
 
 ### S4: cooperative direct-tool visibility
@@ -272,7 +375,10 @@ a binding on an **authorized** contribution. A contribution without a binding
 stays usable through JS, but cannot hide any Pi tool. In particular, independent
 local `tools.read/write/bash` adapters are **not** evidence that Pi's current
 read/write/bash implementation is equivalent; those Pi tools remain untouched.
-Existing Codex auto-activation is not modified or assumed to cooperate.
+Codex owner activation cooperates through an optional versioned factory bus,
+without importing this private package. A unique registered schema reference
+proves the actual owner before binding; foreign first-registration winners and
+replacements are not claimed. Without Code Mode, normal activation is unchanged.
 
 The owner uses `createCodeModeDirectBinding`, exported from the same
 `@oai404iao/pi-code-mode/contributions` TypeScript subpath (load via Pi's extension
@@ -377,7 +483,10 @@ tool mentions, enforce permissions, block arbitrary direct calls from trusted
 extensions, or imply native Pi guards cover nested adapters. **Strict `only`
 is not implemented** and is rejected, rather than silently approximated.
 
-`prepare(input)` optionally normalizes arguments, then cloned/frozen final
+Top-level missing/undefined/null input is normalized to `{}` because Host V1
+cannot distinguish them and contributions require object schemas. Field-level
+null is unchanged; required properties still validate. `prepare(input)` then
+optionally normalizes arguments, and cloned/frozen final
 arguments are schema-checked and supplied to ordered policies and `invoke`.
 Invocation context supplies `cellId`, `toolCallId`, cwd, per-invocation signal,
 and current Pi context with that signal. Never retain it across invocations.
@@ -390,6 +499,16 @@ Hooks run in sorted policy-ID order, with frozen data and a five-second signal
 budget. They must cooperate with cancellation; use policy hooks for checks/
 redaction, not independent side effects. Discovery caps: 32 providers, 64 tools,
 16 policies; schema 8 KiB, description 2000 characters, entire catalog 24 KiB.
+
+`registerCodeModeObserver(pi,{id,complete(receipt,signal)})` returns a disposer.
+This is a separate, optional diagnostic protocol (at most 16 observers), **not**
+a permission/redaction hook. Frozen receipts include IDs, names, state and
+timestamps, never inputs/results. Callbacks must be read-only and honor their
+five-second signal budget; they do not delay tool delivery or modify results.
+Failures increment diagnostic counts when still observable and emit an ID-only
+stderr warning; late failures are not durable audit receipts. Do not use these
+callbacks for effects or guaranteed delivery. Registration/disposal uses the same
+catalog invalidation lifecycle. Security `after` policies still fail closed.
 
 **Nested adapters do not trigger Pi `tool_call/tool_result` hooks.** Existing
 Pi permission/redaction plugins, SSH/container overrides and current direct
@@ -423,7 +542,9 @@ cannot provide a final receipt or guaranteed in-process cleanup.
 | Cell | At most 300s parent deadline + independent OS timer, at most 305s |
 | Host lifetime | 1h OS watchdog; whole-cgroup termination |
 | Code / IPC frame / cell text | 24 KiB / 1 MiB / 32 KiB |
-| Calls / active / queued | 32 / 4 / 16 |
+| Cell slots | 1 default, explicit 1–4 |
+| Calls per cell / shared active workers / shared queued jobs | 32 / 4 / 16 |
+| Maximum aggregate cell text / calls at four slots | 128 KiB / 128 |
 | Bridge result / local write | 64 KiB / 128 KiB |
 
 The IPC ceiling accommodates worst-case JSON escaping of bounded writes; it is
@@ -431,10 +552,22 @@ not a larger output allowance. Kernel limits and PID membership are verified
 before code/commands run. Unknown stop state retains the OS watchdog and blocks
 reuse; killing a proxy is not proof that effects ended.
 
-Verified binaries are copied into private retained runtime directories under
-`${XDG_STATE_HOME:-$HOME/.local/state}/pi-code-mode/` (about 46 MB per Host).
-Process jobs retain their own directories. Remove only specific inactive
-directories manually. No authorization config or transcript is stored there.
+Verified binaries share one private, content-addressed cache under
+`${XDG_STATE_HOME:-$HOME/.local/state}/pi-code-mode/hosts/` (about 66 MB per pinned
+artifact), while each Host/process retains a separate working directory.
+The caller's executable and cached bytes are stream-hashed on **every** launch;
+publication is atomic and never replaces an existing cache inode. Symlinks,
+insecure cache directories and mismatches are refused, not silently repaired.
+This protects normal cooperating launches, not a malicious process with the same
+UID modifying files after verification. Remove only specific inactive directories
+manually; old per-runtime copies are not automatically swept.
+No authorization config or transcript is stored there.
+
+Performance evidence can be reproduced with
+`npm exec -- tsx scripts/benchmark-code-mode.mts --host /absolute/path/to/pinned-host`.
+The bounded five-sample workload reports latency/RSS/disk/IPC/systemd counts.
+Caching reduces retained disk and streaming limits transient buffers, but extra
+verification can increase cold-start latency; no universal speedup is promised.
 
 ```sh
 npm run check --workspace @oai404iao/pi-code-mode

@@ -35,6 +35,7 @@ import { createApplyPatchToolDefinition } from "./tools/apply-patch.js";
 import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInput } from "./tools/view-image.js";
 
 import { addPackageTool, ensureCodexServices } from "@oai404iao/pi-codex-runtime";
+import { registerCodeModeOwnedTool } from "@oai404iao/pi-codex-runtime/internal/code-mode-contributions";
 
 import { registerResponsesProviderRuntime } from "./extension/provider-runtime.js";
 import { registerPatchContribution } from "./code-mode-adapter.js";
@@ -194,9 +195,9 @@ function registerCoreTools(pi: ExtensionAPI): void {
 			return viewImageResultComponent(result, options, theme, context);
 		},
 	} as never);
-	pi.registerTool(createApplyPatchToolDefinition({
+	registerCodeModeOwnedTool(pi, createApplyPatchToolDefinition({
 		deferRendering: loadSettings().deferApplyPatchRendering,
-	}) as never);
+	}));
 }
 
 

@@ -22,6 +22,8 @@ export async function piSession(t: TestContext, options: {
 	write?: boolean; process?: boolean; tools?: string;
 	visibility?: string; factoryFirst?: boolean; activeTools?: string[];
 	protocol?: string; grammar?: boolean; factories?: ExtensionFactory[];
+	expectedToolConflict?: string;
+	maxCells?: number;
 } = {}) {
 	const cwd = options.cwd ?? await scratch("pi");
 	const agentDir = join(cwd, "agent");
@@ -34,7 +36,11 @@ export async function piSession(t: TestContext, options: {
 		extensionFactories: options.factoryFirst ? [...(options.factories ?? [options.factory!]), codeMode] : options.factories ?? (options.factory ? [options.factory] : []),
 	});
 	await loader.reload();
-	assert.deepEqual(loader.getExtensions().errors, []);
+	if (options.expectedToolConflict) {
+		const errors = loader.getExtensions().errors;
+		assert.equal(errors.length, 1);
+		assert(errors[0].error.includes(`Tool "${options.expectedToolConflict}" conflicts with`));
+	} else assert.deepEqual(loader.getExtensions().errors, []);
 	const loaded = loader.getExtensions();
 	if (options.host) loaded.runtime.flagValues.set("code-mode-host", options.host);
 	if (options.grant) loaded.runtime.flagValues.set("code-mode-read-root", cwd);
@@ -43,6 +49,7 @@ export async function piSession(t: TestContext, options: {
 	if (options.tools) loaded.runtime.flagValues.set("code-mode-tools", options.tools);
 	if (options.visibility) loaded.runtime.flagValues.set("code-mode-visibility", options.visibility);
 	if (options.protocol) loaded.runtime.flagValues.set("code-mode-protocol", options.protocol);
+	if (options.maxCells !== undefined) loaded.runtime.flagValues.set("code-mode-max-cells", String(options.maxCells));
 	const modelRuntime = await ModelRuntime.create({
 		credentials: new InMemoryCredentialStore(), modelsPath: null,
 		modelsStorePath: join(agentDir, "models-store.json"), allowModelNetwork: false,

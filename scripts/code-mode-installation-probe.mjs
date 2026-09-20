@@ -1,6 +1,6 @@
 // Copied into the isolated consumer: bare imports MUST resolve there.
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, realpathSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, SessionManager, VERSION } from "@earendil-works/pi-coding-agent";
@@ -14,25 +14,35 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf
 assert(!Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies, ...manifest.peerDependencies })
 	.some((name) => name.startsWith("@oai404iao/pi-codex")));
 const cwd = join(root, "cwd");
+const configDirectory = join(process.env.PI_CODING_AGENT_DIR, "extensions/pi-code-mode");
+mkdirSync(configDirectory, { recursive: true });
+writeFileSync(join(configDirectory, "config.json"), JSON.stringify({
+	version: 1, hostPath: process.env.CODE_MODE_TEST_HOST, protocol: "auto", visibility: "hide-bridged", maxCells: 2,
+}));
 writeFileSync(join(cwd, "fixture.txt"), "tarball-runtime-read");
 // Exercise the public TypeScript subpath through the real Pi extension loader,
 // not Node's unsupported raw node_modules type stripping or a workspace alias.
 const contributionPath = join(root, "contribution.ts");
 writeFileSync(contributionPath, `
-import { createCodeModeDirectBinding, registerCodeModeTools } from "@oai404iao/pi-code-mode/contributions";
+import { createCodeModeDirectBinding, registerCodeModeTools, registerCodeModeObserver } from "@oai404iao/pi-code-mode/contributions";
 import { Type } from "typebox";
 import { fileURLToPath } from "node:url";
 export default function contribution(pi) {
+	globalThis.__codeModeReceipts = [];
+	const stopObserver = registerCodeModeObserver(pi, { id: "installed", complete(receipt) {
+		globalThis.__codeModeReceipts.push({ frozen: Object.isFrozen(receipt),
+			privateFields: "input" in receipt || "value" in receipt, origin: receipt.originToolCallId });
+	} });
 	pi.registerTool({ name: "installed_lookup", label: "Lookup", description: "Installed direct lookup",
 		parameters: Type.Object({}), async execute() { throw new Error("Use the contributed adapter"); } });
 	const owner = createCodeModeDirectBinding(pi, { name: "installed_lookup", sourcePath: fileURLToPath(import.meta.url) });
 	const registration = registerCodeModeTools(pi, { id: "fixture", tools: [{
-		name: "read", description: "Installed public contribution", parameters: Type.Object({}), effect: "read",
+		name: "read", description: "Installed public contribution", parameters: Type.Object({}), outputSchema: Type.String(), effect: "read",
 		direct: owner.binding,
 		async invoke() { return { value: "installed-contribution" }; },
 	}] });
 	pi.on("session_start", () => { owner.setActive(true); });
-	pi.on("session_shutdown", () => { registration.dispose(); owner.dispose(); });
+	pi.on("session_shutdown", () => { registration.dispose(); owner.dispose(); stopObserver(); });
 }
 `);
 let requests = 0;
@@ -41,20 +51,22 @@ globalThis.fetch = async (input, init) => {
 	assert.equal(new URL(request.url).origin, "https://s1-fixture.invalid");
 	const body = await request.json();
 	requests++;
-	assert(requests <= 3);
+	assert(requests <= 4);
 	assert(body.tools.some((tool) => tool.type === "custom" && tool.custom?.name === "exec"));
 	assert(body.tools.some((tool) => tool.function?.name === "wait"));
 	assert(!body.tools.some((tool) => tool.function?.name === "installed_lookup"));
 	assert(body.tools.some((tool) => tool.function?.name === "bash"), "unadapted direct tools remain");
-	if (requests === 3) {
+	if (requests === 4) {
 		assert.match(JSON.stringify(body.messages), /tarball-runtime-read/);
 		assert.match(JSON.stringify(body.messages), /installed-contribution/);
+		assert.match(JSON.stringify(body.messages), /installed-sibling/);
 	}
 	const cellId = JSON.stringify(body.messages).match(/cm-[a-f0-9-]{36}/)?.[0];
-	if (requests === 2) assert(cellId);
-	const delta = requests <= 2
+	if (requests === 3) assert(cellId);
+	const delta = requests <= 3
 		? { role: "assistant", tool_calls: [{ index: 0, id: `call_${requests}`, ...(requests === 1
-			? { type: "custom", custom: { name: "exec", input: "// @exec: {\"yield_time_ms\":0}\ntext((await tools.read({path:'fixture.txt'})).text); text(await tools.fixture__read({}))" } }
+			? { type: "custom", custom: { name: "exec", input: "// @exec: {\"yield_time_ms\":0}\ntext((await tools.read({path:'fixture.txt'})).text); text(await tools.fixture__read({})); await new Promise(r=>setTimeout(r,500))" } }
+			: requests === 2 ? { type: "custom", custom: { name: "exec", input: "// @exec: {\"yield_time_ms\":10000}\ntext('installed-sibling')" } }
 			: { type: "function", function: { name: "wait", arguments: JSON.stringify({ cell_id: cellId, yield_time_ms: 10000 }) } }),
 		}] }
 		: { role: "assistant", content: "Done" };
@@ -62,7 +74,7 @@ globalThis.fetch = async (input, init) => {
 		id: "s1", object: "chat.completion.chunk", created: 1, model: "s1",
 		choices: [{ index: 0, delta: value, finish_reason }],
 	})}\n\n`;
-	return new Response(chunk(delta, null) + chunk({}, requests <= 2 ? "tool_calls" : "stop") + "data: [DONE]\n\n",
+	return new Response(chunk(delta, null) + chunk({}, requests <= 3 ? "tool_calls" : "stop") + "data: [DONE]\n\n",
 		{ headers: { "content-type": "text/event-stream" } });
 };
 const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } });
@@ -74,11 +86,8 @@ const loader = new DefaultResourceLoader({
 await loader.reload();
 assert.deepEqual(loader.getExtensions().errors, []);
 const loaded = loader.getExtensions();
-loaded.runtime.flagValues.set("code-mode-host", process.env.CODE_MODE_TEST_HOST);
 loaded.runtime.flagValues.set("code-mode-read-root", cwd);
 loaded.runtime.flagValues.set("code-mode-tools", "fixture__read");
-loaded.runtime.flagValues.set("code-mode-visibility", "hide-bridged");
-loaded.runtime.flagValues.set("code-mode-protocol", "auto");
 const modelRuntime = await ModelRuntime.create({
 	authPath: join(root, "agent/auth.json"), modelsPath: null, modelsStorePath: join(root, "agent/models-store.json"), allowModelNetwork: false,
 });
@@ -97,11 +106,19 @@ try {
 	// Pi 0.85.1 reload emits session_start only when a UI/action/error binding
 	// is retained. Match the real print frontend's error binding, not mode alone.
 	await session.bindExtensions({ mode: "print", onError: (error) => errors.push(error.error) });
+	assert.match(session.getAllTools().find((tool) => tool.name === "exec").description, /Promise<string>/);
+	await session.prompt("/code-mode doctor");
 	await session.prompt("Read fixture.txt through exec");
-	assert.equal(requests, 3);
+	assert.equal(requests, 4);
 	const result = session.messages.find((message) => message.role === "toolResult" && message.toolName === "wait");
 	assert(result && !result.isError);
 	assert.match(JSON.stringify(result.content), /tarball-runtime-read/);
+	const sibling = session.messages.find((message) => message.role === "toolResult" && message.toolCallId === "call_2");
+	assert(sibling && !sibling.isError);
+	assert.equal(sibling.details.epoch, result.details.epoch);
+	assert.equal(sibling.details.runtimeReset, false);
+	assert.equal(globalThis.__codeModeReceipts.length, 2);
+	assert(globalThis.__codeModeReceipts.every(r => r.frozen && !r.privateFields && r.origin === "call_1"));
 	await session.prompt("/code-mode off");
 	assert(!session.getActiveToolNames().includes("exec"));
 	assert(session.getActiveToolNames().includes("installed_lookup"));
@@ -111,7 +128,7 @@ try {
 	await session.prompt("/code-mode off");
 	assert(session.getActiveToolNames().includes("installed_lookup"));
 	assert.deepEqual(errors, []);
-	console.log(`PASS isolated S3/S4 production tarball, native grammar, public owner cooperation, hide/restore/reload, exec/wait, Pi ${VERSION}, real Host, no Codex packages`);
+	console.log(`PASS isolated U4 production tarball, config/doctor/output schema, native grammar, public owner cooperation, hide/restore/reload, two shared-Host cells, Pi ${VERSION}, real Host, no Codex packages`);
 } finally {
 	await session.abort();
 	await session.prompt("/code-mode off");

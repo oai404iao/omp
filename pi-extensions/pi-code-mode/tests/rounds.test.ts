@@ -158,21 +158,46 @@ test("real Pi: Esc after exec returns aborts the cross-turn contribution and pre
 
 test("real Pi: model switch, tree navigation and reload discard cells/store without replay", { timeout: 25000 }, async (t) => {
 	const http = transport(t);
-	const f = await piSession(t, { host, grant: true });
+	const f = await piSession(t, { host, grant: true, maxCells: 2 });
 	assert.equal((await http.run(f.session, { name: "exec", arguments: { code: "store('old', 1)", yield_time_ms: 10000 } })).isError, false);
 	const old = cellId(await http.run(f.session, exec("await new Promise(() => {})")));
+	const oldSibling = cellId(await http.run(f.session, exec("await new Promise(() => {})")));
 	await f.session.setModel({ ...f.session.model!, id: "s2-switch" });
 	assert.equal((await http.run(f.session, wait(old))).isError, true);
+	assert.equal((await http.run(f.session, wait(oldSibling))).isError, true);
 	const result = await http.run(f.session, { name: "exec", arguments: { code: "text(load('old') ?? 'empty')", yield_time_ms: 10000 } });
 	assert.match(JSON.stringify(result.content), /empty/);
 	const second = cellId(await http.run(f.session, exec("await new Promise(() => {})")));
+	const secondSibling = cellId(await http.run(f.session, exec("await new Promise(() => {})")));
 	const navigation = await f.session.navigateTree(f.session.getUserMessagesForForking()[0].entryId, { summarize: false });
 	assert.equal(navigation.cancelled, false);
 	assert.equal((await http.run(f.session, wait(second))).isError, true);
+	assert.equal((await http.run(f.session, wait(secondSibling))).isError, true);
 	const third = cellId(await http.run(f.session, exec("await new Promise(() => {})")));
+	const thirdSibling = cellId(await http.run(f.session, exec("await new Promise(() => {})")));
 	await f.session.reload();
 	assert.equal((await http.run(f.session, wait(third))).isError, true);
+	assert.equal((await http.run(f.session, wait(thirdSibling))).isError, true);
 	assert.deepEqual(f.errors, []);
+});
+
+test("real Pi U4: two cells survive user turns; commands require a target and preserve unread receipts", { timeout: 20000 }, async (t) => {
+	const http = transport(t);
+	const f = await piSession(t, { host, grant: true, maxCells: 2 });
+	const a = cellId(await http.run(f.session, exec("text('A'); await new Promise(()=>{})")));
+	const b = cellId(await http.run(f.session, exec("text('B'); await new Promise(()=>{})")));
+	await f.session.prompt("/code-mode cells");
+	await f.session.prompt("/code-mode terminate");
+	assert(f.errors.some((error) => error.includes("No unique")));
+	await f.session.prompt(`/code-mode terminate ${a}`);
+	const done = await http.run(f.session, wait(a));
+	assert.equal(done.isError, false);
+	assert.equal((done.details as { state: string }).state, "terminated");
+	const pending = await http.run(f.session, { name: "wait", arguments: { cell_id: b, yield_time_ms: 0 } });
+	assert.equal((pending.details as { state: string }).state, "running");
+	await f.session.prompt("/code-mode terminate all");
+	assert.equal((await http.run(f.session, wait(b))).isError, false);
+	assert.equal((await http.run(f.session, wait(a))).isError, true);
 });
 
 test("real Pi: ungranted contribution is absent, policies block execution and redact before JavaScript", { timeout: 20000 }, async (t) => {

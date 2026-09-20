@@ -1,0 +1,17 @@
+{
+  "release": "rust-v0.155.1+pi-v8-sort.1",
+  "source": "be2951ea34f0d295ed0becf97079f92fa5f6950e",
+  "patch": "aaa2cabfbcb8d9997ce67e166f796f46d5b72342",
+  "patchSha256": "4002429516d3048b8d19687f8c8016cd4e04a7cac4a24101e5fd57341456ba3d",
+  "target": "x86_64-unknown-linux-gnu",
+  "glibcMinimum": "2.39",
+  "sharedLibraries": ["libssl.so.3", "libcrypto.so.3", "libgcc_s.so.1", "libm.so.6", "libc.so.6", "ld-linux-x86-64.so.2"],
+  "sha256": "4c5824da1cdf4652ce08e13ed572a7d488814d9fe0f9dd6ac0ce683422c27690",
+  "bytes": 65707032,
+  "sourceLockSha256": "81eb29f6276d5b3d1b39f1588a26059dadfbba717952247efeb8a575f271f569",
+  "buildLockSha256": "df88a71b82843c6f092610fb07589f7a40032ddc25f50718354546ca541eb9b7",
+  "rust": "1.95.0 (59807616e 2026-04-14)",
+  "profile": "release; debug=0,lto=false,codegen-units=16,strip=symbols",
+  "v8ArchiveSha256": "a35c75d1f26e6a983885a45b33490a4ebe54f05050568b32b89cfb421b30b583",
+  "v8BindingSha256": "7727826ae479bdb645e807239fb12d1f8e2e23de7a6cf16f5ee592690d1d8506"
+}

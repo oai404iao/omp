@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { addPackageTool, ensureCodexServices } from "@oai404iao/pi-codex-runtime";
+import { registerCodeModeOwnedTool } from "@oai404iao/pi-codex-runtime/internal/code-mode-contributions";
 import { currentCodexTurn, resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { createWebSearchToolDefinition } from "./tools/web-search.js";
 import { createWebSearchCapture } from "./tools/web-search/capture.js";
@@ -16,7 +17,7 @@ export default function codexWebSearch(pi: ExtensionAPI): void {
 		streamEffects: () => ({ createEventObserver: createWebSearchCapture }),
 	});
 	addPackageTool(broker, "web_search", () => {
-		pi.registerTool(createWebSearchToolDefinition({
+		registerCodeModeOwnedTool(pi, createWebSearchToolDefinition({
 			getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
 			getRequestIdentity: sessionId => resolveCodexRequestIdentity(sessionId, undefined, "turn"),
 			hasProviderRuntime: () => broker.coreEnabled,

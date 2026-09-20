@@ -21,7 +21,7 @@ const signal = () => new AbortController().signal;
 
 test("contributions: discovery is load-order independent, snapshots immutable, refresh/dispose explicit", () => {
 	const pi = { events: createEventBus() } as unknown as ExtensionAPI;
-	assert.deepEqual(collect(pi), { tools: [], policies: [] });
+	assert.deepEqual(collect(pi), { tools: [], policies: [], observers: [], approvals: [] });
 	const first = registerCodeModeTools(pi, { id: "first", tools: [tool] });
 	const snapshot = collect(pi);
 	assert.equal(snapshot.tools[0].name, "first__echo");
@@ -170,7 +170,7 @@ test("cell: a running snapshot cannot consume a terminal result that arrived jus
 		return snapshot;
 	};
 	const session = new CodeSession();
-	Object.assign(session, { cell });
+	Object.assign(session, { cells: new Map([[cell.id, cell]]) });
 	const running = await session.wait(cell.id, { yield_time_ms: 0 });
 	assert.equal(running.state, "running");
 	assert.equal(session.activeCell?.id, cell.id);
@@ -205,6 +205,7 @@ test("runtime: cancellation during effect settlement cannot become successful co
 	const controller = new AbortController();
 	const runtime = Object.create(Runtime.prototype) as Runtime;
 	Object.assign(runtime, {
+		active: new Set(), cells: new Map(), starts: Promise.resolve(), delegates: new Map(), delegateIds: new Set(),
 		supervisor: { arm: async () => async () => {} },
 		wire: { start: () => ({
 			started: Promise.resolve({ type: "execution/started", cellId: "backend" }),
@@ -224,7 +225,7 @@ test("session: teardown audits late usage once and stays blocked", { timeout: 10
 		return "terminated";
 	});
 	const session = new CodeSession();
-	Object.assign(session, { cell });
+	Object.assign(session, { cells: new Map([[cell.id, cell]]) });
 	const audits: unknown[] = [];
 	session.onDiscard = (receipt) => audits.push(receipt.usage);
 	await assert.rejects(session.revoke(true), /settling/);
@@ -244,7 +245,7 @@ test("session: teardown and an active observer cannot double-consume usage", asy
 		return "terminated";
 	});
 	const session = new CodeSession();
-	Object.assign(session, { cell });
+	Object.assign(session, { cells: new Map([[cell.id, cell]]) });
 	const audits: unknown[] = [];
 	session.onDiscard = (receipt) => audits.push(receipt.usage);
 	const observation = session.wait(cell.id, { yield_time_ms: 1000 });

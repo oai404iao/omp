@@ -14,7 +14,7 @@ test("S2 cells: yield, single observer, observation abort, terminal consumption 
 	await session.authorize(await scratch("s2-observe"), host);
 	const first = await session.execute("await new Promise(r=>setTimeout(r,1000)); text('done')", undefined, { yield_time_ms: 0 });
 	assert.equal(first.state, "running");
-	await assert.rejects(session.execute("text('duplicate')"), /Only one/);
+	await assert.rejects(session.execute("text('duplicate')"), /capacity 1/);
 	const controller = new AbortController();
 	const pending = session.wait(first.cellId, { yield_time_ms: 3000 }, controller.signal);
 	await assert.rejects(session.wait(first.cellId), /observer/);
