@@ -1,12 +1,32 @@
 # Code Mode：工具声明、内置工具接入与 Codex 协商设计
 
-状态：**设计提案，尚未实现**。本轮只合并既有 U0–U4，并分析下一步协议。
+状态：**互操作设计提案，尚未实现；已按 Pi 0.86.1 重新核对**。
 
-- 已本地 squash 合并：`main@972d2c2c`，来源 `feat/code-mode-u0-u4@bb5592d8`。
-- 合并后的文件树与已验收的功能分支一致；未推送、发布或改变 Pi baseline。
-- 本文的现状以该提交和本地安装的 **Pi 0.85.1** 为准，不推断其他版本。
+- 原 U0–U4 合并点：`972d2c2c`；旧版设计保留在 `fb4ff5e0`。
+- 当前复核基线：用户更新后的 **`main@b02484ce`**，包含
+  `bb7e5ea5` 的 Pi 0.86.1 适配，以及后续版本/metadata/test 提交。
+- 项目实际解析的 coding-agent、agent-core、ai 均为 **0.86.1**，不是仅改 peer
+  声明；Code Mode 现为 private `0.2.0`，Codex runtime/core 为 `0.3.0`。
+- 以下区分“用户已完成的适配”和“本方案待实现内容”。不回退用户改动，
+  不重新合并旧代码，不支持已退出项目 baseline 的 Pi 0.85.x。
 - 前序：[U0–U4 实施契约](pi-code-mode-u0-u4.md)、
-  [实施审计](../audits/pi-code-mode-u0-u4.md)。
+  [实施审计](../audits/pi-code-mode-u0-u4.md)、
+  [当前 Pi 兼容边界](../pi-compatibility.md)。
+
+## 0. 本次复核改变了什么
+
+| 旧方案判断 | 0.86.1 复核后的处理 |
+| --- | --- |
+| owner 显式提供 executor，不按名字自动包装 | **保留**；ExtensionAPI 仍没有完整、继承 hooks 的注册工具调用 API |
+| getAllTools 只有元数据 | **保留并限定范围**；SDK `AgentSession.getToolDefinition()` 是公共 getter，但不是原生调用管线 |
+| loader 依赖 tool-result `addedToolNames` | **撤回旧解释**；现在由请求前的 system-message tool deltas 记录变化 |
+| JSON/grammar 两种 transport 协商即可 | **扩展**：需区分 transcript 输入与有效 checkpoint/delta 投影、移除和同名重定义 |
+| 只考虑 live active set 与 lease | **扩展**：`/tree` 会从历史声明恢复名称，并绑定当前 registry 的实现 |
+| owner 恢复跨 tree 没实现 | 用户已修复 **released lease 的恢复被历史 omission 覆盖**；不得当成待重做任务 |
+| `before_agent_start` 返回整个 systemPrompt | 仍可用，但成为本轮 forced projection；建议改用独立 `sections.code_mode` |
+| schema/source 引用可作协作证据 | 当前 live registry 仍成立；transcript 的 cloned declarations **绝不可作 owner 证据** |
+| 子会话可以继承已完成对话 | 保留；用户已排除 parent system authority，新的 intent metadata 也不得重新泄入 child |
+| v1 审批协商、factory 异常路径 | **仍待解决**；升级 Pi 不会自动修正我们的互操作 ABI |
 
 ## 1. 结论
 
@@ -18,7 +38,8 @@
 
 1. **可嵌套执行**：实际 executor、参数与结果、效果、取消/结算契约。
 2. **允许协作隐藏**：实际 direct owner 的注册证据、activation intent、lease。
-3. **支持传输格式**：provider 的 JSON/grammar 编码及历史兼容能力。
+3. **支持传输格式**：provider 的 JSON/grammar 编码，以及 TranscriptContext
+   中 prompt sections/tool deltas 的投影能力。
 
 另外两种决定不属于工具自我声明：
 
@@ -41,7 +62,9 @@
 | 生命周期 | cell 捕获 catalog；现有 `CHANGED {version:1}` 导致全会话失效 |
 | Codex | core 提供 patch，web 提供 standalone search；hosted/image 仍 direct |
 | provider | `transport/v1` 比对实际 `streamSimple` 引用，再结合 model/API metadata 和历史 |
-| Pi 元数据 | `getAllTools()` 没有 executor，没有通用的 public `invokeRegisteredTool()` |
+| provider 输入 | `TranscriptContext`；Codex 已重放有效 prompt/tools，送入原 Standard/Lite complete-loadout encoder |
+| Pi 元数据 | ExtensionAPI `getAllTools()` 没有 executor；SDK `getToolDefinition()` 可取 raw definition，但没有通用的 hook-preserving `invokeRegisteredTool()` |
+| tool history | system-message `toolsAdded/toolsRemoved` 描述变化；不保存 executor、grants 或 lease |
 
 主要源码：
 
@@ -56,16 +79,22 @@
   [owner client](../../pi-extensions/pi-codex-runtime/src/code-mode-owner.ts)、
   [activation](../../pi-extensions/pi-codex-runtime/src/tool-activation.ts)。
 
-Pi 证据（机器上的只读依赖，不纳入 vendor）：
+Pi 证据（项目实际安装的 0.86.1 只读依赖，不纳入 vendor）：
 
 - `node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts`：
   `ToolDefinition`、`ExtensionAPI`、`ToolInfo`。
-- `dist/core/agent-session.js` 的 `getAllTools()` 返回描述、schema、guidelines、
-  sourceInfo，不返回 execute。
-- `/usr/lib/node_modules/pi/packages/coding-agent/docs/extensions.md`：
-  Tool Events、Custom Tools、Remote Execution、Dynamic Tool Loading。
-- 对应 `examples/extensions/tool-override.ts` 与 `ssh.ts` 展示了同名工具
-  可以换成访问控制、SSH/backend operations，名字不能证明执行位置。
+- coding-agent 的 `dist/core/agent-session.js`：`getAllTools()`、
+  `getToolDefinition()`、`_preparePromptAndToolLoadout()`、
+  `_installAgentForcedPromptProjection()`、`_restoreToolsFromTranscript()`。
+- coding-agent 的 `docs/extensions.md`、`docs/session-format.md`、
+  `docs/custom-provider.md`、`docs/sdk.md` 及相关 examples。
+- pi-ai 的 `dist/types.d.ts`、`dist/utils/transcript.js`；
+  agent-core 的 `dist/agent-loop.js`。
+
+**环境差异：** 本机 `/usr/bin/pi` 与 `/usr/lib/node_modules/pi` 在本次复核时
+仍是 **0.85.1**，不能作为新 baseline 的证据。此前
+`code-mode-local-pi.fm058sNd/start-pi.sh` 固定执行 `/usr/bin/pi`，旧试用目录
+未经 0.86.1 重新验收。本轮不改全局安装和既有测试目录。
 
 ## 3. 先修的协议缺口
 
@@ -79,6 +108,8 @@ Pi 证据（机器上的只读依赖，不纳入 vendor）：
 
 **当前 U4 bridge 会检查审批**；问题是跨版本协作没有 feature acknowledgment。
 同样不能依赖旧 consumer “应该会忽略不认识的功能但仍安全”。
+这里引用初版作为协议演化证据，不表示 Pi 0.85.x 再次进入支持矩阵；
+后续兼容测试应区分 **SDK 版本、包版本、互操作 ABI/feature** 三个维度。
 
 处理：
 
@@ -130,10 +161,40 @@ Code Mode 自己的 `exec`/`wait` 部分检查仍主要依赖 description，应�
 - owner 保存的实际 definition/schema 引用；
 - Pi public sourceInfo 和必要的 metadata fingerprint。
 
-Pi 0.85.1 没有给扩展暴露不变的 registration token。自己生成的 generation
+Pi 0.86.1 仍没有给扩展暴露不变的 registration token。自己生成的 generation
 不是 Pi 的身份认证凭证；相同来源、相同对象/元数据的恶意伪装不在安全承诺内。
 owner 主动替换定义必须明确 dispose/re-register。未来 Pi 若 clone metadata，
 应失去隐藏资格而非按名字退化认领。
+
+0.86.1 还要严格区分：
+
+1. `getAllTools()` 每次返回新的 ToolInfo wrapper，但其中 parameters 仍是
+   当前已注册 schema 引用，不能比较 ToolInfo wrapper 的 `===`。
+2. SDK getter 返回当前 raw definition，调用其 execute 不会经过 Pi native
+   preflight/result/event/history/accounting 流程。
+3. transcript 工具声明会 JSON-clone schema，只保留模型接口字段；
+   sourceInfo、函数、owner identity 不在其中。不能拿历史 schema 引用、
+   `getCurrentTools(messages)` 或同名 tool delta 来证明 ownership。
+
+### 3.5 新增：历史 loadout 恢复不等于恢复 logical intent
+
+用户在 `direct-binding.ts` 已加入 before-tree/tree handlers，保护：
+lease 已释放并恢复 direct 后，历史中的 lease-hidden omission 不应再次隐藏它。
+现有 regression 也覆盖了这一范围，应保留而不是重写掉。
+
+但这不是完整的历史协调协议：
+
+- **已复现：** 当前 owner `setActive(false)` 后，跳到历史里该名称 active 的
+  loadout，Pi 可以把它重新激活；helper 并不在每种 tree 场景保留独立 logical intent。
+- Codex activation 目前监听 session/model/thinking，尚未在 `session_tree`
+  重算 profile/ownership 与 native edit/write suppression。
+- fresh owner 看到一个历史 inactive 名称，无法知道它是用户关闭还是过去
+  lease 的物理投影。不能靠这个布尔值重建授权、历史 owner 或恢复 receipt。
+- `dispose()` 新增 tree subscription 解绑；如果解绑后 release 抛错，
+  需要明确 retry/closing 阶段是否继续观察历史状态，不能把半拆除当成功。
+
+这些属于下一轮需要明确并覆盖的边界；不声称完整 Codex resume/fork 路径
+已经复现故障。第 8.3 节提出统一的仲裁规则。
 
 ## 4. 其他扩展现在如何声明
 
@@ -244,8 +305,10 @@ export default function inventory(pi: ExtensionAPI) {
 - 可以由同一 helper 创建 owner control，减少忘记同步 activation 的风险；
 - 未安装 Code Mode 时照常注册 direct，且不启动任何 Host。
 
-不能简单 `adapter.invoke = definition.execute`：
+不能简单 `adapter.invoke = definition.execute`，即使 SDK host 可以取得 raw definition：
 execute 的参数、结果、hooks、进度、控制流和取消上下文并不等价。
+Pi 0.86.1 原生 arguments/results 也收紧到 JSON，不意味着其执行语义与
+Code Mode 的 JSON bridge 自动等价。
 不要注册第二套权限模型，也不要全局 monkey-patch `registerTool`。
 
 ### 4.4 可选集成不应强制安装 private runtime
@@ -322,12 +385,17 @@ authority 描述是披露，不是由一个字符串自动提供的 sandbox。
 | 纯查询、结构化 API、文本数据转换 | 首批 adapter；JSON、预算、signal 明确即可 |
 | `pi-subagent.list_agents` | 可作为后续查询 adapter；从 coordinator 获取受限结构数据，不解析显示文本 |
 | subagent / fork / followup / wait_agent | 默认保留 direct；涉及子会话、durable mailbox、消费 receipt、上下文/费用及生命周期，不是普通“read” |
-| 动态工具 loader | 保留 direct；Pi 用真实工具执行记录 additive activation/addedToolNames，nested 调用不能冒充该流程 |
+| 动态工具 loader | 仍建议保留 direct，但理由改为“它改变 executable/loadout 与未来 catalog”；0.86.1 已改成请求前 system tool deltas，不再依赖 tool-result addedToolNames |
 | ask-user-question 等交互 UI | 默认 direct；Code Mode approval 只用于授权，不是通用问答工具替代品 |
 | view_image / image_generation / 音视频 | 当前数据通道 JSON/text-only，不接受静默删媒体；等待单独的多模态设计 |
 | `pi-tree-continue`、切模型/重载/compact | agent/session 控制，不进入普通 data adapter |
 | external-thinking、keep-defaults、通知/展示 hooks | 本身不一定有可调用的数据工具；无须为了 Code Mode 强行造 tool |
 | permission/redaction 扩展 | 提供显式 policy/approval，或抽取共享 guard；仅注册 Pi hook 不等于保护 nested calls |
+
+0.86.1 中，nested adapter 若在闭包里调用 `setActiveTools()`，也可能改变下一次
+请求的声明；仅拒绝未知 result 字段拦不住这件事。因此 data adapter 契约
+明确禁止调用 agent/loadout 控制操作，违规属于可信 owner 契约违背。
+不要把“结果是 JSON”当成对扩展副作用的安全隔离。
 
 任何未来 subagent 适配都要先证明：child 不继承比原设计更多的 grants、不递归
 触发 exec、并发/深度预算不被放大、usage/完成 receipt 不重复、不把 parent
@@ -401,6 +469,10 @@ observer-receipt/1
 
 ### 7.2 老新组合与 mandatory policy
 
+以下“旧/新”指互操作协议或包代次，不是允许 Pi 0.85.x 与 0.86.1 混装。
+生产验收统一使用项目 0.86.1 floor/target；旧 ABI 行为可通过隔离 fixture
+验证，不为已经退出 baseline 的 SDK 新增兼容分支。
+
 | producer / consumer | 规则 |
 | --- | --- |
 | 旧 producer + 新 consumer | 可以支持已审计 v1 baseline；明确标记 legacy，不凭空声称有新 capability |
@@ -418,7 +490,7 @@ consumer 不能仅因两个 offer 名字一样就静默挑 v2；无法证明同�
 新 policy producer 若要求旧 consumer 不具备的语义，应同时提供一个
 兼容 v1 `before` 的 fail-closed guard，明确拒绝 nested calls，而不是略过策略。
 
-另一个关键事实：Pi 0.85.1 的 `dist/core/event-bus.js` 会捕获并记录 listener
+另一个关键事实：Pi 0.86.1 的 `dist/core/event-bus.js` 仍会捕获并记录 listener
 异常，`emit()` 的调用者不能用 try/catch 感知“producer 在 offer 前失败”。
 因此必须建立**独立于本次成功 offer 的 mandatory-policy 期望集合**：
 
@@ -485,7 +557,7 @@ missing-approval-feature、foreign-direct-owner、stale-registration。
 | --- | --- | --- |
 | tool contribution | 提供真实 client executor、profile availability、result conversion、owner guards | grants、schema/policy/approval、cell 调度与预算、usage/结果交付 |
 | direct-owner lease | 保存 logical activation intent、实际注册证据；投影 physical active set | 对兼容且已授权的 adapter 申请/释放隐藏；失败保守恢复 |
-| provider transport | 声明具体 stream 的 JSON/grammar/history 能力 | 按实际 active stream/model/history 选择格式；auto 安全 fallback |
+| provider transport | 声明具体 stream 的 JSON/grammar、TranscriptContext 投影能力 | 按实际 active stream/model/history 选择；preserve declarations/sections，auto 安全 fallback |
 
 继续维持包依赖：
 
@@ -514,30 +586,111 @@ owner 要分别提供 capability availability 与 direct activation intent；
 owner 的禁用/profile kill switch 则应同时撤销其可执行 offer。
 已有 exact grants 是 nested 授权，不从 `getActiveTools()` 推断授权。
 
-### 8.3 lease 是协调状态，不是全局 active-tools 拦截器
+### 8.3 将 tree 的历史候选状态纳入 owner 仲裁
 
-仍采用当前合理的 logical/physical 分离：
+0.86.1 `/tree` 在发 `session_tree` **之前**调用 `_restoreToolsFromTranscript()`。
+它重放历史工具声明的名称，并在**当前 registry**中查找 executor；历史
+schema/description 不会还原出旧函数。未注册的名字被忽略。
+目标历史没有 system message 时，该 helper 直接返回，不保证清空/重置工具。
 
-1. Codex 按 settings/profile/owner intent 算 logical set。
-2. 基于 logical apply_patch 判定 native write/edit suppression。
-3. owner `projectActive()` 把已持有 lease 的名字投影成 physical inactive。
-4. 合并 live registry 后只写一次 active set，随后 reconcile。
-5. Code Mode off/协议失败/owner撤销释放自己的 receipt，不回放旧工具全集。
+所以必须拆开四份状态：
 
-generation/revision 要贯穿 acquire/reconcile/release，旧 consumer 的 release
-不能恢复新 owner。owner失去注册资格即停止隐藏，不重新按名字抢占。
-修复第 3 节的失败重试、重入和 live-control 预算。
+```text
+历史 model declarations    只是 loadout 候选，不是 executor/grant
+当前 owner logical intent 有来源/代次；不是每次都从 physical set 反推
+当前 physical active set  owner projection + Code Mode lease 的结果
+当前 cell catalog         已授权的、不可变的 executable snapshot
+```
+
+建议由实际 owner（Codex 则是 shared activation service）统一仲裁：
+
+1. 首先验证当前 registration ownership；foreign replacement 不碰。
+2. 当前 profile/global kill switch 等 availability 限制优先，历史不能复活禁用能力。
+3. 当前代、经 owner 协作接口记录的最新显式意图优先于历史 physical 候选。
+   合法的新 settings/model/user 操作仍可按 owner 原业务规则更新意图。
+   不能把 Pi 的历史 replay 假装成一条新的 `setActive(true/false)`。
+4. 没有显式意图时，owner 才按既有 autoEnable/初始 loadout 规则处理候选。
+   不在 Code Mode 中重写 Codex 的业务配置规则。
+5. 基于 logical apply_patch 重算 native edit/write suppression；
+   再应用 live Code Mode lease，得到 physical set。
+6. 只合并自己拥有的变化到 live set，单次写入，再 reconcile；不能回放旧全集。
+
+应在 `session_tree` 协调 Codex activation，而不只是 helper 单独恢复一个名字。
+要适配正反加载顺序：Pi replay → 撤销旧 cell/catalog → owner projection →
+重新判断是否能持 lease。即使各扩展 handler 次序不同，结束状态应收敛，
+不能在旧权限尚未撤销时先重开执行入口。
+
+最低决策表：
+
+| 状态 | 期望 |
+| --- | --- |
+| 当前 owner 显式 inactive，历史 active | 保持 inactive，除非有真正更新的 owner 意图 |
+| owner/profile 禁用，历史 active | 保持禁用；nested offer 也不可用 |
+| 当前 lease live，历史 active | direct 仍 hidden，不产生新 grant |
+| lease 已成功释放且恢复 active，历史 omission | 保留用户这次升级已实现的恢复行为 |
+| owner 已被替换，历史仍有同名工具 | 不隐藏/恢复 foreign tool；它由实际 owner 管理 |
+| 无 system history 或 missing registration | 不虚构历史权限/函数，按有证据的 live state 处理 |
+
+generation/revision 要贯穿 acquire/reconcile/release。旧 consumer 的 release
+不能恢复新 owner。解绑 tree handlers、释放 receipt、切换 factory 也应纳入
+retryable transition，不能在半拆除状态下声称已退出或已恢复。
 
 Pi 没有全局 active-tools-changed 通知；不能承诺观察到每个第三方/用户界面的
 所有 activation 意图。只有 owner 经协作 control 的意图有可靠因果关系。
 这不是 strict-only 模式，也不是权限边界。
 
-### 8.4 transport 不成为“Codex 模式”的授权开关
+**resume/fork/new/reload 与同实例 tree 不相同。** 新实例不得复用旧 closure、
+grant、approval 或 lease。首版不承诺跨 session 持久化所有 logical intent，
+以当前 owner 配置、明确 CLI/loadout 和重新发现为准；无法判明历史 omission
+来自用户还是 lease 时，不按历史猜测着恢复工具。
+如果以后持久化非权限 intent hint，必须独立设计其 session/branch/owner scope，
+不能让 child 将 parent 的 metadata 当自身 authority。
 
-继续确认 actual stream identity，不按 provider 名字猜。
-下一版 transport metadata 可以说明已支持的 JSON function、
-raw-JavaScript grammar、canonical history projection 和 wire variants；
-只有实际已验证的组合才声明支持。
+也不应笼统宣称“所有 resume/fork 都恢复历史 active set”：
+当前 AgentSession 构造路径只有在 `initialActiveToolNames === undefined` 时
+自动 restore，而正常 `createAgentSession()` 会提供初始数组。应分别测
+普通 CLI/SDK、显式 tool allowlist、直接 session 构造路径，不用 tree 测试代替。
+
+### 8.4 transport 协商增加 transcript 投影维度
+
+**已完成的适配，不重复实现：**
+
+- [provider-runtime.ts](../../pi-extensions/pi-codex-core/src/extension/provider-runtime.ts)
+  接收 `TranscriptContext`；native fallback 使用原 transcript。
+- [transcript.ts](../../pi-extensions/pi-codex-core/src/providers/openai-codex/transcript.ts)
+  用 `getCurrentSystemPrompt/getCurrentTools` 得到有效 checkpoint，再交给现有
+  Standard/Lite complete-loadout encoder；不修改持久化 transcript。
+- [native-compaction.ts](../../pi-extensions/pi-codex-core/src/native-compaction.ts)
+  保留有效 system checkpoint；
+  [compaction-prompt.ts](../../pi-extensions/pi-codex-core/src/extension/compaction-prompt.ts)
+  跟踪当前 run 的 forced prompt，在 settled/session 生命周期清除。
+
+新协议应说明“格式”和“历史投影”两个独立方面，例如：
+
+```text
+input                normalized Pi TranscriptContext
+tool wire formats    JSON function / raw JavaScript grammar
+projection           effective checkpoint / supported transcript deltas
+verified semantics   section patch, removal/redefinition, forced prompt,
+                     compaction checkpoint, canonical exec call history
+```
+
+这些是 transport offer 的信息，不往普通 data adapter requirements 里塞
+provider/SDK 内部细节。actual stream identity 仍需精确匹配，不按 provider 名猜。
+
+当前 Codex 应声明 **effective checkpoint**，不能声称已实现原位 delta transport
+或任意 prompt/tool 变化下的 cached-prefix 保留。原生 provider 能否保持 deltas
+仍取决于 model/compat/transport；同名重定义、removal 等可能触发 SDK fallback。
+
+0.86.1 transcript 的关键语义：
+
+- system `content` 追加；`sections[name] = text` 替换，`null` 删除；
+- 同条消息先 remove tools 再 add；同名 changed definition 可以是 remove+add；
+- schema/description/`constrainedSampling` 的变化属于模型接口变化；
+  **executor-only replacement 不保证产生 tool delta**；
+- Code Mode JSON↔grammar 变化要测同名 exec 重定义与旧 call/result 的配对；
+- 在 `context` hook 中过滤 system messages，可能同时抹掉 prompt 和工具声明。
+  `projectExecHistory` 只能投影其负责的 exec arguments，不能顺手丢掉这些记录。
 
 切换到 Anthropic 等 JSON 路径时，兼容的 data adapters 仍可使用；
 `auto → json` 不应该额外撤销纯工具能力。反之，有 grammar 支持也不意味着
@@ -546,6 +699,52 @@ transport/config/model 的实际撤销仍按现有 lifecycle 取消旧 cell。
 
 鉴权由执行该请求的 owner 通过 Pi model registry 获取；Code Mode 不接收、
 缓存或散播 Codex token。transport handshake 不做账号探测。
+
+### 8.5 Code Mode prompt 改用独立 section，而非每轮 forced 全文
+
+当前 `extension.ts` 仍返回 `{systemPrompt: event.systemPrompt + ...}`。
+0.86.1 下这会设置 request-local `forceSystemPrompt`，仍可执行，但该全文
+不是持久化的 structured prompt state，不能声称已利用 section deltas。
+
+建议下一轮改成（片段示意，尚未改运行时代码）：
+
+```ts
+pi.on("before_agent_start", (event, ctx) => {
+  if (!isCurrentlyAuthorized(ctx)) {
+    delete event.systemPromptOptions.sections.code_mode;
+    return;
+  }
+  event.systemPromptOptions.sections.code_mode = stableCodeModeInstructions(ctx);
+});
+```
+
+确切 API 是 `event.systemPromptOptions.sections`，**不是**
+`event.systemPromptSections`，也没有建议向原生 `ToolDefinition` 加未知字段。
+只维护自己的 `code_mode`，不覆盖内置 tools/rules，也不使用禁止的 preamble。
+
+两种 section 数据形状不能混淆：
+
+| 场合 | 值 / 删除 / 排序 |
+| --- | --- |
+| builder `options.sections` | `Record<string,string>`，传未包标签的内容；赋值 upsert，`delete` 去掉贡献；空字符串被忽略 |
+| transcript `SystemMessage.sections` | 已渲染的 opaque 字符串或 `null`；`null` 删除；不手工复制 builder 中的原文代替已渲染 checkpoint |
+
+builder 会包装 `<code_mode>...</code_mode>`；不要自行双重包装。
+`sections` 的 diff 比较值与是否存在，不应依靠仅调整 key 顺序触发更新。
+
+section 放稳定规则、当前有效能力的说明；不要每轮写 cell ID、trace、
+approval receipt、令牌或瞬态倒计时。cell 状态通过 exec/wait、status/cells
+提供，既避免无谓 prompt 变化，也不把失效 cell 句柄当持久化状态复活。
+
+transcript 是给模型的声明记录，不是 grants 存储。resume/compaction 后仍按
+实际会话重新生成 section；历史里出现“已授权”不能给新的会话授权。
+有其他扩展明确强制全文 prompt 时尊重其 exact projection，不主动抢回全文；
+Code Mode 的执行 guard 与工具描述仍成立，不能依赖某段 prompt 来 enforcing 权限。
+
+当前强制 prompt projection 在 `context` 之后，保留 replayed tools，再进入
+provider normalization。迁移要覆盖 forced prompt 与 section 共存、手动/自动
+compaction、/continue 的 recorded sections，以及两个扩展加载顺序。
+`pi-tree-continue` 已按 0.86.1 审计，不为这次设计重新引入旧版私有 hook。
 
 ## 9. refresh 协议：减少误伤，但不放宽撤销
 
@@ -570,6 +769,8 @@ transport/config/model 的实际撤销仍按现有 lifecycle 取消旧 cell。
 - 参数 schema/effect/prepare/executor/required feature 的变化不是展示变化。
 - owner 不能谎报 presentation 来替换 executor；consumer 比对实际契约摘要，
   对不符合类别的变化升级失效或拒绝。
+- Pi transcript 没有可序列化的 executor identity；不能仅凭“没有 tools delta”
+  就认定没有语义变化，仍需要 owner registration revision 与撤销通知。
 - reload/new/fork/shutdown：代次整体作废；旧 context、receipt、lease 不复用。
 
 有 legacy offer 的 producer 在注册、语义 refresh、撤销/注销时，必须**同时**
@@ -586,6 +787,35 @@ transport/config/model 的实际撤销仍按现有 lifecycle 取消旧 cell。
 不要在没有撤销/引用寿命证明时直接保留所有旧 cells。
 
 ## 10. 必须保持的效果与结果边界
+
+### 10.1 不把 native hooks 当作等价的 nested policy
+
+本次核对的 Pi 0.86.1 原生顺序是：
+
+```text
+tool_execution_start → prepareArguments → schema validation → mutable tool_call
+  → execute（期间可能有 tool_execution_update）
+  → tool_result → tool_execution_end → tool-result messages/history
+```
+
+与 Code Mode 有几个重要区别：
+
+- `prepareArguments` 同步、在验证前；tool_call 可以修改已验证参数，
+  后面**不会再次校验**。
+- tool_call 异常会阻止执行；tool_result handler 异常则会被记录并继续链路，
+  不能把“redaction hook 抛错”当作已阻断原始结果。
+- start/progress events 已发生在 result hooks 之前；最终 tool_result redaction
+  不能追溯保护此前的 args/partial updates。需要保密的进度应在 owner 发出前过滤。
+- preflight 就失败的调用不经过正常已执行工具的 result-hook 路径。
+- 并行工具按 source order preflight，结果 hooks 可按完成顺序交错，
+  最终 tool result messages 仍按 source order；不是一个可随意内联的函数。
+- `terminate` 是真实 tool batch 的控制语义，不是 data adapter 的普通字段。
+
+所以保持独立的冻结参数/显式审批/共享调度管线。需要 fail-closed 的敏感
+过滤放入有明确失败语义的共享 executor 或 Code Mode after-policy，
+不要通过伪造 native events 声称获得相同保护。
+
+### 10.2 Code Mode data-plane
 
 建议固定执行顺序：
 
@@ -608,7 +838,9 @@ transport/config/model 的实际撤销仍按现有 lifecycle 取消旧 cell。
 
 - 盲信 `details` 可披露，泄露内部上下文/凭据；
 - 把图片直接丢掉或伪造成成功的空字符串；
-- 吞掉 `terminate`、`addedToolNames`，假装 Pi 控制语义保留；
+- 吞掉当前 `terminate` 或 legacy envelope 的 `addedToolNames`，假装控制语义保留；
+  后者已不属于 0.86.1 native tool result 契约，不能再用它实现新 loader；
+- 执行 adapter 时隐式 setActiveTools/切模型/重载，再把结果伪装成纯 JSON 查询；
 - 超时返回后放任原 invoke 的文件/进程效果继续，仍报告“已终止”；
 - 用 Promise.all 绕过共享 scheduler，或把带写操作的工具标成并行 read；
 - 将 direct 与 nested 都写入 native tool results，导致用量与历史重复；
@@ -622,10 +854,13 @@ transport/config/model 的实际撤销仍按现有 lifecycle 取消旧 cell。
 
 | 阶段 | 工作 | 验收重点 |
 | --- | --- | --- |
-| I0：先修兼容/生命周期 | mandatory feature 老新门禁、owner transition 可重试、live-control 预算、exec/wait 身份一致性 | 旧 consumer 忽略新字段仍不能执行应审批的效果；失败释放可重试；循环创建不会泄漏 |
-| I1：冻结声明契约 | v2 types/structural client、示例、result mapping、public unsettled error、conformance fixtures | 无 Code Mode 时 owner 不变；无硬依赖；参数/usage/取消/unsupported controls 符合契约 |
-| I2：协商与可诊断 refresh | owner/revision receipts、capability status、duplicate fail-closed、分类/合并失效；Codex 接入 | 正反加载、多份模块、缺包/hosted/profile变化、旧 lease、重复通知、observer 不丢 store |
+| I0：先修兼容/生命周期 | mandatory feature 老新门禁、owner transition 可重试、live-control 预算、exec/wait 身份一致性；补完历史候选/当前 intent 仲裁 | 旧 ABI 忽略新字段仍不能绕过审批；tree 不复活禁用/替换的 owner；失败释放可重试、live controls 不泄漏 |
+| I1：冻结声明契约 | v2 types/structural client、示例、result mapping、public unsettled error、conformance fixtures；区分 live definitions 与 transcript declarations | 无 Code Mode 时 owner 不变；无硬依赖；不复制 native mutable hooks 或把历史声明当权限 |
+| I2：协商与可诊断 refresh | owner/revision receipts、分类/合并失效；Codex 接入；Code Mode 独立 prompt section；transport projection capability | 正反加载、profile/tree变化、旧 lease、重复通知；observer 不丢 store；sections/forced prompt/grammar/compaction 不串层 |
 | I3：首批工具试点 | 一个普通第三方查询 adapter；明确选择的 Pi 文本 builtin adapter；可选 subagent 查询 | overrides 不被绕过、路径/输出语义保留、显式 grants、direct/nested 共享业务检查 |
+
+I2 不重做用户已经完成的 Codex TranscriptContext/compaction 适配，而是在其
+基础上声明并验证互操作边界。I0 的 tree 仲裁也保留现有 released-lease 修复。
 
 I3 不是自动启用全部工具的承诺。subagent 控制面、多模态、native hooks 的完整
 嵌套调用，继续作为独立设计，不捎带放进本轮。
@@ -650,7 +885,57 @@ I3 不是自动启用全部工具的承诺。subagent 控制面、多模态、na
    coalescing 不延迟安全动作。
 9. standalone Code Mode、仅 core、仅 web、bundle、无 Code Mode、缺必要 feature
    的 production tarball 组合。
-10. Pi floor/target matrix、root CI；不以真实账号/网络探测充当 discovery。
+10. Pi **0.86.1** floor/target matrix、root CI；不以真实账号/网络探测充当 discovery。
+11. tree 到历史 active/inactive/无 system message、同名替换、缺失 registration；
+    当前显式 inactive/profile-disabled 不被历史复活；Codex suppression 重算。
+12. CLI/标准 SDK/显式工具 allowlist/直接 session 构造的 resume、fork、reload
+    分别测试；不将“SDK始终重放历史loadout”作为前提。child 不继承 parent system
+    declarations，也不从将来的 intent metadata 获得权限。
+13. getAllTools wrapper 与 schema 引用、SDK raw definition、
+    transcript cloned declaration 三种身份；executor-only 替换没有 tool delta
+    时仍须正确撤销旧 adapter。
+14. builder section upsert/delete/空字符串、transcript section null、
+    同名工具 remove+add、constrainedSampling 切换；仅顺序变化不能当撤销通知。
+15. context 投影保留 system declarations；forced prompt 与 sections 共存；
+    manual/auto compaction 的 checkpoint、/continue 保留的 recorded sections；
+    Codex effective-checkpoint 与 native provider fallback 的不同路径。
+16. tool_call 修改后不重验、tool_result 抛错继续，以及 preflight failure 无常规
+    result-hook：不能把这些原生行为误当 nested fail-closed guard。
 
-本设计阶段不重跑已经通过的业务测试，也不声称上述新增矩阵已经通过。
-合并只验证文件树等价和 diff 完整性；文档验证检查链接与 whitespace。
+以上是下一轮实现的验收目标，不声称本次已经全部通过。
+
+## 13. 0.86.1 复核记录与限制
+
+本轮不修改生产实现、package manifests、lock、全局 Pi 或旧试用配置。
+设计基于用户当前 main 派生；原 0.85.1 设计分支保留作历史，不把旧代码
+cherry-pick 回新 main。只承接原文档提交并修订。
+
+已完成：
+
+- 对比 `972d2c2c..b02484ce`，复核 `bb7e5ea5` 的运行时代码改变。
+- 实际解析 workspace coding-agent/agent-core/ai 版本均为 0.86.1；
+  项目 CLI `node node_modules/@earendil-works/pi-coding-agent/dist/cli.js --version`
+  输出 0.86.1，而全局 `/usr/bin/pi --version` 输出 0.85.1。
+- 完整阅读项目安装的 Pi README、extensions、session-format、custom-provider、
+  SDK 与相关 sessions/compaction/ai 文档；用实现补足省略或易混淆之处。
+  例如 session-format 的简略 SystemMessage interface 漏列 sections，但实际
+  types、示例、实现均有该字段，不能照简略摘录断言功能不存在。
+- 独立 review 的 visibility unit suite **12/12**。
+- 本轮针对性测试 **24/24**：
+  `pi-codex-minimal-tools/tests/pi-transcript.test.ts`、
+  `pi-code-mode/tests/protocol.test.ts`、`pi-code-mode/tests/visibility-pi.test.ts`。
+- credential-free probe 验证 live metadata/reference、真实 SDK tree 重新激活
+  显式 inactive 工具、factory 65th allocation、失败 owner transition 不重试。
+  fresh-owner 丢失旧 intent 的部分是独立 fixture，不冒充完整 resume/fork 验证。
+
+本机保留证据：
+
+```text
+~/.local/state/agents/tmp/code-mode-0861-design.p3Vkmew6/focused-tests.log
+~/.local/state/agents/tmp/code-mode-0861-review.0Ezx5uW3/probe.mts
+```
+
+未运行：完整 CI/Pi matrix、真实 Host suite、真实 provider/账号请求、完整 Codex
+resume/fork 集成；不把旧基线的 U0–U4 测试数字改名为 0.86.1 验收。
+文档另检查本地链接、代码围栏与 whitespace。下一轮临时试用环境必须使用
+实际锁定的 0.86.1 CLI/依赖，不能继续由旧 `/usr/bin/pi` 驱动新工作树。

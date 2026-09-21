@@ -2,8 +2,10 @@
 
 状态：**U0–U4 已按顺序实施并验收**。用户明确选择
 **0.155.1 + 上游 V8 规避补丁构建**。已本地合并至 `main@972d2c2c`；
-仍 private/blocked，未发布或推送。后续仅提出
+Code Mode 仍 private/blocked；此处不推断当前远程/发布状态。后续仅提出
 [工具互操作与协商设计](pi-code-mode-tool-interop.md)，尚未实施。
+该后续设计已按 `main@b02484ce` / Pi 0.86.1 重新核对；本文件及原实施审计中的
+0.85.1 验证数字仍是历史记录，当前 baseline 见 [Pi 兼容说明](../pi-compatibility.md)。
 本文件细化 [v2 方案](pi-code-mode-v2.md)，不将未完成项标成已交付。
 基线 `ac5c2e51`；实施分支 `feat/code-mode-u0-u4`。
 各阶段分别提交；不自动合并 main、发布或替换正在运行的试用环境。

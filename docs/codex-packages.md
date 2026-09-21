@@ -115,7 +115,11 @@ factory: `hide-bridged` can hide explicitly granted counterparts while Codex
 retains logical activation intent and native mutation-tool suppression.
 Without Code Mode, or in its default mixed visibility, direct behavior remains.
 Further declaration/version/owner negotiation work is a proposal, not implemented:
-see [tool interoperability design](plans/pi-code-mode-tool-interop.md).
+see [tool interoperability design](plans/pi-code-mode-tool-interop.md), rechecked
+against Pi 0.86.1. Its historical system/tool declarations are not executable-owner
+identities or grants. Tree loadout restoration must be coordinated with current
+owner intent and leases; the existing released-lease restoration covers only one
+part of that proposed contract.
 
 Core advertises its exact stream function on the optional grammar handshake.
 Runtime handles generic grammar tool declarations, canonical string arguments,
