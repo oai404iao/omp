@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-minimal-tools",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "Model-profiled Codex Responses tools for Pi: WebSocket, Lite, web search, images, compaction, and apply_patch",
   "repository": {
     "type": "git",
@@ -43,10 +43,10 @@
     "typebox": "*"
   },
   "dependencies": {
-    "@oai404iao/pi-codex-runtime": "0.2.0",
-    "@oai404iao/pi-codex-core": "0.2.0",
-    "@oai404iao/pi-codex-web-search": "0.1.1",
-    "@oai404iao/pi-codex-imagegen": "0.1.1"
+    "@oai404iao/pi-codex-runtime": "0.3.0",
+    "@oai404iao/pi-codex-core": "0.3.0",
+    "@oai404iao/pi-codex-web-search": "0.2.0",
+    "@oai404iao/pi-codex-imagegen": "0.2.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.86.1",

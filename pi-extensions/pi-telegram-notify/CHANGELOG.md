@@ -1,5 +1,16 @@
 # @oai404iao/pi-telegram-notify
 
+## 0.3.0
+
+### Minor Changes
+
+- bb7e5ea: Require Pi 0.86.1 or newer. Adapt Codex streaming and native compaction to
+  transcript-backed system prompts and tool declarations, keep inherited parent
+  system authority out of child sessions, and recognize in-conversation OpenAI
+  tool additions in External Thinking. Preserve the existing Codex wire formats,
+  model profiles and publication eligibility. Keep Code Mode's already-restored
+  direct tools available after historical tool-loadout restoration.
+
 ## 0.2.1
 
 ### Patch Changes
