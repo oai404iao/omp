@@ -38,6 +38,22 @@ export default function codeMode(pi: ExtensionAPI): void {
 	let latest: ExtensionContext | undefined;
 	let configuredHost = "";
 	let configIssue: string | undefined;
+	let requiredPolicies: readonly string[] = [];
+	let contributionIssue: string | undefined;
+	const contributions = () => {
+		try {
+			const catalog = collect(pi, requiredPolicies);
+			contributionIssue = undefined;
+			return catalog;
+		} catch (error) {
+			contributionIssue = errorText(error);
+			session.cancel("Code Mode contribution protection unavailable");
+			try { visibility.release(); } catch (cleanup) {
+				throw new AggregateError([error, cleanup], "Code Mode protection and visibility unavailable");
+			}
+			throw error;
+		}
+	};
 	let probeController: AbortController | undefined;
 	let probeTask: Promise<string> | undefined;
 	const cancelProbe = () => probeController?.abort(new Error("Code Mode doctor cancelled"));
@@ -78,9 +94,9 @@ export default function codeMode(pi: ExtensionAPI): void {
 			if (next.join("\0") !== active.join("\0")) pi.setActiveTools(next);
 		}
 		try {
-			const eligible = session.enabled && !session.blocked && protocolAvailable && !stopped && owned.length === 2;
+			const eligible = session.enabled && !session.blocked && !contributionIssue && protocolAvailable && !stopped && owned.length === 2;
 			visibility.sync(eligible ? mode : "mixed",
-				eligible && mode === "hide-bridged" ? session.catalog(collect(pi)).tools : []);
+				eligible && mode === "hide-bridged" ? session.catalog(contributions()).tools : []);
 			visibilityIssue = undefined;
 		} catch (error) {
 			const message = `Code Mode visibility unavailable; direct tools retained where possible: ${errorText(error)}`;
@@ -91,7 +107,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 			visibilityIssue = message;
 		}
 		if (ctx.hasUI) ctx.ui.setStatus("pi-code-mode", session.enabled
-			? `Code mode: ${session.blocked || !protocolAvailable ? "blocked" : session.activeCell?.state ?? (session.busy ? "busy" : "ready")}; ${session.cellList.length}/${session.maxCells} cells; ${protocolState.grammar ? "grammar" : "json"}; ${mode}; ${visibility.names.length} cooperative bindings${visibilityIssue ? " (visibility error)" : ""}`
+			? `Code mode: ${session.blocked || !protocolAvailable || contributionIssue ? "blocked" : session.activeCell?.state ?? (session.busy ? "busy" : "ready")}; ${session.cellList.length}/${session.maxCells} cells; ${protocolState.grammar ? "grammar" : "json"}; ${mode}; ${visibility.names.length} cooperative bindings${visibilityIssue ? " (visibility error)" : ""}`
 			: undefined);
 	};
 	const bind = (ctx: ExtensionContext) => { latest = ctx; session.setContext(ctx); };
@@ -100,7 +116,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 		if (!ownsTool("exec") || !ownsTool("wait")) return;
 		if (latest) protocolState = resolveProtocol(pi, latest, protocol);
 		protocolAvailable = protocol !== "grammar" || protocolState.grammar;
-		const description = `${EXEC_DESCRIPTION}\nProtocol: ${protocolState.grammar ? "raw JavaScript grammar; send raw JavaScript, NOT a JSON wrapper or Markdown fence" : "JSON"} (${protocolState.reason}).${protocolAvailable ? "" : " Explicit grammar mode is unavailable; exec will fail until the protocol/model is changed."}\nRaw code may start with // @exec: {\"yield_time_ms\":0,\"timeout_ms\":30000,\"max_tokens\":8192} followed by a newline and JavaScript. Conflicting JSON/pragma options are rejected.\nExact authorized nested tools for the next cell:\n${toolPrompt(session.catalog(collect(pi)).tools)}`;
+		const description = `${EXEC_DESCRIPTION}\nProtocol: ${protocolState.grammar ? "raw JavaScript grammar; send raw JavaScript, NOT a JSON wrapper or Markdown fence" : "JSON"} (${protocolState.reason}).${protocolAvailable ? "" : " Explicit grammar mode is unavailable; exec will fail until the protocol/model is changed."}\nRaw code may start with // @exec: {\"yield_time_ms\":0,\"timeout_ms\":30000,\"max_tokens\":8192} followed by a newline and JavaScript. Conflicting JSON/pragma options are rejected.\nExact authorized nested tools for the next cell:\n${toolPrompt(session.catalog(contributions()).tools)}`;
 		if (description === execDescription) return;
 		execDescription = description;
 		execDefinition = { ...execDefinition, description, constrainedSampling: protocolState.grammar ? EXEC_SAMPLING : false };
@@ -146,7 +162,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 				if (protocol === "grammar" && !current.grammar) throw new Error(`Code Mode grammar unavailable: ${current.reason}`);
 				const decoded = decodeExec({ code, ...options });
 				const { code: source, ...controls } = decoded;
-				const result = await session.execute(source, signal, controls, collect(pi), _id);
+				const result = await session.execute(source, signal, controls, contributions(), _id);
 				reflect(ctx);
 				return renderObservation(result);
 			},
@@ -180,6 +196,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 			if (session.enabled) { await session.revoke(); reflect(ctx); }
 			configuredHost = "";
 			const configured = configuration(pi);
+			requiredPolicies = configured.value.requiredPolicies;
 			mode = configured.value.visibility;
 			protocol = configured.value.protocol;
 			session.setMaxCells(configured.value.maxCells);
@@ -191,7 +208,10 @@ export default function codeMode(pi: ExtensionAPI): void {
 			await session.authorize(root, host(), grants());
 			refreshTools();
 			reflect(ctx);
-		} catch (error) { configIssue = errorText(error); if (ctx.hasUI) ctx.ui.notify(configIssue, "error"); else throw error; }
+		} catch (error) {
+			if (!contributionIssue) configIssue = errorText(error);
+			if (ctx.hasUI) ctx.ui.notify(errorText(error), "error"); else throw error;
+		}
 	});
 	pi.registerCommand("code-mode", {
 		description: "Code Mode on|off|status|cells|terminate [id|all]|doctor [host]|visibility mixed|hide-bridged|protocol json|auto|grammar. Permissions require explicit CLI flags.",
@@ -232,6 +252,8 @@ export default function codeMode(pi: ExtensionAPI): void {
 				return;
 			}
 			if (action === "status") {
+				if (requiredPolicies.length || contributionIssue) ctx.ui.notify(
+					`Required policies: ${requiredPolicies.join(", ") || "(none)"}; ${contributionIssue ?? "last discovery ready"}`, contributionIssue ? "error" : "info");
 				const active = pi.getActiveTools();
 				ctx.ui.notify(`Code Mode ${session.enabled ? "enabled" : "disabled"}; ${session.blocked || !protocolAvailable ? "blocked" : session.busy ? "busy" : "idle"}.\nRoot: ${session.rootPath ?? "(none)"}\nCells (${session.maxCells} slots): ${JSON.stringify(session.cellList)}\nGrants: ${JSON.stringify(grants())}\nProtocol: ${protocol} → ${protocolState.grammar ? "grammar" : "json"}; ${protocolState.reason}.\nVisibility: ${mode}; hidden: ${visibility.names.filter((name) => !active.includes(name)).join(", ") || "(none)"}; externally reactivated: ${visibility.names.filter((name) => active.includes(name)).join(", ") || "(none)"}.\n${visibilityIssue ?? "Visibility is cooperative, not strict only or an authorization boundary."}\nPi tool permission/redaction hooks are not inherited.`, "info");
 				return;
@@ -308,9 +330,15 @@ export default function codeMode(pi: ExtensionAPI): void {
 	pi.on("context", (event) => session.enabled && ownsTool("exec") && protocolState.grammar ? { messages: projectExecHistory(event.messages) } : undefined);
 	pi.on("thinking_level_select", (_event, ctx) => { if (!stopped) reflect(ctx); });
 	pi.on("session_shutdown", async () => {
+		disposeOwners.closeAdmission();
 		cancelProbe();
-		await probeTask?.catch(() => {});
 		stopped = true; changed(); visibilityChanged(); disposeApproval(); unbindAgent(); authorizationGeneration++;
-		try { await session.revoke(true); } finally { visibility.release(); disposeOwners(); }
+		const errors: unknown[] = [];
+		const revoked = session.revoke(true).catch((error) => { errors.push(error); });
+		await probeTask?.catch(() => {});
+		await revoked;
+		try { visibility.release(); } catch (error) { errors.push(error); }
+		try { disposeOwners(); } catch (error) { errors.push(error); }
+		if (errors.length) throw new AggregateError(errors, "Code Mode shutdown failed");
 	});
 }

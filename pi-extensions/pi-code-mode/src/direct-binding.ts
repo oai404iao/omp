@@ -76,6 +76,7 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 		restoreAfterTree = false;
 	});
 	return {
+		closeAdmission() { closing = true; },
 		binding: Object.freeze({
 			version: 1 as const, name,
 			acquire(): DirectToolLease | undefined {

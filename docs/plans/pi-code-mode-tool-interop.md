@@ -1,7 +1,8 @@
 # Code Mode：工具声明、内置工具接入与 Codex 协商设计
 
-状态：**已开始 I0 实现；I1–I3 尚未实现**。正文第 0–13 节保留
-`5328d3df` 的 Pi 0.86.1 设计/复核基线；实现进度和边界见第 14 节。
+状态：**I0 已完整实现并验收；I1–I3 尚未实现**。正文第 0–13 节保留
+`5328d3df` 的 Pi 0.86.1 设计/复核基线；首批历史记录见第 14 节，
+I0 完成范围见第 15 节及[实施审计](../audits/pi-code-mode-i0.md)。
 
 - 原 U0–U4 合并点：`972d2c2c`；旧版设计保留在 `fb4ff5e0`。
 - 当前复核基线：用户更新后的 **`main@b02484ce`**，包含
@@ -943,6 +944,9 @@ resume/fork 集成；不把旧基线的 U0–U4 测试数字改名为 0.86.1 验
 
 ## 14. I0 首批实现
 
+本节是 `af0eef5d` 的历史检查点；其中 requiredPolicies 等未完成项已由
+第 15 节补齐，不代表当前 I0 仍未完成。
+
 本批实现，不代表 I1–I3 或第 12 节完整验收矩阵已经完成：
 
 - 新增 `discover/v2` 的**审批门禁子集**：consumer 显式确认 `approval/1`；
@@ -987,3 +991,45 @@ unsettled-effect error、分类 refresh、独立 prompt section、transport proj
 
 保留日志：`~/.local/state/agents/tmp/code-mode-interop-i0.WFycHofx/` 下的
 `ci.log`、`pi-matrix.log`、`host.log` 和 matrix 子目录。
+
+## 15. I0 完成验收
+
+I0 五项工作均已完成；本阶段不是把完整 I1 v2 ABI 提前宣布稳定：
+
+| I0 项 | 完成内容 |
+| --- | --- |
+| mandatory 老新门禁 | v2 审批 feature acknowledgment、精确 receipt/v1 deny fallback；新增有界 `requiredPolicies`，producer 未加载、offer 前抛错、policy not-ready/failed/incompatible、缺审批 provider 时均阻止全 catalog 准入 |
+| owner transition | dispose/create/invalid control 的失败可重试；foreign/missing/SDK/builtin replacement 也不丢 pending cleanup；discovery/dispose/create 的同步回调触发 shutdown 或替换时重新核验，不再创建/返回已失效 owner |
+| live-control 预算 | 成功 dispose 才移出 live Set；factory 先关闭所有 control 的 acquisition，再逐一释放；失败聚合报告，其余 cleanup 不跳过，可重试 |
+| exec/wait 身份 | 延续首批实例级 schema/source/fingerprint 校验；同描述、clone 或替换不能被认领、刷新、停用，也不能继续使用旧 exec 入口 |
+| tree/intent 仲裁 | 当前协作意图、profile 禁用与 live lease 优先；Codex 重算 native suppression；覆盖正反加载、autoEnable:false/显式 allowlist、无 system history，以及 before-tree 撤销后导航取消不能复活 cells |
+
+补充的全局保护不是自动 grant：`config.json.requiredPolicies` 最多 16 个
+不同的精确 policy ID，支持既有单段 ID 及 `owner__policy`，缺失时连本地
+read/ls/write/bash 也不能启动。`registerCodeModePolicy` 可以先声明 not-ready
+再同步 resolve；错误转换成固定、有界 failed 记录，legacy consumer 得到
+deny guard。policy `refresh()` 先通知旧代撤销再发布新 revision。
+需要“producer 缺失也阻断”的配置必须使用本实现；旧 consumer 无此独立期望，
+不承诺透明降级。旧 ABI fixture 忽略新字段仍不能拿到审批 closure，已运行
+legacy cell 的排队/后续 effects 也受同步 v1 撤销保护。
+
+关闭处理先撤销准入，再等待 probe/效果结算；visibility、factory、各 Codex
+owner 及 native edit/write 恢复独立尝试。失败不清空其 receipt，也不假装已恢复。
+
+最终验证通过：
+
+- 根 `npm run ci`：Code Mode **111/111**、runtime **18/18**、
+  Codex compatibility **319/319**，以及其他 workspace 与 release/pack 检查；
+  **17 种** Codex production tarball 组合通过。
+- Pi **0.86.1 floor / target** 两轮完整 CI。
+- 真实 Host/systemd/cgroup suite **53/53**。
+- Code Mode 独立生产 tarball probe（含 required policy、审批协商和 legacy
+  deny gate）及 Code Mode + Codex production probe 均通过。
+
+日志、初次失败与修复、fixtures 和验收边界见[审计](../audits/pi-code-mode-i0.md)。
+没有真实 provider/账号/UI/发布验证，没有修改全局 Pi 或旧试用配置。
+
+I1–I3 保持待实现：完整通用 `requires`/availability、session-generation ABI
+与跨收集 revision 回退检测、structural v2 client/public unsettled error、
+classified refresh/去重、prompt section、transport projection 声明、工具试点。
+本批不新增 builtin adapter，不持久化跨实例 intent/grants/leases。

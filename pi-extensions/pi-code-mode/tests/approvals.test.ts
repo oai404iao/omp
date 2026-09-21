@@ -66,6 +66,8 @@ test("ABI gate: mandatory approval policy gives old consumers a deny guard, not 
 	}
 	assert.equal(old.policies.length, 1);
 	assert.equal(effects, 0);
+	assert.throws(() => collect(pi), /policy approval unavailable/);
+	registerCodeModeApproval(pi, { id: "user", approve: () => false });
 	const catalog = collect(pi);
 	const bridge = new ToolBridge([{ ...target, name: "safe", approval: undefined,
 		invoke: async () => { effects++; return { value: {} }; } }], catalog.policies,

@@ -181,6 +181,36 @@ test("real Pi: model switch, tree navigation and reload discard cells/store with
 	assert.deepEqual(f.errors, []);
 });
 
+test("real Pi: cancellation after before-tree cannot revive an invalidated running cell", { timeout: 20000 }, async (t) => {
+	const http = transport(t);
+	let started = false, aborted = false, effects = 0;
+	const f = await piSession(t, { host, grant: true, tools: "fixture__hold,fixture__effect", factory: (pi) => {
+		registerCodeModeTools(pi, { id: "fixture", tools: [
+			{ name: "hold", description: "Await tree cancellation", effect: "write", parameters: Type.Object({}),
+				async invoke(_input, ctx) {
+					started = true;
+					await new Promise<void>((resolve) => ctx.signal.addEventListener("abort", () => { aborted = true; resolve(); }, { once: true }));
+					return { value: null };
+				} },
+			{ name: "effect", description: "Must not run after revocation", effect: "write", parameters: Type.Object({}),
+				async invoke() { effects++; return { value: null }; } },
+		] });
+		pi.on("session_before_tree", () => {
+			assert(aborted, "Code Mode must settle old effects before later tree handlers");
+			return { cancel: true };
+		});
+	} });
+	const id = cellId(await http.run(f.session, exec("await tools.fixture__hold({}); await tools.fixture__effect({})")));
+	await until(() => started);
+	const leaf = f.session.sessionManager.getLeafId();
+	const navigation = await f.session.navigateTree(f.session.getUserMessagesForForking()[0].entryId, { summarize: false });
+	assert(navigation.cancelled);
+	assert.equal(f.session.sessionManager.getLeafId(), leaf);
+	assert.equal(effects, 0);
+	assert.equal((await http.run(f.session, wait(id))).isError, true);
+	assert.deepEqual(f.errors, []);
+});
+
 test("real Pi U4: two cells survive user turns; commands require a target and preserve unread receipts", { timeout: 20000 }, async (t) => {
 	const http = transport(t);
 	const f = await piSession(t, { host, grant: true, maxCells: 2 });

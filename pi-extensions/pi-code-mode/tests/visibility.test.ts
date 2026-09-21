@@ -254,7 +254,7 @@ test("owner factory: shutdown failure is retryable and blocks synchronous acquis
 	control.binding.acquire();
 	const write = f.pi.setActiveTools;
 	f.pi.setActiveTools = () => { throw new Error("restore failed"); };
-	assert.throws(close, /restore failed/);
+	assert.throws(close, /owner cleanup failed/);
 	assert.equal(ownerFactory(f.pi), undefined);
 	assert.throws(() => factory.create(f.pi, { name: "lookup", sourcePath }), /closing/);
 	f.pi.setActiveTools = write;
@@ -267,4 +267,27 @@ test("owner factory: shutdown failure is retryable and blocks synchronous acquis
 	close();
 	assert.equal(reentries, 1);
 	assert(f.active.includes("lookup"));
+});
+
+test("owner factory: all controls close admission before any notification and cleanup continues after failure", () => {
+	const f = fixture();
+	const close = installOwnerFactory(f.pi);
+	const factory = ownerFactory(f.pi);
+	const first = factory.create(f.pi, { name: "lookup", sourcePath });
+	const second = factory.create(f.pi, { name: "lookup", sourcePath });
+	first.binding.acquire();
+	const write = f.pi.setActiveTools;
+	let checks = 0;
+	f.pi.setActiveTools = () => {
+		checks++;
+		assert.equal(second.binding.acquire(), undefined, "not-yet-disposed control must already be closed");
+		throw new Error("first restore failed");
+	};
+	assert.throws(close, AggregateError);
+	assert.equal(checks, 1);
+	assert.equal(second.activeIntent, undefined, "independent cleanup must not be skipped");
+	assert.equal(second.binding.acquire(), undefined);
+	f.pi.setActiveTools = write;
+	close();
+	assert.equal(first.activeIntent, undefined);
 });

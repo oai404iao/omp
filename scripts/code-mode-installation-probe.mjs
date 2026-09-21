@@ -18,17 +18,26 @@ const configDirectory = join(process.env.PI_CODING_AGENT_DIR, "extensions/pi-cod
 mkdirSync(configDirectory, { recursive: true });
 writeFileSync(join(configDirectory, "config.json"), JSON.stringify({
 	version: 1, hostPath: process.env.CODE_MODE_TEST_HOST, protocol: "auto", visibility: "hide-bridged", maxCells: 2,
+	requiredPolicies: ["fixture__guard"],
 }));
 writeFileSync(join(cwd, "fixture.txt"), "tarball-runtime-read");
 // Exercise the public TypeScript subpath through the real Pi extension loader,
 // not Node's unsupported raw node_modules type stripping or a workspace alias.
 const contributionPath = join(root, "contribution.ts");
 writeFileSync(contributionPath, `
-import { createCodeModeDirectBinding, registerCodeModeTools, registerCodeModeObserver } from "@oai404iao/pi-code-mode/contributions";
+import { DISCOVER, createCodeModeDirectBinding, registerCodeModeTools, registerCodeModeObserver,
+	registerCodeModePolicy, registerCodeModeApproval } from "@oai404iao/pi-code-mode/contributions";
 import { Type } from "typebox";
 import { fileURLToPath } from "node:url";
 export default function contribution(pi) {
 	globalThis.__codeModeReceipts = [];
+	globalThis.__codeModeApprovals = 0;
+	const stopApproval = registerCodeModeApproval(pi, { id: "installed", approve() {
+		globalThis.__codeModeApprovals++; return true;
+	} });
+	const stopPolicy = registerCodeModePolicy(pi, { id: "fixture__guard", resolve() {
+		return { id: "fixture__guard", approval: "installed" };
+	} });
 	const stopObserver = registerCodeModeObserver(pi, { id: "installed", complete(receipt) {
 		globalThis.__codeModeReceipts.push({ frozen: Object.isFrozen(receipt),
 			privateFields: "input" in receipt || "value" in receipt, origin: receipt.originToolCallId });
@@ -38,11 +47,17 @@ export default function contribution(pi) {
 	const owner = createCodeModeDirectBinding(pi, { name: "installed_lookup", sourcePath: fileURLToPath(import.meta.url) });
 	const registration = registerCodeModeTools(pi, { id: "fixture", tools: [{
 		name: "read", description: "Installed public contribution", parameters: Type.Object({}), outputSchema: Type.String(), effect: "read",
-		direct: owner.binding,
+		direct: owner.binding, approval: "installed",
 		async invoke() { return { value: "installed-contribution" }; },
 	}] });
+	let exposed = 0, blocked = false;
+	pi.events.emit(DISCOVER, { version: 1,
+		provider(value) { exposed += value.tools.length; },
+		policy(value) { blocked = value.before?.({})?.block === true; },
+	});
+	globalThis.__legacyProtection = { exposed, blocked };
 	pi.on("session_start", () => { owner.setActive(true); });
-	pi.on("session_shutdown", () => { registration.dispose(); owner.dispose(); stopObserver(); });
+	pi.on("session_shutdown", () => { registration.dispose(); owner.dispose(); stopObserver(); stopPolicy(); stopApproval(); });
 }
 `);
 let requests = 0;
@@ -119,6 +134,8 @@ try {
 	assert.equal(sibling.details.runtimeReset, false);
 	assert.equal(globalThis.__codeModeReceipts.length, 2);
 	assert(globalThis.__codeModeReceipts.every(r => r.frozen && !r.privateFields && r.origin === "call_1"));
+	assert.equal(globalThis.__codeModeApprovals, 2, "required global policy enforces both local and contributed calls");
+	assert.deepEqual(globalThis.__legacyProtection, { exposed: 0, blocked: true });
 	await session.prompt("/code-mode off");
 	assert(!session.getActiveToolNames().includes("exec"));
 	assert(session.getActiveToolNames().includes("installed_lookup"));
@@ -128,7 +145,7 @@ try {
 	await session.prompt("/code-mode off");
 	assert(session.getActiveToolNames().includes("installed_lookup"));
 	assert.deepEqual(errors, []);
-	console.log(`PASS isolated U4 production tarball, config/doctor/output schema, native grammar, public owner cooperation, hide/restore/reload, two shared-Host cells, Pi ${VERSION}, real Host, no Codex packages`);
+	console.log(`PASS isolated I0 production tarball, required policy/approval negotiation and legacy deny gate, config/doctor/output schema, native grammar, public owner cooperation, hide/restore/reload, two shared-Host cells, Pi ${VERSION}, real Host, no Codex packages`);
 } finally {
 	await session.abort();
 	await session.prompt("/code-mode off");

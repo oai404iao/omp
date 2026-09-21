@@ -119,8 +119,11 @@ the initial I0 implementation and remaining I1–I3 work. Owner transitions now
 retain failed disposal receipts for retry; tree activation reconciles current
 intent, profile restrictions, native mutation suppression and live leases.
 Historical system/tool declarations are not executable-owner identities or grants.
-Code Mode's initial v2 approval gate does not yet implement the complete v2 ABI
-or missing-required-policy configuration; Codex's safe adapters still use v1.
+Code Mode's I0 safety subset includes required-policy expectations and legacy
+approval gates, not the complete v2 ABI; Codex's safe adapters still use v1.
+SDK/builtin/foreign replacements cannot be activated or suppress native tools
+on behalf of the old Codex owner. Pending cleanup is retried even after ownership
+loss; shutdown attempts all owners and retains failed native restoration receipts.
 
 Core advertises its exact stream function on the optional grammar handshake.
 Runtime handles generic grammar tool declarations, canonical string arguments,

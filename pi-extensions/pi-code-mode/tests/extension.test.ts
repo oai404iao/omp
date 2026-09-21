@@ -7,6 +7,7 @@ import extension from "../src/extension.ts";
 import type { ExtensionAPI, ExtensionCommandContext, ToolDefinition, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { EXEC_DESCRIPTION, WAIT_DESCRIPTION, execParameters, waitParameters } from "../src/public-tools.ts";
+import { createCodeModeDirectBinding, registerCodeModeTools } from "../src/contributions.ts";
 
 globalThis.fetch = async () => { throw new Error("Network forbidden in extension fixtures"); };
 
@@ -125,4 +126,66 @@ test("authorization: off invalidates a still-pending confirmation", async () => 
 	finish(true);
 	await assert.rejects(pending, /superseded/);
 	assert.deepEqual(active, ["read"]);
+});
+
+test("extension shutdown closes factory admission and attempts independent cleanup despite release failures", async () => {
+	const cwd = await scratch("shutdown");
+	let active = ["read", "lookup", "second"], fail = false;
+	const tools = new Map<string, ToolInfo>();
+	const handlers = new Map<string, Set<(...args: any[]) => any>>();
+	let second!: ReturnType<typeof createCodeModeDirectBinding>;
+	const pi = {
+		events: createEventBus(), registerFlag() {}, registerCommand() {},
+		getFlag: (name: string) => ({
+			"code-mode-host": "/fixture", "code-mode-read-root": cwd,
+			"code-mode-tools": "fixture__lookup", "code-mode-visibility": "hide-bridged",
+		})[name],
+		on(name: string, handler: (...args: any[]) => any) {
+			if (!handlers.has(name)) handlers.set(name, new Set());
+			handlers.get(name)!.add(handler);
+			return () => { handlers.get(name)!.delete(handler); };
+		},
+		registerTool(tool: ToolDefinition) {
+			tools.set(tool.name, { ...tool,
+				sourceInfo: { path: "/fixture/owner.ts", source: "fixture", scope: "temporary", origin: "top-level" } });
+		},
+		getAllTools: () => [...tools.values()].map((tool) => ({ ...tool })),
+		getActiveTools: () => [...active],
+		setActiveTools(names: string[]) {
+			if (fail && names.includes("lookup")) {
+				assert.equal(second.binding.acquire(), undefined, "all controls close before the first restoration");
+				throw new Error("restore failed");
+			}
+			active = [...names];
+		},
+	} as unknown as ExtensionAPI;
+	extension(pi);
+	for (const name of ["lookup", "second"]) pi.registerTool({ name, label: name, description: name, parameters: Type.Object({}),
+		async execute() { return { content: [], details: {} }; } });
+	let factory!: { create(pi: ExtensionAPI, options: { name: string; sourcePath: string }): ReturnType<typeof createCodeModeDirectBinding> };
+	pi.events.emit("@oai404iao/pi-code-mode:direct-owner/v1", { version: 1, accept(value: typeof factory) { factory = value; } });
+	const first = factory.create(pi, { name: "lookup", sourcePath: "/fixture/owner.ts" });
+	second = factory.create(pi, { name: "second", sourcePath: "/fixture/owner.ts" });
+	const registration = registerCodeModeTools(pi, { id: "fixture", tools: [{
+		name: "lookup", description: "fixture", effect: "read", parameters: Type.Object({}), direct: first.binding,
+		async invoke() { return { value: null }; },
+	}] });
+	const emit = async (name: string) => {
+		for (const handler of [...(handlers.get(name) ?? [])]) await handler({}, { cwd, hasUI: false });
+	};
+	try {
+		await emit("session_start");
+		assert(!active.includes("lookup"));
+		fail = true;
+		await assert.rejects(emit("session_shutdown"), (error: AggregateError) => {
+			assert.equal(error.errors.length, 2);
+			return true;
+		});
+		assert.equal(second.activeIntent, undefined);
+		assert.throws(() => factory.create(pi, { name: "second", sourcePath: "/fixture/owner.ts" }), /closing/);
+		fail = false;
+		await emit("session_shutdown");
+		assert(active.includes("lookup"));
+		assert.equal(first.activeIntent, undefined);
+	} finally { fail = false; registration.dispose(); await emit("session_shutdown"); }
 });

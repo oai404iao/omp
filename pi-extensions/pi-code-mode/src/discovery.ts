@@ -2,6 +2,17 @@ import type { CodeModePolicy, CodeModeProvider } from "./contributions.ts";
 
 export const DISCOVER_V2 = "@oai404iao/pi-code-mode:discover/v2";
 export const APPROVAL_FEATURE = "approval/1";
+export function isPolicyId(value: unknown): value is string {
+	return typeof value === "string" && value.length <= 82
+		&& value.split("__").length <= 2
+		&& value.split("__").every((part) => part.length <= 40 && /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(part));
+}
+export function requiredPolicyIds(value: unknown): string[] {
+	if (!Array.isArray(value) || value.length > 16 || !value.every(isPolicyId) || new Set(value).size !== value.length) {
+		throw new Error("requiredPolicies must contain at most 16 distinct exact policy IDs");
+	}
+	return [...value];
+}
 export interface Registration {
 	readonly owner: string;
 	readonly instanceId: string;
@@ -21,10 +32,13 @@ export interface DiscoveryReceipt {
 export type DiscoveryOffer = {
 	registration: Registration;
 	requires: readonly string[];
-} & ({ kind: "provider"; provider: CodeModeProvider } | { kind: "policy"; policy: CodeModePolicy });
+} & ({ kind: "provider"; provider: CodeModeProvider } | {
+	kind: "policy"; policy?: CodeModePolicy;
+	availability?: { state: "available" | "not-ready" | "failed"; reason?: string };
+});
 export interface DiscoveryV2 {
 	hello: ConsumerHello;
-	offer(value: DiscoveryOffer): { status: "compatible" | "incompatible"; missing?: readonly string[] };
+	offer(value: DiscoveryOffer): { status: "compatible" | "incompatible" | "unavailable"; missing?: readonly string[] };
 }
 export function discoveryV2(value: unknown): value is DiscoveryV2 {
 	const request = value as Partial<DiscoveryV2> | undefined;

@@ -48,7 +48,8 @@ Optional `<agentDir>/extensions/pi-code-mode/config.json`:
   "hostPath": "/absolute/path/to/patched/codex-code-mode-host",
   "protocol": "auto",
   "visibility": "mixed",
-  "maxCells": 1
+  "maxCells": 1,
+  "requiredPolicies": []
 }
 ```
 
@@ -59,6 +60,16 @@ fail closed. There is no project-level config or persistent grant in this file:
 With hostPath configured, `/code-mode on` can ask for a current-session grant.
 `maxCells` is an integer 1–4, default 1; opt into two cells with `"maxCells": 2`
 or `--code-mode-max-cells 2`. This changes shared Host slots, not authority.
+
+`requiredPolicies` lists at most 16 distinct, exact policy IDs, for example
+`["permission__guard"]`. It only restricts admission, never grants tools.
+Missing, failed, incompatible or not-ready required policies prevent **all**
+nested work (including local adapters) before a Host/cell is started.
+Policy IDs can be a single existing identifier or `owner__policy`; no wildcards.
+Discovery failures also cancel retained cells and release cooperative hiding.
+This protection requires the I0-capable consumer; an old v1 consumer cannot
+infer that an absent extension was required. There is no transparent downgrade
+for configurations requiring this guarantee.
 
 `/code-mode doctor` checks the pinned file/hash/platform, user systemd manager,
 available controllers, configured protocol and available/granted contributions.
@@ -245,11 +256,13 @@ receipts are neither grants nor approval decisions. Semantic refresh first
 withdraws the old offer and notifies v1 consumers, then publishes a new revision.
 Do not mutate a registered tool/policy in place.
 
-This is the initial approval-gating subset of the interoperability design, not
-the complete v2 contract. `requiredPolicies`, general feature requirements,
-availability diagnostics and classified refresh are not implemented yet.
-An absent producer cannot be inferred from discovery; configurations requiring
-protection even when a policy extension is missing are not supported yet.
+This is the I0 safety subset, not the complete v2 contract. General tool feature
+requirements, session-generation negotiation, availability diagnostics and
+classified refresh remain later work. User-configured `requiredPolicies` supplies
+the independent expectation needed when a producer never loads or throws before
+offering its guard. Global policy readiness failures reject the entire catalog,
+even when not explicitly listed; a missing policy's former presence alone is not
+a durable expectation.
 
 Order: normalize/freeze/validate → before policies → deduplicated approvals →
 execution scheduler → invoke → after policies. Approval sees the same frozen
@@ -491,6 +504,11 @@ Failed owner disposal retains tree observation and its release receipt, while
 closing controls/factories refuse new acquisition. Factory capacity counts live
 controls rather than historical allocations.
 
+Factory shutdown closes **every** control before any restoration callback.
+Independent owners and native suppression restoration are attempted even when
+one receipt fails. Failed receipts retain a retry path after foreign replacement
+as well as during shutdown; success is not reported for partial cleanup.
+
 Code Mode's own exec/wait registrations use instance-local schema references
 and live source/metadata fingerprints. Matching descriptions or cloned historical
 declarations cannot claim ownership, refresh a replacement, or toggle it.
@@ -527,6 +545,17 @@ Hooks run in sorted policy-ID order, with frozen data and a five-second signal
 budget. They must cooperate with cancellation; use policy hooks for checks/
 redaction, not independent side effects. Discovery caps: 32 providers, 64 tools,
 16 policies; schema 8 KiB, description 2000 characters, entire catalog 24 KiB.
+
+For initialization that can fail, use
+`registerCodeModePolicy(pi, {id, resolve() { return {id, before, after}; }})`.
+Resolution is synchronous and performs no I/O. The helper announces not-ready
+before resolving and converts failures to a bounded failed record; it does not
+rely on Pi propagating event-listener exceptions. Legacy consumers receive a
+deny guard for this resolver form. The callable disposer also has `refresh()`:
+call it after changing policy semantics/readiness, before allowing further
+effects; it withdraws the old revision and emits v1 revocation before publishing
+the next one. Do not silently mutate guards captured by running cells.
+Use `requiredPolicies` in addition to this helper to cover a missing producer.
 
 `registerCodeModeObserver(pi,{id,complete(receipt,signal)})` returns a disposer.
 This is a separate, optional diagnostic protocol (at most 16 observers), **not**

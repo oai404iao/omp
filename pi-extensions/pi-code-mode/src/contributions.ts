@@ -57,6 +57,9 @@ export interface CodeModePolicy {
 	before?(call: PolicyCall): Promise<void | { block: true; reason?: string }> | void | { block: true; reason?: string };
 	after?(call: PolicyCall, value: JsonValue): Promise<JsonValue> | JsonValue;
 }
+/** Resolve synchronously without I/O. Failure keeps the global guard closed;
+ * configure requiredPolicies as well to cover a producer that never loads. */
+export interface CodeModePolicySource { id: string; resolve(): CodeModePolicy }
 export interface CompletionReceipt {
 	readonly cellId: string; readonly toolCallId: string; readonly name: string;
 	readonly originToolCallId?: string; readonly epoch?: number;
@@ -133,23 +136,51 @@ export function registerCodeModeTools(pi: ExtensionAPI, initial: CodeModeProvide
 		dispose() { if (!disposed) { disposed = true; off(); offV2(); pi.events.emit(CHANGED, { version: 1 }); } },
 	};
 }
-export function registerCodeModePolicy(pi: ExtensionAPI, policy: CodeModePolicy) {
+export function registerCodeModePolicy(pi: ExtensionAPI, source: CodeModePolicy | CodeModePolicySource) {
 	let disposed = false;
-	const registration = Object.freeze({ owner: policy.id, instanceId: randomUUID(), revision: 1 });
-	const accepted = new WeakSet<ConsumerHello>();
+	let ready = true;
+	let registration: Registration = Object.freeze({ owner: source.id, instanceId: randomUUID(), revision: 1 });
+	let accepted = new WeakSet<ConsumerHello>();
+	const resolve = () => {
+		const policy = "resolve" in source ? source.resolve() : source;
+		if (policy.id !== registration.owner) throw new Error("Policy identity changed");
+		return policy;
+	};
+	const deny: CodeModePolicy = { id: source.id,
+		before: () => ({ block: true, reason: "Code Mode policy unavailable or requires negotiated approval/1 support" }) };
 	const offV2 = pi.events.on(DISCOVER_V2, (value) => {
 		if (disposed || !discoveryV2(value)) return;
-		const requires = policy.approval !== undefined ? [APPROVAL_FEATURE] : [];
-		if (requires.some((feature) => !value.hello.features.includes(feature))) return;
-		if (value.offer({ kind: "policy", registration, requires, policy }).status === "compatible") accepted.add(value.hello);
+		value.offer({ kind: "policy", registration, requires: [], availability: { state: "not-ready" } });
+		if (!ready) return;
+		try {
+			const policy = resolve();
+			const requires = policy.approval !== undefined ? [APPROVAL_FEATURE] : [];
+			if (requires.some((feature) => !value.hello.features.includes(feature))) {
+				value.offer({ kind: "policy", registration, requires, availability: { state: "failed", reason: "missing-approval-feature" } });
+				return;
+			}
+			if (value.offer({ kind: "policy", registration, requires, policy, availability: { state: "available" } }).status === "compatible") accepted.add(value.hello);
+		} catch {
+			value.offer({ kind: "policy", registration, requires: [], availability: { state: "failed", reason: "owner-not-ready" } });
+		}
 	});
 	const off = pi.events.on(DISCOVER, (value) => {
 		if (disposed || !discover(value) || hasReceipt(value, registration, accepted)) return;
-		value.policy(policy.approval === undefined ? policy : {
-			id: policy.id,
-			before: () => ({ block: true, reason: "Code Mode policy requires negotiated approval/1 support" }),
-		});
+		let policy = deny;
+		try {
+			if (ready && !("resolve" in source) && source.approval === undefined) policy = source;
+		} catch { /* Leave the legacy deny guard in place. */ }
+		value.policy(policy);
 	});
 	pi.events.emit(CHANGED, { version: 1 });
-	return () => { if (!disposed) { disposed = true; off(); offV2(); pi.events.emit(CHANGED, { version: 1 }); } };
+	const dispose = () => { if (!disposed) { disposed = true; off(); offV2(); pi.events.emit(CHANGED, { version: 1 }); } };
+	return Object.assign(dispose, { refresh() {
+		if (disposed) throw new Error("Code Mode policy registration disposed");
+		ready = false;
+		pi.events.emit(CHANGED, { version: 1 });
+		registration = Object.freeze({ ...registration, revision: registration.revision + 1 });
+		accepted = new WeakSet();
+		ready = true;
+		pi.events.emit(CHANGED, { version: 1 });
+	} });
 }

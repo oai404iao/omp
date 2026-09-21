@@ -35,7 +35,8 @@ export async function doctor(pi: ExtensionAPI, ctx: ExtensionContext, probe: boo
 	});
 	lines.push(`Configured protocol: ${config.value.protocol} → ${protocol.grammar ? "grammar" : "json"}; ${protocol.reason}`);
 	await check("contribution discovery", async () => {
-		const tools = collect(pi).tools.map((tool) => tool.name);
+		lines.push(`Required policies: ${config.value.requiredPolicies.join(", ") || "(none)"}`);
+		const tools = collect(pi, config.value.requiredPolicies).tools.map((tool) => tool.name);
 		const grants = String(pi.getFlag("code-mode-tools") ?? "").split(",").map((name) => name.trim()).filter(Boolean);
 		lines.push(`Available: ${tools.join(", ") || "(none)"}`, `Granted: ${grants.join(", ") || "(none)"}`,
 			`Granted but unavailable: ${grants.filter((name) => !tools.includes(name)).join(", ") || "(none)"}`);

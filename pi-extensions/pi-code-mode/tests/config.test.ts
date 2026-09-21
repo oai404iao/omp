@@ -14,13 +14,13 @@ test("config: defaults, user settings, explicit CLI and strict non-permission sc
 	await mkdir(join(dir, "extensions/pi-code-mode"), { recursive: true });
 	const flags: Record<string, string | boolean> = {};
 	const pi = { getFlag: (name: string) => flags[name] } as Pick<ExtensionAPI, "getFlag">;
-	assert.deepEqual(configuration(pi, dir).value, { hostPath: "", protocol: "json", visibility: "mixed", maxCells: 1 });
+	assert.deepEqual(configuration(pi, dir).value, { hostPath: "", protocol: "json", visibility: "mixed", maxCells: 1, requiredPolicies: [] });
 	await writeFile(path, JSON.stringify({ version: 1, hostPath: "/host", protocol: "auto", visibility: "hide-bridged" }));
 	assert.equal(configuration(pi, dir).sources.hostPath, "config");
 	flags["code-mode-protocol"] = "json";
 	flags["code-mode-visibility"] = "mixed";
 	flags["code-mode-host"] = "/cli-host";
-	assert.deepEqual(configuration(pi, dir).value, { hostPath: "/cli-host", protocol: "json", visibility: "mixed", maxCells: 1 });
+	assert.deepEqual(configuration(pi, dir).value, { hostPath: "/cli-host", protocol: "json", visibility: "mixed", maxCells: 1, requiredPolicies: [] });
 	assert.equal(configuration(pi, dir).sources.protocol, "CLI");
 	await writeFile(path, JSON.stringify({ version: 1, maxCells: 2 }));
 	assert.equal(configuration(pi, dir).value.maxCells, 2);
@@ -32,7 +32,12 @@ test("config: defaults, user settings, explicit CLI and strict non-permission sc
 		assert.throws(() => configuration(pi, dir), /maxCells/);
 	}
 	delete flags["code-mode-max-cells"];
+	await writeFile(path, JSON.stringify({ version: 1, requiredPolicies: ["guard", "permission__guard"] }));
+	assert.deepEqual(configuration(pi, dir).value.requiredPolicies, ["guard", "permission__guard"]);
+	assert.equal(configuration(pi, dir).sources.requiredPolicies, "config");
 	for (const invalid of [{}, [], null, { version: 2 }, { version: 1, write: true },
+		...[null, "guard", ["*"], ["guard", "guard"], ["bad___id"], Array.from({ length: 17 }, (_, i) => `guard${i}`)]
+			.map((requiredPolicies) => ({ version: 1, requiredPolicies })),
 		...[0, 5, 1.5, "2", null].map((maxCells) => ({ version: 1, maxCells })),
 		{ version: 1, tools: ["any"] }, { version: 1, hostPath: "relative" },
 		{ version: 1, protocol: "unknown" }, { version: 1, visibility: "only" }]) {

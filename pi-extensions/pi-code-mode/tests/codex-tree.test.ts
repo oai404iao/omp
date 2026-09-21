@@ -58,3 +58,42 @@ for (const first of [false, true]) test(`Codex tree arbitration and suppression,
 	assert.doesNotMatch(f.session.getAllTools().find((tool) => tool.name === "exec")!.description, /tools\.codex_core__apply_patch/);
 	assert.deepEqual(f.errors, []);
 });
+
+for (const first of [false, true]) for (const initiallyActive of [false, true]) {
+	test(`Codex tree preserves explicit allowlist with autoEnable=false, owner first=${first}, active=${initiallyActive}`, async (t) => {
+		const previous = process.env.PI_CODING_AGENT_DIR;
+		const directory = await scratch("codex-tree-allowlist");
+		process.env.PI_CODING_AGENT_DIR = directory;
+		t.after(() => {
+			if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previous;
+		});
+		const config = join(directory, "extensions/pi-codex-minimal-tools");
+		await mkdir(config, { recursive: true });
+		await writeFile(join(config, "config.json"), JSON.stringify({ autoEnable: false, webSocketEnabled: false }));
+		await writeFile(join(config, "models.json"), JSON.stringify({ version: 1, models: [{
+			id: "s1-fixture/s1", extends: "openai/gpt-5.5",
+			responses: { providerShim: false, websocketPrewarm: false },
+			tools: { applyPatch: "function", webSearch: { implementation: "standalone", contentTypes: ["text"] }, imageGeneration: false, viewImage: false },
+			compaction: "pi",
+		}] }));
+		const f = await piSession(t, {
+			host: "/fixture-not-executed", grant: true, factoryFirst: first, factories: [codexCore, codexWeb],
+			tools: "codex_core__apply_patch,codex_web__web_search", visibility: "hide-bridged",
+			activeTools: ["read", "edit", "write", "exec", "wait", ...(initiallyActive ? ["apply_patch", "web_search"] : [])],
+		});
+		await delay(0);
+		const withoutSystem = f.session.sessionManager.appendCustomEntry("fixture", {});
+		const tools = f.session.getAllTools().map(({ name, description, parameters }) => ({ name, description, parameters: structuredClone(parameters) }));
+		const full = f.session.sessionManager.appendMessage({ role: "system", content: "", toolsAdded: tools, timestamp: Date.now() });
+		await f.session.navigateTree(withoutSystem, { summarize: false });
+		await f.session.navigateTree(full, { summarize: false });
+		await delay(0);
+		assert(!f.session.getActiveToolNames().includes("apply_patch"));
+		assert.equal(f.session.getActiveToolNames().includes("edit"), !initiallyActive);
+		await f.session.prompt("/code-mode off");
+		assert.equal(f.session.getActiveToolNames().includes("apply_patch"), initiallyActive);
+		assert.equal(f.session.getActiveToolNames().includes("web_search"), initiallyActive);
+		assert.deepEqual(f.errors, []);
+	});
+}

@@ -3,7 +3,7 @@ import { DISCOVER, OBSERVERS, APPROVALS, type CodeModeApproval, type CodeModeObs
 import { LIMITS } from "./limits.ts";
 import { schemaType } from "./schema-description.ts";
 import { randomUUID } from "node:crypto";
-import { APPROVAL_FEATURE, DISCOVER_V2, type ConsumerHello, type DiscoveryReceipt, type DiscoveryV2 } from "./discovery.ts";
+import { APPROVAL_FEATURE, DISCOVER_V2, isPolicyId, requiredPolicyIds, type ConsumerHello, type DiscoveryReceipt, type DiscoveryV2, type Registration } from "./discovery.ts";
 
 const identifier = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 const component = (value: unknown): value is string => typeof value === "string" && value.length <= 40 && identifier.test(value);
@@ -19,7 +19,8 @@ export function frozen<T>(value: T): T {
 	return value;
 }
 export interface Catalog { tools: CodeModeTool[]; policies: CodeModePolicy[]; observers?: readonly CodeModeObserver[]; approvals?: readonly CodeModeApproval[] }
-export function collect(pi: ExtensionAPI): Catalog {
+export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = []): Catalog {
+	const required = requiredPolicyIds(requiredPolicies);
 	const providers: CodeModeProvider[] = [];
 	const policies: CodeModePolicy[] = [];
 	const observers: CodeModeObserver[] = [];
@@ -32,21 +33,34 @@ export function collect(pi: ExtensionAPI): Catalog {
 	});
 	const receipts: DiscoveryReceipt[] = [];
 	const registrations = new Set<string>();
+	const pendingPolicies = new Map<string, Registration>();
 	let attempts = 0;
 	let discovering = true;
 	pi.events.emit(DISCOVER_V2, { hello, offer(value) {
 		if (!discovering) return { status: "incompatible" };
-		if (++attempts > 48) { overflow = true; return { status: "incompatible" }; }
+		if (++attempts > 80) { overflow = true; return { status: "incompatible" }; }
 		try {
 			const { registration, requires } = value;
 			const key = `${value.kind}:${registration.owner}`;
-			if (!component(registration.owner) || typeof registration.instanceId !== "string"
+			const pending = pendingPolicies.get(key);
+			if (!(value.kind === "policy" ? isPolicyId(registration.owner) : component(registration.owner)) || typeof registration.instanceId !== "string"
 				|| !registration.instanceId || registration.instanceId.length > 128
 				|| !Number.isSafeInteger(registration.revision) || registration.revision < 1
 				|| !Array.isArray(requires) || requires.length > 32
 				|| requires.some((feature) => typeof feature !== "string" || feature.length > 128)
-				|| registrations.has(key)) throw new Error("Invalid/duplicate Code Mode registration");
+				|| (registrations.has(key) && pending !== registration)) throw new Error("Invalid/duplicate Code Mode registration");
 			registrations.add(key);
+			if (value.kind === "policy" && value.availability) {
+				const { state, reason } = value.availability;
+				if (reason !== undefined && (typeof reason !== "string" || reason.length > 256)) throw new Error("Invalid policy reason");
+				if (state === "not-ready") {
+					if (pending || pendingPolicies.size + policies.length >= 16) throw new Error("Duplicate/oversized pending policies");
+					pendingPolicies.set(key, registration);
+					return { status: "unavailable" };
+				}
+				if (state === "failed") { invalid = true; return { status: "unavailable" }; }
+				if (state !== "available") throw new Error("Invalid policy availability");
+			}
 			const missing = requires.filter((feature) => !hello.features.includes(feature));
 			if (missing.length) {
 				// An incompatible global policy cannot disappear from enforcement.
@@ -54,7 +68,10 @@ export function collect(pi: ExtensionAPI): Catalog {
 				return { status: "incompatible", missing };
 			}
 			if (value.kind === "provider" && registration.owner === value.provider.id && providers.length < 32) providers.push(value.provider);
-			else if (value.kind === "policy" && registration.owner === value.policy.id && policies.length < 16) policies.push(value.policy);
+			else if (value.kind === "policy" && value.policy && registration.owner === value.policy.id && policies.length < 16) {
+				policies.push(value.policy);
+				pendingPolicies.delete(key);
+			}
 			else throw new Error("Invalid Code Mode offer/budget");
 			receipts.push(Object.freeze({ registration, consumer: hello }));
 			return { status: "compatible" };
@@ -77,7 +94,7 @@ export function collect(pi: ExtensionAPI): Catalog {
 		if (approvals.length >= 16) overflow = true; else approvals.push(value);
 	} });
 	if (overflow) throw new Error("Code Mode discovery budget exceeded");
-	if (invalid) throw new Error("Invalid/duplicate/incompatible Code Mode discovery registration");
+	if (invalid || pendingPolicies.size) throw new Error("Invalid/duplicate/incompatible or not-ready Code Mode discovery registration");
 	const owners = new Set<string>();
 	const names = new Set<string>();
 	const tools: CodeModeTool[] = [];
@@ -103,13 +120,15 @@ export function collect(pi: ExtensionAPI): Catalog {
 	}
 	const policyNames = new Set<string>();
 	for (const policy of policies) {
-		if (!component(policy.id) || policyNames.has(policy.id)
+		if (!isPolicyId(policy.id) || policyNames.has(policy.id)
 			|| (!policy.before && !policy.after && !policy.approval)
 			|| (policy.approval !== undefined && !component(policy.approval))
 			|| (policy.before !== undefined && typeof policy.before !== "function")
 			|| (policy.after !== undefined && typeof policy.after !== "function")) throw new Error("Invalid/duplicate Code Mode policy");
 		policyNames.add(policy.id);
 	}
+	const missingPolicies = required.filter((id) => !policyNames.has(id));
+	if (missingPolicies.length) throw new Error(`Missing required Code Mode policies: ${missingPolicies.join(", ")}`);
 	const observerIds = new Set<string>();
 	for (const observer of observers) {
 		if (!component(observer.id) || observerIds.has(observer.id) || typeof observer.complete !== "function") throw new Error("Invalid/duplicate Code Mode observer");
@@ -119,6 +138,9 @@ export function collect(pi: ExtensionAPI): Catalog {
 	for (const approval of approvals) {
 		if (!component(approval.id) || approvalIds.has(approval.id) || typeof approval.approve !== "function") throw new Error("Invalid/duplicate Code Mode approval");
 		approvalIds.add(approval.id);
+	}
+	for (const policy of policies) {
+		if (policy.approval && !approvalIds.has(policy.approval)) throw new Error(`Code Mode policy approval unavailable: ${policy.id}`);
 	}
 	return { tools, policies: policies.map((p) => Object.freeze({ ...p })).sort((a, b) => a.id.localeCompare(b.id)),
 		approvals: approvals.map((a) => Object.freeze({ ...a })),
