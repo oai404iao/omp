@@ -13,8 +13,14 @@ const info = (name = "lookup"): ToolInfo => ({
 function fixture(active = ["read", "lookup", "bash"]) {
 	let definitions = [info()];
 	let writes = 0;
+	const handlers = new Map<string, Set<() => void>>();
 	const pi = {
 		events: createEventBus(),
+		on(name: string, handler: () => void) {
+			if (!handlers.has(name)) handlers.set(name, new Set());
+			handlers.get(name)!.add(handler);
+			return () => { handlers.get(name)!.delete(handler); };
+		},
 		getAllTools: () => definitions,
 		getActiveTools: () => active.slice(),
 		setActiveTools: (next: string[]) => { active = next.slice(); writes++; },
@@ -27,6 +33,7 @@ function fixture(active = ["read", "lookup", "bash"]) {
 		get active() { return active; }, get writes() { return writes; },
 		foreign(next: string[]) { active = next; },
 		replace(next: ToolInfo[]) { definitions = next; },
+		emit(name: string) { for (const handler of handlers.get(name) ?? []) handler(); },
 	};
 }
 
@@ -37,6 +44,26 @@ test("visibility: mixed is default, only is rejected, construction/mixed make no
 	const f = fixture();
 	f.view.sync("mixed", [f.tool]);
 	assert.equal(f.writes, 0);
+});
+
+test("visibility: tree loadouts cannot undo an owned restoration, but explicit inactivity and replacements win", () => {
+	for (const action of ["restore", "inactive", "replacement", "disposed", "cancelled"] as const) {
+		const f = fixture();
+		f.view.sync("hide-bridged", [f.tool]);
+		f.view.release();
+		if (action === "inactive") f.owner.setActive(false);
+		f.emit("session_before_tree");
+		if (action === "replacement") f.replace([{ ...info(), description: "new owner definition" }]);
+		if (action === "disposed") f.owner.dispose();
+		if (action === "cancelled") {
+			f.owner.setActive(false);
+			f.emit("session_before_tree");
+		}
+		f.foreign(["read", "bash", "new_foreign_tool"]);
+		f.emit("session_tree");
+		assert.equal(f.active.includes("lookup"), action === "restore");
+		assert(f.active.includes("new_foreign_tool"));
+	}
 });
 
 test("visibility: restore only removed names into live state, never replay the old active set", () => {

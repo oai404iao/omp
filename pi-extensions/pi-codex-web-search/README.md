@@ -2,7 +2,7 @@
 
 Alpha bootstrap candidate; initial npm publication is still pending.
 
-Peer floor: Pi 0.85.1; tested against 0.85.1.
+Peer floor: Pi 0.86.1; tested against 0.86.1.
 
 Installs `web_search` and search activity rendering. Depends only on
 `pi-codex-runtime`, not core, imagegen or the old bundle.

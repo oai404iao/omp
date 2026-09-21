@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, VERSION } from "@earendil-works/pi-coding-agent";
 
 const root = process.cwd(), cwd = join(root, "cwd"), agentDir = process.env.PI_CODING_AGENT_DIR;
-assert.equal(VERSION, "0.85.1");
+assert.equal(VERSION, "0.86.1");
 assert(realpathSync(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))).startsWith(`${root}/node_modules/`));
 const packages = ["pi-code-mode", "pi-codex-core", "pi-codex-web-search", "pi-codex-runtime"];
 for (const name of packages) {

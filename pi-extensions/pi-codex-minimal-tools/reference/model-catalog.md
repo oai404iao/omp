@@ -100,7 +100,7 @@ openai-codex-responses
 The extension registers its stream handler for the selected provider without
 supplying URL, auth, headers, or models. Supported Pi versions therefore
 compose the handler over the user's provider while dispatching it by the
-Responses API type. Pi 0.85.1, the peer floor, supplies Astra's model
+Responses API type. Pi 0.86.1, the peer floor, supplies Astra's model
 descriptor; this extension supplies only its exact Codex request profile.
 
 If the API does not match, hosted tools, custom `apply_patch`, native

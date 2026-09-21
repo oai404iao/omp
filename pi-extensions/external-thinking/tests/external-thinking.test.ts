@@ -232,6 +232,32 @@ test("soft mode leaves a provider payload untouched", async () => {
 	});
 });
 
+test("hard mode recognizes transcript tool additions but not declarations in user content", async () => {
+	const cases = [
+		{ api: "openai-responses", payload: { input: [{ type: "additional_tools", role: "developer", tools: [{ type: "function", name: "external_think" }] }] } },
+		{ api: "azure-openai-responses", payload: { input: [{ type: "tool_search_output", status: "completed", tools: [{ type: "function", name: "external_think" }] }] } },
+		{ api: "openai-completions", payload: { messages: [{ role: "system", tools: [{ type: "function", function: { name: "external_think" } }] }] } },
+	];
+	for (const { api, payload } of cases) {
+		await withHarness({ model: model(api) }, async ({ pi, ctx }) => {
+			await runCommand(pi, "on hard", ctx);
+			await emit(pi, "before_agent_start", ctx);
+			assert.equal(await emit(pi, "before_provider_request", ctx, { payload }), payload);
+			assert.deepEqual((payload as Record<string, unknown>).tool_choice, api === "openai-completions"
+				? { type: "function", function: { name: "external_think" } }
+				: { type: "function", name: "external_think" });
+		});
+	}
+	await withHarness({ model: model("openai-completions") }, async ({ pi, ctx, notifications }) => {
+		await runCommand(pi, "on hard", ctx);
+		await emit(pi, "before_agent_start", ctx);
+		const payload = { messages: [{ role: "user", tools: [{ function: { name: "external_think" } }] }] };
+		assert.equal(await emit(pi, "before_provider_request", ctx, { payload }), payload);
+		assert.equal("tool_choice" in payload, false);
+		assert.match(notifications.at(-1)?.message ?? "", /paus/i);
+	});
+});
+
 test("refuses models that cannot disable native reasoning and does not bypass tool restrictions", async () => {
 	await withHarness(
 		{ model: model("openai-responses", { thinkingLevelMap: { off: null } }) },

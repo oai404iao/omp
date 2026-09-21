@@ -1,4 +1,5 @@
 import type { Api, AssistantMessage, Context, Model, ThinkingLevel, Tool } from "@earendil-works/pi-ai";
+import { getCurrentSystemMessage, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import type {
 	CompactionEntry,
 	ExtensionAPI,
@@ -10,6 +11,7 @@ import type {
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 import { sanitizeNativeCompactionOutput } from "./adapter/compaction/checkpoint.js";
 import { requestOpenAINativeCompaction } from "./adapter/compaction/request.js";
+import { trackCompactionPrompt } from "./extension/compaction-prompt.js";
 import type { ModelLike } from "@oai404iao/pi-codex-runtime/internal/capabilities";
 import { hasCodexRequestAuth } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveModelProfile } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
@@ -266,7 +268,8 @@ export function applyNativeCompactionContext(
 		const output = normalizedNativeCompactionMode(details) === "responses-compact"
 			? sanitizeNativeCompactionOutput(details.output)
 			: details.output;
-		const withoutSummary = withoutCompactionSummary(messages);
+		const system = getCurrentSystemMessage(messages) ?? installed.entry.systemMessage;
+		const withoutSummary = withoutCompactionSummary(messages).filter((message) => message.role !== "system");
 		let tail: PiMessages;
 		if (details.sourceEntryId) {
 			tail = legacyTailAfterContextManagementMarker(withoutSummary, details.sourceBlockIndex);
@@ -277,8 +280,9 @@ export function applyNativeCompactionContext(
 			tail = messagesAfterEntry(branchEntries, installed.index);
 		}
 		return normalizeNativeCompactionToolPairs([
+			...(system ? [system] : []),
 			syntheticNativeAssistant(output, model, new Date(installed.entry.timestamp).getTime()),
-			...tail,
+			...tail.filter((message) => message.role !== "system"),
 		]);
 	}
 	return messages;
@@ -306,15 +310,16 @@ async function buildNativeCompactionContext(
 	event: SessionBeforeCompactEvent,
 	ctx: ExtensionContext,
 	model: Model<Api>,
+	forcedPrompt?: string,
 ): Promise<Context> {
 	const session = buildSessionContext(event.branchEntries, ctx.sessionManager.getLeafId());
 	return {
-		systemPrompt: ctx.getSystemPrompt(),
+		systemPrompt: forcedPrompt ?? (getCurrentSystemMessage(session.messages) ? getCurrentSystemPrompt(session.messages) : ctx.getSystemPrompt()),
 		messages: applyNativeCompactionContext(
 			session.messages,
 			event.branchEntries,
 			model,
-		) as Context["messages"],
+		).filter((message) => message.role !== "system") as Context["messages"],
 		tools: activeTools(pi),
 	};
 }
@@ -323,6 +328,7 @@ export function registerNativeCompaction(
 	pi: ExtensionAPI,
 	providerController?: OpenAIResponsesProviderController,
 ): void {
+	const forcedPrompt = trackCompactionPrompt(pi);
 	pi.on("context", (event, ctx) => {
 		const settings = loadModelSettings(ctx.model as ModelLike | undefined, ctx.cwd);
 		if (!settings.enabled || settings.compactionMode === "pi") return undefined;
@@ -352,7 +358,7 @@ export function registerNativeCompaction(
 				throw new Error(auth.ok ? "OpenAI request authentication is unavailable" : auth.error);
 			}
 			const sessionId = ctx.sessionManager.getSessionId();
-			const context = await buildNativeCompactionContext(pi, event, ctx, model);
+			const context = await buildNativeCompactionContext(pi, event, ctx, model, forcedPrompt());
 			const output = await requestOpenAINativeCompaction(model, context, {
 				ownsNativeTool: providerController?.ownsNativeTool,
 				mode,

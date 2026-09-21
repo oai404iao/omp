@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, SessionManager, VERSION } from "@earendil-works/pi-coding-agent";
 
 const root = process.cwd();
-assert.equal(VERSION, "0.85.1");
+assert.equal(VERSION, "0.86.1");
 const sdkPath = realpathSync(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
 assert(sdkPath.startsWith(`${root}/node_modules/`));
 const packageRoot = join(root, "node_modules/@oai404iao/pi-code-mode");
@@ -103,7 +103,7 @@ const { session } = await createAgentSession({
 });
 const errors = [];
 try {
-	// Pi 0.85.1 reload emits session_start only when a UI/action/error binding
+	// Pi 0.86.1 reload emits session_start only when a UI/action/error binding
 	// is retained. Match the real print frontend's error binding, not mode alone.
 	await session.bindExtensions({ mode: "print", onError: (error) => errors.push(error.error) });
 	assert.match(session.getAllTools().find((tool) => tool.name === "exec").description, /Promise<string>/);

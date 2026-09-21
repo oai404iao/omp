@@ -29,6 +29,8 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 	let schema: unknown;
 	let held = false;
 	let restore = false;
+	let restoredByLease = false;
+	let restoreAfterTree = false;
 	let index = 0;
 	const fingerprint = (tool: ToolInfo) => JSON.stringify([tool.sourceInfo, tool.description, tool.parameters, tool.promptGuidelines]);
 	const owns = () => {
@@ -55,14 +57,28 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 		if (!held) return;
 		// Only restore a removal/activation intent owned by this lease. Do not
 		// turn off a foreign reactivation, or touch a replaced definition.
-		if (restore && owns()) change(true);
+		restoredByLease = restore && owns();
+		if (restoredByLease) change(true);
 		held = false;
 	};
+	const beforeTree = pi.on("session_before_tree", () => {
+		restoreAfterTree = restoredByLease && !held && owns() && pi.getActiveTools().includes(name);
+	});
+	const afterTree = pi.on("session_tree", () => {
+		// Pi restores historical tool loadouts before this event. A past leased
+		// omission must not undo this owner's already-released restoration.
+		if (restoreAfterTree && restoredByLease && !held && owns()) {
+			change(true);
+			pi.events.emit(VISIBILITY_CHANGED, { version: 1 });
+		}
+		restoreAfterTree = false;
+	});
 	return {
 		binding: Object.freeze({
 			version: 1 as const, name,
 			acquire(): DirectToolLease | undefined {
 				if (held || !owns()) return undefined;
+				restoredByLease = false;
 				const current = pi.getActiveTools();
 				index = current.indexOf(name);
 				restore = index >= 0;
@@ -82,12 +98,13 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 		projectActive(active: boolean): boolean | undefined {
 			if (!owns()) return undefined;
 			if (held) { restore = active; return false; }
+			restoredByLease = false;
 			return active;
 		},
 		setActive(active: boolean): boolean {
 			if (!owns()) return false;
 			if (held) { restore = active; change(false); }
-			else { index = pi.getActiveTools().length; change(active); }
+			else { restoredByLease = false; index = pi.getActiveTools().length; change(active); }
 			pi.events.emit(VISIBILITY_CHANGED, { version: 1 });
 			return true;
 		},
@@ -97,7 +114,7 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 			return current;
 		},
 		dispose() {
-			if (!disposed) { release(); disposed = true; pi.events.emit(VISIBILITY_CHANGED, { version: 1 }); }
+			if (!disposed) { beforeTree(); afterTree(); release(); disposed = true; pi.events.emit(VISIBILITY_CHANGED, { version: 1 }); }
 		},
 	};
 }

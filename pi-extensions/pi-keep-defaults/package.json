@@ -32,10 +32,10 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.85.1"
+    "@earendil-works/pi-coding-agent": ">=0.86.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2"
   },

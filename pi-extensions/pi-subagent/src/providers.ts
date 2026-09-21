@@ -201,6 +201,8 @@ function appendInheritedEntry(
 	entry: SessionEntry,
 ): void {
 	if (entry.type === "message") {
+		// Children inherit conversation data, not the parent's prompt or executable loadout.
+		if (entry.message.role === "system") return;
 		if (entry.message.role === "compactionSummary") {
 			session.appendCustomMessageEntry(
 				INHERITED_COMPACTION_CUSTOM_TYPE,

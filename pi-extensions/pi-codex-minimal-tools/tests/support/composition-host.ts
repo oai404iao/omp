@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { normalizeContext, type Context } from "@earendil-works/pi-ai";
 
 export async function withCompositionDirectory(run: (directory: string) => Promise<void>) {
 	const previous = process.env.PI_CODING_AGENT_DIR;
@@ -70,7 +71,10 @@ export function createCompositionHost(directory: string, bus = new EventEmitter(
 		},
 		registerTool: (tool: any) => add(tools, tool.name, tool),
 		registerProvider: (providerOrName: string | { id: string }, value?: any) => {
-			if (typeof providerOrName === "string") add(providers, providerOrName, value);
+			if (typeof providerOrName === "string") add(providers, providerOrName, {
+				...value,
+				streamSimple: (model: any, context: Context, options: any) => value.streamSimple(model, normalizeContext(context), options),
+			});
 			else add(providers, providerOrName.id, providerOrName);
 		},
 		registerCommand: (name: string, value: any) => add(commands, name, value),

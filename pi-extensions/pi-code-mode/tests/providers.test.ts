@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { piSession, scratch } from "./helpers.ts";
 import { Type } from "typebox";
+import { getCurrentTools } from "@earendil-works/pi-ai";
 import { createCodeModeDirectBinding, registerCodeModeTools } from "../src/contributions.ts";
 
 const host = process.env.CODE_MODE_TEST_HOST;
@@ -86,7 +87,7 @@ for (const api of ["openai-completions", "anthropic-messages"]) {
 		assert.match(JSON.stringify(requests[3].messages), /dynamic-nested-result/);
 		const loaderResult = f.session.messages.find((message) => message.role === "toolResult" && message.toolName === "load_lookup");
 		assert(loaderResult?.role === "toolResult" && !loaderResult.isError);
-		assert(!loaderResult.addedToolNames?.includes("lookup"), "do not forge deferred activation for a suppressed tool");
+		assert(!getCurrentTools(f.session.messages).some((tool) => tool.name === "lookup"), "do not declare a suppressed tool");
 		await f.session.prompt("/code-mode off");
 		assert(f.session.getActiveToolNames().includes("lookup"));
 	});

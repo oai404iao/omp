@@ -1,12 +1,13 @@
 import {
 	streamSimpleOpenAICodexResponses, streamSimpleOpenAIResponses,
-	type Api, type Context, type Model, type SimpleStreamOptions,
+	type Api, type TranscriptContext, type Model, type SimpleStreamOptions,
 } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { installCodexIdentityLifecycle } from "@oai404iao/pi-codex-runtime/internal/codex-identity-extension";
 import { currentCodexTurn, resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { createCodexStream } from "../providers/openai-codex/stream.js";
+import { projectCodexTranscript } from "../providers/openai-codex/transcript.js";
 import type { OpenAIResponsesProviderController } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { closeProviderWebSocketSessions } from "../providers/openai-codex/websocket-session.js";
 import type { ProviderPresentation } from "@oai404iao/pi-codex-runtime/internal/extension/provider-presentation";
@@ -19,7 +20,7 @@ export function registerResponsesProviderRuntime(
 ): OpenAIResponsesProviderController {
 	installCodexIdentityLifecycle(pi);
 	const prewarm = createStartupPrewarmLifecycle(pi, options.ownsNativeTool);
-	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: Context, streamOptions?: SimpleStreamOptions) => {
+	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: TranscriptContext, streamOptions?: SimpleStreamOptions) => {
 		const settings = loadModelSettings(model, options.getCurrentCwd());
 		if (
 			!settings.enabled
@@ -30,7 +31,7 @@ export function registerResponsesProviderRuntime(
 				? streamSimpleOpenAICodexResponses(model as Model<"openai-codex-responses">, context, streamOptions)
 				: streamSimpleOpenAIResponses(model as Model<"openai-responses">, context, streamOptions);
 		}
-		return createCodexStream(model, context, streamOptions, {
+		return createCodexStream(model, projectCodexTranscript(context), streamOptions, {
 			ownsNativeTool: options.ownsNativeTool,
 			...presentation?.streamEffects(),
 			getCurrentCwd: options.getCurrentCwd,

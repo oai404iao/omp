@@ -8,7 +8,7 @@
 
 也就是说 `/model`、`Ctrl+P` 循环切换、模型选择器、RPC 切模型、切换思考级别等操作只影响**当前会话**,不会再悄悄改写全局默认值。
 
-兼容性下限：Pi 0.85.1；已验证 0.85.1。
+兼容性下限：Pi 0.86.1；已验证 0.86.1。
 
 ## 安装
 
@@ -61,7 +61,7 @@ pi install /absolute/path/to/pi-keep-defaults
 只在有 active session 时执行保护;最后一个 owner shutdown 后会立即恢复原生 setter 委托,
 因此删除或禁用扩展后不会继续冻结默认值。用户的 on/off 偏好会保留并应用到下一个 session。
 
-`SettingsManager` 的 setter 拦截依赖内部属性。如果属性形状与已测试的 Pi 0.85.1 不兼容，
+`SettingsManager` 的 setter 拦截依赖内部属性。如果属性形状与已测试的 Pi 0.86.1 不兼容，
 扩展会在任何 setter 被修改前安全放弃主补丁,并通过 console/UI warning 明确提示;此时仅使用
 session-scoped 文件守卫兜底。文件守卫启动失败时同样会警告,而不会令 pi 崩溃。该降级模式不能
 保证拦截文件守卫无法观察到的未来内部写入路径,因此不宣称对所有未来 pi 版本始终兼容。

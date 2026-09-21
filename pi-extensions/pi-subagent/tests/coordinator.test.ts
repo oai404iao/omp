@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { afterEach, test, type TestContext } from "node:test";
 import {
 	createAssistantMessageEventStream,
+	getCurrentTools,
 	type AssistantMessage,
 	type AssistantMessageEventStream,
 	type Context,
@@ -316,7 +317,7 @@ async function fixture(
 		streamSimple: (model, context, streamOptions) => {
 			const currentTurn = ++turn;
 			options.onRequestContext?.(context);
-			options.onRequestTools?.((context.tools ?? []).map((tool) => tool.name));
+			options.onRequestTools?.(getCurrentTools(context.messages).map((tool) => tool.name));
 			if (options.streamSimple) {
 				return options.streamSimple(
 					model,
@@ -624,7 +625,7 @@ test("a nested parent resolves a direct child by its relative path", async () =>
 	let scoutTurns = 0;
 	const { coordinator, parent } = await fixture({
 		streamSimple: (model, context, turn, signal) => {
-			const canDelegate = context.tools?.some(
+			const canDelegate = getCurrentTools(context.messages).some(
 				(tool) => tool.name === "subagent",
 			);
 			if (!canDelegate) {
@@ -2316,7 +2317,7 @@ test("nested wait_agent consumes only direct-child completion from the parent se
 			const toolResults = context.messages.filter(
 				(message) => message.role === "toolResult",
 			);
-			const hasNestedControls = context.tools?.some(
+			const hasNestedControls = getCurrentTools(context.messages).some(
 				(tool) => tool.name === "wait_agent",
 			);
 			if (!hasNestedControls) {
@@ -3724,7 +3725,7 @@ test("nested delegation tools enumerate the available agent definitions", async 
 	const { coordinator, parent } = await fixture({
 		onRequestContext: (context) => {
 			for (const name of ["subagent", "subagent_fork"]) {
-				const tool = context.tools?.find((candidate) => candidate.name === name);
+				const tool = getCurrentTools(context.messages).find((candidate) => candidate.name === name);
 				const properties = (
 					tool?.parameters as { properties?: Record<string, unknown> } | undefined
 				)?.properties;

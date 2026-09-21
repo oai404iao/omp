@@ -2,7 +2,7 @@
 
 Alpha bootstrap candidate; initial npm publication is still pending.
 
-Peer floor: Pi 0.85.1; tested against 0.85.1.
+Peer floor: Pi 0.86.1; tested against 0.86.1.
 
 Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
 `apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,

@@ -2,7 +2,7 @@
 
 Pi 完成任务、最终停止于错误、或通过 `ask_user_question` 等待你的回复时，向 Telegram Bot 发送一条通知。
 
-兼容性下限：Pi 0.85.1；已验证 0.85.1。
+兼容性下限：Pi 0.86.1；已验证 0.86.1。
 
 通知使用 Telegram MarkdownV2：标签加粗，项目路径使用行内代码，概要保留
 换行和缩进。概要上限从 30 提高到 **3000 UTF-16 单位**（大多数中英文字符
@@ -94,7 +94,7 @@ npm 包名使用 `@oai404iao/pi-telegram-notify`，但配置目录继续使用
   `@juicesharp/rpiv-ask-user-question` 的 `rpiv:ask-user:prompt` 公开事件；
   同时对 `ask_user_question` / `ask-user-question` 工具名提供回退监听。
 
-“完成/错误”只使用 Pi 0.85.1 的公开 `agent_settled` 事件，并从
+“完成/错误”只使用 Pi 0.86.1 的公开 `agent_settled` 事件，并从
 `ctx.sessionManager.getBranch()` 读取当前 active branch。该事件只在没有
 自动重试、自动压缩或排队 continuation 时触发通知。`toolUse` 和
 `aborted` assistant 消息会被忽略；`agent_end` 不会触发通知。

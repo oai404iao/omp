@@ -3,7 +3,7 @@
 Codex-specific Responses support for Pi, driven by an exact per-model JSON
 catalog instead of model-name heuristics.
 
-Peer floor: Pi 0.85.1; tested against 0.85.1.
+Peer floor: Pi 0.86.1; tested against 0.86.1.
 
 > npm identity stays `@oai404iao/pi-codex-minimal-tools`. This checkout composes
 > core, web-search and imagegen through a shared runtime. The four new packages
@@ -323,7 +323,7 @@ The pre-Astra entries include equivalent `openai/...` and
 ChatGPT subscription route. A public-API or proxy Astra deployment requires an
 explicit user profile for that endpoint.
 
-Pi 0.85.1 provides the Astra model descriptor; it is now the package peer
+Pi 0.86.1 provides the Astra model descriptor; it is now the package peer
 floor. The extension composes its stream shim over that provider and does not
 replace authentication, streams, or the model catalog.
 The descriptor keeps the production default at 272,000 context tokens and

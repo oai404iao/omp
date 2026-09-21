@@ -19,7 +19,7 @@ const textResult = (text) => ({ content: [{ type: "text", text }], details: {} }
 const textOf = (result) => result.content.filter((item) => item.type === "text").map((item) => item.text).join("\n");
 
 async function fixture(t, { factory = () => {}, settings = {}, baseToolsOverride } = {}) {
-  assert.equal(VERSION, "0.85.1", "Re-audit API assumptions before changing Pi baseline");
+  assert.equal(VERSION, "0.86.1", "Re-audit API assumptions before changing Pi baseline");
   assert(process.env.CODE_MODE_S0_DIR, "Use run.mjs");
   const cwd = join(process.env.CODE_MODE_S0_DIR, `pi-${randomUUID()}`);
   const agentDir = join(cwd, "agent");

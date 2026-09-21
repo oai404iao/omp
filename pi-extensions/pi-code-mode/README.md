@@ -11,7 +11,7 @@ the defaults; Codex integration is optional.
 
 ## Requirements and authorization
 
-- Pi 0.85.1 or compatible; Node >=22.19.
+- Pi 0.86.1 or compatible; Node >=22.19.
 - Linux x64 **glibc >=2.39 and OpenSSL 3** for the current local patched artifact,
   `/usr/bin/systemd-run`, `/usr/bin/systemctl`, `/usr/bin/env`,
   a user systemd manager and effective cgroup v2 memory/pids/CPU controllers.
@@ -467,7 +467,7 @@ is never re-enabled by an old receipt.
 Cleanup attempts all owners; failures are reported and retained for retry rather
 than silently claiming restoration succeeded.
 
-Pi 0.85.1 has no active-tools-changed event or global visibility lock.
+Pi 0.86.1 has no active-tools-changed event or global visibility lock.
 `registerTool` may reactivate names selected by `--tools`; reload re-enables
 extension definitions. Owner `reconcile()` and Code Mode's pre-request-safe
 boundaries reapply suppression. `turn_start/context` are **after** Pi snapshots
