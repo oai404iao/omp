@@ -115,17 +115,24 @@ factory: `hide-bridged` can hide explicitly granted counterparts while Codex
 retains logical activation intent and native mutation-tool suppression.
 Without Code Mode, or in its default mixed visibility, direct behavior remains.
 The [tool interoperability design](plans/pi-code-mode-tool-interop.md) tracks
-the initial I0 implementation and remaining I1–I3 work. Owner transitions now
+I0–I3 implementation. Owner transitions now
 retain failed disposal receipts for retry; tree activation reconciles current
 intent, profile restrictions, native mutation suppression and live leases.
 Historical system/tool declarations are not executable-owner identities or grants.
-Code Mode's I0 safety subset includes required-policy expectations and legacy
-approval gates, not the complete v2 ABI; Codex's safe adapters still use v1.
+Code Mode's v2 contract includes required-policy expectations, legacy approval
+gates, feature/availability declarations and bounded revision/generation checks.
+Codex contributes through a structural v2 client plus a legacy-safe v1 mirror;
+it resolves executable snapshots once per revision and retains no Code Mode
+package dependency. Classified diagnostics/presentation refresh preserves cells
+and store; execution changes revoke immediately.
 SDK/builtin/foreign replacements cannot be activated or suppress native tools
 on behalf of the old Codex owner. Pending cleanup is retried even after ownership
 loss; shutdown attempts all owners and retains failed native restoration receipts.
 
 Core advertises its exact stream function on the optional grammar handshake.
+Its v2 transport capability declares effective-checkpoint projection of Pi
+transcripts, including section updates, tool replacement/removal, forced prompt
+and compaction semantics. This does not claim in-place deltas or cache retention.
 Runtime handles generic grammar tool declarations, canonical string arguments,
 escaped JSON deltas and replay for Standard/Lite SSE/WS; it does not special-case
 Code Mode's `exec`. Selection still requires explicit model grammar metadata.

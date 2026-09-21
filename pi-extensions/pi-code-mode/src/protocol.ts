@@ -4,6 +4,15 @@ import { LIMITS } from "./limits.ts";
 import type { ExecOptions } from "./session.ts";
 
 export const TRANSPORT_DISCOVER = "@oai404iao/pi-code-mode:transport/v1";
+export const TRANSPORT_DISCOVER_V2 = "@oai404iao/pi-code-mode:transport/v2";
+export const TRANSCRIPT_SEMANTICS = Object.freeze(["sections", "tool-removal", "tool-redefinition", "forced-prompt", "compaction-checkpoint", "exec-history"]);
+export interface TransportCapability {
+	readonly stream: unknown;
+	readonly input: "pi-transcript/1";
+	readonly formats: readonly ("json" | "grammar")[];
+	readonly projection: "effective-checkpoint" | "transcript-deltas";
+	readonly semantics: readonly string[];
+}
 export type ProtocolMode = "json" | "auto" | "grammar";
 export const EXEC_SAMPLING: ConstrainedSamplingConfig = {
 	type: "grammar", variants: { openai_lark: "start: SOURCE\nSOURCE: /[\\s\\S]+/\n" },
@@ -84,6 +93,27 @@ export function resolveProtocol(pi: ExtensionAPI, ctx: ExtensionContext, mode: P
 	const override = ctx.modelRegistry.getRegisteredProviderConfig(model.provider)?.streamSimple
 		?? ctx.modelRegistry.getRegisteredNativeProvider(model.provider)?.streamSimple;
 	if (override) {
+		let offers = 0;
+		const matches: TransportCapability[] = [];
+		let open = true;
+		pi.events.emit(TRANSPORT_DISCOVER_V2, { protocol: 2, accept(capability: TransportCapability) {
+			if (!open) return;
+			if (++offers > 16) return;
+			if (capability?.stream === override) matches.push(capability);
+		} });
+		open = false;
+		if (offers > 16 || matches.length > 1) return { grammar: false, reason: "conflicting/oversized transcript transport handshake" };
+		if (matches.length) {
+			const capability = matches[0];
+			if (capability.input !== "pi-transcript/1" || !Array.isArray(capability.formats)
+				|| capability.formats.length > 2 || !capability.formats.includes("json") || !capability.formats.includes("grammar")
+				|| !["effective-checkpoint", "transcript-deltas"].includes(capability.projection)
+				|| !Array.isArray(capability.semantics) || capability.semantics.length > 16
+				|| !TRANSCRIPT_SEMANTICS.every((feature) => capability.semantics.includes(feature)))
+				return { grammar: false, reason: "active transport lacks required transcript semantics" };
+			if (!compatibleHistory(ctx)) return { grammar: false, reason: "exec history contains incompatible arguments; select JSON or a clean branch" };
+			return { grammar: true, reason: `declared grammar with ${capability.projection} projection` };
+		}
 		let accepted = false, count = 0;
 		pi.events.emit(TRANSPORT_DISCOVER, { version: 1, accept(stream: unknown) { count++; if (stream === override) accepted = true; } });
 		if (!accepted || count > 16) return { grammar: false, reason: "active custom transport has no matching grammar handshake" };

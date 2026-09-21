@@ -9,8 +9,9 @@ import { Runtime } from "./runtime.ts";
 import { ToolBridge } from "./bridge.ts";
 import { HOST, errorText } from "./limits.ts";
 import { UnconfirmedRuntimeStop } from "./errors.ts";
+import type { DiscoveryState } from "./discovery-state.ts";
 
-export async function doctor(pi: ExtensionAPI, ctx: ExtensionContext, probe: boolean, cancellation?: AbortSignal): Promise<string> {
+export async function doctor(pi: ExtensionAPI, ctx: ExtensionContext, probe: boolean, cancellation?: AbortSignal, discovery?: DiscoveryState): Promise<string> {
 	const cwd = ctx.cwd;
 	const contextSignal = ctx.signal;
 	const signal = AbortSignal.any([AbortSignal.timeout(10_000), ...(contextSignal ? [contextSignal] : []), ...(cancellation ? [cancellation] : [])]);
@@ -36,10 +37,12 @@ export async function doctor(pi: ExtensionAPI, ctx: ExtensionContext, probe: boo
 	lines.push(`Configured protocol: ${config.value.protocol} → ${protocol.grammar ? "grammar" : "json"}; ${protocol.reason}`);
 	await check("contribution discovery", async () => {
 		lines.push(`Required policies: ${config.value.requiredPolicies.join(", ") || "(none)"}`);
-		const tools = collect(pi, config.value.requiredPolicies).tools.map((tool) => tool.name);
+		const catalog = collect(pi, config.value.requiredPolicies, discovery);
+		const tools = catalog.tools.map((tool) => tool.name);
 		const grants = String(pi.getFlag("code-mode-tools") ?? "").split(",").map((name) => name.trim()).filter(Boolean);
 		lines.push(`Available: ${tools.join(", ") || "(none)"}`, `Granted: ${grants.join(", ") || "(none)"}`,
 			`Granted but unavailable: ${grants.filter((name) => !tools.includes(name)).join(", ") || "(none)"}`);
+		for (const item of catalog.diagnostics ?? []) lines.push(`Declaration ${item.name}: ${item.state}${item.reason ? ` (${item.reason})` : ""}`);
 	});
 	if (probe && ready) await check("supervised pure-computation Host probe", async () => {
 		const bridge = new ToolBridge([], [], "doctor", cwd, signal, () => undefined, () => {}, () => {});

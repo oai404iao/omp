@@ -4,7 +4,9 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition, ToolInfo } from "@
 import { CodeSession } from "./session.ts";
 import { HOST, errorText } from "./limits.ts";
 import { CHANGED, registerCodeModeApproval } from "./contributions.ts";
-import { collect, toolPrompt, isContributionName } from "./catalog.ts";
+import { collect, toolPrompt, isContributionName, type Catalog } from "./catalog.ts";
+import { DiscoveryState, sameExecutableCatalog } from "./discovery-state.ts";
+import { CHANGED_V2, contributionChange as isChange } from "./changes.ts";
 import { EXEC_DESCRIPTION, WAIT_DESCRIPTION, execParameters, waitParameters, renderObservation } from "./public-tools.ts";
 import type { Grants } from "./builtin-tools.ts";
 import { Visibility, visibilityMode, type VisibilityMode } from "./visibility.ts";
@@ -17,6 +19,8 @@ import { installOwnerFactory } from "./owner-factory.ts";
 
 export default function codeMode(pi: ExtensionAPI): void {
 	const session = new CodeSession();
+	const discovery = new DiscoveryState();
+	let lastCatalog: Catalog | undefined;
 	const disposeOwners = installOwnerFactory(pi);
 	const disposeApproval = registerCodeModeApproval(pi, { id: "user", async approve(call) {
 		const ctx = call.context.pi;
@@ -42,8 +46,10 @@ export default function codeMode(pi: ExtensionAPI): void {
 	let contributionIssue: string | undefined;
 	const contributions = () => {
 		try {
-			const catalog = collect(pi, requiredPolicies);
+			const catalog = collect(pi, requiredPolicies, discovery);
 			contributionIssue = undefined;
+			if (lastCatalog && !sameExecutableCatalog(lastCatalog, catalog)) handleChange({ version: 1 });
+			else if (!lastCatalog) lastCatalog = catalog;
 			return catalog;
 		} catch (error) {
 			contributionIssue = errorText(error);
@@ -193,7 +199,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 		bind(ctx);
 		const root = pi.getFlag("code-mode-read-root");
 		try {
-			if (session.enabled) { await session.revoke(); reflect(ctx); }
+			if (session.enabled) { discovery.advance(); await session.revoke(); reflect(ctx); }
 			configuredHost = "";
 			const configured = configuration(pi);
 			requiredPolicies = configured.value.requiredPolicies;
@@ -214,12 +220,20 @@ export default function codeMode(pi: ExtensionAPI): void {
 		}
 	});
 	pi.registerCommand("code-mode", {
-		description: "Code Mode on|off|status|cells|terminate [id|all]|doctor [host]|visibility mixed|hide-bridged|protocol json|auto|grammar. Permissions require explicit CLI flags.",
+		description: "Code Mode on|off|status|tools|cells|terminate [id|all]|doctor [host]|visibility mixed|hide-bridged|protocol json|auto|grammar. Permissions require explicit CLI flags.",
 		handler: async (args, ctx) => {
 			bind(ctx);
 			const action = args.trim() || "status";
 			if (action === "cells") {
 				const report = `Code Mode cells ${session.cellList.length}/${session.maxCells}: ${JSON.stringify(session.cellList)}. Terminal unread results still occupy slots.`;
+				if (ctx.hasUI) ctx.ui.notify(report, "info"); else process.stderr.write(`${report}\n`);
+				return;
+			}
+			if (action === "tools") {
+				const catalog = contributions();
+				const selected = new Set(grants().tools);
+				const report = (catalog.diagnostics ?? []).map((item) =>
+					`${item.name}: ${item.state}${item.reason ? ` (${item.reason})` : ""}; ${selected.has(item.name) ? "granted" : "ungranted"}`).join("\n") || "No external declarations";
 				if (ctx.hasUI) ctx.ui.notify(report, "info"); else process.stderr.write(`${report}\n`);
 				return;
 			}
@@ -229,7 +243,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 				probeController = controller;
 				let report: string;
 				try {
-					probeTask = doctor(pi, ctx, action === "doctor host", controller.signal);
+					probeTask = doctor(pi, ctx, action === "doctor host", controller.signal, discovery);
 					report = await probeTask;
 				} catch (error) {
 					if (error instanceof UnconfirmedRuntimeStop) { session.block(error); visibility.release(); }
@@ -258,7 +272,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 				ctx.ui.notify(`Code Mode ${session.enabled ? "enabled" : "disabled"}; ${session.blocked || !protocolAvailable ? "blocked" : session.busy ? "busy" : "idle"}.\nRoot: ${session.rootPath ?? "(none)"}\nCells (${session.maxCells} slots): ${JSON.stringify(session.cellList)}\nGrants: ${JSON.stringify(grants())}\nProtocol: ${protocol} → ${protocolState.grammar ? "grammar" : "json"}; ${protocolState.reason}.\nVisibility: ${mode}; hidden: ${visibility.names.filter((name) => !active.includes(name)).join(", ") || "(none)"}; externally reactivated: ${visibility.names.filter((name) => active.includes(name)).join(", ") || "(none)"}.\n${visibilityIssue ?? "Visibility is cooperative, not strict only or an authorization boundary."}\nPi tool permission/redaction hooks are not inherited.`, "info");
 				return;
 			}
-			if (action === "off") { cancelProbe(); authorizationGeneration++; try { await session.revoke(); } finally { reflect(ctx); } return; }
+			if (action === "off") { cancelProbe(); authorizationGeneration++; discovery.advance(); try { await session.revoke(); } finally { reflect(ctx); } return; }
 			if (action === "terminate" || action.startsWith("terminate ")) {
 				if (action === "terminate" && probeTask) { cancelProbe(); await probeTask; return; }
 				const target = action.slice("terminate".length).trim();
@@ -273,7 +287,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 			if (action !== "on") throw new Error("Usage: /code-mode on|off|status|cells|terminate [id|all]|doctor [host]|visibility mixed|hide-bridged|protocol json|auto|grammar");
 			if (stopped || session.busy) throw new Error("Code Mode session busy/closed");
 			if (!ctx.hasUI) throw new Error("Headless grants require explicit Code Mode CLI flags");
-			const generation = ++authorizationGeneration;
+			const generation = ++authorizationGeneration; discovery.advance();
 			const root = await realpath(ctx.cwd);
 			const selected = grants();
 			const warning = `Read ALL regular files (including hidden/secret files) under ${root}.\nWrite in root: ${selected.write}.\nFULL CURRENT-USER PROCESS EXECUTION (can write anywhere): ${selected.process}.\nExternal tools, not confined to root: ${selected.tools.join(", ") || "(none)"}.\nExisting Pi guards/redaction and SSH/container overrides are NOT inherited. Authorize for this session?`;
@@ -290,7 +304,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 		bind(ctx);
 		await contributionChange;
 		if (!session.enabled) return;
-		if (await realpath(ctx.cwd) !== session.rootPath) { await session.revoke(); reflect(ctx); return; }
+		if (await realpath(ctx.cwd) !== session.rootPath) { discovery.advance(); await session.revoke(); reflect(ctx); return; }
 		try { refreshTools(); } catch (error) { visibility.release(); throw error; }
 		reflect(ctx);
 		if (session.blocked || !protocolAvailable || contributionIssue || !ownsTool("exec") || !ownsTool("wait")) return;
@@ -305,11 +319,46 @@ export default function codeMode(pi: ExtensionAPI): void {
 		unbindAgent = () => signal?.removeEventListener("abort", abort);
 	});
 	pi.on("agent_end", (_event, ctx) => { if (ctx.signal?.aborted) session.cancel(); unbindAgent(); });
-	const changed = pi.events.on(CHANGED, (message) => {
-		if (stopped || (message as { version?: number })?.version !== 1) return;
+	let refreshing = false;
+	const seen = new Map<string, { revision: number; phases: Set<string> }>();
+	const handleChange = (message: unknown) => {
+		if (stopped) return;
+		if (isChange(message)) {
+			const key = `${message.registration.owner}:${message.registration.instanceId}:${message.kind}`;
+			const previousChange = seen.get(key);
+			if (previousChange && message.registration.revision < previousChange.revision) return;
+			if (previousChange?.revision === message.registration.revision && previousChange.phases.has(message.phase)) return;
+			if (seen.size >= 256 && !seen.has(key)) seen.delete(seen.keys().next().value!);
+			if (!previousChange || message.registration.revision > previousChange.revision)
+				seen.set(key, { revision: message.registration.revision, phases: new Set([message.phase]) });
+			else if (message.registration.revision === previousChange.revision) previousChange.phases.add(message.phase);
+			try {
+				const kind = message.kind === "execution" || message.kind === "presentation" ? "provider" : message.kind;
+				if (discovery.isStale(kind, message.registration)) return;
+				if (message.phase === "withdrawn" || message.phase === "disposed") discovery.withdraw(kind, message.registration);
+				else discovery.mark(kind, message.registration);
+			} catch {
+				session.cancel("Code Mode contribution history budget exceeded");
+			}
+			if (["observer", "presentation"].includes(message.kind)) {
+				const previous = lastCatalog;
+				try {
+					const next = contributions();
+					if (!previous || sameExecutableCatalog(previous, next)) {
+						refreshTools(); if (latest) reflect(latest);
+						return;
+					}
+				} catch { /* Any failed or misclassified discovery requires immediate revocation. */ }
+			}
+		}
 		authorizationGeneration++;
-		if (!session.enabled && !session.busy) return;
+		discovery.advance();
+		if (!session.enabled && !session.busy) { lastCatalog = undefined; return; }
+		session.cancel("Code Mode contribution revision changed");
+		if (refreshing) return;
+		refreshing = true;
 		contributionChange = session.invalidate().then(() => {
+			lastCatalog = undefined;
 			if (!stopped) { refreshTools(); if (latest) reflect(latest); }
 		}).catch((error) => {
 			if (!stopped) {
@@ -317,14 +366,21 @@ export default function codeMode(pi: ExtensionAPI): void {
 				if (latest?.hasUI) latest.ui.notify(errorText(error), "error");
 				else process.stderr.write(`Code Mode contribution refresh failed: ${errorText(error)}\n`);
 			}
-		});
+			throw error;
+		}).finally(() => { refreshing = false; });
 		void contributionChange.catch(() => {});
+	};
+	const changedV2 = pi.events.on(CHANGED_V2, handleChange);
+	const changed = pi.events.on(CHANGED, (message) => {
+		if ((message as { version?: number })?.version !== 1) return;
+		const change = (message as { change?: unknown }).change;
+		handleChange(isChange(change) ? change : message);
 	});
 	const visibilityChanged = pi.events.on(VISIBILITY_CHANGED, (message) => {
 		if (!stopped && latest && (message as { version?: number })?.version === 1) reflect(latest);
 	});
-	pi.on("model_select", async (_event, ctx) => { cancelProbe(); bind(ctx); authorizationGeneration++; try { await session.invalidate(); } finally { refreshTools(); reflect(ctx); } });
-	pi.on("session_before_tree", async () => { cancelProbe(); authorizationGeneration++; await session.invalidate(); });
+	pi.on("model_select", async (_event, ctx) => { cancelProbe(); bind(ctx); handleChange({ version: 1 }); try { await contributionChange; } finally { refreshTools(); reflect(ctx); } });
+	pi.on("session_before_tree", async () => { cancelProbe(); authorizationGeneration++; discovery.advance(); await session.invalidate(); });
 	pi.on("session_tree", async (_event, ctx) => { cancelProbe(); bind(ctx); authorizationGeneration++; try { await session.invalidate(); } finally { reflect(ctx); } });
 	// turn_start/context run after Pi's tools snapshot. Reconcile before the
 	// next snapshot, not by rewriting provider payloads or old tool history.
@@ -334,7 +390,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", async () => {
 		disposeOwners.closeAdmission();
 		cancelProbe();
-		stopped = true; changed(); visibilityChanged(); disposeApproval(); unbindAgent(); authorizationGeneration++;
+		stopped = true; changed(); changedV2(); visibilityChanged(); disposeApproval(); unbindAgent(); authorizationGeneration++; discovery.advance();
 		const errors: unknown[] = [];
 		const revoked = session.revoke(true).catch((error) => { errors.push(error); });
 		await probeTask?.catch(() => {});

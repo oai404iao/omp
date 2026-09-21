@@ -1,12 +1,15 @@
 # Code Mode：工具声明、内置工具接入与 Codex 协商设计
 
-状态：**I0 已完整实现并验收；I1–I3 尚未实现**。正文第 0–13 节保留
+状态：**I0–I3 已实现并验收**。I3 按用户选择只含独立
+inventory 查询示例和显式 opt-in 的 Pi builtin ls，不含 subagent 查询。
+当前完成范围见第 16 节。正文第 0–13 节保留
 `5328d3df` 的 Pi 0.86.1 设计/复核基线；首批历史记录见第 14 节，
-I0 完成范围见第 15 节及[实施审计](../audits/pi-code-mode-i0.md)。
+I0 完成范围见第 15 节及[实施审计](../audits/pi-code-mode-i0.md)；历史章节中的
+“尚未实现”不覆盖第 16 节的后续进度。
 
 后续原生 API 精简：第 8.5 节的独立 `sections.code_mode` 已实现，稳定规则
 不再混入动态 cell 列表，也不强制替换完整 prompt。这是从 I2 单独提前完成
-的一项，不代表分类 refresh、transport 声明或完整 I1–I3 已完成。
+的一项；后续分类 refresh、transport 声明与 I1–I3 实施见第 16 节。
 本机全局 Pi 现已升级为 0.86.1；下文全局 0.85.1 记录仅描述历史复核环境。
 实现、验证和其他扩展迁移见[原生 API 精简审计](../audits/pi-0861-native-apis.md)。
 
@@ -1039,3 +1042,25 @@ I1–I3 保持待实现：完整通用 `requires`/availability、session-generat
 与跨收集 revision 回退检测、structural v2 client/public unsettled error、
 classified refresh/去重、prompt section、transport projection 声明、工具试点。
 本批不新增 builtin adapter，不持久化跨实例 intent/grants/leases。
+
+## 16. I1–I3 实施
+
+基于 `b4ca1ad0` 的原生 API 精简继续；不回退 I0 安全门禁，也不重复实现
+已迁移的 prompt section。用户明确选定：独立查询示例、Pi 文本 builtin
+仅 `ls`、暂不接入 subagent 查询。
+
+| 阶段 | 本批实现 |
+| --- | --- |
+| I1 声明契约 | 公开 v2 offer/receipt/feature/availability 类型；工具级 requiredPolicies；policy/approval/observer 独立记录；稳定 consumer instance/generation、有界 revision 高水位和撤销墓碑；旧 consumer 的新语义门禁；跨安装结构化 unsettled-effect 错误；helper/Codex structural client 共用 conformance 测试 |
+| I2 refresh/协商 | changed/v2 分类及 v1 撤销镜像；语义通知去重、同步撤销和异步 teardown 合并；展示分类比对 executable snapshot，diagnostic 查询不能更新已准入权限基线；observer/presentation 保留 cells/store；Codex v2 可选贡献及有效 checkpoint transport 声明 |
+| I3 试点 | 可独立加载、无 Code Mode 硬依赖的 inventory 双入口示例；`registerPiBuiltinLs()` 与 `/builtin-adapters` 导出；两者均需 exact grant，默认不加载，不隐藏当前 builtin/SSH override |
+
+最新 API 和使用方式见
+[Code Mode README](../../pi-extensions/pi-code-mode/README.md#v2-author-contract)。
+注册 closure 不是原生 hooks 调用管线；历史 declarations 不提供 grant 或 owner
+凭证。Pi builtin ls 明确是新建的本地实现，不能冒充已安装的 remote override，
+也不宣称受 Code Mode read-root 限制。没有新增 package/publication 授权。
+
+验证、初次失败、评审修复与边界见[实施审计](../audits/pi-code-mode-i1-i3.md)。
+本批最终根 CI、Pi 0.86.1 floor/target 两轮完整 CI、真实 Host **55/55**
+和独立/组合生产 tarball 验证均通过；没有真实账号/UI/发布或 main 合并。

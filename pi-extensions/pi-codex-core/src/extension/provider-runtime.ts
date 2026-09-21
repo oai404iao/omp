@@ -43,6 +43,13 @@ export function registerResponsesProviderRuntime(
 		const request = message as { version?: number; accept?: (stream: unknown) => void } | undefined;
 		if (request?.version === 1 && typeof request.accept === "function") request.accept(streamSimple);
 	});
+	const stopTranscriptDiscovery = pi.events.on("@oai404iao/pi-code-mode:transport/v2", (message) => {
+		const request = message as { protocol?: number; accept?: (capability: unknown) => void } | undefined;
+		if (request?.protocol === 2 && typeof request.accept === "function") request.accept({
+			stream: streamSimple, input: "pi-transcript/1", formats: ["json", "grammar"], projection: "effective-checkpoint",
+			semantics: ["sections", "tool-removal", "tool-redefinition", "forced-prompt", "compaction-checkpoint", "exec-history"],
+		});
+	});
 
 	type CodexResponsesApi = "openai-responses" | "openai-codex-responses";
 	const registeredProviderApis = new Map<string, CodexResponsesApi>();
@@ -82,6 +89,7 @@ export function registerResponsesProviderRuntime(
 	});
 	pi.on("session_shutdown", async (_event, ctx) => {
 		stopGrammarDiscovery();
+		stopTranscriptDiscovery();
 		prewarm.reset();
 		presentation?.flush();
 		closeProviderWebSocketSessions(ctx?.sessionManager?.getSessionId?.());

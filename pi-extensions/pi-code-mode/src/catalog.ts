@@ -2,8 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DISCOVER, OBSERVERS, APPROVALS, type CodeModeApproval, type CodeModeObserver, type CodeModeProvider, type CodeModePolicy, type CodeModeTool, type Discovery } from "./contributions.ts";
 import { LIMITS } from "./limits.ts";
 import { schemaType } from "./schema-description.ts";
-import { randomUUID } from "node:crypto";
-import { APPROVAL_FEATURE, DISCOVER_V2, isPolicyId, requiredPolicyIds, type ConsumerHello, type DiscoveryReceipt, type DiscoveryV2, type Registration } from "./discovery.ts";
+import { DISCOVER_V2, isPolicyId, requiredPolicyIds, features, availability, type DiscoveryReceipt, type DiscoveryV2, type Registration } from "./discovery.ts";
+import { DiscoveryState } from "./discovery-state.ts";
 
 const identifier = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 const component = (value: unknown): value is string => typeof value === "string" && value.length <= 40 && identifier.test(value);
@@ -18,8 +18,9 @@ export function frozen<T>(value: T): T {
 	}
 	return value;
 }
-export interface Catalog { tools: CodeModeTool[]; policies: CodeModePolicy[]; observers?: readonly CodeModeObserver[]; approvals?: readonly CodeModeApproval[] }
-export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = []): Catalog {
+export interface CatalogDiagnostic { name: string; state: "available" | "unavailable" | "incompatible" | "legacy"; reason?: string }
+export interface Catalog { tools: CodeModeTool[]; policies: CodeModePolicy[]; observers?: readonly CodeModeObserver[]; approvals?: readonly CodeModeApproval[]; diagnostics?: readonly CatalogDiagnostic[] }
+export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = [], state = new DiscoveryState()): Catalog {
 	const required = requiredPolicyIds(requiredPolicies);
 	const providers: CodeModeProvider[] = [];
 	const policies: CodeModePolicy[] = [];
@@ -27,10 +28,24 @@ export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = 
 	const approvals: CodeModeApproval[] = [];
 	let overflow = false;
 	let invalid = false;
-	const hello: ConsumerHello = Object.freeze({
-		protocol: 2, instanceId: randomUUID(), generation: 1, features: Object.freeze([APPROVAL_FEATURE]),
-		limits: Object.freeze({ resultBytes: LIMITS.resultBytes, callsPerCell: LIMITS.calls, maxCells: LIMITS.maxCells }),
-	});
+	let invalidReason = "Invalid/duplicate/incompatible or not-ready Code Mode discovery registration";
+	const hello = state.hello();
+	const diagnostics: CatalogDiagnostic[] = [];
+	const v2Owners = new Set<string>();
+	let declarations = 0;
+	let declarationFailure: string | undefined;
+	const declarationError = (message: string): never => { declarationFailure = message; throw new Error(message); };
+	const checkProvider = (provider: CodeModeProvider) => {
+		if (!Array.isArray(provider.tools) || provider.tools.length > 64 || (declarations += provider.tools.length) > 64)
+			declarationError("Code Mode declaration budget exceeded");
+		for (const tool of provider.tools) {
+			if (typeof tool?.description !== "string" || tool.description.length > 2000
+				|| !tool.parameters || Buffer.byteLength(JSON.stringify(tool.parameters)) > 8000)
+				declarationError("Code Mode declaration schema/description budget exceeded");
+			if (tool.outputSchema !== undefined && Buffer.byteLength(JSON.stringify(tool.outputSchema)) > 8000)
+				declarationError("Invalid contribution output schema/budget");
+		}
+	};
 	const receipts: DiscoveryReceipt[] = [];
 	const registrations = new Set<string>();
 	const pendingPolicies = new Map<string, Registration>();
@@ -38,7 +53,7 @@ export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = 
 	let discovering = true;
 	pi.events.emit(DISCOVER_V2, { hello, offer(value) {
 		if (!discovering) return { status: "incompatible" };
-		if (++attempts > 80) { overflow = true; return { status: "incompatible" }; }
+		if (++attempts > 128) { overflow = true; return { status: "incompatible" }; }
 		try {
 			const { registration, requires } = value;
 			const key = `${value.kind}:${registration.owner}`;
@@ -46,10 +61,12 @@ export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = 
 			if (!(value.kind === "policy" ? isPolicyId(registration.owner) : component(registration.owner)) || typeof registration.instanceId !== "string"
 				|| !registration.instanceId || registration.instanceId.length > 128
 				|| !Number.isSafeInteger(registration.revision) || registration.revision < 1
-				|| !Array.isArray(requires) || requires.length > 32
-				|| requires.some((feature) => typeof feature !== "string" || feature.length > 128)
 				|| (registrations.has(key) && pending !== registration)) throw new Error("Invalid/duplicate Code Mode registration");
+			features(requires);
+			state.mark(value.kind, registration);
 			registrations.add(key);
+			if (value.kind === "provider") checkProvider(value.provider);
+			const available = availability(value.availability);
 			if (value.kind === "policy" && value.availability) {
 				const { state, reason } = value.availability;
 				if (reason !== undefined && (typeof reason !== "string" || reason.length > 256)) throw new Error("Invalid policy reason");
@@ -58,19 +75,34 @@ export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = 
 					pendingPolicies.set(key, registration);
 					return { status: "unavailable" };
 				}
-				if (state === "failed") { invalid = true; return { status: "unavailable" }; }
+				if (state === "failed" || state === "unavailable") { invalid = true; return { status: "unavailable" }; }
 				if (state !== "available") throw new Error("Invalid policy availability");
 			}
 			const missing = requires.filter((feature) => !hello.features.includes(feature));
 			if (missing.length) {
 				// An incompatible global policy cannot disappear from enforcement.
 				if (value.kind === "policy") invalid = true;
+				diagnostics.push({ name: registration.owner, state: "incompatible", reason: missing.join(",") });
 				return { status: "incompatible", missing };
 			}
-			if (value.kind === "provider" && registration.owner === value.provider.id && providers.length < 32) providers.push(value.provider);
+			if (value.kind !== "policy" && available.state !== "available") {
+				diagnostics.push({ name: registration.owner, state: "unavailable", reason: available.reason ?? available.state });
+				return { status: "unavailable" };
+			}
+			if (value.kind === "provider" && registration.owner === value.provider.id && providers.length < 32) {
+				state.observe(value.kind, registration, value.provider);
+				providers.push(value.provider); v2Owners.add(value.provider.id);
+			}
 			else if (value.kind === "policy" && value.policy && registration.owner === value.policy.id && policies.length < 16) {
+				state.observe(value.kind, registration, value.policy);
 				policies.push(value.policy);
 				pendingPolicies.delete(key);
+			}
+			else if (value.kind === "approval" && value.approval.id === registration.owner && approvals.length < 16) {
+				state.observe(value.kind, registration, value.approval); approvals.push(value.approval);
+			}
+			else if (value.kind === "observer" && value.observer.id === registration.owner && observers.length < 16) {
+				state.observe(value.kind, registration, value.observer); observers.push(value.observer);
 			}
 			else throw new Error("Invalid Code Mode offer/budget");
 			receipts.push(Object.freeze({ registration, consumer: hello }));
@@ -78,29 +110,46 @@ export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = 
 		} catch {
 			// Pi's bus swallows listener errors; latch failure before returning.
 			invalid = true;
+			if (["provider", "policy", "observer", "approval"].includes(value?.kind))
+				invalidReason = `Invalid/duplicate Code Mode ${value.kind} registration`;
 			return { status: "incompatible" };
 		}
 	} } satisfies DiscoveryV2);
 	discovering = false;
 	pi.events.emit(DISCOVER, { version: 1,
 		consumer: hello, receipts: Object.freeze(receipts),
-		provider: (value) => { if (providers.length >= 32) overflow = true; else providers.push(value); },
-		policy: (value) => { if (policies.length >= 16) overflow = true; else policies.push(value); },
+		provider: (value) => {
+			if (state.hasOwner("provider", value?.id)) { invalid = true; return; }
+			try { checkProvider(value); } catch { overflow = true; return; }
+			if (providers.length >= 32) overflow = true; else providers.push(value);
+		},
+		policy: (value) => {
+			if (state.hasOwner("policy", value?.id)) { invalid = true; return; }
+			if (policies.length >= 16) overflow = true; else policies.push(value);
+		},
 	} satisfies Discovery);
-	pi.events.emit(OBSERVERS, { version: 1, accept(value: CodeModeObserver) {
+	pi.events.emit(OBSERVERS, { version: 1, consumer: hello, receipts, accept(value: CodeModeObserver) {
+		if (state.hasOwner("observer", value?.id)) { invalid = true; return; }
 		if (observers.length >= 16) overflow = true; else observers.push(value);
 	} });
-	pi.events.emit(APPROVALS, { version: 1, accept(value: CodeModeApproval) {
+	pi.events.emit(APPROVALS, { version: 1, consumer: hello, receipts, accept(value: CodeModeApproval) {
+		if (state.hasOwner("approval", value?.id)) { invalid = true; return; }
 		if (approvals.length >= 16) overflow = true; else approvals.push(value);
 	} });
+	if (declarationFailure) throw new Error(declarationFailure);
 	if (overflow) throw new Error("Code Mode discovery budget exceeded");
-	if (invalid || pendingPolicies.size) throw new Error("Invalid/duplicate/incompatible or not-ready Code Mode discovery registration");
+	if (invalid || pendingPolicies.size) throw new Error(invalidReason);
 	const owners = new Set<string>();
 	const names = new Set<string>();
 	const tools: CodeModeTool[] = [];
 	for (const provider of providers) {
 		if (!component(provider.id) || owners.has(provider.id) || !Array.isArray(provider.tools)) throw new Error("Invalid/duplicate Code Mode provider");
 		owners.add(provider.id);
+		const missingFeatures = features(provider.requires ?? []).filter((feature) => !hello.features.includes(feature));
+		if (availability(provider.availability).state !== "available" || missingFeatures.length) {
+			diagnostics.push({ name: provider.id, state: missingFeatures.length ? "incompatible" : "unavailable", reason: missingFeatures.join(",") || provider.availability?.reason });
+			continue;
+		}
 		for (const tool of provider.tools) {
 			const name = `${provider.id}__${tool.name}`;
 			if (!component(tool.name) || names.has(name) || typeof tool.description !== "string"
@@ -109,6 +158,16 @@ export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = 
 				|| (tool.parallel && tool.effect !== "read")
 				|| (tool.approval !== undefined && !component(tool.approval))) throw new Error(`Invalid Code Mode tool: ${name}`);
 			names.add(name);
+			const missing = features(tool.requires ?? []).filter((feature) => !hello.features.includes(feature));
+			const available = availability(tool.availability);
+			const expected = requiredPolicyIds(tool.requiredPolicies ?? []);
+			const absent = expected.filter((id) => !policies.some((policy) => policy.id === id));
+			if (missing.length || available.state !== "available" || absent.length) {
+				diagnostics.push({ name, state: missing.length ? "incompatible" : "unavailable",
+					reason: missing.join(",") || (absent.length ? `missing-policy:${absent.join(",")}` : available.reason ?? available.state) });
+				continue;
+			}
+			diagnostics.push({ name, state: v2Owners.has(provider.id) ? "available" : "legacy" });
 			const parameters = frozen(structuredClone(tool.parameters));
 			if (Buffer.byteLength(JSON.stringify(parameters)) > 8000) throw new Error("Contribution schema budget exceeded");
 			const outputSchema = tool.outputSchema === undefined ? undefined : frozen(structuredClone(tool.outputSchema));
@@ -120,6 +179,7 @@ export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = 
 	}
 	const policyNames = new Set<string>();
 	for (const policy of policies) {
+		if (features(policy.requires ?? []).some((feature) => !hello.features.includes(feature))) throw new Error("Incompatible Code Mode policy features");
 		if (!isPolicyId(policy.id) || policyNames.has(policy.id)
 			|| (!policy.before && !policy.after && !policy.approval)
 			|| (policy.approval !== undefined && !component(policy.approval))
@@ -142,9 +202,11 @@ export function collect(pi: ExtensionAPI, requiredPolicies: readonly string[] = 
 	for (const policy of policies) {
 		if (policy.approval && !approvalIds.has(policy.approval)) throw new Error(`Code Mode policy approval unavailable: ${policy.id}`);
 	}
+	if (state.hello().generation !== hello.generation) throw new Error("Code Mode discovery generation changed during collection");
 	return { tools, policies: policies.map((p) => Object.freeze({ ...p })).sort((a, b) => a.id.localeCompare(b.id)),
 		approvals: approvals.map((a) => Object.freeze({ ...a })),
-		observers: observers.map((o) => Object.freeze({ ...o })).sort((a, b) => a.id.localeCompare(b.id)) };
+		observers: observers.map((o) => Object.freeze({ ...o })).sort((a, b) => a.id.localeCompare(b.id)),
+		...(diagnostics.length ? { diagnostics } : {}) };
 }
 export function toolPrompt(tools: readonly CodeModeTool[]): string {
 	const text = [...tools].sort((a, b) => a.name.localeCompare(b.name)).map((tool) =>

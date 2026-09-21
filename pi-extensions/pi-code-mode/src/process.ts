@@ -7,7 +7,8 @@ import { Supervisor } from "./supervisor.ts";
 import { LIMITS } from "./limits.ts";
 import type { ReadRoot } from "./readonly.ts";
 
-export class UnsettledEffect extends Error {}
+import { UnsettledEffect } from "./errors.ts";
+export { UnsettledEffect } from "./errors.ts";
 export const processSchema = Type.Object({
 	command: Type.String({ minLength: 1, maxLength: 12000 }),
 	timeout_ms: Type.Optional(Type.Integer({ minimum: 1, maximum: LIMITS.executionMs })),
