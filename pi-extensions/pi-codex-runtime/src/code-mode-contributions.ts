@@ -56,6 +56,7 @@ export function registerCodeModeContribution(pi: ExtensionAPI, id: string,
 	};
 	pi.on("session_start", update);
 	pi.on("model_select", update);
+	pi.on("session_tree", update);
 	pi.on("session_shutdown", () => {
 		if (disposed) return;
 		disposed = true; context = undefined; off(); changed();

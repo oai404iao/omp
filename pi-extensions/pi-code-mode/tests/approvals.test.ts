@@ -5,7 +5,8 @@ import { createEventBus, type ExtensionAPI } from "@earendil-works/pi-coding-age
 import { ApprovalQueue } from "../src/approvals.ts";
 import { ToolBridge } from "../src/bridge.ts";
 import { collect } from "../src/catalog.ts";
-import { registerCodeModeApproval, registerCodeModePolicy, type CodeModeTool, type PolicyCall } from "../src/contributions.ts";
+import { DISCOVER, CHANGED, registerCodeModeTools, registerCodeModeApproval, registerCodeModePolicy, type CodeModeTool, type CodeModePolicy, type CodeModeProvider, type PolicyCall } from "../src/contributions.ts";
+import { DISCOVER_V2, type ConsumerHello, type DiscoveryOffer, type DiscoveryReceipt } from "../src/discovery.ts";
 import { Cell } from "../src/cell.ts";
 import extension from "../src/extension.ts";
 
@@ -16,6 +17,91 @@ const call = (id: string, outer = signal()): PolicyCall => ({ name: id, effect: 
 const target: CodeModeTool = { name: "write", description: "fixture", effect: "write", approval: "user",
 	parameters: Type.Object({ value: Type.Integer() }), prepare: (input) => ({ value: Number((input as { value: unknown }).value) }),
 	invoke: async () => ({ value: {} }) };
+
+function legacy(pi: ExtensionAPI, extra = {}) {
+	const providers: CodeModeProvider[] = [], policies: CodeModePolicy[] = [];
+	pi.events.emit(DISCOVER, { version: 1, ...extra,
+		provider: (value: CodeModeProvider) => providers.push(value), policy: (value: CodeModePolicy) => policies.push(value) });
+	return { tools: providers.flatMap((p) => p.tools), policies };
+}
+function negotiate(pi: ExtensionAPI, features: string[]) {
+	const hello: ConsumerHello = { protocol: 2, instanceId: "fixture", generation: 1, features,
+		limits: { resultBytes: 65536, callsPerCell: 32, maxCells: 4 } };
+	const offers: DiscoveryOffer[] = [];
+	const receipts: DiscoveryReceipt[] = [];
+	pi.events.emit(DISCOVER_V2, { hello, offer(value: DiscoveryOffer) {
+		offers.push(value); receipts.push({ registration: value.registration, consumer: hello });
+		return { status: "compatible" };
+	} });
+	return { hello, offers, receipts };
+}
+
+test("ABI gate: an old consumer ignoring approval never receives its executable closure", () => {
+	const pi = { events: createEventBus() } as unknown as ExtensionAPI;
+	const registration = registerCodeModeTools(pi, { id: "owner", tools: [target, { ...target, name: "safe", approval: undefined }] });
+	assert.deepEqual(legacy(pi).tools.map((tool) => tool.name), ["safe"]);
+	const incapable = negotiate(pi, []);
+	assert.equal(incapable.offers.length, 0);
+	assert.deepEqual(legacy(pi).tools.map((tool) => tool.name), ["safe"]);
+	const capable = negotiate(pi, ["approval/1"]);
+	assert.equal(capable.offers.length, 1);
+	assert.deepEqual(legacy(pi, { consumer: capable.hello, receipts: capable.receipts }).tools, []);
+	assert.deepEqual(legacy(pi, { consumer: { ...capable.hello }, receipts: capable.receipts }).tools.map((tool) => tool.name), ["safe"]);
+	const catalog = collect(pi);
+	assert.deepEqual(catalog.tools.map((tool) => tool.name), ["owner__write", "owner__safe"]);
+	registration.dispose();
+	assert.equal(collect(pi).tools.length, 0);
+});
+
+test("ABI gate: mandatory approval policy gives old consumers a deny guard, not an omitted policy", async () => {
+	const pi = { events: createEventBus() } as unknown as ExtensionAPI;
+	registerCodeModePolicy(pi, { id: "guard", approval: "user" });
+	const old = legacy(pi);
+	let effects = 0;
+	// Model the initial ABI: knows before(), ignores later approval metadata.
+	for (const policy of old.policies) {
+		const result = await policy.before?.(call("write"));
+		if (result?.block) continue;
+		effects++;
+	}
+	assert.equal(old.policies.length, 1);
+	assert.equal(effects, 0);
+	const catalog = collect(pi);
+	const bridge = new ToolBridge([{ ...target, name: "safe", approval: undefined,
+		invoke: async () => { effects++; return { value: {} }; } }], catalog.policies,
+		"cell", ".", signal(), () => undefined, () => {}, () => {}, { approvals: [] });
+	await assert.rejects(bridge.invoke("safe", { value: 1 }, "id", signal()), /approval/i);
+	assert.equal(effects, 0);
+	const accepted = negotiate(pi, ["approval/1"]);
+	assert.equal(legacy(pi, { consumer: accepted.hello, receipts: accepted.receipts }).policies.length, 0);
+	assert.equal(legacy(pi, { consumer: accepted.hello, receipts: accepted.receipts.map((r) => ({
+		...r, registration: { ...r.registration },
+	})) }).policies.length, 1, "copied registration is not the producer's exact receipt");
+});
+
+test("ABI gate: safe to approval-required refresh revokes before publishing and rejects old receipts", () => {
+	const pi = { events: createEventBus() } as unknown as ExtensionAPI;
+	const registration = registerCodeModeTools(pi, { id: "owner", tools: [{ ...target, approval: undefined }] });
+	const old = negotiate(pi, ["approval/1"]);
+	const snapshots: string[][] = [];
+	pi.events.on(CHANGED, () => snapshots.push(collect(pi).tools.map((tool) => tool.approval ?? "safe")));
+	registration.refresh([target]);
+	assert.deepEqual(snapshots, [[], ["user"]]);
+	assert.deepEqual(legacy(pi, { consumer: old.hello, receipts: old.receipts }).tools, []);
+	registration.refresh([{ ...target, approval: undefined }]);
+	assert.equal(legacy(pi, { consumer: old.hello, receipts: old.receipts }).tools.length, 1);
+	assert.equal(negotiate(pi, ["approval/1"]).offers[0].registration.revision, 3);
+});
+
+test("ABI gate: duplicate and incompatible global policy offers fail even when Pi catches listener errors", () => {
+	const pi = { events: createEventBus() } as unknown as ExtensionAPI;
+	pi.events.on(DISCOVER_V2, (request: unknown) => {
+		const { offer } = request as { offer(value: DiscoveryOffer): unknown };
+		offer({ kind: "policy", registration: { owner: "guard", instanceId: "guard", revision: 1 },
+			requires: ["unknown/1"], policy: { id: "guard", before() {} } });
+	});
+	assert.throws(() => collect(pi), /incompatible/);
+});
 
 test("approvals: FIFO, queued cancellation, active cancellation retains the UI slot", async () => {
 	const queue = new ApprovalQueue();

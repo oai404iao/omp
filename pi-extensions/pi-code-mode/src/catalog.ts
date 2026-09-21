@@ -2,6 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DISCOVER, OBSERVERS, APPROVALS, type CodeModeApproval, type CodeModeObserver, type CodeModeProvider, type CodeModePolicy, type CodeModeTool, type Discovery } from "./contributions.ts";
 import { LIMITS } from "./limits.ts";
 import { schemaType } from "./schema-description.ts";
+import { randomUUID } from "node:crypto";
+import { APPROVAL_FEATURE, DISCOVER_V2, type ConsumerHello, type DiscoveryReceipt, type DiscoveryV2 } from "./discovery.ts";
 
 const identifier = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 const component = (value: unknown): value is string => typeof value === "string" && value.length <= 40 && identifier.test(value);
@@ -23,7 +25,48 @@ export function collect(pi: ExtensionAPI): Catalog {
 	const observers: CodeModeObserver[] = [];
 	const approvals: CodeModeApproval[] = [];
 	let overflow = false;
+	let invalid = false;
+	const hello: ConsumerHello = Object.freeze({
+		protocol: 2, instanceId: randomUUID(), generation: 1, features: Object.freeze([APPROVAL_FEATURE]),
+		limits: Object.freeze({ resultBytes: LIMITS.resultBytes, callsPerCell: LIMITS.calls, maxCells: LIMITS.maxCells }),
+	});
+	const receipts: DiscoveryReceipt[] = [];
+	const registrations = new Set<string>();
+	let attempts = 0;
+	let discovering = true;
+	pi.events.emit(DISCOVER_V2, { hello, offer(value) {
+		if (!discovering) return { status: "incompatible" };
+		if (++attempts > 48) { overflow = true; return { status: "incompatible" }; }
+		try {
+			const { registration, requires } = value;
+			const key = `${value.kind}:${registration.owner}`;
+			if (!component(registration.owner) || typeof registration.instanceId !== "string"
+				|| !registration.instanceId || registration.instanceId.length > 128
+				|| !Number.isSafeInteger(registration.revision) || registration.revision < 1
+				|| !Array.isArray(requires) || requires.length > 32
+				|| requires.some((feature) => typeof feature !== "string" || feature.length > 128)
+				|| registrations.has(key)) throw new Error("Invalid/duplicate Code Mode registration");
+			registrations.add(key);
+			const missing = requires.filter((feature) => !hello.features.includes(feature));
+			if (missing.length) {
+				// An incompatible global policy cannot disappear from enforcement.
+				if (value.kind === "policy") invalid = true;
+				return { status: "incompatible", missing };
+			}
+			if (value.kind === "provider" && registration.owner === value.provider.id && providers.length < 32) providers.push(value.provider);
+			else if (value.kind === "policy" && registration.owner === value.policy.id && policies.length < 16) policies.push(value.policy);
+			else throw new Error("Invalid Code Mode offer/budget");
+			receipts.push(Object.freeze({ registration, consumer: hello }));
+			return { status: "compatible" };
+		} catch {
+			// Pi's bus swallows listener errors; latch failure before returning.
+			invalid = true;
+			return { status: "incompatible" };
+		}
+	} } satisfies DiscoveryV2);
+	discovering = false;
 	pi.events.emit(DISCOVER, { version: 1,
+		consumer: hello, receipts: Object.freeze(receipts),
 		provider: (value) => { if (providers.length >= 32) overflow = true; else providers.push(value); },
 		policy: (value) => { if (policies.length >= 16) overflow = true; else policies.push(value); },
 	} satisfies Discovery);
@@ -34,6 +77,7 @@ export function collect(pi: ExtensionAPI): Catalog {
 		if (approvals.length >= 16) overflow = true; else approvals.push(value);
 	} });
 	if (overflow) throw new Error("Code Mode discovery budget exceeded");
+	if (invalid) throw new Error("Invalid/duplicate/incompatible Code Mode discovery registration");
 	const owners = new Set<string>();
 	const names = new Set<string>();
 	const tools: CodeModeTool[] = [];

@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolDefinition, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { CodeSession } from "./session.ts";
 import { HOST, errorText } from "./limits.ts";
 import { CHANGED, registerCodeModeApproval } from "./contributions.ts";
@@ -44,6 +44,22 @@ export default function codeMode(pi: ExtensionAPI): void {
 	let unbindAgent = () => {};
 	let execDefinition: ToolDefinition<typeof execParameters> | undefined;
 	let execDescription = EXEC_DESCRIPTION;
+	const execSchema = structuredClone(execParameters);
+	const waitSchema = structuredClone(waitParameters);
+	const registrations = new Map<string, { parameters: unknown; fingerprint: string }>();
+	const fingerprint = (tool: ToolInfo) => JSON.stringify([tool.sourceInfo, tool.description, tool.parameters, tool.promptGuidelines]);
+	const ownsTool = (name: string) => {
+		const registration = registrations.get(name);
+		const tool = pi.getAllTools().find((item) => item.name === name);
+		return Boolean(registration && tool && tool.parameters === registration.parameters && fingerprint(tool) === registration.fingerprint);
+	};
+	const rememberTool = (name: string, parameters: unknown) => {
+		const tool = pi.getAllTools().find((item) => item.name === name);
+		if (!tool || tool.parameters !== parameters || ["builtin", "sdk"].includes(tool.sourceInfo.source)) {
+			throw new Error(`Code Mode ${name} registration ownership unavailable`);
+		}
+		registrations.set(name, { parameters, fingerprint: fingerprint(tool) });
+	};
 	const host = () => {
 		if (configIssue) throw new Error(configIssue);
 		return configuredHost;
@@ -54,9 +70,9 @@ export default function codeMode(pi: ExtensionAPI): void {
 		return { write: pi.getFlag("code-mode-write") === true, process: pi.getFlag("code-mode-process") === true, tools: [...new Set(names)] };
 	};
 	const reflect = (ctx: ExtensionContext) => {
-		const descriptions = new Map([["exec", execDescription], ["wait", WAIT_DESCRIPTION]]);
-		const owned = pi.getAllTools().filter((tool) => descriptions.get(tool.name) === tool.description).map((tool) => tool.name);
+		const owned = ["exec", "wait"].filter(ownsTool);
 		if (registered) {
+			if (owned.length !== 2) session.cancel("Code Mode exec/wait ownership lost");
 			const active = pi.getActiveTools();
 			const next = session.enabled ? [...new Set([...active, ...owned])] : active.filter((name) => !owned.includes(name));
 			if (next.join("\0") !== active.join("\0")) pi.setActiveTools(next);
@@ -81,7 +97,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 	const bind = (ctx: ExtensionContext) => { latest = ctx; session.setContext(ctx); };
 	const refreshTools = () => {
 		if (!execDefinition || !session.enabled) return;
-		if (pi.getAllTools().find((tool) => tool.name === "exec")?.description !== execDescription) return;
+		if (!ownsTool("exec") || !ownsTool("wait")) return;
 		if (latest) protocolState = resolveProtocol(pi, latest, protocol);
 		protocolAvailable = protocol !== "grammar" || protocolState.grammar;
 		const description = `${EXEC_DESCRIPTION}\nProtocol: ${protocolState.grammar ? "raw JavaScript grammar; send raw JavaScript, NOT a JSON wrapper or Markdown fence" : "JSON"} (${protocolState.reason}).${protocolAvailable ? "" : " Explicit grammar mode is unavailable; exec will fail until the protocol/model is changed."}\nRaw code may start with // @exec: {\"yield_time_ms\":0,\"timeout_ms\":30000,\"max_tokens\":8192} followed by a newline and JavaScript. Conflicting JSON/pragma options are rejected.\nExact authorized nested tools for the next cell:\n${toolPrompt(session.catalog(collect(pi)).tools)}`;
@@ -89,6 +105,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 		execDescription = description;
 		execDefinition = { ...execDefinition, description, constrainedSampling: protocolState.grammar ? EXEC_SAMPLING : false };
 		pi.registerTool(execDefinition); // supported Pi dynamic definition refresh; no provider shim
+		rememberTool("exec", execSchema);
 	};
 	pi.registerFlag("code-mode-host", { description: `Path to verified ${HOST.release} Linux x64 Host (no download)`, type: "string" });
 	pi.registerFlag("code-mode-read-root", { description: "EXPLICIT local read grant for cwd, including hidden files; enables Code Mode. Does not inherit Pi guards.", type: "string" });
@@ -112,14 +129,18 @@ export default function codeMode(pi: ExtensionAPI): void {
 	};
 
 	const ensureTools = () => {
-		if (registered) return;
+		if (registered) {
+			if (!ownsTool("exec") || !ownsTool("wait")) throw new Error("Code Mode exec/wait ownership lost");
+			return;
+		}
 		if (pi.getAllTools().some((tool) => ["exec", "wait"].includes(tool.name))) throw new Error("Existing exec/wait owner; Code Mode will not override it");
 		const active = pi.getActiveTools();
 		execDefinition = {
-			name: "exec", label: "Code Mode", description: EXEC_DESCRIPTION, parameters: execParameters, constrainedSampling: false, executionMode: "sequential",
+			name: "exec", label: "Code Mode", description: EXEC_DESCRIPTION, parameters: execSchema, constrainedSampling: false, executionMode: "sequential",
 			promptSnippet: "Orchestrate explicitly authorized tools using JavaScript; use wait for running cells.",
 			async execute(_id, { code, ...options }, signal, _update, ctx) {
 				bind(ctx);
+				if (!ownsTool("exec") || !ownsTool("wait")) throw new Error("Code Mode exec/wait ownership lost");
 				if (stopped || await realpath(ctx.cwd) !== session.rootPath) throw new Error("Code Mode has no grant for current cwd");
 				const current = resolveProtocol(pi, ctx, protocol);
 				if (protocol === "grammar" && !current.grammar) throw new Error(`Code Mode grammar unavailable: ${current.reason}`);
@@ -131,8 +152,9 @@ export default function codeMode(pi: ExtensionAPI): void {
 			},
 		};
 		pi.registerTool(execDefinition);
+		rememberTool("exec", execSchema);
 		pi.registerTool({
-			name: "wait", label: "Wait for Code Mode", description: WAIT_DESCRIPTION, parameters: waitParameters, executionMode: "sequential",
+			name: "wait", label: "Wait for Code Mode", description: WAIT_DESCRIPTION, parameters: waitSchema, executionMode: "sequential",
 			async execute(_id, { cell_id, ...options }, signal, _update, ctx) {
 				bind(ctx);
 				const result = await session.wait(cell_id, options, signal);
@@ -140,6 +162,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 				return renderObservation(result);
 			},
 		});
+		rememberTool("wait", waitSchema);
 		registered = true;
 		pi.setActiveTools(active);
 	};
@@ -147,7 +170,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 	// Pi's supported result hook sets the real model-visible error flag.
 	pi.on("tool_result", (event) => {
 		const details = event.details as { brand?: string; failed?: boolean } | undefined;
-		if (["exec", "wait"].includes(event.toolName) && details?.brand === "pi-code-mode/v2" && details.failed) return { isError: true };
+		if (ownsTool(event.toolName) && details?.brand === "pi-code-mode/v2" && details.failed) return { isError: true };
 	});
 	pi.on("session_start", async (_event, ctx) => {
 		cancelProbe();
@@ -277,11 +300,12 @@ export default function codeMode(pi: ExtensionAPI): void {
 		if (!stopped && latest && (message as { version?: number })?.version === 1) reflect(latest);
 	});
 	pi.on("model_select", async (_event, ctx) => { cancelProbe(); bind(ctx); authorizationGeneration++; try { await session.invalidate(); } finally { refreshTools(); reflect(ctx); } });
+	pi.on("session_before_tree", async () => { cancelProbe(); authorizationGeneration++; await session.invalidate(); });
 	pi.on("session_tree", async (_event, ctx) => { cancelProbe(); bind(ctx); authorizationGeneration++; try { await session.invalidate(); } finally { reflect(ctx); } });
 	// turn_start/context run after Pi's tools snapshot. Reconcile before the
 	// next snapshot, not by rewriting provider payloads or old tool history.
 	pi.on("turn_end", (_event, ctx) => { if (!stopped) { bind(ctx); refreshTools(); reflect(ctx); } });
-	pi.on("context", (event) => session.enabled && registered && protocolState.grammar ? { messages: projectExecHistory(event.messages) } : undefined);
+	pi.on("context", (event) => session.enabled && ownsTool("exec") && protocolState.grammar ? { messages: projectExecHistory(event.messages) } : undefined);
 	pi.on("thinking_level_select", (_event, ctx) => { if (!stopped) reflect(ctx); });
 	pi.on("session_shutdown", async () => {
 		cancelProbe();

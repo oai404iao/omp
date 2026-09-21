@@ -236,6 +236,21 @@ from the public `/contributions` export. Discovery uses
 Missing providers, denial, exceptions, non-`true` results and cancellation fail
 closed. No approval is implicitly added to existing grants/tools.
 
+The registration helpers now negotiate `approval/1` through a separate
+`discover/v2` channel. Older v1 consumers receive only approval-free tools;
+an approval-dependent global policy supplies a v1 `before` deny guard instead
+of disappearing. The current consumer accepts the audited v1 baseline too.
+Exact per-discovery registration receipts suppress duplicate legacy mirrors;
+receipts are neither grants nor approval decisions. Semantic refresh first
+withdraws the old offer and notifies v1 consumers, then publishes a new revision.
+Do not mutate a registered tool/policy in place.
+
+This is the initial approval-gating subset of the interoperability design, not
+the complete v2 contract. `requiredPolicies`, general feature requirements,
+availability diagnostics and classified refresh are not implemented yet.
+An absent producer cannot be inferred from discovery; configurations requiring
+protection even when a policy extension is missing are not supported yet.
+
 Order: normalize/freeze/validate → before policies → deduplicated approvals →
 execution scheduler → invoke → after policies. Approval sees the same frozen
 final arguments as invocation. It does not acquire a worker or the write gate.
@@ -466,6 +481,19 @@ releases leases when execution is permanently blocked. Definition replacement
 is never re-enabled by an old receipt.
 Cleanup attempts all owners; failures are reported and retained for retry rather
 than silently claiming restoration succeeded.
+
+Same-instance `/tree` replay does not replace explicit owner intent. Live leases
+stay hidden, current explicit inactivity wins over historical activation, and
+released restoration survives historical omission. Codex also recomputes current
+profile restrictions and native edit/write suppression. This does not persist
+intent or authority across new/resumed/forked/reloaded extension instances.
+Failed owner disposal retains tree observation and its release receipt, while
+closing controls/factories refuse new acquisition. Factory capacity counts live
+controls rather than historical allocations.
+
+Code Mode's own exec/wait registrations use instance-local schema references
+and live source/metadata fingerprints. Matching descriptions or cloned historical
+declarations cannot claim ownership, refresh a replacement, or toggle it.
 
 Pi 0.86.1 has no active-tools-changed event or global visibility lock.
 `registerTool` may reactivate names selected by `--tools`; reload re-enables

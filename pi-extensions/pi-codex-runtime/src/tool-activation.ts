@@ -43,7 +43,7 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	};
 	let latest: ExtensionContext | undefined;
 	let syncing = false;
-	const sync = (ctx: ExtensionContext) => {
+	const sync = (ctx: ExtensionContext, fromTree = false) => {
 		latest = ctx;
 		if (syncing) return;
 		syncing = true;
@@ -72,7 +72,7 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 			);
 			const desired = available && owned.registered && capabilities[name].enabled && !hostedWithoutCore;
 			if (!desired) active.delete(name);
-			else if (settings.autoEnable) active.add(name);
+			else if (settings.autoEnable && !(fromTree && control?.activeIntent !== undefined)) active.add(name);
 		}
 		const ownsPatch = broker.tools.has("apply_patch") && !broker.tools.get("apply_patch")?.codeModeOwner?.replaced;
 		if (ownsPatch && active.has("apply_patch")) {
@@ -102,6 +102,7 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	});
 	pi.on("model_select", (_event, ctx) => sync(ctx));
 	pi.on("thinking_level_select", (_event, ctx) => sync(ctx));
+	pi.on("session_tree", (_event, ctx) => sync(ctx, true));
 	pi.on("agent_end", () => broker.presentation.scheduleFlush());
 	pi.on("session_shutdown", () => {
 		offOwner();

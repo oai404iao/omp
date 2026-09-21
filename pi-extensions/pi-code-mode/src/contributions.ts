@@ -2,6 +2,9 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { JsonValue, Usage } from "@earendil-works/pi-ai";
 import type { TSchema } from "typebox";
 import type { CodeModeDirectBinding } from "./direct-binding.ts";
+import { randomUUID } from "node:crypto";
+import { APPROVAL_FEATURE, DISCOVER_V2, discoveryV2, hasReceipt, type ConsumerHello, type DiscoveryReceipt, type Registration } from "./discovery.ts";
+export { DISCOVER_V2, type ConsumerHello, type Registration, type DiscoveryV2 } from "./discovery.ts";
 export { createCodeModeDirectBinding, type CodeModeDirectBinding, type DirectToolLease } from "./direct-binding.ts";
 
 export const DISCOVER = "@oai404iao/pi-code-mode:discover/v1";
@@ -83,6 +86,8 @@ export function registerCodeModeObserver(pi: ExtensionAPI, observer: CodeModeObs
 }
 export interface Discovery {
 	version: 1;
+	consumer?: ConsumerHello;
+	receipts?: readonly DiscoveryReceipt[];
 	provider(provider: CodeModeProvider): void;
 	policy(policy: CodeModePolicy): void;
 }
@@ -96,20 +101,55 @@ function discover(value: unknown): value is Discovery {
 export function registerCodeModeTools(pi: ExtensionAPI, initial: CodeModeProvider) {
 	let provider = initial;
 	let disposed = false;
-	const off = pi.events.on(DISCOVER, (value) => { if (!disposed && discover(value)) value.provider(provider); });
+	let ready = true;
+	let registration: Registration = Object.freeze({ owner: initial.id, instanceId: randomUUID(), revision: 1 });
+	let accepted = new WeakSet<ConsumerHello>();
+	const offV2 = pi.events.on(DISCOVER_V2, (value) => {
+		if (disposed || !ready || !discoveryV2(value)) return;
+		const requires = Array.isArray(provider.tools) && provider.tools.some((tool) => tool?.approval !== undefined) ? [APPROVAL_FEATURE] : [];
+		if (requires.some((feature) => !value.hello.features.includes(feature))) return;
+		if (value.offer({ kind: "provider", registration, requires, provider }).status === "compatible") accepted.add(value.hello);
+	});
+	const off = pi.events.on(DISCOVER, (value) => {
+		if (disposed || !ready || !discover(value) || hasReceipt(value, registration, accepted)) return;
+		// Old consumers can ignore unknown fields; never give them a closure
+		// whose safety depends on recognizing the later approval field.
+		const tools = Array.isArray(provider.tools) ? provider.tools.filter((tool) => tool?.approval === undefined) : provider.tools;
+		if (!Array.isArray(tools)) { value.provider(provider); return; }
+		if (tools.length) value.provider({ id: provider.id, tools });
+	});
 	pi.events.emit(CHANGED, { version: 1 });
 	return {
 		refresh(tools: readonly CodeModeTool[]) {
 			if (disposed) throw new Error("Code Mode provider registration disposed");
+			ready = false;
+			pi.events.emit(CHANGED, { version: 1 });
 			provider = { id: initial.id, tools };
+			registration = Object.freeze({ ...registration, revision: registration.revision + 1 });
+			accepted = new WeakSet();
+			ready = true;
 			pi.events.emit(CHANGED, { version: 1 });
 		},
-		dispose() { if (!disposed) { disposed = true; off(); pi.events.emit(CHANGED, { version: 1 }); } },
+		dispose() { if (!disposed) { disposed = true; off(); offV2(); pi.events.emit(CHANGED, { version: 1 }); } },
 	};
 }
 export function registerCodeModePolicy(pi: ExtensionAPI, policy: CodeModePolicy) {
 	let disposed = false;
-	const off = pi.events.on(DISCOVER, (value) => { if (!disposed && discover(value)) value.policy(policy); });
+	const registration = Object.freeze({ owner: policy.id, instanceId: randomUUID(), revision: 1 });
+	const accepted = new WeakSet<ConsumerHello>();
+	const offV2 = pi.events.on(DISCOVER_V2, (value) => {
+		if (disposed || !discoveryV2(value)) return;
+		const requires = policy.approval !== undefined ? [APPROVAL_FEATURE] : [];
+		if (requires.some((feature) => !value.hello.features.includes(feature))) return;
+		if (value.offer({ kind: "policy", registration, requires, policy }).status === "compatible") accepted.add(value.hello);
+	});
+	const off = pi.events.on(DISCOVER, (value) => {
+		if (disposed || !discover(value) || hasReceipt(value, registration, accepted)) return;
+		value.policy(policy.approval === undefined ? policy : {
+			id: policy.id,
+			before: () => ({ block: true, reason: "Code Mode policy requires negotiated approval/1 support" }),
+		});
+	});
 	pi.events.emit(CHANGED, { version: 1 });
-	return () => { if (!disposed) { disposed = true; off(); pi.events.emit(CHANGED, { version: 1 }); } };
+	return () => { if (!disposed) { disposed = true; off(); offV2(); pi.events.emit(CHANGED, { version: 1 }); } };
 }

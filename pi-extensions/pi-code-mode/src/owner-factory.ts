@@ -8,22 +8,30 @@ export function installOwnerFactory(pi: ExtensionAPI): () => void {
 	type Control = ReturnType<typeof createCodeModeDirectBinding>;
 	const controls = new Set<Control>();
 	let disposed = false;
+	let closing = false;
+	let disposing = false;
 	const factory = Object.freeze({ version: 1, create(owner: ExtensionAPI, options: { name: string; sourcePath: string }) {
-		if (disposed || controls.size >= 64) throw new Error("Code Mode owner factory disposed/full");
+		if (closing || disposed || controls.size >= 64) throw new Error("Code Mode owner factory closing/disposed/full");
 		const control = createCodeModeDirectBinding(owner, options);
+		const dispose = control.dispose;
+		control.dispose = () => { dispose(); controls.delete(control); };
 		controls.add(control);
 		return control;
 	} });
 	const off = pi.events.on(DISCOVER_OWNER, (message) => {
 		const request = message as { version?: number; accept?: (value: unknown) => void } | undefined;
-		if (!disposed && request?.version === 1 && typeof request.accept === "function") request.accept(factory);
+		if (!closing && !disposed && request?.version === 1 && typeof request.accept === "function") request.accept(factory);
 	});
 	pi.events.emit(OWNER_CHANGED, { version: 1 });
 	return () => {
-		if (disposed) return;
-		// Retain discovery/receipts if restoration fails, permitting a retry.
-		for (const control of controls) control.dispose();
-		disposed = true; off(); controls.clear();
-		pi.events.emit(OWNER_CHANGED, { version: 1 });
+		if (disposed || disposing) return;
+		closing = true;
+		disposing = true;
+		try {
+			// Failed receipts remain live for retry; closing forbids acquisition.
+			for (const control of controls) control.dispose();
+			disposed = true; off();
+			pi.events.emit(OWNER_CHANGED, { version: 1 });
+		} finally { disposing = false; }
 	};
 }

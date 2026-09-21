@@ -114,12 +114,13 @@ patch and standalone search cooperate with Code Mode's optional direct-owner
 factory: `hide-bridged` can hide explicitly granted counterparts while Codex
 retains logical activation intent and native mutation-tool suppression.
 Without Code Mode, or in its default mixed visibility, direct behavior remains.
-Further declaration/version/owner negotiation work is a proposal, not implemented:
-see [tool interoperability design](plans/pi-code-mode-tool-interop.md), rechecked
-against Pi 0.86.1. Its historical system/tool declarations are not executable-owner
-identities or grants. Tree loadout restoration must be coordinated with current
-owner intent and leases; the existing released-lease restoration covers only one
-part of that proposed contract.
+The [tool interoperability design](plans/pi-code-mode-tool-interop.md) tracks
+the initial I0 implementation and remaining I1–I3 work. Owner transitions now
+retain failed disposal receipts for retry; tree activation reconciles current
+intent, profile restrictions, native mutation suppression and live leases.
+Historical system/tool declarations are not executable-owner identities or grants.
+Code Mode's initial v2 approval gate does not yet implement the complete v2 ABI
+or missing-required-policy configuration; Codex's safe adapters still use v1.
 
 Core advertises its exact stream function on the optional grammar handshake.
 Runtime handles generic grammar tool declarations, canonical string arguments,

@@ -1,6 +1,7 @@
 # Code Mode：工具声明、内置工具接入与 Codex 协商设计
 
-状态：**互操作设计提案，尚未实现；已按 Pi 0.86.1 重新核对**。
+状态：**已开始 I0 实现；I1–I3 尚未实现**。正文第 0–13 节保留
+`5328d3df` 的 Pi 0.86.1 设计/复核基线；实现进度和边界见第 14 节。
 
 - 原 U0–U4 合并点：`972d2c2c`；旧版设计保留在 `fb4ff5e0`。
 - 当前复核基线：用户更新后的 **`main@b02484ce`**，包含
@@ -939,3 +940,50 @@ cherry-pick 回新 main。只承接原文档提交并修订。
 resume/fork 集成；不把旧基线的 U0–U4 测试数字改名为 0.86.1 验收。
 文档另检查本地链接、代码围栏与 whitespace。下一轮临时试用环境必须使用
 实际锁定的 0.86.1 CLI/依赖，不能继续由旧 `/usr/bin/pi` 驱动新工作树。
+
+## 14. I0 首批实现
+
+本批实现，不代表 I1–I3 或第 12 节完整验收矩阵已经完成：
+
+- 新增 `discover/v2` 的**审批门禁子集**：consumer 显式确认 `approval/1`；
+  新 producer 不向旧 v1 consumer 暴露审批工具 closure，审批 policy 则提供
+  v1 `before` deny guard。新 consumer 继续接受已审计 v1。
+- 同一次 discovery 的 consumer hello、producer instance/revision 精确 receipt
+  用于抑制 legacy mirror；复制对象、旧 revision、其他 hello 不能代替 receipt。
+  此处 hello 是单次收集身份，**还不是 I1 的完整 session-generation ABI**。
+- 工具 refresh 先置 not-ready 并通知 v1 撤销，再发布新 revision；依然使用
+  全量失效，尚未实现 changed/v2、observer/presentation 分类或 teardown 合并。
+- owner dispose/create 失败保留可重试状态，禁止同步重入；包括“原 factory
+  消失、释放失败、原 factory 重新出现”的路径，以及无效新 control 的清理。
+- factory 按 live controls 计数；成功释放才移除，关闭失败仍拒绝新 acquisition。
+- exec/wait 使用实例级 schema 引用与 live source/metadata fingerprint，
+  不再按 description 认领、刷新或停用同名工具。
+- direct helper 保存协作接口记录的显式 intent；tree replay 不能覆盖它，
+  live lease 仍隐藏，保留先前 released-lease omission 修复。释放失败不提前
+  解绑 tree handlers。Codex 在 tree 重算 profile、logical activation 与原生
+  edit/write suppression，并刷新 adapter context；Code Mode 在 before-tree
+  先撤销旧 cells，树跳转取消也不会恢复已撤销的 cells。
+
+尚未实现：完整 requiredPolicies 期望集合、通用 requires/availability、
+session generation/revision 回退检测、完整 structural v2 client、public
+unsettled-effect error、分类 refresh、独立 prompt section、transport projection
+声明，以及 I3 adapter 试点。不支持“必需 policy 根本没加载也自动阻断”的配置；
+注册的审批 policy 的 legacy deny guard 不能被描述成这种保护。
+不新增 builtin 授权、不更换 Host、不改全局 Pi/旧测试目录，不发布或合并 main。
+
+本批验证：
+
+- `npm run ci` 通过：Code Mode **101/101**、runtime **6/6**，包括其余
+  workspace、architecture/release/license/pack checks 和 Codex **17 种**
+  production tarball/Pi 组合。
+- `npm run ci:pi-matrix`：floor 与 target 均为实际安装的 **0.86.1**，
+  两轮完整 CI 均通过；不是由全局 Pi 版本或 peer 声明推断。
+- `npm run test:host -w @oai404iao/pi-code-mode`：真实固定 Host、
+  systemd/cgroup 回归 **52/52**；provider 流量为 fixture，不使用真实账号。
+- 独立 review 发现的“失败释放后原 factory 重现”问题已修复并加入回归；
+  初次 61 项 focused 测试通过并未覆盖该路径，不能替代新增测试。
+- 未运行 Code Mode 专用 production installation probe、真实 provider/UI
+  验收或第 12 节完整后续矩阵。全局安装与旧试用环境不构成本批验收。
+
+保留日志：`~/.local/state/agents/tmp/code-mode-interop-i0.WFycHofx/` 下的
+`ci.log`、`pi-matrix.log`、`host.log` 和 matrix 子目录。
