@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-web-search",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": false,
   "description": "Unpublished pi-codex-web-search workspace for the staged Codex split",
   "type": "module",
@@ -45,7 +45,7 @@
     }
   },
   "dependencies": {
-    "@oai404iao/pi-codex-runtime": "0.2.0"
+    "@oai404iao/pi-codex-runtime": "0.3.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.86.1",
