@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { artifactWorkspaces, publishableWorkspaces, workspaces } from "./workspaces.mjs";
+import { artifactWorkspaces, publishableWorkspaces, readManifest, workspaces } from "./workspaces.mjs";
+
+test("all workspaces, including private packages, satisfy release metadata gates", () => {
+  for (const { name, directory } of workspaces) {
+    const manifest = readManifest(directory);
+    assert.deepEqual(manifest.repository, {
+      type: "git",
+      url: "git+https://github.com/oai404iao/omp.git",
+      directory,
+    }, name);
+    assert.equal(manifest.homepage, `https://github.com/oai404iao/omp/tree/main/${directory}#readme`, name);
+    assert.equal(manifest.bugs?.url, "https://github.com/oai404iao/omp/issues", name);
+  }
+});
 
 test("bootstrap packages stay out of guarded release artifacts", () => {
   const fixture = [
