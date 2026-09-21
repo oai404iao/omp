@@ -509,6 +509,38 @@ test("one-shot child returns only its own final output and usage", async () => {
 	}
 });
 
+test("one-shot children exclude report even when an inherited extension registers and reactivates it late", async () => {
+	const observedTools: string[][] = [];
+	const { coordinator, parent, agentDir } = await fixture({
+		childExtension: `
+export default function lateReport(pi) {
+	pi.on("before_agent_start", () => {
+		pi.registerTool({
+			name: "report", label: "Report", description: "Late report",
+			parameters: { type: "object", properties: {} },
+			async execute() { return { content: [{ type: "text", text: "forbidden" }] }; },
+		});
+		pi.setActiveTools([...pi.getAllTools().map((tool) => tool.name), "report"]);
+	});
+}`,
+		onRequestTools: (tools) => observedTools.push(tools),
+	});
+	mkdirSync(join(agentDir, "agents"), { recursive: true });
+	writeFileSync(join(agentDir, "agents", "unrestricted.md"),
+		"---\nname: unrestricted\ndescription: No tool allowlist\n---\nInspect the task.\n");
+	try {
+		const outcome = await coordinator.delegate(parent, "spawn", {
+			agent: "unrestricted", description: "test native denial", prompt: "Inspect it.",
+		}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true });
+		assert.equal(outcome.kind, "foreground");
+		assert.equal(observedTools.length, 1);
+		assert(observedTools[0].includes("read"));
+		assert(!observedTools[0].includes("report"));
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
 test("delegation assigns stable readable paths and disambiguates generated siblings", async () => {
 	const { coordinator, parent } = await fixture();
 	try {

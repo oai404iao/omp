@@ -142,6 +142,13 @@ nothing and does **not** itself kill the cell. Pi agent interruption/Esc cancels
 all session cells separately, even after `exec` returned. Normal `agent_end` does
 not: cells can continue across model turns and later user prompts.
 
+Code Mode contributes stable instructions through Pi's `code_mode` system-prompt
+section, without forcing a replacement for the full prompt. Current cell IDs and
+state remain in `exec`/`wait` results and `/code-mode cells`, not in per-turn prompt
+text. Disabling or losing availability removes the section on the next prompt.
+Recorded sections are model context, never authority to restore grants or cells.
+Another extension's explicitly forced prompt still takes precedence.
+
 `wait({cell_id,terminate:true})` first stops dispatch and aborts nested work,
 then terminates the Host cell and waits for already-started effects to settle.
 `terminating` is not a claim of cleanup. An explicit successful termination

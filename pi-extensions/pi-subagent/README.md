@@ -288,6 +288,8 @@ Frontmatter:
 | `thinking` | no | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 
 For continuable children, `report` is retained even when the agent has a tool allowlist.
+One-shot children exclude `report` through Pi's native `excludeTools`, including
+late registrations by inherited extensions, even when `tools` is omitted.
 
 ### Tool policy and inherited extensions
 

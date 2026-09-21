@@ -23,7 +23,6 @@ const requiredRuntimeFiles = {
     "src/codex-reserved-tools.ts",
     "src/providers/codex-apply-patch.lark",
   ],
-  "@oai404iao/pi-keep-defaults": [],
   "@oai404iao/pi-code-mode": ["THIRD_PARTY_NOTICES.md", "src/limits.ts"],
   "@oai404iao/pi-subagent": [
     "LICENSES/DeepSeek-Harness-MIT.txt",

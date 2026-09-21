@@ -29,6 +29,178 @@ test("apply_patch rechecks abort after acquiring the shared mutation queue", asy
 	assert.equal(existsSync(target), false);
 });
 
+test("apply_patch rejects distinct aliases rather than losing one of their edits", { timeout: 5000 }, async () => {
+	const cwd = tempDir();
+	mkdirSync(join(cwd, "real"));
+	symlinkSync(join(cwd, "real"), join(cwd, "alias"), "dir");
+	writeFileSync(join(cwd, "real/file.txt"), "one\ntwo\n");
+	await assert.rejects(executeApplyPatchTool({ input: `*** Begin Patch
+*** Update File: real/file.txt
+@@
+-one
++ONE
+*** Update File: alias/file.txt
+@@
+-two
++TWO
+*** End Patch` }, cwd), /alias the same target/);
+	assert.equal(readFileSync(join(cwd, "real/file.txt"), "utf8"), "one\ntwo\n");
+	await assert.rejects(executeApplyPatchTool({ input: `*** Begin Patch
+*** Update File: real/file.txt
+*** Move to: alias/file.txt
+@@
+-one
++ONE
+*** End Patch` }, cwd), /alias the same target/);
+});
+
+test("apply_patch rejects missing aliases before waiting on native creation", { timeout: 5000 }, async () => {
+	const cwd = tempDir();
+	mkdirSync(join(cwd, "a"));
+	symlinkSync(join(cwd, "a"), join(cwd, "z"), "dir");
+	let release!: () => void;
+	let acquired!: () => void;
+	const ready = new Promise<void>((resolve) => { acquired = resolve; });
+	const target = join(cwd, "a/file.txt");
+	const held = withFileMutationQueue(target, async () => {
+		acquired();
+		await new Promise<void>((resolve) => { release = resolve; });
+		writeFileSync(target, "native\n");
+	});
+	await ready;
+	try {
+		await assert.rejects(executeApplyPatchTool({ input: `*** Begin Patch
+*** Add File: a/file.txt
++first
+*** Add File: z/file.txt
++second
+*** End Patch` }, cwd), /alias the same target/);
+		assert.equal(existsSync(target), false);
+	} finally { release(); await held; }
+	await withFileMutationQueue(target, async () => {});
+	assert.equal(readFileSync(target, "utf8"), "native\n");
+});
+
+test("apply_patch permits repeated actions on the same lexical path", { timeout: 5000 }, async () => {
+	const cwd = tempDir();
+	await executeApplyPatchTool({ input: `*** Begin Patch
+*** Add File: a.txt
++one
+*** Update File: a.txt
+@@
+-one
++two
+*** Update File: a.txt
+*** Move to: b.txt
+@@
+-two
++three
+*** Update File: b.txt
+@@
+-three
++four
+*** End Patch` }, cwd);
+	assert.equal(readFileSync(join(cwd, "b.txt"), "utf8"), "four\n");
+	assert.equal(existsSync(join(cwd, "a.txt")), false);
+});
+
+test("apply_patch rejects target identity drift after a native queue wait and releases its locks", { timeout: 5000 }, async (t) => {
+	const cwd = tempDir();
+	mkdirSync(join(cwd, "z-real"));
+	symlinkSync(join(cwd, "z-real"), join(cwd, "z-alias"), "dir");
+	const first = join(cwd, "a.txt");
+	const created = join(cwd, "z-real/file.txt");
+	writeFileSync(first, "before\n");
+	let release!: () => void;
+	let acquired!: () => void;
+	const ready = new Promise<void>((resolve) => { acquired = resolve; });
+	const held = withFileMutationQueue(first, async () => {
+		acquired();
+		await new Promise<void>((resolve) => { release = resolve; });
+	});
+	await ready;
+	const signal = new AbortController().signal;
+	const checkAbort = signal.throwIfAborted.bind(signal);
+	let captured!: () => void;
+	const snapshotsReady = new Promise<void>((resolve) => { captured = resolve; });
+	let checkpoints = 0;
+	t.mock.method(signal, "throwIfAborted", () => {
+		checkAbort();
+		// The third checkpoint follows snapshot validation, just before the
+		// first acquisition. Synchronize creation without a scheduler delay.
+		if (++checkpoints === 3) captured();
+	});
+	const task = executeApplyPatchTool({ input: `*** Begin Patch
+*** Update File: a.txt
+@@
+-before
++after
+*** Update File: z-alias/file.txt
+@@
+-native
++patched
+*** End Patch` }, cwd, signal);
+	const rejected = assert.rejects(task, /identity changed/);
+	try {
+		await snapshotsReady;
+		await withFileMutationQueue(created, async () => { writeFileSync(created, "native\n"); });
+	} finally { release(); await held; }
+	await rejected;
+	await withFileMutationQueue(first, async () => {});
+	assert.equal(readFileSync(first, "utf8"), "before\n");
+	assert.equal(readFileSync(created, "utf8"), "native\n");
+});
+
+test("apply_patch refuses ambiguous dangling-link identities without effects", { timeout: 5000 }, async () => {
+	const cwd = tempDir();
+	symlinkSync(join(cwd, "missing"), join(cwd, "link"), "dir");
+	await assert.rejects(executeApplyPatchTool({
+		input: "*** Begin Patch\n*** Add File: link/file.txt\n+no\n*** End Patch",
+	}, cwd), /Cannot resolve patch target identity/);
+	assert.equal(existsSync(join(cwd, "missing/file.txt")), false);
+});
+
+test("overlapping patches order canonical locks consistently across reversed aliases", { timeout: 5000 }, async () => {
+	const cwd = tempDir();
+	for (const name of ["a", "z"]) {
+		mkdirSync(join(cwd, name));
+		writeFileSync(join(cwd, name, "file.txt"), "original\n");
+	}
+	symlinkSync(join(cwd, "z"), join(cwd, "b"), "dir");
+	symlinkSync(join(cwd, "a"), join(cwd, "y"), "dir");
+	const patch = (paths: string[], marker: string) => `*** Begin Patch\n${paths.map((path) =>
+		`*** Update File: ${path}/file.txt\n@@\n+${marker}\n original`).join("\n")}\n*** End Patch`;
+	await Promise.all([
+		executeApplyPatchTool({ input: patch(["a", "z"], "first") }, cwd),
+		executeApplyPatchTool({ input: patch(["b", "y"], "second") }, cwd),
+	]);
+	const a = readFileSync(join(cwd, "a/file.txt"), "utf8");
+	assert.equal(readFileSync(join(cwd, "z/file.txt"), "utf8"), a);
+	assert.match(a, /first/);
+	assert.match(a, /second/);
+});
+
+test("apply_patch shares alias locks with native mutations and reads after acquisition", { timeout: 5000 }, async () => {
+	const cwd = tempDir();
+	mkdirSync(join(cwd, "real"));
+	symlinkSync(join(cwd, "real"), join(cwd, "alias"), "dir");
+	const target = join(cwd, "real/file.txt");
+	writeFileSync(target, "before\n");
+	let release!: () => void;
+	let acquired!: () => void;
+	const ready = new Promise<void>((resolve) => { acquired = resolve; });
+	const held = withFileMutationQueue(target, async () => {
+		acquired();
+		await new Promise<void>((resolve) => { release = resolve; });
+		writeFileSync(target, "native\n");
+	});
+	await ready;
+	const task = executeApplyPatchTool({ input: "*** Begin Patch\n*** Update File: alias/file.txt\n@@\n-native\n+patched\n*** End Patch" }, cwd);
+	release();
+	await Promise.all([held, task]);
+	assert.equal(readFileSync(target, "utf8"), "patched\n");
+});
+
 test("parseApplyPatch parses add/update/delete actions", () => {
 	const parsed = parseApplyPatch(`*** Begin Patch
 *** Add File: a.txt

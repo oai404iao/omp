@@ -1,3 +1,6 @@
+import { lstat, realpath } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { applyPatch, resolvePatchPath, type ApplyPatchResult } from "../patch/apply.js";
 import { parseApplyPatch } from "../patch/parser.js";
 import { createApplyPatchRenderers } from "../patch/render.js";
@@ -25,24 +28,55 @@ export function applyPatchTargetPaths(input: string, cwd: string): string[] {
 	return [...paths].sort();
 }
 
-async function withMutationQueue(path: string, fn: () => Promise<void>): Promise<void> {
-	let queue: ((path: string, fn: () => Promise<void>) => Promise<void>) | undefined;
-	try {
-		const mod = await import("@earendil-works/pi-coding-agent");
-		queue = (mod as { withFileMutationQueue?: typeof queue }).withFileMutationQueue;
-	} catch {
-		// Unit tests can run outside Pi without peer dependencies installed.
+interface MutationTarget {
+	path: string;
+	key: string;
+	identity: string;
+}
+
+async function missingTargetIdentity(path: string): Promise<string> {
+	let ancestor = path;
+	for (;;) {
+		try {
+			return resolve(await realpath(ancestor), relative(ancestor, path));
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+		// A dangling symlink is not a missing directory: its future identity
+		// cannot be inferred from its lexical parent.
+		const entry = await lstat(ancestor).catch((error: NodeJS.ErrnoException) => {
+			if (error.code !== "ENOENT") throw error;
+			return undefined;
+		});
+		if (entry || dirname(ancestor) === ancestor) throw new Error(`Cannot resolve patch target identity: ${path}`);
+		ancestor = dirname(ancestor);
 	}
-	if (typeof queue === "function") return queue(path, fn);
-	return fn();
+}
+
+async function mutationTarget(path: string): Promise<MutationTarget> {
+	try {
+		const key = await realpath(path);
+		return { path, key, identity: key };
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		return { path, key: path, identity: await missingTargetIdentity(path) };
+	}
 }
 
 export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string, signal?: AbortSignal): Promise<{ content: Array<{ type: "text"; text: string }>; details: ApplyPatchResult }> {
 	signal?.throwIfAborted();
 	if (!params || typeof params.input !== "string") throw new Error("apply_patch requires an input string.");
-	let targets: string[];
+	let targets: MutationTarget[];
 	try {
-		targets = applyPatchTargetPaths(params.input, cwd);
+		targets = await Promise.all(applyPatchTargetPaths(params.input, cwd).map(mutationTarget));
+		const identities = new Set<string>();
+		for (const target of targets) {
+			if (identities.has(target.identity)) throw new Error(`Patch paths alias the same target: ${target.path}`);
+			identities.add(target.identity);
+		}
+		// Order by semantic identity even for missing files: Pi's queue key can
+		// become canonical when another mutation creates a file while we wait.
+		targets.sort((a, b) => a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`apply_patch verification failed: ${message}`);
@@ -50,11 +84,18 @@ export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string
 	let result: ApplyPatchResult | undefined;
 	const runAt = async (index: number): Promise<void> => {
 		signal?.throwIfAborted();
+		for (const target of targets) {
+			const current = await mutationTarget(target.path);
+			if (current.key !== target.key || current.identity !== target.identity) {
+				throw new Error(`Patch target identity changed while acquiring mutation queues: ${target.path}`);
+			}
+		}
+		signal?.throwIfAborted();
 		if (index >= targets.length) {
 			result = await applyPatch(params.input, { cwd });
 			return;
 		}
-		await withMutationQueue(targets[index]!, () => runAt(index + 1));
+		await withFileMutationQueue(targets[index]!.key, () => runAt(index + 1));
 	};
 	await runAt(0);
 	if (!result) throw new Error("apply_patch did not produce a result.");

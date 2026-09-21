@@ -119,25 +119,6 @@ export function lastAssistantMessageEntry(entries: readonly SessionEntry[]): Ass
 	return undefined;
 }
 
-export function questionSummaryFromInput(input: unknown): string {
-	const params = asRecord(input);
-	if (!params) return "";
-
-	if (typeof params.question === "string") return params.question;
-	const questions = Array.isArray(params.questions) ? params.questions : [];
-	const firstQuestion = asRecord(questions[0]);
-	if (typeof firstQuestion?.question === "string") return firstQuestion.question;
-	if (typeof firstQuestion?.prompt === "string") return firstQuestion.prompt;
-	return "";
-}
-
-export function questionSummaryFromPromptEvent(payload: unknown): string {
-	const event = asRecord(payload);
-	const questions = Array.isArray(event?.questions) ? event.questions : [];
-	const firstQuestion = asRecord(questions[0]);
-	return typeof firstQuestion?.question === "string" ? firstQuestion.question : "";
-}
-
 export function formatNotification(cwd: string, status: NotificationStatus, summary: string): string {
 	const project = truncateSummary(cwd.replace(/\s+/g, " "), PROJECT_LIMIT) || "(未知项目目录)";
 	const fallbackSummary = status === "completed" ? "Pi 任务已完成" : status === "error" ? "Pi 任务失败" : "等待用户回复";

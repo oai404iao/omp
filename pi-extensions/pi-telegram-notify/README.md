@@ -1,6 +1,6 @@
 # @oai404iao/pi-telegram-notify
 
-Pi 完成任务、最终停止于错误、或通过 `ask_user_question` 等待你的回复时，向 Telegram Bot 发送一条通知。
+Pi 完成任务、最终停止于错误、或扩展弹出阻塞式交互等待你的回复时，向 Telegram Bot 发送一条通知。
 
 兼容性下限：Pi 0.86.1；已验证 0.86.1。
 
@@ -90,9 +90,15 @@ npm 包名使用 `@oai404iao/pi-telegram-notify`，但配置目录继续使用
   assistant 消息以 `stop` 或 `length` 结束。
 - `错误`：Pi 已决定不再自动重试或自动压缩后继续，且当前 active branch
   的最后一个 assistant 消息以 `error` 结束。
-- `等待回复`：优先订阅
-  `@juicesharp/rpiv-ask-user-question` 的 `rpiv:ask-user:prompt` 公开事件；
-  同时对 `ask_user_question` / `ask-user-question` 工具名提供回退监听。
+- `等待回复`：使用 Pi 原生 `ui_prompt_start` 事件，覆盖扩展的
+  `select`、`confirm`、`input`、`editor` 和 `custom` 对话框，包括审批弹窗。
+  Pi 将嵌套或重叠的对话框合并成一个等待区间，只在区间开始时通知；
+  关闭对话框的 `ui_prompt_end` 不另发通知。
+
+等待通知使用原生事件提供的标题，无标题时显示“等待用户回复”。
+不再读取完整问卷内容、订阅 `rpiv:ask-user:prompt` 或按工具名设置延时回退。
+因此被阻止、尚未真正打开 UI 的工具调用不会误报等待；标题不包含完整
+问题的自定义 UI 也不再发送原来的详细问题摘要。无 UI 会话不发送等待通知。
 
 “完成/错误”只使用 Pi 0.86.1 的公开 `agent_settled` 事件，并从
 `ctx.sessionManager.getBranch()` 读取当前 active branch。该事件只在没有

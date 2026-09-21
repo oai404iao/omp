@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { artifactWorkspaces, publishableWorkspaces, readManifest, workspaces } from "./workspaces.mjs";
 
+test("retired keep-defaults is absent from workspaces and every artifact selection", () => {
+  assert(!readManifest(".").workspaces.includes("pi-extensions/pi-keep-defaults"));
+  for (const entries of [workspaces, publishableWorkspaces, artifactWorkspaces(), artifactWorkspaces(true)]) {
+    assert(!entries.some(({ name }) => name === "@oai404iao/pi-keep-defaults"));
+  }
+});
+
 test("all workspaces, including private packages, satisfy release metadata gates", () => {
   for (const { name, directory } of workspaces) {
     const manifest = readManifest(directory);

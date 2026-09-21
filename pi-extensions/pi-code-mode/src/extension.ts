@@ -286,13 +286,15 @@ export default function codeMode(pi: ExtensionAPI): void {
 		},
 	});
 	pi.on("before_agent_start", async (event, ctx) => {
+		delete event.systemPromptOptions.sections.code_mode;
 		bind(ctx);
 		await contributionChange;
 		if (!session.enabled) return;
 		if (await realpath(ctx.cwd) !== session.rootPath) { await session.revoke(); reflect(ctx); return; }
 		try { refreshTools(); } catch (error) { visibility.release(); throw error; }
 		reflect(ctx);
-		return { systemPrompt: `${event.systemPrompt}\n\nCode Mode local root: ${JSON.stringify(session.rootPath)}. The exec tool description lists the exact authorized nested tools. Shared Host capacity: ${session.maxCells}; cells: ${JSON.stringify(session.cellList)}. Collect terminal results and all output/traces/usage to release slots. Visibility is ${mode}: only explicitly cooperating, authorized contributions may hide their direct counterpart; all other tools stay direct. This is not strict only or a permission boundary. External contributions have their own authority, not local-root confinement. Writes/processes are not rolled back.` };
+		if (session.blocked || !protocolAvailable || contributionIssue || !ownsTool("exec") || !ownsTool("wait")) return;
+		event.systemPromptOptions.sections.code_mode = `Code Mode local root: ${JSON.stringify(session.rootPath)}. The exec tool description lists the exact authorized nested tools. Shared Host capacity: ${session.maxCells}. Use exec/wait results or /code-mode cells for current cell state. Collect terminal results and all output/traces/usage to release slots. Visibility is ${mode}: only explicitly cooperating, authorized contributions may hide their direct counterpart; all other tools stay direct. This is not strict only or a permission boundary. External contributions have their own authority, not local-root confinement. Writes/processes are not rolled back.`;
 	});
 	pi.on("turn_start", (_event, ctx) => {
 		bind(ctx); unbindAgent();

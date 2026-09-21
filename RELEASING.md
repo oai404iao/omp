@@ -9,7 +9,7 @@ This dedicated activation checkout moves them to `publishable` and records
 their exact artifacts in the release lock. Its merge and actual protected
 publication still require separate approval.
 
-Ordinary preparation now includes all nine alpha packages: four immutable
+The bootstrap activation originally included nine alpha packages: four immutable
 `recover` dependencies plus five `publish` candidates. Do not republish the
 initial four, ignore dependencies, or replace locked artifacts. A known locked
 version returning E404 is pending verification, not a fresh publication candidate.
@@ -28,9 +28,12 @@ pins and rejects pin changes without a corresponding consumer version bump.
 Its tests version temporary fixtures; actual alpha versions belong in a reviewed
 version PR, never in an unreviewed direct main update.
 
-The approved preparation cohort is nine alpha packages (all workspaces except
-tree-continue). `.changeset/pre.json` records the `alpha` channel, while release
-artifacts use the `next` dist-tag. Limited real smoke on the immutable bootstrap
+The original preparation cohort was nine alpha packages. The current artifact
+selection contains eight publishable workspaces: keep-defaults is retired, while
+Code Mode and tree-continue remain private/blocked. Historical keep-defaults
+release locks are retained, but it must not enter new artifact batches.
+Prerelease artifacts use the `next` dist-tag when prerelease mode is active.
+Limited real smoke on the immutable bootstrap
 artifacts has been performed, with important harness/coverage limitations
 recorded in the activation audit; it is not universal endpoint acceptance.
 Remaining publication requires separate approval. The earlier
@@ -174,8 +177,8 @@ Release eligibility is explicit in two places:
      artifacts.
 2. only `blocked` packages may set `"private": true`.
 
-CI rejects mismatches. The guarded release scripts now select all nine packages
-other than `pi-tree-continue`, including the four verified Codex recovery nodes.
+CI rejects mismatches. The guarded release scripts select the eight publishable
+workspaces, excluding private Code Mode/tree-continue and retired keep-defaults.
 The historical manual releases below remain locked; they are not a live registry
 inventory. See the root README and activation audit for this alpha cohort.
 All future releases require a maintainer to manually dispatch and approve the

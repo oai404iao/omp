@@ -3,38 +3,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import {
+	createEventBus, DefaultResourceLoader, ExtensionRunner, SessionManager,
+	type ModelRegistry,
+} from "@earendil-works/pi-coding-agent";
 import telegramNotifyExtension from "../index.js";
 
 type ExtensionHandler = (event: any, ctx: any) => unknown;
 
-class FakeEventBus {
-	private readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
-
-	on(channel: string, handler: (payload: unknown) => void): () => void {
-		const channelListeners = this.listeners.get(channel) ?? new Set();
-		channelListeners.add(handler);
-		this.listeners.set(channel, channelListeners);
-		return () => {
-			channelListeners.delete(handler);
-			if (channelListeners.size === 0) this.listeners.delete(channel);
-		};
-	}
-
-	emit(channel: string, payload: unknown): void {
-		for (const handler of this.listeners.get(channel) ?? []) handler(payload);
-	}
-
-	listenerCount(channel: string): number {
-		return this.listeners.get(channel)?.size ?? 0;
-	}
-}
-
 function fakePi() {
 	const handlers: Record<string, ExtensionHandler[]> = {};
 	const commands: Record<string, { handler: (args: string, ctx: any) => Promise<void> }> = {};
-	const events = new FakeEventBus();
 	return {
-		events,
+		events: createEventBus(),
 		handlers,
 		commands,
 		on(event: string, handler: ExtensionHandler) {
@@ -50,13 +31,9 @@ async function emit(pi: ReturnType<typeof fakePi>, event: string, ctx: any, payl
 
 function assistantEntry(id: string, stopReason: string, text: string, parentId: string | null = null) {
 	return {
-		type: "message",
-		id,
-		parentId,
-		timestamp: "2026-01-01T00:00:00.000Z",
+		type: "message", id, parentId, timestamp: "2026-01-01T00:00:00.000Z",
 		message: {
-			role: "assistant",
-			stopReason,
+			role: "assistant", stopReason,
 			content: text ? [{ type: "text", text }] : [],
 			errorMessage: stopReason === "error" ? text : undefined,
 		},
@@ -64,19 +41,13 @@ function assistantEntry(id: string, stopReason: string, text: string, parentId: 
 }
 
 function context(getBranch: () => unknown[], cwd = "/private/work/project", getEntries = getBranch) {
-	return {
-		cwd,
-		hasUI: true,
-		sessionManager: {
-			getBranch,
-			getEntries,
-		},
-	};
+	return { cwd, hasUI: true, sessionManager: { getBranch, getEntries } };
 }
 
 interface Harness {
 	pi: ReturnType<typeof fakePi>;
 	requests: Array<{ url: string; text: string }>;
+	agentDir: string;
 }
 
 async function withHarness(fn: (harness: Harness) => Promise<void>): Promise<void> {
@@ -85,12 +56,8 @@ async function withHarness(fn: (harness: Harness) => Promise<void>): Promise<voi
 	const configDir = join(agentDir, "extensions", "pi-telegram-notify");
 	mkdirSync(configDir, { recursive: true });
 	writeFileSync(join(configDir, "config.json"), JSON.stringify({
-		enabled: true,
-		botToken: "000000:fake-test-token",
-		chatId: "fake-test-chat",
-		requestTimeoutMs: 1_000,
+		enabled: true, botToken: "000000:fake-test-token", chatId: "fake-test-chat", requestTimeoutMs: 1_000,
 	}));
-
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	const previousFetch = globalThis.fetch;
 	const requests: Array<{ url: string; text: string }> = [];
@@ -100,11 +67,10 @@ async function withHarness(fn: (harness: Harness) => Promise<void>): Promise<voi
 		requests.push({ url: String(url), text: body.text });
 		return new Response(JSON.stringify({ ok: true }), { status: 200 });
 	}) as typeof fetch;
-
 	try {
 		const pi = fakePi();
 		telegramNotifyExtension(pi as any);
-		await fn({ pi, requests });
+		await fn({ pi, requests, agentDir });
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
@@ -113,18 +79,10 @@ async function withHarness(fn: (harness: Harness) => Promise<void>): Promise<voi
 	}
 }
 
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function childDescriptor(provider = "spawn") {
 	return {
-		type: "custom",
-		customType: "pi-subagent/descriptor",
-		id: "descriptor",
-		parentId: null,
-		timestamp: "2026-01-01T00:00:00.000Z",
-		data: { provider },
+		type: "custom", customType: "pi-subagent/descriptor",
+		id: "descriptor", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", data: { provider },
 	};
 }
 
@@ -132,18 +90,13 @@ test("spawn and fork children never send completion, error, waiting, or test not
 	for (const provider of ["spawn", "fork"]) {
 		const branch: unknown[] = [childDescriptor(provider)];
 		const ctx = { ...context(() => branch), ui: { notify() {} } };
-		await emit(pi, "session_start", ctx, { reason: "startup" });
+		await emit(pi, "session_start", ctx);
 		await emit(pi, "before_agent_start", ctx, { prompt: "child task" });
 		for (const stopReason of ["stop", "length", "error"]) {
 			branch.push(assistantEntry(stopReason, stopReason, "child result"));
 			await emit(pi, "agent_settled", ctx);
 		}
-		await emit(pi, "tool_call", ctx, {
-			toolName: "ask_user_question", toolCallId: "child-question",
-			input: { question: "child question" },
-		});
-		await delay(150);
-		pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "child question" }] });
+		await emit(pi, "ui_prompt_start", ctx, { kind: "custom", title: "child question" });
 		await pi.commands["telegram-notify"]!.handler("test", ctx);
 		await pi.commands["telegram-notify:test"]!.handler("", ctx);
 		await emit(pi, "session_shutdown", ctx);
@@ -151,257 +104,150 @@ test("spawn and fork children never send completion, error, waiting, or test not
 	assert.equal(requests.length, 0);
 }));
 
-test("checks descriptors appended after startup and before delayed delivery", () => withHarness(async ({ pi, requests }) => {
+test("checks child descriptors appended after startup at notification time", () => withHarness(async ({ pi, requests }) => {
 	const branch: unknown[] = [];
 	const ctx = context(() => branch);
 	await emit(pi, "session_start", ctx);
-	await emit(pi, "tool_call", ctx, {
-		toolName: "ask_user_question", toolCallId: "pending-child",
-		input: { question: "must remain silent" },
-	});
 	branch.push(childDescriptor(), assistantEntry("child-final", "stop", "silent child"));
-	await delay(150);
-	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "another child question" }] });
+	await emit(pi, "ui_prompt_start", ctx, { kind: "confirm", title: "child question" });
 	await emit(pi, "agent_settled", ctx);
 	assert.equal(requests.length, 0);
-
 	await emit(pi, "session_shutdown", ctx);
 	const parentCtx = { ...context(() => [assistantEntry("parent-final", "stop", "parent result")]), hasUI: false };
 	await emit(pi, "session_start", parentCtx);
 	await emit(pi, "agent_settled", parentCtx);
-	assert.equal(requests.length, 1, "ordinary non-UI parent sessions still notify after a child session");
+	assert.equal(requests.length, 1, "non-UI parent sessions still notify completion");
 	assert.match(requests[0]!.text, /parent result/);
 }));
 
-test("child identity survives navigation before the descriptor on another branch", () => withHarness(async ({ pi, requests }) => {
+test("child identity survives navigation before its descriptor", () => withHarness(async ({ pi, requests }) => {
 	const branch = [assistantEntry("inherited-final", "stop", "inherited result")];
 	const entries = [...branch, childDescriptor("fork")];
-	const ctx = {
-		...context(() => branch, "/work/child", () => entries),
-		ui: { notify() {} },
-	};
+	const ctx = { ...context(() => branch, "/work/child", () => entries), ui: { notify() {} } };
 	await emit(pi, "session_start", ctx);
 	await emit(pi, "agent_settled", ctx);
-	await emit(pi, "tool_call", ctx, {
-		toolName: "ask_user_question", toolCallId: "navigated-question",
-		input: { question: "still a child" },
-	});
-	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "still a child" }] });
+	await emit(pi, "ui_prompt_start", ctx, { kind: "select", title: "still a child" });
 	await pi.commands["telegram-notify:test"]!.handler("", ctx);
-	await delay(150);
 	assert.equal(requests.length, 0);
 }));
 
-test("registers agent_settled without agent_end and deduplicates the active-branch assistant entry", () => withHarness(async ({ pi, requests }) => {
+test("agent_settled deduplicates the active-branch assistant and ignores intermediate retries", () => withHarness(async ({ pi, requests }) => {
 	assert.equal(pi.handlers.agent_settled?.length, 1);
 	assert.equal(pi.handlers.agent_end, undefined);
-
-	const activeAssistant = assistantEntry("active-final", "stop", "active branch result", "model");
-	const branch = [
-		assistantEntry("earlier-error", "error", "retry me"),
-		{ type: "model_change", id: "model", parentId: "earlier-error", timestamp: "2026-01-01T00:00:01.000Z" },
-		activeAssistant,
-		{ type: "label", id: "label", parentId: activeAssistant.id, timestamp: "2026-01-01T00:00:02.000Z" },
-	];
+	let branch = [assistantEntry("retry-error", "error", "temporary provider failure")];
 	const ctx = context(() => branch, "/private/work/project", () => [
-		...branch, assistantEntry("off-branch", "error", "must not notify this error"),
+		...branch, assistantEntry("off-branch", "error", "off-branch failure"),
 	]);
-
-	await emit(pi, "session_start", ctx, { reason: "startup" });
+	await emit(pi, "session_start", ctx);
 	await emit(pi, "before_agent_start", ctx, { prompt: "implement the fix" });
+	await emit(pi, "agent_end", ctx, { messages: [branch[0]!.message] });
+	assert.equal(requests.length, 0);
+	branch = [...branch, assistantEntry("retry-final", "stop", "active branch result", "retry-error")];
 	await emit(pi, "agent_settled", ctx);
 	await emit(pi, "agent_settled", ctx);
-
 	assert.equal(requests.length, 1);
 	assert.match(requests[0]!.text, /\*项目:\* `\/private\/work\/project`/);
 	assert.match(requests[0]!.text, /\*状态:\* 完成/);
 	assert.match(requests[0]!.text, /active branch result/);
-
+	assert.doesNotMatch(requests[0]!.text, /temporary provider failure|off-branch failure/);
 	await emit(pi, "session_shutdown", ctx, { reason: "reload" });
 	await emit(pi, "session_start", ctx, { reason: "reload" });
 	await emit(pi, "agent_settled", ctx);
-	assert.equal(requests.length, 2, "session lifecycle resets entry-id deduplication");
-}));
-
-test("does not notify an intermediate retry error and settled reports only the final result", () => withHarness(async ({ pi, requests }) => {
-	let branch = [assistantEntry("retry-error", "error", "temporary provider failure")];
-	const ctx = context(() => branch);
-	await emit(pi, "session_start", ctx, { reason: "startup" });
-
-	await emit(pi, "agent_end", ctx, { messages: [branch[0]!.message] });
-	assert.equal(requests.length, 0);
-	assert.equal(pi.handlers.agent_end, undefined);
-
-	branch = [
-		...branch,
-		assistantEntry("retry-final", "stop", "retry eventually succeeded", "retry-error"),
-	];
-	await emit(pi, "agent_settled", ctx);
-
-	assert.equal(requests.length, 1);
-	assert.match(requests[0]!.text, /\*状态:\* 完成/);
-	assert.match(requests[0]!.text, /retry eventually succeeded/);
-	assert.doesNotMatch(requests[0]!.text, /temporary provider failure/);
-}));
-
-test("concurrent ask-user aliases consume one pending per rpiv by exact match then FIFO", () => withHarness(async ({ pi, requests }) => {
-	const firstCtx = context(() => [], "/private/work/first-alias");
-	const secondCtx = context(() => [], "/private/work/second-alias");
-	await emit(pi, "session_start", firstCtx, { reason: "startup" });
-
-	await emit(pi, "tool_call", firstCtx, {
-		toolName: "ask_user_question",
-		toolCallId: "question-1",
-		input: { question: "first question" },
-	});
-	await emit(pi, "tool_call", secondCtx, {
-		toolName: "ask-user-question",
-		toolCallId: "question-2",
-		input: { questions: [{ question: "second question" }] },
-	});
-
-	// Reverse event order to verify exact-summary matching takes precedence over
-	// FIFO, then use an unmatched summary to consume the one remaining oldest call.
-	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "second question" }] });
-	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "authoritative first" }] });
-	await delay(150);
-
 	assert.equal(requests.length, 2);
-	assert.match(requests[0]!.text, /\*状态:\* 等待回复/);
-	assert.match(requests[0]!.text, /\*项目:\* `\/private\/work\/second-alias`/);
-	assert.match(requests[0]!.text, /second question/);
-	assert.match(requests[1]!.text, /\*项目:\* `\/private\/work\/first-alias`/);
-	assert.match(requests[1]!.text, /authoritative first/);
-
-	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "authoritative without pending" }] });
-	assert.equal(requests.length, 3, "an authoritative event without a pending fallback still notifies");
-	assert.match(requests[2]!.text, /authoritative without pending/);
 }));
 
-test("an unmatched rpiv event consumes only the oldest concurrent pending call", () => withHarness(async ({ pi, requests }) => {
-	const oldestCtx = context(() => [], "/private/work/oldest");
-	const newerCtx = context(() => [], "/private/work/newer");
-	await emit(pi, "session_start", oldestCtx, { reason: "startup" });
-
-	await emit(pi, "tool_call", oldestCtx, {
-		toolName: "ask_user_question",
-		toolCallId: "oldest-question",
-		input: { question: "oldest fallback" },
-	});
-	await emit(pi, "tool_call", newerCtx, {
-		toolName: "ask-user-question",
-		toolCallId: "newer-question",
-		input: { questions: [{ question: "newer fallback" }] },
-	});
-
-	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "unmatched authoritative" }] });
-	await delay(150);
-
-	assert.equal(requests.length, 2);
-	assert.match(requests[0]!.text, /\*项目:\* `\/private\/work\/oldest`/);
-	assert.match(requests[0]!.text, /unmatched authoritative/);
-	assert.match(requests[1]!.text, /\*项目:\* `\/private\/work\/newer`/);
-	assert.match(requests[1]!.text, /newer fallback/);
-}));
-
-test("late rpiv suppresses only its sent fallback and leaves another question pending", () => withHarness(async ({ pi, requests }) => {
-	const sentCtx = context(() => [], "/private/work/sent-fallback");
-	const pendingCtx = context(() => [], "/private/work/still-pending");
-	await emit(pi, "session_start", sentCtx, { reason: "startup" });
-
-	await emit(pi, "tool_call", sentCtx, {
-		toolName: "ask_user_question",
-		toolCallId: "sent-question",
-		input: { question: "fallback already sent" },
-	});
-	await delay(150);
-	assert.equal(requests.length, 1);
-	assert.match(requests[0]!.text, /\*项目:\* `\/private\/work\/sent-fallback`/);
-	assert.match(requests[0]!.text, /fallback already sent/);
-
-	await emit(pi, "tool_call", pendingCtx, {
-		toolName: "ask-user-question",
-		toolCallId: "pending-question",
-		input: { questions: [{ question: "pending authoritative" }] },
-	});
-	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "fallback already sent" }] });
-	await delay(10);
-	assert.equal(requests.length, 1, "a late authoritative event must not duplicate its sent fallback");
-
-	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "pending authoritative" }] });
-	await delay(150);
-	assert.equal(requests.length, 2, "the other pending question must emit exactly once");
-	assert.match(requests[1]!.text, /\*项目:\* `\/private\/work\/still-pending`/);
-	assert.match(requests[1]!.text, /pending authoritative/);
-}));
-
-test("tool_result and session_shutdown cancel ask-user fallback timers", () => withHarness(async ({ pi, requests }) => {
-	const ctx = context(() => []);
-	await emit(pi, "session_start", ctx, { reason: "startup" });
-
-	await emit(pi, "tool_call", ctx, {
-		toolName: "ask_user_question",
-		toolCallId: "completed-question",
-		input: { question: "do not send after result" },
-	});
-	await emit(pi, "tool_result", ctx, { toolCallId: "completed-question" });
-	await delay(150);
-	assert.equal(requests.length, 0);
-
-	await emit(pi, "tool_call", ctx, {
-		toolName: "ask_user_question",
-		toolCallId: "shutdown-question",
-		input: { question: "do not send after shutdown" },
-	});
-	await emit(pi, "tool_call", ctx, {
-		toolName: "ask-user-question",
-		toolCallId: "second-shutdown-question",
-		input: { questions: [{ question: "also clear on shutdown" }] },
-	});
-	await emit(pi, "session_shutdown", ctx, { reason: "reload" });
-	await delay(150);
-	assert.equal(requests.length, 0);
-}));
-
-test("ask-user fallback timer does not keep the Pi process alive", () => withHarness(async ({ pi }) => {
-	const ctx = context(() => []);
-	await emit(pi, "session_start", ctx, { reason: "startup" });
-
-	const originalSetTimeout = globalThis.setTimeout;
-	let fallbackTimer: NodeJS.Timeout | undefined;
-	globalThis.setTimeout = ((handler: (...args: any[]) => void, timeout?: number, ...args: any[]) => {
-		const timer = originalSetTimeout(handler, timeout, ...args);
-		if (timeout === 100) fallbackTimer = timer;
-		return timer;
-	}) as typeof setTimeout;
-	try {
-		await emit(pi, "tool_call", ctx, {
-			toolName: "ask_user_question",
-			toolCallId: "unref-question",
-			input: { question: "timer should be unreferenced" },
-		});
-	} finally {
-		globalThis.setTimeout = originalSetTimeout;
+test("native prompt starts notify for all blocking extension dialogs, using title or fallback", () => withHarness(async ({ pi, requests }) => {
+	const ctx = context(() => [], "/work/dialog");
+	await emit(pi, "session_start", ctx);
+	for (const kind of ["select", "confirm", "input", "editor", "custom"]) {
+		await emit(pi, "ui_prompt_start", ctx, { reason: "ui_prompt", kind, title: `  ${kind} title  ` });
+		await emit(pi, "ui_prompt_end", ctx, { reason: "ui_prompt" });
+		assert.match(requests.at(-1)!.text, new RegExp(`${kind} title`));
+		assert.match(requests.at(-1)!.text, /\*状态:\* 等待回复/);
+		assert.match(requests.at(-1)!.text, /`\/work\/dialog`/);
 	}
-
-	assert.ok(fallbackTimer);
-	assert.equal(fallbackTimer.hasRef(), false);
-	await emit(pi, "tool_result", ctx, { toolCallId: "unref-question" });
+	assert.equal(requests.length, 5, "end notifications do not send Telegram messages");
+	await emit(pi, "ui_prompt_start", ctx, { kind: "custom" });
+	assert.match(requests.at(-1)!.text, /等待用户回复$/);
 }));
 
-test("rpiv event subscription follows the session lifecycle and unsubscribes on shutdown", () => withHarness(async ({ pi, requests }) => {
-	const channel = "rpiv:ask-user:prompt";
+test("tool preflight and legacy rpiv events no longer guess waiting or duplicate native notifications", () => withHarness(async ({ pi, requests }) => {
 	const ctx = context(() => []);
-	assert.equal(pi.events.listenerCount(channel), 0);
-
-	await emit(pi, "session_start", ctx, { reason: "startup" });
-	assert.equal(pi.events.listenerCount(channel), 1);
-	await emit(pi, "session_start", ctx, { reason: "reload" });
-	assert.equal(pi.events.listenerCount(channel), 1);
-
-	await emit(pi, "session_shutdown", ctx, { reason: "reload" });
-	assert.equal(pi.events.listenerCount(channel), 0);
-	pi.events.emit(channel, { questions: [{ question: "stale closure" }] });
-	await delay(10);
+	await emit(pi, "session_start", ctx);
+	assert.equal(pi.handlers.tool_call, undefined);
+	assert.equal(pi.handlers.tool_result, undefined);
+	await emit(pi, "tool_call", ctx, { toolName: "ask_user_question", input: { question: "may be blocked" } });
+	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "legacy summary" }] });
 	assert.equal(requests.length, 0);
+	await emit(pi, "ui_prompt_start", ctx, { kind: "custom" });
+	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "legacy summary" }] });
+	assert.equal(requests.length, 1);
+	assert.doesNotMatch(requests[0]!.text, /legacy summary|may be blocked/);
+}));
+
+test("no waiting notification without UI or an active session; replacement uses its own cwd", () => withHarness(async ({ pi, requests }) => {
+	const ctx = context(() => []);
+	await emit(pi, "ui_prompt_start", ctx, { kind: "input" });
+	await emit(pi, "session_start", ctx);
+	await emit(pi, "ui_prompt_start", { ...ctx, hasUI: false }, { kind: "input" });
+	await emit(pi, "session_shutdown", ctx);
+	await emit(pi, "ui_prompt_start", ctx, { kind: "input" });
+	assert.equal(requests.length, 0);
+	const replacement = context(() => [], "/work/replacement");
+	await emit(pi, "session_start", replacement);
+	await emit(pi, "ui_prompt_start", replacement, { kind: "input", title: "Replacement" });
+	assert.equal(requests.length, 1);
+	assert.match(requests[0]!.text, /`\/work\/replacement`/);
+}));
+
+test("real Pi runner coalesces overlapping dialogs and closing after shutdown sends nothing", () => withHarness(async ({ agentDir, requests }) => {
+	const loader = new DefaultResourceLoader({
+		cwd: agentDir, agentDir, noExtensions: true, noSkills: true, noThemes: true,
+		noPromptTemplates: true, noContextFiles: true, extensionFactories: [telegramNotifyExtension],
+	});
+	await loader.reload();
+	const loaded = loader.getExtensions();
+	assert.deepEqual(loaded.errors, []);
+	const runner = new ExtensionRunner(loaded.extensions, loaded.runtime, agentDir,
+		SessionManager.inMemory(agentDir), {} as ModelRegistry);
+	const errors: string[] = [];
+	runner.onError((error) => errors.push(error.error));
+	const finishes: Array<(value: boolean) => void> = [];
+	runner.setUIContext({
+		...runner.getUIContext(),
+		confirm: () => new Promise<boolean>((resolve) => { finishes.push(resolve); }),
+	}, "rpc");
+	const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+	try {
+		await runner.emit({ type: "session_start", reason: "startup" });
+		const ui = runner.getUIContext();
+		const first = ui.confirm("Outer dialog", "First");
+		const overlapping = ui.confirm("Overlapping dialog", "Second");
+		await flush();
+		assert.equal(requests.length, 1);
+		assert.match(requests[0]!.text, /Outer dialog/);
+		finishes[0](true);
+		await first;
+		await flush();
+		assert.equal(requests.length, 1);
+		await runner.emit({ type: "session_shutdown", reason: "reload" });
+		finishes[1](false);
+		await overlapping;
+		await flush();
+		assert.equal(requests.length, 1);
+		await runner.emit({ type: "session_start", reason: "reload" });
+		const next = ui.confirm("Next span", "Third");
+		await flush();
+		assert.equal(requests.length, 2);
+		assert.match(requests[1]!.text, /Next span/);
+		finishes[2](true);
+		await next;
+		await flush();
+		assert.deepEqual(errors, []);
+	} finally {
+		for (const finish of finishes) finish(false);
+		await flush();
+		await runner.emit({ type: "session_shutdown", reason: "quit" });
+		loaded.runtime.invalidate();
+	}
 }));
