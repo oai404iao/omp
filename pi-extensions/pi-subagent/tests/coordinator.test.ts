@@ -2752,7 +2752,24 @@ export default function handleMailbox(pi) {
 });
 
 test("interrupting a mailbox followup while it waits for capacity preserves its batch", async () => {
-	const { coordinator, parent, messages } = await fixture({ delayMs: 80 });
+	let releaseHolder!: () => void;
+	const holder = new Promise<void>((resolve) => { releaseHolder = resolve; });
+	let holding = false;
+	const { coordinator, parent, messages } = await fixture({
+		streamSimple(model, context, turn, signal) {
+			const lastUser = context.messages.filter((message) => message.role === "user").at(-1);
+			if (!lastUser || !userMessageText(lastUser).includes("Hold the only slot.")) {
+				return scriptedStream(model, `child answer ${turn}`, signal);
+			}
+			holding = true;
+			const stream = createAssistantMessageEventStream();
+			void holder.then(async () => {
+				for await (const event of scriptedStream(model, `child answer ${turn}`, signal)) stream.push(event);
+				stream.end();
+			});
+			return stream;
+		},
+	});
 	coordinator.configureBackgroundRuns(1);
 	try {
 		const settings = {
@@ -2805,7 +2822,9 @@ test("interrupting a mailbox followup while it waits for capacity preserves its 
 			"Remain pending if interrupted.",
 		);
 		await coordinator.followupTask(parent, first.details.agentId);
+		await waitUntil(() => holding);
 		const blocked = coordinator.followupTask(parent, second.details.agentId);
+		const interrupted = assert.rejects(blocked, /interrupted/);
 		await waitUntil(async () => {
 			const entries = await coordinator.list(parent, "children");
 			return entries.some(
@@ -2816,7 +2835,7 @@ test("interrupting a mailbox followup while it waits for capacity preserves its 
 			);
 		});
 		await coordinator.interrupt(parent, second.details.agentId);
-		await assert.rejects(() => blocked, /interrupted/);
+		await interrupted;
 		await waitUntil(async () => {
 			const entries = await coordinator.list(parent, "children");
 			const child = entries.find(
@@ -2829,6 +2848,7 @@ test("interrupting a mailbox followup while it waits for capacity preserves its 
 				&& child.pendingMessages === 1;
 		});
 	} finally {
+		releaseHolder();
 		await coordinator.shutdown();
 	}
 });
