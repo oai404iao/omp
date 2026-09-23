@@ -13,13 +13,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Host, resultBody, texts, tool } from "./host-client.mjs";
 import { createLabBridge } from "./bridge.mjs";
+import { piVersion } from "../pi-baselines.mjs";
 
 globalThis.fetch = async () => { throw new Error("Network forbidden in S0 Pi fixture"); };
 const textResult = (text) => ({ content: [{ type: "text", text }], details: {} });
 const textOf = (result) => result.content.filter((item) => item.type === "text").map((item) => item.text).join("\n");
 
 async function fixture(t, { factory = () => {}, settings = {}, baseToolsOverride } = {}) {
-  assert.equal(VERSION, "0.86.1", "Re-audit API assumptions before changing Pi baseline");
+  assert.equal(VERSION, piVersion(), "Re-audit API assumptions before changing Pi baseline");
   assert(process.env.CODE_MODE_S0_DIR, "Use run.mjs");
   const cwd = join(process.env.CODE_MODE_S0_DIR, `pi-${randomUUID()}`);
   const agentDir = join(cwd, "agent");

@@ -11,7 +11,7 @@ the defaults; Codex integration is optional.
 
 ## Requirements and authorization
 
-- Pi 0.86.1 or compatible; Node >=22.19.
+- Pi >=0.87.0 (development target 0.87.1); Node >=22.19.
 - Linux x64 **glibc >=2.39 and OpenSSL 3** for the current local patched artifact,
   `/usr/bin/systemd-run`, `/usr/bin/systemctl`, `/usr/bin/env`,
   a user systemd manager and effective cgroup v2 memory/pids/CPU controllers.

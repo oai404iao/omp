@@ -5,7 +5,7 @@ The design independently adapts the
 [DeepSeek Harness subagent seam](https://github.com/deepseek-ai/deepseek-harness/tree/4d03472cd098dc48a630e526ca620f4f37f18a0e/docs/subsystems)
 to Pi's extension and SDK APIs.
 
-Peer floor: Pi 0.86.1; tested against 0.86.1.
+Peer floor: Pi 0.87.0; development target: 0.87.1.
 
 > npm identity: `@oai404iao/pi-subagent`. Once the selected version is
 > available on npm, install it from npm; use a local checkout before its
@@ -67,7 +67,10 @@ For a temporary test:
 pi -e /absolute/path/to/pi-extensions/pi-subagent
 ```
 
-Development and the supported compatibility floor are pinned to Pi `0.86.1`.
+The supported compatibility floor is Pi `0.87.0`; development targets `0.87.1`.
+Inherited context uses the parent's canonical projection, including omissions and
+content replacements, before selecting completed turns. Parent system authority
+is not inherited. Completion comes from finalized events, not context-array offsets.
 
 ## Model-facing tools
 

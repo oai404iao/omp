@@ -115,3 +115,10 @@ source revision is approved only for a one-time manual npm bootstrap from a
 reviewed public `main` commit. It is intentionally excluded from guarded
 GitHub Actions release artifacts until the npm trusted publisher is configured
 and a separate reviewed activation changes its release track to `publishable`.
+# GPT-6 Sol/Luna metadata
+
+The exact Codex Sol/Luna profiles adapt capabilities independently checked at
+Apache-2.0 Codex revision `40eac3ce8a0c10cbcb9db910d529355eb2f8fc09`, with
+descriptor mappings from MIT-licensed Pi 0.87.1. The provenance record
+`provenance/openai-codex-40eac3ce-sol-luna.json` records hashes and limitations.
+This does not replace older immutable protocol or namespace evidence.

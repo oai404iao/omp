@@ -1,4 +1,4 @@
-import { type Api, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import { type Api, type Context, type Model, type SimpleStreamOptions, type ThinkingLevel } from "@earendil-works/pi-ai/compat";
 import { type CodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { createCodexReservedNamespaceTool } from "@oai404iao/pi-codex-runtime/internal/codex-reserved-tools";
 import { resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
@@ -139,9 +139,12 @@ export function buildRequestBody<TApi extends Api>(
 	const clampedReasoning = options?.reasoning
 		? clampCodexThinkingLevel(model as Model<Api>, options.reasoning)
 		: undefined;
-	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
+	const reasoningEffort = clampedReasoning === undefined || clampedReasoning === "off"
+		? model.thinkingLevelMap?.off ?? undefined
+		: clampedReasoning;
 	if (reasoningEffort !== undefined) {
-		const effort = model.thinkingLevelMap?.[reasoningEffort] ?? reasoningEffort;
+		const effort = clampedReasoning === undefined || clampedReasoning === "off"
+			? reasoningEffort : model.thinkingLevelMap?.[reasoningEffort as ThinkingLevel] ?? reasoningEffort;
 		if (effort === null) return body;
 		const reasoning = body.reasoning ?? {};
 		reasoning.effort = clampReasoningEffort(model.id, effort);

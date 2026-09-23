@@ -151,6 +151,35 @@
       }
     },
     {
+      "id": "openai-codex/gpt-6-sol",
+      "enabled": true,
+      "responses": {
+        "providerShim": true,
+        "endpoint": "codex",
+        "mode": "lite",
+        "systemPromptPlacement": "developer",
+        "transport": "auto",
+        "websocketPrewarm": true,
+        "reasoningSummary": "none"
+      },
+      "tools": {
+        "parallelCalls": false,
+        "applyPatch": "custom",
+        "webSearch": {
+          "implementation": "standalone",
+          "contentTypes": ["text", "image"]
+        },
+        "imageGeneration": "standalone",
+        "viewImage": false
+      },
+      "compaction": "responses",
+      "fast": false
+    },
+    {
+      "id": "openai-codex/gpt-6-luna",
+      "extends": "openai-codex/gpt-6-sol"
+    },
+    {
       "id": "openai-codex/gpt-6-astra",
       "extends": "openai/gpt-5.6-sol",
       "responses": {

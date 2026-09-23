@@ -1,5 +1,11 @@
 # Source and license notices
 
+Sol/Luna profile metadata was independently checked against Apache-2.0 Codex
+revision `40eac3ce8a0c10cbcb9db910d529355eb2f8fc09` and the MIT Pi 0.87.1
+catalog. See `provenance/openai-codex-40eac3ce-sol-luna.json` for exact source
+hashes and limits. The local catalog adapts those capabilities; it does not
+copy model instructions, enable unverified billing multipliers or imply access.
+
 This unpublished package is split from `@oai404iao/pi-codex-minimal-tools`.
 Project material remains Copyright (c) 2026 oai404iao. The composite LICENSE
 and verified Apache license/NOTICE snapshots are retained.

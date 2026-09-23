@@ -1,7 +1,7 @@
 /** npm may omit hashes re-imported from a dependency's shrinkwrap. Never lose a reviewed hash. */
-export function preserveRegistryIntegrity(previous, next) {
+export function preserveRegistryIntegrity(previous, next, reviewedArtifacts = []) {
   const known = new Map();
-  for (const entry of Object.values(previous.packages)) {
+  for (const entry of [...Object.values(previous.packages), ...reviewedArtifacts]) {
     if (!entry.resolved || !entry.integrity || entry.link) continue;
     const key = `${entry.resolved}\0${entry.version}`;
     if (known.has(key) && known.get(key) !== entry.integrity) throw new Error("Conflicting locked artifact integrity");

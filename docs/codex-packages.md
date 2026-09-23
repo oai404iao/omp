@@ -35,8 +35,9 @@ supported, forwarding to runtime's identically named subpath.
 The default bundle keeps its existing tool names, activation, mutation-tool
 suppression, commands, schemas, saved message types and wire formats.
 Unknown or disabled model profiles remain on Pi's native implementation.
-`openai-codex/gpt-6-astra` has an exact Responses Lite profile. Pi 0.86.1 is
-the package floor and provides its model descriptor; core composes a stream
+`openai-codex/gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna` have exact Responses
+Lite profiles. Pi 0.87.0 is the package floor; 0.87.1 supplies the Sol/Luna
+descriptors. Core composes a stream
 shim without replacing provider authentication, streams, or models.
 
 All combinations read the same existing configuration:
@@ -200,8 +201,8 @@ and `latest` pointing to their sole initial alpha; that bounded exception is not
 stable-release acceptance. Trusted-publisher configuration is not proof of a
 successful OIDC publish. See [activation evidence](audits/codex-bootstrap-activation.md)
 and [RELEASING.md](../RELEASING.md).
-The public package floor and current development target are both Pi 0.86.1.
-The private tree-continue hook is audited for the same 0.86.1 baseline but
+The public package floor is Pi 0.87.0 and the development target is 0.87.1.
+The private tree-continue hook accepts exactly those two versions but
 remains private/blocked. See
 [Pi compatibility](pi-compatibility.md) for verification commands and limits.
 

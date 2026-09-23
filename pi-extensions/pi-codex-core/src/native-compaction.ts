@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { Api, AssistantMessage, Context, Model, ThinkingLevel, Tool } from "@earendil-works/pi-ai";
 import { getCurrentSystemMessage, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import type {
@@ -11,6 +13,8 @@ import type {
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 import { sanitizeNativeCompactionOutput } from "./adapter/compaction/checkpoint.js";
 import { requestOpenAINativeCompaction } from "./adapter/compaction/request.js";
+import { normalizeNativeCompactionToolPairs } from "./adapter/compaction/tool-pairs.js";
+export { normalizeNativeCompactionToolPairs } from "./adapter/compaction/tool-pairs.js";
 import { trackCompactionPrompt } from "./extension/compaction-prompt.js";
 import type { ModelLike } from "@oai404iao/pi-codex-runtime/internal/capabilities";
 import { hasCodexRequestAuth } from "@oai404iao/pi-codex-runtime/internal/codex-http";
@@ -22,14 +26,15 @@ import {
 } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 export const NATIVE_COMPACTION_DETAILS_KIND = "openai-native-compaction";
-export const NATIVE_COMPACTION_DETAILS_VERSION = 3;
+export const NATIVE_COMPACTION_DETAILS_VERSION = 4;
 
 export type NativeCompactionMode = Exclude<CodexMinimalToolsSettings["compactionMode"], "pi">;
 type StoredNativeCompactionMode = NativeCompactionMode | "responses-context-management";
 
 export interface NativeCompactionDetails {
 	kind: typeof NATIVE_COMPACTION_DETAILS_KIND;
-	version: 1 | 2 | typeof NATIVE_COMPACTION_DETAILS_VERSION;
+	version: 1 | 2 | 3 | typeof NATIVE_COMPACTION_DETAILS_VERSION;
+	checkpointId?: string;
 	mode: StoredNativeCompactionMode;
 	provider: string;
 	model: string;
@@ -59,7 +64,8 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 export function isNativeCompactionDetails(value: unknown): value is NativeCompactionDetails {
 	const details = asRecord(value);
 	return details?.kind === NATIVE_COMPACTION_DETAILS_KIND
-		&& (details.version === 1 || details.version === 2 || details.version === NATIVE_COMPACTION_DETAILS_VERSION)
+		&& (details.version === 1 || details.version === 2 || details.version === 3 || details.version === NATIVE_COMPACTION_DETAILS_VERSION)
+		&& (details.version !== 4 || typeof details.checkpointId === "string")
 		&& (
 			details.mode === "responses"
 			|| details.mode === "responses-compact"
@@ -186,10 +192,6 @@ function legacyTailAfterContextManagementMarker(
 	return suffix.length > 0 ? [{ ...first, content: suffix }, ...messages.slice(1)] : messages.slice(1);
 }
 
-function messageTimestamp(message: PiMessage): number {
-	return typeof message.timestamp === "number" ? message.timestamp : 0;
-}
-
 function messagesAfterEntry(entries: readonly SessionEntry[], entryIndex: number): PiMessages {
 	const suffix = entries.slice(entryIndex + 1);
 	if (suffix.length === 0) return [];
@@ -197,55 +199,6 @@ function messagesAfterEntry(entries: readonly SessionEntry[], entryIndex: number
 		suffix as SessionEntry[],
 		suffix[suffix.length - 1]?.id,
 	).messages;
-}
-
-/**
- * Responses requires every function/custom-tool output to have a matching call.
- * Compaction can expose malformed local history if a boundary lands inside a
- * tool turn, so rebuild tool turns atomically: drop orphan/duplicate results and
- * synthesize an aborted output for a surviving call with no result.
- */
-export function normalizeNativeCompactionToolPairs(messages: PiMessages): PiMessages {
-	const resultByCallId = new Map<string, Extract<PiMessage, { role: "toolResult" }>>();
-	for (const message of messages) {
-		if (message.role === "toolResult" && !resultByCallId.has(message.toolCallId)) {
-			resultByCallId.set(message.toolCallId, message);
-		}
-	}
-
-	let changed = false;
-	const normalized: PiMessage[] = [];
-	const retainedResults = new Set<string>();
-	for (const message of messages) {
-		if (message.role === "toolResult") {
-			changed = true;
-			continue;
-		}
-		normalized.push(message);
-		if (message.role !== "assistant") continue;
-
-		for (const block of message.content) {
-			if (block.type !== "toolCall" || retainedResults.has(block.id)) continue;
-			retainedResults.add(block.id);
-			const existing = resultByCallId.get(block.id);
-			if (existing) {
-				normalized.push(existing);
-				continue;
-			}
-			changed = true;
-			normalized.push({
-				role: "toolResult",
-				toolCallId: block.id,
-				toolName: block.name,
-				content: [{ type: "text", text: "aborted" }],
-				isError: true,
-				timestamp: messageTimestamp(message),
-			} as PiMessage);
-		}
-	}
-
-	if (retainedResults.size !== resultByCallId.size) changed = true;
-	return changed ? normalized : messages;
 }
 
 /**
@@ -257,10 +210,15 @@ export function applyNativeCompactionContext(
 	messages: PiMessages,
 	branchEntries: readonly SessionEntry[],
 	model: Model<Api> | undefined,
+	conversationOnly = false,
 ): PiMessages {
-	if (!model || !resolveModelProfile(model as ModelLike)?.effective.enabled) return messages;
-
 	const installed = latestNativeCompactionEntry(branchEntries);
+	if (installed?.entry.details?.version === 4
+		&& messages.some((message) => message.role === "compactionSummary" && message.summary === installed.entry.summary)
+		&& (!model || !resolveModelProfile(model as ModelLike)?.effective.enabled || !matchesModelIdentity(installed.entry.details, model))) {
+		throw new Error("Native checkpoint requires its original model and profile. Restore them or navigate before compaction; its placeholder is not a text summary.");
+	}
+	if (!model || !resolveModelProfile(model as ModelLike)?.effective.enabled) return messages;
 	if (installed) {
 		const details = installed.entry.details;
 		if (!isNativeCompactionDetails(details)) return messages;
@@ -268,7 +226,25 @@ export function applyNativeCompactionContext(
 		const output = normalizedNativeCompactionMode(details) === "responses-compact"
 			? sanitizeNativeCompactionOutput(details.output)
 			: details.output;
-		const system = getCurrentSystemMessage(messages) ?? installed.entry.systemMessage;
+		if (details.version === 4) {
+			if (installed.entry.firstKeptEntryId !== installed.entry.id) {
+				throw new Error("Native compaction requires a retain-none checkpoint");
+			}
+			const markers = messages.filter((message) => message.role === "compactionSummary"
+				&& message.summary === installed.entry.summary
+				&& message.summary.includes(`[native-checkpoint:${details.checkpointId}]`));
+			if (markers.length !== 1) return messages;
+			return messages.map((message) => message === markers[0]
+				? syntheticNativeAssistant(output, model, new Date(installed.entry.timestamp).getTime())
+				: message);
+		}
+		if (conversationOnly) {
+			const canonical = buildSessionContext([...branchEntries]).messages.filter((message) => message.role !== "system");
+			if (!isDeepStrictEqual(messages, canonical)) {
+				throw new Error("Legacy native checkpoint cannot compose with context transforms. Run /compact on its original model to migrate it before continuing.");
+			}
+		}
+		const system = conversationOnly ? undefined : getCurrentSystemMessage(messages);
 		const withoutSummary = withoutCompactionSummary(messages).filter((message) => message.role !== "system");
 		let tail: PiMessages;
 		if (details.sourceEntryId) {
@@ -331,22 +307,37 @@ export function registerNativeCompaction(
 	const forcedPrompt = trackCompactionPrompt(pi);
 	pi.on("context", (event, ctx) => {
 		const settings = loadModelSettings(ctx.model as ModelLike | undefined, ctx.cwd);
-		if (!settings.enabled || settings.compactionMode === "pi") return undefined;
-		const messages = applyNativeCompactionContext(
-			event.messages as PiMessages,
-			ctx.sessionManager.getBranch(),
-			ctx.model as Model<Api> | undefined,
-		);
-		return messages === event.messages ? undefined : { messages: messages as typeof event.messages };
+		const branch = ctx.sessionManager.getBranch();
+		const retainNone = latestNativeCompactionEntry(branch)?.entry.details?.version === 4;
+		if (!retainNone && (!settings.enabled || settings.compactionMode === "pi")) return undefined;
+		try {
+			if (retainNone && !settings.enabled) throw new Error("Native checkpoint replay is disabled. Re-enable its original model/profile or navigate before compaction.");
+			const messages = applyNativeCompactionContext(
+				event.messages as PiMessages, branch, ctx.model as Model<Api> | undefined, true,
+			);
+			return messages === event.messages ? undefined : { messages: messages as typeof event.messages };
+		} catch (error) {
+			// Context-handler exceptions alone are swallowed by Pi; explicitly abort
+			// rather than replay filtered data or silently lose opaque history.
+			ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+			ctx.abort();
+			return { messages: [] };
+		}
 	});
 
 	pi.on("session_before_compact", async (event, ctx) => {
 		const model = ctx.model as Model<Api> | undefined;
 		const settings = loadModelSettings(model as ModelLike | undefined, ctx.cwd);
 		const mode = settings.compactionMode;
-		if (!settings.enabled || mode === "pi" || !model || !settings.modelProfile?.effective.enabled) return undefined;
-
+		const nativeCheckpoint = latestNativeCompactionEntry(event.branchEntries);
+		if (!settings.enabled || mode === "pi" || !model || !settings.modelProfile?.effective.enabled) {
+			if (!nativeCheckpoint) return undefined;
+			ctx.ui.notify("Cannot replace an opaque native checkpoint with a placeholder summary. Restore its original model/profile and native compaction, or navigate before compaction.", "warning");
+			return { cancel: true };
+		}
+		const leafId = ctx.sessionManager.getLeafId();
 		try {
+			if (event.branchEntries.at(-1)?.id !== leafId) return { cancel: true };
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 			if (
 				!auth.ok
@@ -370,14 +361,22 @@ export function registerNativeCompaction(
 				turnId: providerController?.getCurrentTurnId(sessionId),
 				settings,
 			});
+			if (ctx.sessionManager.getLeafId() !== leafId) {
+				ctx.ui.notify("Native compaction cancelled: session changed while compacting. Retry /compact.", "warning");
+				return { cancel: true };
+			}
+			const checkpointId = randomUUID();
 			return {
 				compaction: {
-					summary: compactionSummary(mode),
-					firstKeptEntryId: event.preparation.firstKeptEntryId,
+					summary: `${compactionSummary(mode)}\n[native-checkpoint:${checkpointId}]`,
+					// Pi 0.87 appendCompaction supports null (retain-none); the
+					// CompactionResult declaration still incorrectly requires string.
+					firstKeptEntryId: null as unknown as string,
 					tokensBefore: event.preparation.tokensBefore,
 					details: {
 						kind: NATIVE_COMPACTION_DETAILS_KIND,
 						version: NATIVE_COMPACTION_DETAILS_VERSION,
+						checkpointId,
 						mode,
 						provider: model.provider,
 						model: model.id,
@@ -388,11 +387,12 @@ export function registerNativeCompaction(
 				},
 			};
 		} catch (error) {
+			if (event.signal.aborted || ctx.sessionManager.getLeafId() !== leafId) return { cancel: true };
 			if (!event.signal.aborted) {
 				const message = error instanceof Error ? error.message : String(error);
-				ctx.ui.notify(`OpenAI native compaction failed; falling back to Pi compaction: ${message}`, "warning");
+				ctx.ui.notify(`OpenAI native compaction failed; ${nativeCheckpoint ? "preserving the existing checkpoint" : "falling back to Pi compaction"}: ${message}`, "warning");
 			}
-			return undefined;
+			return nativeCheckpoint ? { cancel: true } : undefined;
 		}
 	});
 }

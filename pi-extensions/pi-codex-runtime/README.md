@@ -4,7 +4,7 @@ Alpha bootstrap candidate; initial npm publication is still pending.
 It has no Pi extension entry
 and does not automatically register tools or providers.
 
-Peer floor: Pi 0.86.1; tested against 0.86.1.
+Peer floor: Pi 0.87.0; development target: 0.87.1.
 
 Owns shared Codex authentication/headers, wire identity, settings/catalog,
 Responses replay contracts and the session-scoped composition broker.

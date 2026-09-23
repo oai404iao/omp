@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { buildSessionProjection, SessionManager } from "@earendil-works/pi-coding-agent";
 import type {
 	ContextInheritance,
 	SubagentMode,
@@ -262,7 +262,15 @@ function forkedSession(
 ): PreparedChildSession {
 	const parentFile = parent.sessionManager.getSessionFile();
 	const inherited = completedContextEntries(
-		parent.sessionManager.buildContextEntries(),
+		buildSessionProjection(parent.sessionManager.getBranch()).entries.flatMap(
+			({ sourceEntry, messages }) => messages.map((message): SessionEntry => ({
+				type: "message",
+				id: sourceEntry.id,
+				parentId: sourceEntry.parentId,
+				timestamp: sourceEntry.timestamp,
+				message,
+			})),
+		),
 		context,
 	);
 	if (inherited.length === 0) return freshSession(parent);

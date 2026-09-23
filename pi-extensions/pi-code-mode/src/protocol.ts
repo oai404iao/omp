@@ -1,4 +1,5 @@
 import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { buildSessionProjection } from "@earendil-works/pi-coding-agent";
 import type { ConstrainedSamplingConfig } from "@earendil-works/pi-ai";
 import { LIMITS } from "./limits.ts";
 import type { ExecOptions } from "./session.ts";
@@ -76,9 +77,9 @@ export function protocolMode(value: unknown): ProtocolMode {
 	throw new Error("Code Mode protocol must be json, auto or grammar");
 }
 function compatibleHistory(ctx: ExtensionContext): boolean {
-	for (const entry of ctx.sessionManager.getBranch()) {
-		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-		for (const block of entry.message.content) if (block.type === "toolCall" && block.name === "exec") {
+	for (const message of buildSessionProjection(ctx.sessionManager.getBranch()).messages) {
+		if (message.role !== "assistant") continue;
+		for (const block of message.content) if (block.type === "toolCall" && block.name === "exec") {
 			try { encodeExec(block.arguments); } catch { return false; }
 		}
 	}

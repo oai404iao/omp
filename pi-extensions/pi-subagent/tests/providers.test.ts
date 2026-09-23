@@ -89,6 +89,43 @@ test("spawn provider creates an empty child with parent lineage", async () => {
 	await prepared.rollback();
 });
 
+for (const mode of ["all_completed", "last_n_completed"] as const) {
+	for (const edit of ["none", "omit", "replace"] as const) {
+		test(`fork projects edits before selecting completed turns (${mode}, ${edit})`, async () => {
+			const root = tempRoot();
+			const parent = SessionManager.create(root, join(root, "sessions"));
+			parent.appendMessage(user("earlier question"));
+			parent.appendMessage(assistant("earlier answer", "stop"));
+			parent.appendMessage(user("recent question"));
+			const call = assistant("", "toolUse");
+			call.content = [{ type: "toolCall", id: "read-1", name: "read", arguments: {} }];
+			parent.appendMessage(call);
+			const resultId = parent.appendMessage({
+				role: "toolResult", toolCallId: "read-1", toolName: "read",
+				content: [{ type: "text", text: "ORIGINAL_PRIVATE_RESULT" }], isError: false, timestamp: 1,
+			});
+			parent.appendMessage(assistant("completed answer", "stop"));
+			const completedLeaf = parent.getLeafId()!;
+			if (edit !== "none") parent.appendContextEdit(resultId, edit === "omit" ? null : { content: "REDACTED" });
+			parent.appendMessage(user("in-flight question"));
+			const prepared = await new ForkProvider().prepare({ sessionManager: parent }, "one-shot",
+				mode === "all_completed" ? { mode } : { mode, completedTurns: 1 });
+			const messages = prepared.sessionManager.buildSessionContext().messages;
+			const serialized = JSON.stringify(messages);
+			assert.equal(serialized.includes("ORIGINAL_PRIVATE_RESULT"), edit === "none");
+			assert.equal(serialized.includes("REDACTED"), edit === "replace");
+			assert.equal(serialized.includes("earlier question"), mode === "all_completed");
+			assert(!serialized.includes("in-flight"));
+			assert.match(JSON.stringify(parent.getEntry(resultId)), /ORIGINAL_PRIVATE_RESULT/);
+			await prepared.rollback();
+			parent.branch(completedLeaf);
+			const unedited = await new ForkProvider().prepare({ sessionManager: parent }, "one-shot");
+			assert.match(JSON.stringify(unedited.sessionManager.buildSessionContext().messages), /ORIGINAL_PRIVATE_RESULT/);
+			await unedited.rollback();
+		});
+	}
+}
+
 test("fork provider supports continuable inherited-context children", async () => {
 	const root = tempRoot();
 	const parent = SessionManager.create(
