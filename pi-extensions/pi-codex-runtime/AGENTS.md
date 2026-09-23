@@ -32,7 +32,7 @@ Shared library, not a Pi extension. No default factory or `pi.extensions`.
 Read root CONTRIBUTING.md, RELEASING.md and docs/codex-packages.md. Source evidence
 is in pi-codex-minimal-tools/reference/source-map.md.
 Use the root package-lock.json; never add package locks. All new modules must be
-at most 400 lines. Preserve the Pi 0.85.1 floor and exact 0.85.1 target; run
+at most 400 lines. Preserve the Pi 0.86.1 floor and exact 0.86.1 target; run
 `npm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
 Tarball-facing changes require a changeset. AGENTS/tests/reference are not shipped.
 Run `npm run changeset:sync` for recursive consumers; never loosen exact workspace pins.

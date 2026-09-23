@@ -11,10 +11,11 @@ export function shortHash(str: string): string {
 	return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
 }
 
-export function parseStreamingJson(partialJson: string): Record<string, unknown> {
+export function parseStreamingJson(partialJson: string): JsonObject {
 	if (!partialJson || partialJson.trim() === "") return {};
 	try {
-		return JSON.parse(partialJson) as Record<string, unknown>;
+		const value: unknown = JSON.parse(partialJson);
+		return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
 	} catch {
 		return {};
 	}
@@ -30,3 +31,4 @@ export function localToolName(namespace: unknown, name: string): string {
 	if (namespace === "image_gen" && name === "imagegen") return "image_generation";
 	return name;
 }
+import type { JsonObject } from "@earendil-works/pi-ai";

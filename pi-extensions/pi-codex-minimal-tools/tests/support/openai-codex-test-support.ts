@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { registerOpenAIResponsesProviders } from "../../src/provider-shim.js";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
+import { normalizeContext, type Context } from "@earendil-works/pi-ai";
 
 export function codexJwt(): string {
 	const payload = Buffer.from(JSON.stringify({
@@ -18,8 +20,12 @@ export function createProviderHarness(options?: {
 	const messages: any[] = [];
 	const renderers: Record<string, Function> = {};
 	const pi = {
+		events: createEventBus(),
 		registerProvider(providerOrName: string | { id: string }, value?: any) {
-			if (typeof providerOrName === "string") providers[providerOrName] = value;
+			if (typeof providerOrName === "string") providers[providerOrName] = {
+				...value,
+				streamSimple: (model: any, context: Context, options: any) => value.streamSimple(model, normalizeContext(context), options),
+			};
 			else providers[providerOrName.id] = providerOrName;
 		},
 		on(name: string, handler: (event: any, ctx: any) => Promise<void> | void) {

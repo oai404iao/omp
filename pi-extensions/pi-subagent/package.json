@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-subagent",
-  "version": "0.4.1",
+  "version": "0.5.1",
   "description": "Durable, continuable subagents for Pi with spawn/fork providers and lifecycle controls.",
   "repository": {
     "type": "git",
@@ -31,20 +31,20 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": ">=0.85.1",
-    "@earendil-works/pi-ai": ">=0.85.1",
-    "@earendil-works/pi-coding-agent": ">=0.85.1",
-    "@earendil-works/pi-tui": ">=0.85.1",
+    "@earendil-works/pi-agent-core": ">=0.86.1",
+    "@earendil-works/pi-ai": ">=0.86.1",
+    "@earendil-works/pi-coding-agent": ">=0.86.1",
+    "@earendil-works/pi-tui": ">=0.86.1",
     "typebox": "*"
   },
   "optionalDependencies": {
-    "@oai404iao/pi-codex-minimal-tools": "2.1.0"
+    "@oai404iao/pi-codex-minimal-tools": "3.0.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-agent-core": "0.86.1",
+    "@earendil-works/pi-ai": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@earendil-works/pi-tui": "0.86.1",
     "@types/node": "^26.2.0",
     "tsx": "^4.20.6",
     "typebox": "^1.1.24",

@@ -1,6 +1,7 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { type Context, type Usage } from "@earendil-works/pi-ai";
 import { type ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
+import type { GrammarInputBuffer } from "./sampling.js";
 
 type MessageRole = Context["messages"][number]["role"];
 
@@ -52,6 +53,7 @@ export interface ReplayableResponseMessageItem {
 export type InternalAssistantContent = Extract<Message, { role: "assistant" }>["content"][number] | ImageGenerationCallBlock;
 
 export interface OpenAIResponsesStreamOptions {
+	grammarToolInputProperties?: ReadonlyMap<string, string>;
 	serviceTier?: ResponseCreateParamsStreaming["service_tier"];
 	resolveServiceTier?: (
 		responseServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
@@ -66,10 +68,12 @@ export type TextSignaturePhase = "commentary" | "final_answer";
 
 export interface ConvertResponsesMessagesOptions {
 	includeSystemPrompt?: boolean;
+	grammarToolInputProperties?: ReadonlyMap<string, string>;
 }
 
 export interface ConvertResponsesToolsOptions {
 	strict?: boolean | null;
+	supportsOpenAIGrammarTools?: boolean;
 }
 
 export type ThinkingBlock = Extract<AssistantMessage["content"][number], { type: "thinking" }>;
@@ -108,6 +112,7 @@ export type CustomToolCallState = {
 	sourceItemId?: string;
 	callId: string;
 	input: string;
+	inputJson?: GrammarInputBuffer;
 };
 
 export type OutputState = ReasoningState | MessageState | FunctionCallState | CustomToolCallState;

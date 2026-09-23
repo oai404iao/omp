@@ -1,24 +1,22 @@
-import { AgentSession, VERSION, type ExtensionAPI, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import { AgentSession, VERSION, type BuildSystemPromptOptions, type ExtensionAPI, type SessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { SystemMessage } from "@earendil-works/pi-ai";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 
 const PATCHED = Symbol.for("pi-tree-continue.agent-session-patched");
 const ORIGINAL_BIND = Symbol.for("pi-tree-continue.original-bind-extension-core");
 const STATE = Symbol.for("pi-tree-continue.state");
-const PATCH_VERSION = 2;
-export const TESTED_PI_VERSION = "0.85.1";
+const PATCH_VERSION = 3;
+export const TESTED_PI_VERSION = "0.86.1";
 
 interface InternalAgentSession {
-	agent: {
-		continue(): Promise<void>;
-		hasQueuedMessages(): boolean;
-	};
+	agent: { state: { messages: SessionContext["messages"] } };
 	sessionManager: object;
 	modelRuntime?: { hasConfiguredAuth(providerId: string): boolean };
-	_isAgentRunActive?: boolean;
 	_flushPendingBashMessages?: () => void;
-	_flushPendingCustomMessages?: () => void;
-	_handlePostAgentRun?: () => Promise<boolean>;
+	_preparePromptAndToolLoadout?: (options: BuildSystemPromptOptions, messages?: SessionContext["messages"]) => SystemMessage | undefined;
+	_runAgentPrompt?: (messages: SessionContext["messages"]) => Promise<void>;
 	_emitAgentSettled?: () => Promise<void>;
-	_systemPromptOverride?: string | undefined;
+	_runSystemPromptOptions?: BuildSystemPromptOptions;
 }
 
 interface ContinueOptions {
@@ -51,7 +49,7 @@ export default function treeContinueExtension(pi: ExtensionAPI) {
 	const patchInstalled = installAgentSessionPatch();
 
 	pi.registerCommand("continue", {
-		description: "Continue from the previous tool result without adding a message",
+		description: "Continue from the previous tool result without adding a user message",
 		handler: async (args, ctx) => {
 			const options = parseArgs(args);
 
@@ -112,7 +110,7 @@ export default function treeContinueExtension(pi: ExtensionAPI) {
 			}
 
 			try {
-				await continueWithoutMessage(session);
+				await continueWithoutMessage(session, ctx.getSystemPromptOptions());
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				ctx.ui.notify(`/continue failed: ${message}`, "error");
@@ -172,11 +170,6 @@ function parseArgs(args: string): ContinueOptions {
 function findContinuationTarget(branch: SessionEntry[], options: ContinueOptions): ContinuationTargetResult {
 	if (branch.length === 0) return { reason: "No session entries found to continue from." };
 
-	if (options.force) {
-		const target = findLatestToolResult(branch);
-		return target ? { target } : { reason: "No previous tool result found to continue from." };
-	}
-
 	const leaf = branch[branch.length - 1];
 	if (isToolResultEntry(leaf)) return { target: leaf };
 
@@ -185,18 +178,15 @@ function findContinuationTarget(branch: SessionEntry[], options: ContinueOptions
 
 	const trailingEntries = branch.slice(targetIndex + 1);
 	if (trailingEntries.length > 0 && trailingEntries.every(isIgnorableAfterToolResult)) {
-		return { target: branch[targetIndex] };
+		// Keep prompt/tool updates and metadata; only rewind the terminal empty errors.
+		return { target: trailingEntries.reverse().find((entry) => !isEmptyAssistantError(entry)) ?? branch[targetIndex] };
 	}
+	if (options.force) return { target: branch[targetIndex] };
 
 	return {
 		reason:
 			"Current branch does not end at a tool result or empty assistant error. Use /continue --force to abandon later entries.",
 	};
-}
-
-function findLatestToolResult(branch: SessionEntry[]): SessionEntry | undefined {
-	const index = findLatestToolResultIndex(branch);
-	return index === -1 ? undefined : branch[index];
 }
 
 function findLatestToolResultIndex(branch: SessionEntry[]): number {
@@ -212,6 +202,7 @@ function isToolResultEntry(entry: SessionEntry | undefined): entry is SessionEnt
 
 function isIgnorableAfterToolResult(entry: SessionEntry): boolean {
 	if (isEmptyAssistantError(entry)) return true;
+	if (entry.type === "message" && entry.message.role === "system") return true;
 	return (
 		entry.type === "model_change" ||
 		entry.type === "thinking_level_change" ||
@@ -241,31 +232,39 @@ function hasMeaningfulAssistantContent(content: unknown): boolean {
 	});
 }
 
-async function continueWithoutMessage(session: InternalAgentSession): Promise<void> {
-	if (typeof session.agent?.continue !== "function") {
-		throw new Error("Pi Agent.continue() is not available");
+async function continueWithoutMessage(session: InternalAgentSession, options: BuildSystemPromptOptions): Promise<void> {
+	if (typeof session._preparePromptAndToolLoadout !== "function" || typeof session._runAgentPrompt !== "function" || typeof session._emitAgentSettled !== "function") {
+		throw new Error("Pi prompt preparation/run hooks are not available");
 	}
-	if (typeof session._handlePostAgentRun !== "function") {
-		throw new Error("Pi post-run continuation hook is not available");
-	}
-	if (typeof session._emitAgentSettled !== "function") {
-		throw new Error("Pi agent-settled hook is not available");
-	}
-
-	// Mirror AgentSession._runAgentPrompt's continuation lifecycle: mark the run
-	// active so idle/streaming consumers see the same state as a regular turn,
-	// flush queued bash/custom messages, and emit agent_settled when done.
-	session._isAgentRunActive = true;
+	session._flushPendingBashMessages?.();
+	const prepare = session._preparePromptAndToolLoadout;
+	const settled = session._emitAgentSettled;
+	// There is no new user turn to recompute before_agent_start sections for.
+	// Keep the transcript's prompt, including deletions, throughout tool/retry
+	// continuations. Pi still updates executable tools and declares their deltas.
+	const prepareContinuation = (nextOptions: BuildSystemPromptOptions, messages = session.agent.state.messages) => {
+		const current = getCurrentSystemMessage(messages);
+		const update = prepare.call(session, nextOptions, messages);
+		return current ? undefined : update;
+	};
+	const emitSettled = async () => {
+		// Settled handlers may start a new user turn once Pi marks itself idle.
+		restore();
+		await settled.call(session);
+	};
+	const restore = () => {
+		if (session._preparePromptAndToolLoadout === prepareContinuation) session._preparePromptAndToolLoadout = prepare;
+		if (session._emitAgentSettled === emitSettled) session._emitAgentSettled = settled;
+	};
+	session._preparePromptAndToolLoadout = prepareContinuation;
+	session._emitAgentSettled = emitSettled;
 	try {
-		session._flushPendingBashMessages?.();
-		await session.agent.continue();
-		while (await session._handlePostAgentRun()) {
-			await session.agent.continue();
-		}
+		const update = session._preparePromptAndToolLoadout(options);
+		session._runSystemPromptOptions = options;
+		// An empty/system-only prompt adds no user message. Pi owns abort reset,
+		// retries, compaction, prompt cleanup and agent_settled.
+		await session._runAgentPrompt(update ? [update] : []);
 	} finally {
-		session._systemPromptOverride = undefined;
-		session._flushPendingBashMessages?.();
-		session._flushPendingCustomMessages?.();
-		await session._emitAgentSettled();
+		restore();
 	}
 }

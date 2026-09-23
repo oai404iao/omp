@@ -1,7 +1,7 @@
 {
   "name": "@oai404iao/pi-telegram-notify",
-  "version": "0.2.0",
-  "description": "Send Telegram notifications when Pi completes, stops on an error, or waits for ask_user_question input.",
+  "version": "0.4.0",
+  "description": "Send Telegram notifications when Pi completes, stops on an error, or opens a blocking extension UI prompt.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/oai404iao/omp.git",
@@ -31,10 +31,10 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.85.1"
+    "@earendil-works/pi-coding-agent": ">=0.86.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
     "@types/node": "^26.2.0",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2"

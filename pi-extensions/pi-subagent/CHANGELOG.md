@@ -1,5 +1,27 @@
 # @oai404iao/pi-subagent
 
+## 0.5.1
+
+### Patch Changes
+
+- 8af3b86: Use Pi 0.86.1's native interfaces: order multi-file mutation locks by canonical
+  target identity, reject conflicting aliases and identity drift without an unqueued
+  fallback, contribute stable Code Mode prompt sections,
+  and enforce child report exclusions at registry creation. Telegram waiting
+  notifications now follow native blocking-UI events for all extension dialogs,
+  using their titles rather than tool-name timers or rpiv questionnaire summaries.
+
+## 0.5.0
+
+### Minor Changes
+
+- bb7e5ea: Require Pi 0.86.1 or newer. Adapt Codex streaming and native compaction to
+  transcript-backed system prompts and tool declarations, keep inherited parent
+  system authority out of child sessions, and recognize in-conversation OpenAI
+  tool additions in External Thinking. Preserve the existing Codex wire formats,
+  model profiles and publication eligibility. Keep Code Mode's already-restored
+  direct tools available after historical tool-loadout restoration.
+
 ## 0.4.1
 
 ### Patch Changes

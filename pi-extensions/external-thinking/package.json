@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-external-thinking",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Replace compatible Pi models' native reasoning with a visible think scratchpad tool.",
   "repository": {
     "type": "git",
@@ -32,15 +32,15 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.85.1",
-    "@earendil-works/pi-coding-agent": ">=0.85.1",
-    "@earendil-works/pi-tui": ">=0.85.1",
+    "@earendil-works/pi-ai": ">=0.86.1",
+    "@earendil-works/pi-coding-agent": ">=0.86.1",
+    "@earendil-works/pi-tui": ">=0.86.1",
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-ai": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@earendil-works/pi-tui": "0.86.1",
     "@types/node": "^26.2.0",
     "tsx": "^4.20.6",
     "typebox": "^1.1.24",

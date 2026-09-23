@@ -299,3 +299,30 @@ test("fork provider does not silently drop completed history from an ephemeral p
 		/cannot copy completed history/,
 	);
 });
+
+for (const compacted of [false, true]) {
+	for (const mode of ["all_completed", "last_n_completed"] as const) {
+		test(`${mode} inherits conversation, not parent system authority (compacted=${compacted})`, async () => {
+			const root = tempRoot();
+			const parent = SessionManager.create(join(root, "project"), join(root, "sessions"));
+			parent.appendMessage({
+				role: "system", content: "PARENT_POLICY",
+				toolsAdded: [{ name: "parent_only", description: "Parent-only tool", parameters: { type: "object" } }],
+				timestamp: 1,
+			});
+			const first = parent.appendMessage(user("completed question"));
+			parent.appendMessage({ role: "system", content: "PARENT_PATCH", timestamp: 2 });
+			parent.appendMessage(assistant("completed answer", "stop"));
+			if (compacted) parent.appendCompaction("durable summary", first, 10000);
+			parent.appendMessage(user("in-flight question"));
+			const prepared = await new ForkProvider().prepare({ sessionManager: parent }, "one-shot",
+				mode === "all_completed" ? { mode } : { mode, completedTurns: 1 });
+			const messages = prepared.sessionManager.buildSessionContext().messages;
+			assert(messages.some((message) => message.role === "assistant"));
+			assert(!messages.some((message) => message.role === "system"));
+			assert.doesNotMatch(JSON.stringify(messages), /PARENT_POLICY|PARENT_PATCH|parent_only|in-flight/);
+			if (compacted && mode === "all_completed") assert.match(JSON.stringify(messages), /durable summary/);
+			await prepared.rollback();
+		});
+	}
+}

@@ -25,7 +25,7 @@
     "pi-extensions/pi-codex-core",
     "pi-extensions/pi-codex-web-search",
     "pi-extensions/pi-codex-imagegen",
-    "pi-extensions/pi-keep-defaults",
+    "pi-extensions/pi-code-mode",
     "pi-extensions/pi-subagent",
     "pi-extensions/pi-telegram-notify",
     "pi-extensions/pi-tree-continue"
@@ -46,6 +46,8 @@
     "ci:pi-floor": "node scripts/test-pi-baselines.mjs floor",
     "ci:pi-target": "node scripts/test-pi-baselines.mjs target",
     "test:codex-packages": "node scripts/verify-codex-installations.mjs",
+    "test:code-mode-s0": "node scripts/code-mode-s0/run.mjs",
+    "test:code-mode-package": "node scripts/verify-code-mode-installation.mjs",
     "license:check": "node scripts/verify-licenses.mjs",
     "pack:check": "node scripts/verify-packages.mjs",
     "release:artifacts": "node scripts/prepare-release-artifacts.mjs",
@@ -54,10 +56,10 @@
     "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/initial-codex-bootstrap.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs scripts/pi-baselines.test.mjs"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-agent-core": "0.86.1",
+    "@earendil-works/pi-ai": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@earendil-works/pi-tui": "0.86.1",
     "@changesets/cli": "3.0.0",
     "@changesets/read": "1.0.0",
     "typescript-ast": "npm:typescript@5.9.3"

@@ -35,12 +35,47 @@ function textFromContent(content: unknown): string {
 		.join("\n");
 }
 
-export function truncateSummary(text: string, maxCharacters = 30): string {
-	const normalized = text.replace(/\s+/g, " ").trim();
-	if (!normalized) return "";
+// UTF-16 budgets conservatively fit Telegram's 4096-character parsed-text limit,
+// including the project path and labels. Truncate before adding Markdown escapes.
+const SUMMARY_LIMIT = 3000;
+const PROJECT_LIMIT = 512;
 
-	const characters = Array.from(normalized);
-	return characters.length > maxCharacters ? `${characters.slice(0, maxCharacters).join("")}…` : normalized;
+export function truncateSummary(text: string, maxCharacters = SUMMARY_LIMIT): string {
+	const normalized = text.replace(/\r\n?/g, "\n").trim();
+	if (!normalized) return "";
+	if (maxCharacters <= 0) return "";
+	if (normalized.length <= maxCharacters) return normalized;
+
+	let prefix = "";
+	for (const character of normalized) {
+		if (prefix.length + character.length > maxCharacters - 1) break;
+		prefix += character;
+	}
+	// Prefer a paragraph, line, or word boundary near the limit without throwing
+	// away most of the preview when the text has few separators (e.g. Chinese).
+	for (const separator of ["\n\n", "\n", " "]) {
+		const boundary = prefix.lastIndexOf(separator);
+		if (boundary >= prefix.length * 0.8) {
+			prefix = prefix.slice(0, boundary);
+			break;
+		}
+	}
+	return `${prefix.trimEnd()}…`;
+}
+
+function escapeMarkdown(text: string): string {
+	return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, "\\$&");
+}
+
+function escapeCode(text: string): string {
+	return text.replace(/[`\\]/g, "\\$&");
+}
+
+export function isSubagentSession(entries: readonly SessionEntry[]): boolean {
+	// pi-subagent persists this marker for both spawn and fork children. Do not
+	// use hasUI or parentSession: normal print/RPC and user forks also use those.
+	// Inspect all entries: navigating before the marker does not change identity.
+	return entries.some((entry) => entry.type === "custom" && entry.customType === "pi-subagent/descriptor");
 }
 
 export function terminalNotificationFromMessage(message: unknown, fallbackSummary = ""): TerminalNotification | undefined {
@@ -84,28 +119,15 @@ export function lastAssistantMessageEntry(entries: readonly SessionEntry[]): Ass
 	return undefined;
 }
 
-export function questionSummaryFromInput(input: unknown): string {
-	const params = asRecord(input);
-	if (!params) return "";
-
-	if (typeof params.question === "string") return params.question;
-	const questions = Array.isArray(params.questions) ? params.questions : [];
-	const firstQuestion = asRecord(questions[0]);
-	if (typeof firstQuestion?.question === "string") return firstQuestion.question;
-	if (typeof firstQuestion?.prompt === "string") return firstQuestion.prompt;
-	return "";
-}
-
-export function questionSummaryFromPromptEvent(payload: unknown): string {
-	const event = asRecord(payload);
-	const questions = Array.isArray(event?.questions) ? event.questions : [];
-	const firstQuestion = asRecord(questions[0]);
-	return typeof firstQuestion?.question === "string" ? firstQuestion.question : "";
-}
-
 export function formatNotification(cwd: string, status: NotificationStatus, summary: string): string {
-	const project = cwd.trim() || "(未知项目目录)";
+	const project = truncateSummary(cwd.replace(/\s+/g, " "), PROJECT_LIMIT) || "(未知项目目录)";
 	const fallbackSummary = status === "completed" ? "Pi 任务已完成" : status === "error" ? "Pi 任务失败" : "等待用户回复";
 	const body = truncateSummary(summary) || fallbackSummary;
-	return [`项目: ${project}`, `状态: ${STATUS_LABEL[status]}`, `概要: ${body}`].join("\n");
+	return [
+		`*项目:* \`${escapeCode(project)}\``,
+		`*状态:* ${STATUS_LABEL[status]}`,
+		"",
+		"*概要:*",
+		escapeMarkdown(body),
+	].join("\n");
 }

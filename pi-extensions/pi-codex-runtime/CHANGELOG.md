@@ -1,5 +1,46 @@
 # @oai404iao/pi-codex-runtime
 
+## 0.3.1
+
+### Patch Changes
+
+- 8af3b86: Complete fail-closed required-policy admission, policy readiness and legacy
+  revocation gates. Close all owner controls before shutdown callbacks, retain
+  cleanup retries after foreign replacements, and attempt independent cleanup and
+  native mutation-tool restoration even when another receipt fails.
+- 8af3b86: Gate approval-dependent Code Mode contributions from legacy consumers, retain
+  retryable owner cleanup and live-control budgets, strengthen exec/wait ownership,
+  and reconcile current owner intent and Codex tool suppression after tree replay.
+- 8af3b86: Complete v2 contribution declarations, bounded consumer generations/revision
+  checks, public structural unsettled-effect errors, classified/coalesced refresh,
+  Codex's optional structural client and transcript-aware transport negotiation.
+  Add explicit, default-off inventory and native-local ls pilots with exact grants;
+  keep subagent, multimedia and control tools direct.
+- 8af3b86: Reject same-patch hardlink aliases and inode replacement while acquiring native
+  mutation queues. Reset native-tool suppression receipts on session/tree changes,
+  bind nested direct-tool visibility to the registered provider owner, reject
+  duplicate owned definitions, and validate feature requirement syntax before
+  discovery offers.
+  
+  Keep the Codex stream's effective-checkpoint contract on native fallback paths
+  as well as enabled transports. Correct Telegram's package description to describe
+  native blocking extension UI prompt notifications.
+
+## 0.3.0
+
+### Minor Changes
+
+- ac5c2e5: Add optional provider-neutral Code Mode grammar transport and lossless history
+  projection, generic Codex Standard/Lite grammar streaming and replay, and explicitly
+  granted patch/standalone-search contributions without Code Mode dependency edges.
+  Preserve JSON defaults, direct tools, existing authorization and private release status.
+- bb7e5ea: Require Pi 0.86.1 or newer. Adapt Codex streaming and native compaction to
+  transcript-backed system prompts and tool declarations, keep inherited parent
+  system authority out of child sessions, and recognize in-conversation OpenAI
+  tool additions in External Thinking. Preserve the existing Codex wire formats,
+  model profiles and publication eligibility. Keep Code Mode's already-restored
+  direct tools available after historical tool-loadout restoration.
+
 ## 0.2.0
 
 ### Minor Changes

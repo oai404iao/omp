@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
+import { withCodexSettings } from "./support/provider-lifecycle-test-support.js";
 import {
 	applyNativeCompactionContext,
 	NATIVE_COMPACTION_DETAILS_KIND,
@@ -90,6 +92,67 @@ const marker = {
 	thinkingSignature: JSON.stringify(item),
 	redacted: true,
 };
+
+test("native compaction requests replay persisted sections and scope forced prompts to the active run", async () => {
+	await withCodexSettings({ compactionMode: "responses", openaiTransport: "sse" }, async (cwd) => {
+		const previousFetch = globalThis.fetch;
+		const bodies: any[] = [];
+		globalThis.fetch = async (_url, init) => {
+			bodies.push(JSON.parse(String(init?.body)));
+			const event = { type: "response.completed", response: { id: "compact", status: "completed", output: [item] } };
+			return new Response(`data: ${JSON.stringify(event)}\n\n`, { headers: { "content-type": "text/event-stream" } });
+		};
+		try {
+			const handlers: Record<string, Function> = {};
+			registerNativeCompaction({
+				on: (name: string, handler: Function) => { handlers[name] = handler; },
+				getActiveTools: () => [], getAllTools: () => [], getThinkingLevel: () => "off",
+			} as any);
+			const system = { role: "system", content: "PERSISTED_CONTENT", sections: { audit: "PERSISTED_SECTION" }, timestamp: 1 };
+			const event = {
+				branchEntries: [messageEntry("system", null, system), messageEntry("user", "system", { role: "user", content: "compact", timestamp: 2 })],
+				preparation: { firstKeptEntryId: "user", tokensBefore: 100 }, signal: new AbortController().signal,
+			};
+			const ctx = {
+				cwd, model: { ...model, baseUrl: "https://fixture.invalid/v1" }, getSystemPrompt: () => "STALE_BASE",
+				modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "fixture", headers: {} }) },
+				sessionManager: { getLeafId: () => "user", getSessionId: () => "compaction-transcript" },
+				ui: { notify: (message: string) => assert.fail(message) },
+			};
+			await handlers.session_before_compact(event, ctx);
+			const options: Record<string, unknown> = {};
+			handlers.before_agent_start({ systemPromptOptions: options });
+			options.forceSystemPrompt = "FORCED_BY_LATER_HANDLER";
+			await handlers.session_before_compact(event, ctx);
+			handlers.agent_settled();
+			await handlers.session_before_compact(event, ctx);
+			assert.deepEqual(bodies.map((body) => body.instructions), [
+				getCurrentSystemPrompt([system]), "FORCED_BY_LATER_HANDLER", getCurrentSystemPrompt([system]),
+			]);
+			assert(bodies.every((body) => !JSON.stringify(body.input).includes("PERSISTED_CONTENT")));
+		} finally {
+			globalThis.fetch = previousFetch;
+		}
+	});
+});
+
+test("native replay preserves the compaction system checkpoint and request-local deltas exactly once", () => {
+	const tool = { name: "read", description: "Read", parameters: { type: "object" } };
+	const system = { role: "system", content: "base prompt", sections: { rules: "old rules" }, toolsAdded: [tool], timestamp: 1 };
+	const update = { role: "system", content: "request-local note", sections: { rules: "new rules" }, toolsRemoved: [{ name: "read" }],
+		toolsAdded: [{ ...tool, name: "lookup" }], timestamp: 7 };
+	const compact = { ...compactionEntry("responses", [item]), systemMessage: system };
+	const future = { role: "user", content: "future", timestamp: 6 };
+	const messages = [system, { role: "compactionSummary", summary: "placeholder", tokensBefore: 100, timestamp: 5 }, future, update] as any;
+	const before = structuredClone(messages);
+	const result = applyNativeCompactionContext(messages, [compact, messageEntry("future", compact.id, future)], model);
+	assert.deepEqual(result.map((message) => message.role), ["system", "assistant", "user"]);
+	assert.equal(getCurrentSystemPrompt(result), getCurrentSystemPrompt(messages));
+	assert.deepEqual(getCurrentTools(result).map((entry) => entry.name), ["lookup"]);
+	assert.equal(getCurrentSystemPrompt(result).split("request-local note").length, 2);
+	assert.deepEqual(messages, before);
+	assert.deepEqual(applyNativeCompactionContext(result, [compact, messageEntry("future", compact.id, future)], model), result);
+});
 
 test("legacy v1 context-management details still replay the installed checkpoint", () => {
 	const source = assistant([

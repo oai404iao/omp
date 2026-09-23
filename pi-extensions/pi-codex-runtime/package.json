@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-runtime",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "private": false,
   "description": "Unpublished pi-codex-runtime workspace for the staged Codex split",
   "type": "module",
@@ -23,8 +23,8 @@
     "./subagent-inline": "./src/subagent-inline.ts"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.85.1",
-    "@earendil-works/pi-coding-agent": ">=0.85.1"
+    "@earendil-works/pi-ai": ">=0.86.1",
+    "@earendil-works/pi-coding-agent": ">=0.86.1"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-ai": {
@@ -36,8 +36,8 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-ai": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
     "@types/node": "^26.2.0",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2"

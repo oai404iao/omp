@@ -2097,6 +2097,7 @@ export class SubagentCoordinator {
 				model,
 				thinkingLevel: descriptor.thinkingLevel,
 				customTools,
+				excludeTools: deniedTools,
 				...(toolCeiling !== undefined ? { tools: toolCeiling } : {}),
 			});
 			return {

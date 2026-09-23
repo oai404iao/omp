@@ -1,24 +1,34 @@
 # @oai404iao/pi-telegram-notify
 
-Pi 完成任务、最终停止于错误、或通过 `ask_user_question` 等待你的回复时，向 Telegram Bot 发送一条通知。
+Pi 完成任务、最终停止于错误、或扩展弹出阻塞式交互等待你的回复时，向 Telegram Bot 发送一条通知。
 
-兼容性下限：Pi 0.85.1；已验证 0.85.1。
+兼容性下限：Pi 0.86.1；已验证 0.86.1。
 
-通知固定使用三行，正文概要会压缩为空白规范化后的前 30 个字符：
+通知使用 Telegram MarkdownV2：标签加粗，项目路径使用行内代码，概要保留
+换行和缩进。概要上限从 30 提高到 **3000 UTF-16 单位**（大多数中英文字符
+占 1，部分 emoji 占 2），包含截断省略号；优先在靠近上限的段落、行或
+词边界截断，不拆开 Unicode 码点。显示示例：
 
 ```text
 项目: /home/me/code/example
 状态: 等待回复
-概要: 应该使用哪一种认证方案？
+
+概要:
+应该使用哪一种认证方案？
 ```
 
 `状态` 为 `完成`、`错误` 或 `等待回复`。
 
+路径最多保留 512 UTF-16 单位，确保整条通知处于 Telegram 解析后 4096 字符
+限制内。动态内容先截断再转义，避免路径、错误消息或被截断的 Markdown
+导致 Telegram 拒收；概要中的原始 Markdown 按字面文本显示，不作为格式执行。
+格式遵循 [Telegram MarkdownV2 规则](https://core.telegram.org/bots/api#markdownv2-style)。
+
 ## 隐私
 
 每条通知都会将 Pi 当前项目的**绝对工作目录**以及概要文本发送给
-Telegram。概要只保留空白规范化后的前 30 个字符，但截断不等于脱敏；
-这 30 个字符仍可能包含文件名、错误信息或其他敏感内容。
+Telegram。概要最多保留 3000 UTF-16 单位，比旧版包含更多内容。
+截断不等于脱敏；通知仍可能包含文件名、错误信息或其他敏感内容。
 
 ## 安装
 
@@ -73,15 +83,24 @@ npm 包名使用 `@oai404iao/pi-telegram-notify`，但配置目录继续使用
 
 ## 触发条件
 
+- **subagent 不通知**：带有 `pi-subagent/descriptor` 会话标记的 spawn / fork
+  子代理不会发送完成、错误、等待回复或测试通知。发送时动态检查标记，
+  兼容启动后才写入标记的子会话；普通无 UI 会话和用户手动 fork 不受影响。
 - `完成`：Pi 的 agent loop 确实结束，且当前 active branch 的最后一个
   assistant 消息以 `stop` 或 `length` 结束。
 - `错误`：Pi 已决定不再自动重试或自动压缩后继续，且当前 active branch
   的最后一个 assistant 消息以 `error` 结束。
-- `等待回复`：优先订阅
-  `@juicesharp/rpiv-ask-user-question` 的 `rpiv:ask-user:prompt` 公开事件；
-  同时对 `ask_user_question` / `ask-user-question` 工具名提供回退监听。
+- `等待回复`：使用 Pi 原生 `ui_prompt_start` 事件，覆盖扩展的
+  `select`、`confirm`、`input`、`editor` 和 `custom` 对话框，包括审批弹窗。
+  Pi 将嵌套或重叠的对话框合并成一个等待区间，只在区间开始时通知；
+  关闭对话框的 `ui_prompt_end` 不另发通知。
 
-“完成/错误”只使用 Pi 0.85.1 的公开 `agent_settled` 事件，并从
+等待通知使用原生事件提供的标题，无标题时显示“等待用户回复”。
+不再读取完整问卷内容、订阅 `rpiv:ask-user:prompt` 或按工具名设置延时回退。
+因此被阻止、尚未真正打开 UI 的工具调用不会误报等待；标题不包含完整
+问题的自定义 UI 也不再发送原来的详细问题摘要。无 UI 会话不发送等待通知。
+
+“完成/错误”只使用 Pi 0.86.1 的公开 `agent_settled` 事件，并从
 `ctx.sessionManager.getBranch()` 读取当前 active branch。该事件只在没有
 自动重试、自动压缩或排队 continuation 时触发通知。`toolUse` 和
 `aborted` assistant 消息会被忽略；`agent_end` 不会触发通知。

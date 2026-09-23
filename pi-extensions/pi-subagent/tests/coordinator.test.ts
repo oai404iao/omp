@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { afterEach, test, type TestContext } from "node:test";
 import {
 	createAssistantMessageEventStream,
+	getCurrentTools,
 	type AssistantMessage,
 	type AssistantMessageEventStream,
 	type Context,
@@ -316,7 +317,7 @@ async function fixture(
 		streamSimple: (model, context, streamOptions) => {
 			const currentTurn = ++turn;
 			options.onRequestContext?.(context);
-			options.onRequestTools?.((context.tools ?? []).map((tool) => tool.name));
+			options.onRequestTools?.(getCurrentTools(context.messages).map((tool) => tool.name));
 			if (options.streamSimple) {
 				return options.streamSimple(
 					model,
@@ -508,6 +509,38 @@ test("one-shot child returns only its own final output and usage", async () => {
 	}
 });
 
+test("one-shot children exclude report even when an inherited extension registers and reactivates it late", async () => {
+	const observedTools: string[][] = [];
+	const { coordinator, parent, agentDir } = await fixture({
+		childExtension: `
+export default function lateReport(pi) {
+	pi.on("before_agent_start", () => {
+		pi.registerTool({
+			name: "report", label: "Report", description: "Late report",
+			parameters: { type: "object", properties: {} },
+			async execute() { return { content: [{ type: "text", text: "forbidden" }] }; },
+		});
+		pi.setActiveTools([...pi.getAllTools().map((tool) => tool.name), "report"]);
+	});
+}`,
+		onRequestTools: (tools) => observedTools.push(tools),
+	});
+	mkdirSync(join(agentDir, "agents"), { recursive: true });
+	writeFileSync(join(agentDir, "agents", "unrestricted.md"),
+		"---\nname: unrestricted\ndescription: No tool allowlist\n---\nInspect the task.\n");
+	try {
+		const outcome = await coordinator.delegate(parent, "spawn", {
+			agent: "unrestricted", description: "test native denial", prompt: "Inspect it.",
+		}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true });
+		assert.equal(outcome.kind, "foreground");
+		assert.equal(observedTools.length, 1);
+		assert(observedTools[0].includes("read"));
+		assert(!observedTools[0].includes("report"));
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
 test("delegation assigns stable readable paths and disambiguates generated siblings", async () => {
 	const { coordinator, parent } = await fixture();
 	try {
@@ -624,7 +657,7 @@ test("a nested parent resolves a direct child by its relative path", async () =>
 	let scoutTurns = 0;
 	const { coordinator, parent } = await fixture({
 		streamSimple: (model, context, turn, signal) => {
-			const canDelegate = context.tools?.some(
+			const canDelegate = getCurrentTools(context.messages).some(
 				(tool) => tool.name === "subagent",
 			);
 			if (!canDelegate) {
@@ -2316,7 +2349,7 @@ test("nested wait_agent consumes only direct-child completion from the parent se
 			const toolResults = context.messages.filter(
 				(message) => message.role === "toolResult",
 			);
-			const hasNestedControls = context.tools?.some(
+			const hasNestedControls = getCurrentTools(context.messages).some(
 				(tool) => tool.name === "wait_agent",
 			);
 			if (!hasNestedControls) {
@@ -2751,7 +2784,24 @@ export default function handleMailbox(pi) {
 });
 
 test("interrupting a mailbox followup while it waits for capacity preserves its batch", async () => {
-	const { coordinator, parent, messages } = await fixture({ delayMs: 80 });
+	let releaseHolder!: () => void;
+	const holder = new Promise<void>((resolve) => { releaseHolder = resolve; });
+	let holding = false;
+	const { coordinator, parent, messages } = await fixture({
+		streamSimple(model, context, turn, signal) {
+			const lastUser = context.messages.filter((message) => message.role === "user").at(-1);
+			if (!lastUser || !userMessageText(lastUser).includes("Hold the only slot.")) {
+				return scriptedStream(model, `child answer ${turn}`, signal);
+			}
+			holding = true;
+			const stream = createAssistantMessageEventStream();
+			void holder.then(async () => {
+				for await (const event of scriptedStream(model, `child answer ${turn}`, signal)) stream.push(event);
+				stream.end();
+			});
+			return stream;
+		},
+	});
 	coordinator.configureBackgroundRuns(1);
 	try {
 		const settings = {
@@ -2804,7 +2854,9 @@ test("interrupting a mailbox followup while it waits for capacity preserves its 
 			"Remain pending if interrupted.",
 		);
 		await coordinator.followupTask(parent, first.details.agentId);
+		await waitUntil(() => holding);
 		const blocked = coordinator.followupTask(parent, second.details.agentId);
+		const interrupted = assert.rejects(blocked, /interrupted/);
 		await waitUntil(async () => {
 			const entries = await coordinator.list(parent, "children");
 			return entries.some(
@@ -2815,7 +2867,7 @@ test("interrupting a mailbox followup while it waits for capacity preserves its 
 			);
 		});
 		await coordinator.interrupt(parent, second.details.agentId);
-		await assert.rejects(() => blocked, /interrupted/);
+		await interrupted;
 		await waitUntil(async () => {
 			const entries = await coordinator.list(parent, "children");
 			const child = entries.find(
@@ -2828,6 +2880,7 @@ test("interrupting a mailbox followup while it waits for capacity preserves its 
 				&& child.pendingMessages === 1;
 		});
 	} finally {
+		releaseHolder();
 		await coordinator.shutdown();
 	}
 });
@@ -3724,7 +3777,7 @@ test("nested delegation tools enumerate the available agent definitions", async 
 	const { coordinator, parent } = await fixture({
 		onRequestContext: (context) => {
 			for (const name of ["subagent", "subagent_fork"]) {
-				const tool = context.tools?.find((candidate) => candidate.name === name);
+				const tool = getCurrentTools(context.messages).find((candidate) => candidate.name === name);
 				const properties = (
 					tool?.parameters as { properties?: Record<string, unknown> } | undefined
 				)?.properties;

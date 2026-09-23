@@ -5,8 +5,8 @@ import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
 
 test("explicit floor/target selection resolves the audited Pi baseline", () => {
   assert.equal(piFloor, piTarget);
-  assert.equal(piVersion("floor"), "0.85.1");
-  assert.equal(piVersion("target"), "0.85.1");
+  assert.equal(piVersion("floor"), "0.86.1");
+  assert.equal(piVersion("target"), "0.86.1");
   assert.throws(() => piVersion("latest"), /Unknown Pi baseline/);
   assert.equal(isPiDependency("@earendil-works/pi-ai"), true);
   assert.equal(isPiDependency("typescript-ast"), false);

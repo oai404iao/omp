@@ -6,6 +6,7 @@ import { decodeWebSearchActivityTextSignature, isWebSearchActivityTextSignature,
 import { sanitizeSurrogates, shortHash } from "./text.js";
 import { wireToolIdentity } from "./tool-identity.js";
 import { type ConvertResponsesMessagesOptions, type InternalAssistantContent, type Message } from "./types.js";
+import { grammarToolInput } from "./sampling.js";
 
 export function convertResponsesMessages<TApi extends Api>(
 	model: Model<TApi>,
@@ -14,6 +15,7 @@ export function convertResponsesMessages<TApi extends Api>(
 	options?: ConvertResponsesMessagesOptions,
 ): ResponseInput {
 	const messages: ResponseInput = [];
+	const customCalls = new Map<string, boolean>();
 	const normalizeIdPart = (part: string) => {
 		const sanitized = part.replace(/[^a-zA-Z0-9_-]/g, "_");
 		const normalized = sanitized.length > 64 ? sanitized.slice(0, 64) : sanitized;
@@ -92,9 +94,14 @@ export function convertResponsesMessages<TApi extends Api>(
 					assistantBlockIndex++;
 				} else if (block.type === "toolCall") {
 					const [callId, itemIdRaw] = block.id.split("|");
-					const custom = itemIdRaw?.startsWith("ctc_") === true;
+					const property = options?.grammarToolInputProperties?.get(block.name);
+					const declared = options?.grammarToolInputProperties !== undefined && context.tools?.some((tool) => tool.name === block.name);
+					const custom = property !== undefined || (!declared && itemIdRaw?.startsWith("ctc_") === true && typeof block.arguments.input === "string");
+					customCalls.set(callId, custom);
 					let itemId: string | undefined = itemIdRaw;
 					if (isDifferentModel && (itemId?.startsWith("fc_") || itemId?.startsWith("ctc_"))) itemId = undefined;
+					if (!custom && itemId?.startsWith("ctc_")) itemId = undefined;
+					if (custom && itemId?.startsWith("fc_")) itemId = undefined;
 					const wireIdentity = wireToolIdentity(block.name, block.thoughtSignature);
 					if (custom) {
 						output.push({
@@ -103,7 +110,7 @@ export function convertResponsesMessages<TApi extends Api>(
 							call_id: callId,
 							name: wireIdentity.name,
 							...(wireIdentity.namespace ? { namespace: wireIdentity.namespace } : {}),
-							input: typeof block.arguments.input === "string" ? block.arguments.input : "",
+							input: sanitizeSurrogates(grammarToolInput(block.name, block.arguments, property ?? "input")),
 						} as ResponseInput[number]);
 					} else {
 						output.push({
@@ -157,7 +164,7 @@ export function convertResponsesMessages<TApi extends Api>(
 					]
 				: sanitizeSurrogates(hasText ? textResult : "(see attached image)");
 			messages.push({
-				type: itemId?.startsWith("ctc_") ? "custom_tool_call_output" : "function_call_output",
+				type: (customCalls.get(callId) ?? (options?.grammarToolInputProperties?.has(msg.toolName) || itemId?.startsWith("ctc_"))) ? "custom_tool_call_output" : "function_call_output",
 				call_id: callId,
 				output,
 			} as ResponseInput[number]);

@@ -1,5 +1,41 @@
 # @oai404iao/pi-codex-minimal-tools
 
+## 3.0.1
+
+### Patch Changes
+
+- 8af3b86: Update exact workspace dependency pins for the pending dependency releases.
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+  - @oai404iao/pi-codex-runtime@0.3.1
+  - @oai404iao/pi-codex-core@0.3.1
+  - @oai404iao/pi-codex-web-search@0.2.1
+  - @oai404iao/pi-codex-imagegen@0.2.1
+
+## 3.0.0
+
+### Major Changes
+
+- bb7e5ea: Require Pi 0.86.1 or newer. Adapt Codex streaming and native compaction to
+  transcript-backed system prompts and tool declarations, keep inherited parent
+  system authority out of child sessions, and recognize in-conversation OpenAI
+  tool additions in External Thinking. Preserve the existing Codex wire formats,
+  model profiles and publication eligibility. Keep Code Mode's already-restored
+  direct tools available after historical tool-loadout restoration.
+
+### Patch Changes
+
+- Updated dependencies [ac5c2e5]
+- Updated dependencies [bb7e5ea]
+  - @oai404iao/pi-codex-runtime@0.3.0
+  - @oai404iao/pi-codex-core@0.3.0
+  - @oai404iao/pi-codex-web-search@0.2.0
+  - @oai404iao/pi-codex-imagegen@0.2.0
+
 ## 2.1.0
 
 ### Minor Changes

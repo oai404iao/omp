@@ -7,6 +7,7 @@ import { applyFastModeServiceTier } from "../../fast-mode.js";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { rewriteNativeOpenAiTools, type NativeToolRewriteOptions } from "../../provider-native-tools.js";
 import { collectHistoricalCitationSources, collectWebSearchCitationSources } from "@oai404iao/pi-codex-runtime/internal/providers/responses/citations";
+import { responseGrammarProperties } from "@oai404iao/pi-codex-runtime/internal/providers/responses/grammar";
 import { webSocketFallbackKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";
 import type { ProviderStreamEffects } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/stream-effects";
@@ -101,6 +102,7 @@ export function createCodexStream<TApi extends Api>(
 			}
 			options = withRequestServiceTier(options, body.service_tier);
 			ensureWebSearchDetailsIncluded(body);
+			const grammarToolInputProperties = responseGrammarProperties(body, context.tools);
 
 			const websocketSessionId = requestIdentity?.sessionId ?? options?.sessionId;
 			const websocketThreadId = requestIdentity?.threadId ?? options?.sessionId;
@@ -208,6 +210,7 @@ export function createCodexStream<TApi extends Api>(
 							websocketRequestMetadata,
 							settings.modelProfileHash,
 							startupPrewarmTask,
+							grammarToolInputProperties,
 						);
 						if (options?.signal?.aborted) {
 							throw new Error("Request was aborted");
@@ -349,6 +352,7 @@ export function createCodexStream<TApi extends Api>(
 				requestPrompt,
 				webSearchCitationSources,
 				historicalCitationSources,
+				grammarToolInputProperties,
 			);
 			finalizeUsage(model, output);
 

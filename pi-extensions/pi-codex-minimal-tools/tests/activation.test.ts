@@ -6,6 +6,7 @@ import test from "node:test";
 import codexMinimalTools from "../src/index.js";
 import { hasConfiguredModelsLoaded } from "../src/activation.js";
 import { DEFAULT_SETTINGS } from "../src/settings.js";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 
 function fakePi() {
 	const handlers: Record<string, Function[]> = {};
@@ -13,6 +14,7 @@ function fakePi() {
 	const providers: Array<{ name: string; value: any }> = [];
 	let activeTools = ["read", "bash"];
 	return {
+		events: createEventBus(),
 		activeTools,
 		handlers,
 		providers,
@@ -24,6 +26,8 @@ function fakePi() {
 		},
 		registerMessageRenderer() {},
 		registerTool(tool: any) { tools.push(tool); },
+		getAllTools() { return tools.map(tool => ({ ...tool,
+			sourceInfo: { path: "/fixture/extension.ts", source: "fixture", scope: "temporary", origin: "top-level" } })); },
 		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },
 		getActiveTools() { return activeTools; },
 		setActiveTools(next: string[]) { activeTools = next; this.activeTools = next; },

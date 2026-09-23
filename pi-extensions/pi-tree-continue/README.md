@@ -1,8 +1,9 @@
 # @oai404iao/pi-tree-continue
 
-Adds `/continue` for Pi sessions. It resumes the agent without adding any new message to the LLM context.
+Adds `/continue` for Pi sessions. It resumes the agent without adding a new user
+or custom message. Pi may append system prompt/tool updates before the request.
 
-Compatibility: experimental against Pi 0.85.1 only. It is not compatible by
+Compatibility: experimental against Pi 0.86.1 only. It is not compatible by
 contract with any Pi version.
 
 > npm identity: `@oai404iao/pi-tree-continue`. This experimental package
@@ -31,7 +32,7 @@ Restart Pi or run `/reload` after installation.
 | Command | Action |
 | --- | --- |
 | `/continue` | Continue when the current branch ends at a `toolResult`, or at an empty assistant error/abort after a `toolResult`. |
-| `/continue --force` | Jump back to the latest `toolResult` anywhere on the current branch, abandoning later entries. |
+| `/continue --force` | Also allow abandoning normal entries after the latest `toolResult`; otherwise preserve safe system updates. |
 
 Unknown arguments are rejected so typos do not accidentally run as plain `/continue`.
 
@@ -42,17 +43,17 @@ Unknown arguments are rejected so typos do not accidentally run as plain `/conti
 Instead, it:
 
 1. Finds the safe continuation `toolResult` on the current branch.
-2. Uses Pi's tree navigation API to make that tool result the active leaf when needed.
-3. Attempts to call Pi's internal agent continuation path.
+2. Uses Pi's tree navigation API to remove trailing empty errors while retaining safe system updates and metadata.
+3. Initializes prompt state for legacy histories, otherwise preserves recorded prompt sections, and calls Pi's private run method with only the required system update or an empty message array.
 
-By default, `/continue` is conservative. It only continues from the current leaf if the leaf is already a `toolResult`, or if everything after the latest `toolResult` is ignorable metadata plus an empty assistant `error` / `aborted` entry. This avoids silently abandoning normal user or assistant messages.
+By default, `/continue` is conservative. It only continues from the current leaf if the leaf is already a `toolResult`, or if everything after the latest `toolResult` consists of system updates, ignorable metadata, or empty assistant `error` / `aborted` entries. This avoids silently abandoning normal user or assistant messages.
 
 Use `/continue --force` when you intentionally want to roll the branch back to the latest `toolResult` even if normal entries exist after it.
 
 Because Pi does not currently expose a public extension API for message-free
 continuation, this package installs a runtime hook into private
-`AgentSession` fields. The hook mirrors Pi's agent-run lifecycle (active-run
-state, queued-message flushing, and the `agent_settled` event) and checks the
+`AgentSession` fields. The hook reuses Pi's agent-run lifecycle (abort reset,
+retries, prompt cleanup, and the `agent_settled` event) and checks the
 selected model's configured auth before continuing, but it cannot emit
 `before_agent_start` or reproduce Pi's branch-prompt semantics. Do not treat
 it as equivalent to a normal user-initiated prompt.

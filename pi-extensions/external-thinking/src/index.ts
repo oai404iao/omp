@@ -134,6 +134,21 @@ function externalThinkingCompatibilityIssue(model: Model<Api> | null | undefined
 // Provider payload rewriting — force the model to call `think` first
 // ---------------------------------------------------------------------------
 
+function openAIToolDeclarations(payload: Record<string, unknown>, responses: boolean): unknown[] {
+	const tools: unknown[] = Array.isArray(payload.tools) ? [...payload.tools] : [];
+	const messages = responses ? payload.input : payload.messages;
+	if (Array.isArray(messages)) {
+		for (const message of messages) {
+			if (!message || typeof message !== "object") continue;
+			const addition = responses
+				? message.type === "additional_tools" || message.type === "tool_search_output"
+				: message.role === "system";
+			if (addition && Array.isArray(message.tools)) tools.push(...message.tools);
+		}
+	}
+	return tools;
+}
+
 /**
  * Pin `tool_choice` to the think tool on the first request of a turn.
  * Returns true when the payload was rewritten.
@@ -143,13 +158,13 @@ function forceThinkToolChoice(payload: unknown, api: string): boolean {
 	if (!p || typeof p !== "object") return false;
 	try {
 		if (OPENAI_RESPONSES_APIS.includes(api)) {
-			const tools = p.tools;
-			if (!Array.isArray(tools) || !tools.some((t) => (t as { name?: string })?.name === TOOL_NAME)) return false;
+			const tools = openAIToolDeclarations(p, true);
+			if (!tools.some((t) => (t as { name?: string })?.name === TOOL_NAME)) return false;
 			p.tool_choice = { type: "function", name: TOOL_NAME };
 			return true;
 		}
 		if (api === "openai-completions") {
-			const tools = p.tools;
+			const tools = openAIToolDeclarations(p, false);
 			if (
 				!Array.isArray(tools) ||
 				!tools.some((t) => (t as { function?: { name?: string } })?.function?.name === TOOL_NAME)

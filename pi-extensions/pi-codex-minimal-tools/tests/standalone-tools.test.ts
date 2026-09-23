@@ -6,6 +6,8 @@ import test, { afterEach } from "node:test";
 import { standaloneImageGeneration } from "../src/tools/image-generation.js";
 import { standaloneWebSearch } from "../src/tools/web-search.js";
 import { loadModelSettings } from "../src/model-catalog/runtime.js";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { beginCodexTurn, endCodexTurn } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 
 const originalFetch = globalThis.fetch;
 const originalPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -41,6 +43,47 @@ function jwt(): string {
 	})).toString("base64");
 	return `header.${payload}.signature`;
 }
+
+test("standalone search snapshots turn/history before delayed auth and cancels before HTTP", async () => withAgentDir(async () => {
+	const model = { provider: "openai", api: "openai-responses", id: "gpt-5.6-sol", baseUrl: "https://fixture.invalid/v1", input: ["text"] } as any;
+	const sm = SessionManager.inMemory(process.cwd());
+	sm.appendMessage({ role: "user", content: "turn A", timestamp: 1 });
+	const firstTurn = beginCodexTurn(sm.getSessionId());
+	let release!: () => void;
+	let body: any, metadata: any, requests = 0;
+	globalThis.fetch = async (_url, init) => {
+		requests++;
+		body = JSON.parse(String(init?.body));
+		metadata = JSON.parse(new Headers(init?.headers).get("x-codex-turn-metadata")!);
+		return Response.json({ output: "snapshot", results: [] });
+	};
+	const context = {
+		cwd: process.cwd(), model, sessionManager: sm,
+		modelRegistry: { async getApiKeyAndHeaders() {
+			await new Promise<void>((resolve) => { release = resolve; });
+			return { ok: true as const, apiKey: "fixture" };
+		} },
+	};
+	try {
+		const pending = standaloneWebSearch({ search_query: [{ q: "fixture" }] }, context);
+		await Promise.resolve();
+		endCodexTurn(sm.getSessionId());
+		beginCodexTurn(sm.getSessionId());
+		sm.appendMessage({ role: "user", content: "turn B must not leak into A", timestamp: 2 });
+		release();
+		await pending;
+		assert.equal(metadata.turn_id, firstTurn.turnId);
+		assert.match(JSON.stringify(body.input), /turn A/);
+		assert.doesNotMatch(JSON.stringify(body.input), /turn B/);
+		const controller = new AbortController();
+		const cancelled = standaloneWebSearch({ search_query: [{ q: "fixture" }] }, context, controller.signal);
+		await Promise.resolve();
+		controller.abort();
+		release();
+		await assert.rejects(cancelled);
+		assert.equal(requests, 1, "cancelled auth must not start a network request");
+	} finally { endCodexTurn(sm.getSessionId()); }
+}));
 
 test("standalone web search uses the Codex alpha/search endpoint and auth", async () => withAgentDir(async () => {
 	const turnId = "0198e2c6-7a5b-7c10-9d1e-2f3a4b5c6d7e";
