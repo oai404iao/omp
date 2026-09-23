@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-external-thinking",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Replace compatible Pi models' native reasoning with a visible think scratchpad tool.",
   "repository": {
     "type": "git",

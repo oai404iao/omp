@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-subagent",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Durable, continuable subagents for Pi with spawn/fork providers and lifecycle controls.",
   "repository": {
     "type": "git",
@@ -38,7 +38,7 @@
     "typebox": "*"
   },
   "optionalDependencies": {
-    "@oai404iao/pi-codex-minimal-tools": "3.0.1"
+    "@oai404iao/pi-codex-minimal-tools": "4.0.0"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.87.1",
