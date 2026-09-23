@@ -21,6 +21,6 @@ export default function codexWebSearch(pi: ExtensionAPI): void {
 			getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
 			getRequestIdentity: sessionId => resolveCodexRequestIdentity(sessionId, undefined, "turn"),
 			hasProviderRuntime: () => broker.coreEnabled,
-		}) as never);
+		}) as never, "codex_web");
 	});
 }

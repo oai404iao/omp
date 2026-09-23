@@ -165,7 +165,6 @@ check(
 
 const projectLicense = read("LICENSE");
 for (const name of [
-  "pi-keep-defaults",
   "pi-subagent",
   "pi-telegram-notify",
   "pi-tree-continue",

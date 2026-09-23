@@ -25,6 +25,8 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 	const { name, sourcePath } = options;
 	if (!isDirectName(name) || !sourcePath || sourcePath.startsWith("<builtin:")) throw new Error("Invalid Code Mode direct binding");
 	let disposed = false;
+	let closing = false;
+	let explicitIntent: boolean | undefined;
 	let identity: string | undefined;
 	let schema: unknown;
 	let held = false;
@@ -57,31 +59,32 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 		if (!held) return;
 		// Only restore a removal/activation intent owned by this lease. Do not
 		// turn off a foreign reactivation, or touch a replaced definition.
-		restoredByLease = restore && owns();
-		if (restoredByLease) change(true);
+		const restoring = restore && owns();
+		if (restoring) change(true);
+		restoredByLease = restoring;
 		held = false;
 	};
 	const beforeTree = pi.on("session_before_tree", () => {
 		restoreAfterTree = restoredByLease && !held && owns() && pi.getActiveTools().includes(name);
 	});
 	const afterTree = pi.on("session_tree", () => {
-		// Pi restores historical tool loadouts before this event. A past leased
-		// omission must not undo this owner's already-released restoration.
-		if (restoreAfterTree && restoredByLease && !held && owns()) {
-			change(true);
+		// Historical loadouts are physical candidates, not new owner intent.
+		if (owns() && (held || explicitIntent !== undefined || (restoreAfterTree && restoredByLease))) {
+			change(held ? false : explicitIntent ?? true);
 			pi.events.emit(VISIBILITY_CHANGED, { version: 1 });
 		}
 		restoreAfterTree = false;
 	});
 	return {
+		closeAdmission() { closing = true; },
 		binding: Object.freeze({
 			version: 1 as const, name,
 			acquire(): DirectToolLease | undefined {
-				if (held || !owns()) return undefined;
+				if (closing || held || !owns()) return undefined;
 				restoredByLease = false;
 				const current = pi.getActiveTools();
 				index = current.indexOf(name);
-				restore = index >= 0;
+				restore = explicitIntent ?? index >= 0;
 				if (index < 0) index = current.length;
 				held = true;
 				try { reconcile(); } catch (error) { release(); throw error; }
@@ -92,17 +95,19 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 				};
 			},
 		}) satisfies CodeModeDirectBinding,
-		get activeIntent(): boolean | undefined { return owns() ? held ? restore : pi.getActiveTools().includes(name) : undefined; },
+		get activeIntent(): boolean | undefined { return owns() ? explicitIntent ?? (held ? restore : pi.getActiveTools().includes(name)) : undefined; },
 		/** Batch activation: update logical intent without writing the registry.
 		 * undefined means ownership was lost; preserve the replacement's state. */
 		projectActive(active: boolean): boolean | undefined {
-			if (!owns()) return undefined;
+			if (closing || !owns()) return undefined;
+			explicitIntent = active;
 			if (held) { restore = active; return false; }
 			restoredByLease = false;
 			return active;
 		},
 		setActive(active: boolean): boolean {
-			if (!owns()) return false;
+			if (closing || !owns()) return false;
+			explicitIntent = active;
 			if (held) { restore = active; change(false); }
 			else { restoredByLease = false; index = pi.getActiveTools().length; change(active); }
 			pi.events.emit(VISIBILITY_CHANGED, { version: 1 });
@@ -114,7 +119,13 @@ export function createCodeModeDirectBinding(pi: ExtensionAPI, options: { name: s
 			return current;
 		},
 		dispose() {
-			if (!disposed) { beforeTree(); afterTree(); release(); disposed = true; pi.events.emit(VISIBILITY_CHANGED, { version: 1 }); }
+			if (disposed) return;
+			closing = true;
+			// A failed release keeps both its receipt and tree observation alive.
+			release();
+			disposed = true;
+			beforeTree(); afterTree();
+			pi.events.emit(VISIBILITY_CHANGED, { version: 1 });
 		},
 	};
 }

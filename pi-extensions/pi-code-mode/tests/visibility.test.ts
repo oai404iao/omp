@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { createEventBus, type ExtensionAPI, type ToolInfo } from "@earendil-works/pi-coding-agent";
 import { createCodeModeDirectBinding, type CodeModeTool } from "../src/contributions.ts";
 import { Visibility, visibilityMode } from "../src/visibility.ts";
+import { installOwnerFactory } from "../src/owner-factory.ts";
 
 const sourcePath = "/fixture/owner.ts";
 const info = (name = "lookup"): ToolInfo => ({
@@ -184,4 +185,109 @@ test("visibility: a failed restoration keeps its receipt and can be retried", ()
 	f.view.release();
 	assert.deepEqual(f.active, ["read", "lookup", "bash"]);
 	assert.deepEqual(f.view.names, []);
+});
+
+test("visibility: explicit intent and live leases override both historical loadouts", () => {
+	for (const intended of [true, false]) for (const leased of [true, false]) {
+		const f = fixture();
+		f.owner.setActive(intended);
+		if (leased) f.view.sync("hide-bridged", [f.tool]);
+		for (const historical of [true, false]) {
+			f.emit("session_before_tree");
+			f.foreign(["foreign", ...(historical ? ["lookup"] : [])]);
+			f.emit("session_tree");
+			assert.equal(f.active.includes("lookup"), intended && !leased);
+			assert(f.active.includes("foreign"));
+			assert.equal(f.owner.activeIntent, intended);
+		}
+		f.view.release();
+		assert.equal(f.active.includes("lookup"), intended);
+	}
+});
+
+test("visibility: failed owner disposal keeps tree protection and refuses reacquisition until retry", () => {
+	const f = fixture();
+	f.owner.setActive(true);
+	const lease = f.owner.binding.acquire()!;
+	const write = f.pi.setActiveTools;
+	f.pi.setActiveTools = () => { throw new Error("restore failed"); };
+	assert.throws(() => f.owner.dispose(), /restore failed/);
+	f.pi.setActiveTools = write;
+	f.emit("session_before_tree");
+	f.foreign(["lookup", "foreign"]);
+	f.emit("session_tree");
+	assert.deepEqual(f.active, ["foreign"]);
+	assert.equal(f.owner.binding.acquire(), undefined);
+	assert.equal(f.owner.setActive(false), false);
+	f.owner.dispose();
+	assert(f.active.includes("lookup"));
+	f.foreign(["foreign"]);
+	lease.release();
+	f.emit("session_tree");
+	assert.deepEqual(f.active, ["foreign"], "disposed handlers and stale receipts stay inert");
+});
+
+function ownerFactory(pi: ExtensionAPI) {
+	let factory!: { create(pi: ExtensionAPI, options: { name: string; sourcePath: string }): ReturnType<typeof createCodeModeDirectBinding> };
+	pi.events.emit("@oai404iao/pi-code-mode:direct-owner/v1", { version: 1, accept(value: typeof factory) { factory = value; } });
+	return factory;
+}
+
+test("owner factory: budget counts live controls, not lifetime allocations", () => {
+	const f = fixture();
+	const close = installOwnerFactory(f.pi);
+	const factory = ownerFactory(f.pi);
+	for (let i = 0; i < 100; i++) factory.create(f.pi, { name: "lookup", sourcePath }).dispose();
+	const live = Array.from({ length: 64 }, () => factory.create(f.pi, { name: "lookup", sourcePath }));
+	assert.throws(() => factory.create(f.pi, { name: "lookup", sourcePath }), /full/);
+	live[0].dispose();
+	factory.create(f.pi, { name: "lookup", sourcePath });
+	close(); close();
+	assert.throws(() => factory.create(f.pi, { name: "lookup", sourcePath }), /disposed/);
+});
+
+test("owner factory: shutdown failure is retryable and blocks synchronous acquisition", () => {
+	const f = fixture();
+	const close = installOwnerFactory(f.pi);
+	const factory = ownerFactory(f.pi);
+	const control = factory.create(f.pi, { name: "lookup", sourcePath });
+	control.binding.acquire();
+	const write = f.pi.setActiveTools;
+	f.pi.setActiveTools = () => { throw new Error("restore failed"); };
+	assert.throws(close, /owner cleanup failed/);
+	assert.equal(ownerFactory(f.pi), undefined);
+	assert.throws(() => factory.create(f.pi, { name: "lookup", sourcePath }), /closing/);
+	f.pi.setActiveTools = write;
+	let reentries = 0;
+	f.pi.events.on("@oai404iao/pi-code-mode:visibility/v1", () => {
+		reentries++;
+		assert.throws(() => factory.create(f.pi, { name: "lookup", sourcePath }), /closing/);
+		close();
+	});
+	close();
+	assert.equal(reentries, 1);
+	assert(f.active.includes("lookup"));
+});
+
+test("owner factory: all controls close admission before any notification and cleanup continues after failure", () => {
+	const f = fixture();
+	const close = installOwnerFactory(f.pi);
+	const factory = ownerFactory(f.pi);
+	const first = factory.create(f.pi, { name: "lookup", sourcePath });
+	const second = factory.create(f.pi, { name: "lookup", sourcePath });
+	first.binding.acquire();
+	const write = f.pi.setActiveTools;
+	let checks = 0;
+	f.pi.setActiveTools = () => {
+		checks++;
+		assert.equal(second.binding.acquire(), undefined, "not-yet-disposed control must already be closed");
+		throw new Error("first restore failed");
+	};
+	assert.throws(close, AggregateError);
+	assert.equal(checks, 1);
+	assert.equal(second.activeIntent, undefined, "independent cleanup must not be skipped");
+	assert.equal(second.binding.acquire(), undefined);
+	f.pi.setActiveTools = write;
+	close();
+	assert.equal(first.activeIntent, undefined);
 });

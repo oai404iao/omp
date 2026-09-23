@@ -141,3 +141,27 @@ test("real Pi: replacing a direct definition cannot restore or hide it via an ol
 	await f.session.prompt("/code-mode off");
 	assert(!f.session.getActiveToolNames().includes("lookup"), "old receipt must not enable new definition");
 });
+
+for (const first of [false, true]) test(`real Pi tree: current intent wins with owner first=${first}`, async (t) => {
+	const f = await setup(t, { first, mode: "mixed" });
+	const tools = f.session.getAllTools().map(({ name, description, parameters }) => ({
+		name, description, parameters: structuredClone(parameters),
+	}));
+	const active = f.session.sessionManager.appendMessage({ role: "system", content: "", toolsAdded: tools, timestamp: Date.now() });
+	const hidden = f.session.sessionManager.appendMessage({
+		role: "system", content: "", toolsRemoved: [{ name: "lookup" }], timestamp: Date.now(),
+	});
+	f.owner.setActive(false);
+	await f.session.navigateTree(active, { summarize: false });
+	assert(!f.session.getActiveToolNames().includes("lookup"));
+	f.owner.setActive(true);
+	await f.session.navigateTree(hidden, { summarize: false });
+	assert(f.session.getActiveToolNames().includes("lookup"));
+	await f.session.prompt("/code-mode visibility hide-bridged");
+	await f.session.navigateTree(active, { summarize: false });
+	assert(!f.session.getActiveToolNames().includes("lookup"));
+	await f.session.prompt("/code-mode off");
+	await f.session.navigateTree(hidden, { summarize: false });
+	assert(f.session.getActiveToolNames().includes("lookup"));
+	assert.deepEqual(f.errors, []);
+});

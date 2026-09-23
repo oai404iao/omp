@@ -9,7 +9,7 @@ This dedicated activation checkout moves them to `publishable` and records
 their exact artifacts in the release lock. Its merge and actual protected
 publication still require separate approval.
 
-Ordinary preparation now includes all nine alpha packages: four immutable
+The bootstrap activation originally included nine alpha packages: four immutable
 `recover` dependencies plus five `publish` candidates. Do not republish the
 initial four, ignore dependencies, or replace locked artifacts. A known locked
 version returning E404 is pending verification, not a fresh publication candidate.
@@ -28,9 +28,12 @@ pins and rejects pin changes without a corresponding consumer version bump.
 Its tests version temporary fixtures; actual alpha versions belong in a reviewed
 version PR, never in an unreviewed direct main update.
 
-The approved preparation cohort is nine alpha packages (all workspaces except
-tree-continue). `.changeset/pre.json` records the `alpha` channel, while release
-artifacts use the `next` dist-tag. Limited real smoke on the immutable bootstrap
+The original preparation cohort was nine alpha packages. The current artifact
+selection contains eight publishable workspaces: keep-defaults is retired, while
+Code Mode and tree-continue remain private/blocked. Historical keep-defaults
+release locks are retained, but it must not enter new artifact batches.
+Prerelease artifacts use the `next` dist-tag when prerelease mode is active.
+Limited real smoke on the immutable bootstrap
 artifacts has been performed, with important harness/coverage limitations
 recorded in the activation audit; it is not universal endpoint acceptance.
 Remaining publication requires separate approval. The earlier
@@ -174,8 +177,8 @@ Release eligibility is explicit in two places:
      artifacts.
 2. only `blocked` packages may set `"private": true`.
 
-CI rejects mismatches. The guarded release scripts now select all nine packages
-other than `pi-tree-continue`, including the four verified Codex recovery nodes.
+CI rejects mismatches. The guarded release scripts select the eight publishable
+workspaces, excluding private Code Mode/tree-continue and retired keep-defaults.
 The historical manual releases below remain locked; they are not a live registry
 inventory. See the root README and activation audit for this alpha cohort.
 All future releases require a maintainer to manually dispatch and approve the
@@ -248,6 +251,25 @@ Official references:
 - [npm provenance](https://docs.npmjs.com/generating-provenance-statements/)
 
 ## Normal release flow
+
+### Pi 0.86.1 migration release note
+
+Include this retirement notice in the migration release announcement:
+`@oai404iao/pi-keep-defaults` is retired from this repository and future artifact
+batches. Existing users must remove their installed copy and fully restart Pi;
+`/reload` cannot reliably remove its old process-global patches. Pi 0.86.1 keeps
+ordinary model/thinking changes session-local, but the retired settings-file
+watcher's stronger protection against explicit saves and external edits is
+intentionally **not** retained. See the
+[migration instructions](pi-extensions/pi-keep-defaults/README.md).
+
+The last recorded stable release is `0.1.3`; there is no new retirement package
+version or changeset for the removed workspace. This change does not run
+`npm deprecate`, unpublish, or alter installed copies. Thus existing npm users
+will not receive a registry-level deprecation warning; any such operation needs
+separate publication authorization.
+
+### Release steps
 
 1. Add a changeset in each package-facing pull request:
 

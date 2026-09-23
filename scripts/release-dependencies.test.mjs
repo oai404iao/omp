@@ -47,7 +47,7 @@ test("the four verified Codex packages enter guarded batches without admitting t
   assert.equal(tree.releaseStatus, "blocked");
   assert.equal(readManifest(tree.directory).private, true);
   assert.ok(!artifactWorkspaces(true).includes(tree));
-  assert.equal(artifactWorkspaces().length, 9);
+  assert.equal(artifactWorkspaces().length, 8);
   assert.deepEqual(artifactWorkspaces(), artifactWorkspaces(true));
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces()));
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces(true)));

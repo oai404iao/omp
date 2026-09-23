@@ -48,7 +48,8 @@ Optional `<agentDir>/extensions/pi-code-mode/config.json`:
   "hostPath": "/absolute/path/to/patched/codex-code-mode-host",
   "protocol": "auto",
   "visibility": "mixed",
-  "maxCells": 1
+  "maxCells": 1,
+  "requiredPolicies": []
 }
 ```
 
@@ -59,6 +60,16 @@ fail closed. There is no project-level config or persistent grant in this file:
 With hostPath configured, `/code-mode on` can ask for a current-session grant.
 `maxCells` is an integer 1–4, default 1; opt into two cells with `"maxCells": 2`
 or `--code-mode-max-cells 2`. This changes shared Host slots, not authority.
+
+`requiredPolicies` lists at most 16 distinct, exact policy IDs, for example
+`["permission__guard"]`. It only restricts admission, never grants tools.
+Missing, failed, incompatible or not-ready required policies prevent **all**
+nested work (including local adapters) before a Host/cell is started.
+Policy IDs can be a single existing identifier or `owner__policy`; no wildcards.
+Discovery failures also cancel retained cells and release cooperative hiding.
+This protection requires the I0-capable consumer; an old v1 consumer cannot
+infer that an absent extension was required. There is no transparent downgrade
+for configurations requiring this guarantee.
 
 `/code-mode doctor` checks the pinned file/hash/platform, user systemd manager,
 available controllers, configured protocol and available/granted contributions.
@@ -131,6 +142,13 @@ nothing and does **not** itself kill the cell. Pi agent interruption/Esc cancels
 all session cells separately, even after `exec` returned. Normal `agent_end` does
 not: cells can continue across model turns and later user prompts.
 
+Code Mode contributes stable instructions through Pi's `code_mode` system-prompt
+section, without forcing a replacement for the full prompt. Current cell IDs and
+state remain in `exec`/`wait` results and `/code-mode cells`, not in per-turn prompt
+text. Disabling or losing availability removes the section on the next prompt.
+Recorded sections are model context, never authority to restore grants or cells.
+Another extension's explicitly forced prompt still takes precedence.
+
 `wait({cell_id,terminate:true})` first stops dispatch and aborts nested work,
 then terminates the Host cell and waits for already-started effects to settle.
 `terminating` is not a claim of cleanup. An explicit successful termination
@@ -194,11 +212,18 @@ resetting cells, store or grants; reload returns to the CLI value.
 - `grammar`: the same capability checks, but failure blocks `exec` **before
   starting a Host**, rather than silently downgrading. `wait` remains available.
 
-Custom provider streams must opt in on the synchronous
-`@oai404iao/pi-code-mode:transport/v1` event: payload `{version:1,accept}`
-accepts the **exact registered active `streamSimple` function**, with at most
-16 replies. Both legacy and native Provider registrations are checked.
-The Codex core shim participates; a provider-name match alone is insufficient.
+Custom provider streams opt in on synchronous `transport/v2` (under the
+`@oai404iao/pi-code-mode:` prefix). Payload `{protocol:2,accept}` accepts a
+capability with the **exact registered active `streamSimple` function**,
+`input:"pi-transcript/1"`, `formats:["json","grammar"]`, a projection
+(`"effective-checkpoint"` or `"transcript-deltas"`), and verified semantics
+`sections`, `tool-removal`, `tool-redefinition`, `forced-prompt`,
+`compaction-checkpoint`, `exec-history`. There are at most 16 replies.
+Codex advertises effective-checkpoint projection, not cached-prefix preservation.
+Missing v2 matches may use the audited `transport/v1` exact-stream handshake
+(`{version:1,accept(stream)}`); a conflicting or incomplete matching v2 declaration
+cannot downgrade through its v1 mirror. Both legacy and native Provider
+registrations are checked; a provider-name match alone is insufficient.
 Native Pi adapters require no extra handshake. This is an interoperability
 contract among trusted extensions, not an isolation boundary.
 
@@ -231,10 +256,27 @@ reset volatile cells/store according to the lifecycle above.
 
 Tools and policies can declare `approval: "user"` (or a custom provider ID).
 Register custom providers with `registerCodeModeApproval(pi, { id, approve })`
-from the public `/contributions` export. Discovery uses
-`@oai404iao/pi-code-mode:approvals/v1`; disposal invalidates old cell snapshots.
+from the public `/contributions` export. Discovery uses `discover/v2` with an
+`approvals/v1` mirror; disposal invalidates old cell snapshots.
 Missing providers, denial, exceptions, non-`true` results and cancellation fail
 closed. No approval is implicitly added to existing grants/tools.
+
+The registration helpers now negotiate `approval/1` through a separate
+`discover/v2` channel. Older v1 consumers receive only approval-free tools;
+an approval-dependent global policy supplies a v1 `before` deny guard instead
+of disappearing. The current consumer accepts the audited v1 baseline too.
+Exact per-discovery registration receipts suppress duplicate legacy mirrors;
+receipts are neither grants nor approval decisions. Semantic refresh first
+withdraws the old offer and notifies v1 consumers, then publishes a new revision.
+Do not mutate a registered tool/policy in place.
+
+V2 also supports general `requires` and availability declarations, stable
+consumer-instance generations, registration revision checks and classified
+refresh. User-configured `requiredPolicies` supplies
+the independent expectation needed when a producer never loads or throws before
+offering its guard. Global policy readiness failures reject the entire catalog,
+even when not explicitly listed; a missing policy's former presence alone is not
+a durable expectation.
 
 Order: normalize/freeze/validate → before policies → deduplicated approvals →
 execution scheduler → invoke → after policies. Approval sees the same frozen
@@ -279,6 +321,81 @@ multimodal/control contracts are not silently converted to text.
 These Codex contributions now offer cooperative direct bindings: `hide-bridged`
 hides explicitly granted patch/standalone-search counterparts. Owner activation
 still determines logical availability; hosted/image tools are never claimed.
+
+## V2 author contract
+
+The public `/contributions` export includes `ConsumerHello`, `Registration`,
+`DiscoveryOffer`, `DiscoveryReceipt`, `Availability`, `ContributionChange` and
+`FEATURES`. Providers and individual tools may declare `requires: ["feature/1"]`
+and `availability: {state,reason?}`. States are `available`, `unavailable`,
+`not-ready`, or `failed`. Tool-level `requiredPolicies` restricts admission to
+those exact guards; it never grants tools. Policies may also require features.
+`/code-mode tools` and `/code-mode doctor` show availability/compatibility and
+exact grant status without dumping unauthorized schemas into model prompts.
+
+Consumer IDs persist only for the current extension instance. Generations
+advance on authority/lifecycle changes; new/resume/fork/reload instances get new
+IDs. Receipts remain per-discovery object evidence and are never persisted.
+Registration revisions cannot roll back, including across unavailable offers;
+same-revision executable replacement is rejected. The bounded history accepts
+at most 256 registration identities per consumer instance, and helpers track at
+most 64 consumer instances. Collection accepts at most 32 providers, 64 total
+tool declarations (including unavailable ones), and 16 each of policy, approval
+and observer records. Duplicate/conflicting mirrors fail closed.
+
+Helper tool registrations expose `refresh(tools, "presentation")` for changes
+limited to descriptions/output hints. Executable schema, effects, requirements,
+prepare/invoke functions and direct binding identities cannot change through
+that path. The consumer also compares executable snapshots rather than trusting
+the event label. Default `refresh(tools)` remains an execution change.
+To update provider-wide requirements or availability, pass a replacement
+`{id,tools,requires?,availability?}` instead of the tools array; `id` must stay
+unchanged. Do not mutate the previous declaration in place.
+`changed/v2` reports registration, kind and phase; helpers also emit the v1
+invalidation required by legacy consumers. Execution/policy/approval changes
+revoke synchronously and coalesce teardown, while diagnostics/presentation
+preserve live cells and store. Disposed observers stop receiving new receipts.
+Unclassified legacy changes remain conservative full invalidations.
+
+Owners that cannot confirm effect settlement must throw `unsettledEffect(message)`
+from `/contributions`. Across physical installations its structural discriminator
+is `{code:"PI_CODE_MODE_UNSETTLED_EFFECT",version:1,message:string}`; matching
+does not depend on `instanceof`. It blocks queued effects and poisons the session.
+Do not use it for ordinary failures whose effects have settled. Result adapters
+must explicitly return `{value,usage?}` with bounded JSON, not blindly expose
+native `details`, drop media, or swallow agent-control results.
+
+The Codex structural client implements v2 plus a legacy-safe v1 mirror without
+a dependency on this private package. The standalone inventory example below
+demonstrates a v2-only owner; an old consumer leaves it direct rather than
+guessing an equivalent nested executor.
+
+## Explicit I3 pilots (off by default)
+
+```sh
+pi -e ./pi-extensions/pi-code-mode \
+  -e ./pi-extensions/pi-code-mode/examples/inventory.ts \
+  -e ./pi-extensions/pi-code-mode/examples/pi-builtin-ls.ts \
+  --code-mode-host /absolute/path/to/pinned-host \
+  --code-mode-read-root "$PWD" \
+  --code-mode-tools inventory__lookup,pi_builtin__ls
+```
+
+- `inventory.ts` is a standalone extension with no Code Mode import or
+  dependency. Its direct `inventory_lookup` and nested `inventory__lookup` share
+  the same in-memory query and validation. It stays direct without Code Mode.
+- `registerPiBuiltinLs(pi)` from `/builtin-adapters` explicitly installs the
+  `pi_builtin__ls` contribution. Importing the main extension does not install
+  it; registration does not grant it. It creates Pi's **local builtin** ls for
+  the invocation cwd; it does not call, hide or replace a registered ls/SSH/
+  sandbox override, and does not inherit Pi hooks or Code Mode root confinement.
+  The exact grant permits current-user local listing, including absolute paths
+  outside the root. Defaults are 500 entries/50 KB; mapping preserves text,
+  entry limits and truncation counters without exposing arbitrary `details`.
+  The bridge's separate JSON byte budget still applies.
+
+No find/grep/read adapter, media adapter, or subagent query/control adapter is
+installed by these pilots.
 
 ## Local adapters
 
@@ -467,6 +584,24 @@ is never re-enabled by an old receipt.
 Cleanup attempts all owners; failures are reported and retained for retry rather
 than silently claiming restoration succeeded.
 
+Same-instance `/tree` replay does not replace explicit owner intent. Live leases
+stay hidden, current explicit inactivity wins over historical activation, and
+released restoration survives historical omission. Codex also recomputes current
+profile restrictions and native edit/write suppression. This does not persist
+intent or authority across new/resumed/forked/reloaded extension instances.
+Failed owner disposal retains tree observation and its release receipt, while
+closing controls/factories refuse new acquisition. Factory capacity counts live
+controls rather than historical allocations.
+
+Factory shutdown closes **every** control before any restoration callback.
+Independent owners and native suppression restoration are attempted even when
+one receipt fails. Failed receipts retain a retry path after foreign replacement
+as well as during shutdown; success is not reported for partial cleanup.
+
+Code Mode's own exec/wait registrations use instance-local schema references
+and live source/metadata fingerprints. Matching descriptions or cloned historical
+declarations cannot claim ownership, refresh a replacement, or toggle it.
+
 Pi 0.86.1 has no active-tools-changed event or global visibility lock.
 `registerTool` may reactivate names selected by `--tools`; reload re-enables
 extension definitions. Owner `reconcile()` and Code Mode's pre-request-safe
@@ -499,6 +634,17 @@ Hooks run in sorted policy-ID order, with frozen data and a five-second signal
 budget. They must cooperate with cancellation; use policy hooks for checks/
 redaction, not independent side effects. Discovery caps: 32 providers, 64 tools,
 16 policies; schema 8 KiB, description 2000 characters, entire catalog 24 KiB.
+
+For initialization that can fail, use
+`registerCodeModePolicy(pi, {id, resolve() { return {id, before, after}; }})`.
+Resolution is synchronous and performs no I/O. The helper announces not-ready
+before resolving and converts failures to a bounded failed record; it does not
+rely on Pi propagating event-listener exceptions. Legacy consumers receive a
+deny guard for this resolver form. The callable disposer also has `refresh()`:
+call it after changing policy semantics/readiness, before allowing further
+effects; it withdraws the old revision and emits v1 revocation before publishing
+the next one. Do not silently mutate guards captured by running cells.
+Use `requiredPolicies` in addition to this helper to cover a missing producer.
 
 `registerCodeModeObserver(pi,{id,complete(receipt,signal)})` returns a disposer.
 This is a separate, optional diagnostic protocol (at most 16 observers), **not**

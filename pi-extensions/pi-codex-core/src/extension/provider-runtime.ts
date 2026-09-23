@@ -1,5 +1,5 @@
 import {
-	streamSimpleOpenAICodexResponses, streamSimpleOpenAIResponses,
+	collapseSystemMessages, streamSimpleOpenAICodexResponses, streamSimpleOpenAIResponses,
 	type Api, type TranscriptContext, type Model, type SimpleStreamOptions,
 } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -27,9 +27,12 @@ export function registerResponsesProviderRuntime(
 			|| !settings.modelProfile?.effective.enabled
 			|| !settings.providerShimActive
 		) {
+			// The exact stream advertises checkpoint projection even when a
+			// native model supports preserving intermediate system messages.
+			const checkpoint = collapseSystemMessages(context);
 			return model.api === "openai-codex-responses"
-				? streamSimpleOpenAICodexResponses(model as Model<"openai-codex-responses">, context, streamOptions)
-				: streamSimpleOpenAIResponses(model as Model<"openai-responses">, context, streamOptions);
+				? streamSimpleOpenAICodexResponses(model as Model<"openai-codex-responses">, checkpoint, streamOptions)
+				: streamSimpleOpenAIResponses(model as Model<"openai-responses">, checkpoint, streamOptions);
 		}
 		return createCodexStream(model, projectCodexTranscript(context), streamOptions, {
 			ownsNativeTool: options.ownsNativeTool,
@@ -42,6 +45,13 @@ export function registerResponsesProviderRuntime(
 	const stopGrammarDiscovery = pi.events.on("@oai404iao/pi-code-mode:transport/v1", (message) => {
 		const request = message as { version?: number; accept?: (stream: unknown) => void } | undefined;
 		if (request?.version === 1 && typeof request.accept === "function") request.accept(streamSimple);
+	});
+	const stopTranscriptDiscovery = pi.events.on("@oai404iao/pi-code-mode:transport/v2", (message) => {
+		const request = message as { protocol?: number; accept?: (capability: unknown) => void } | undefined;
+		if (request?.protocol === 2 && typeof request.accept === "function") request.accept({
+			stream: streamSimple, input: "pi-transcript/1", formats: ["json", "grammar"], projection: "effective-checkpoint",
+			semantics: ["sections", "tool-removal", "tool-redefinition", "forced-prompt", "compaction-checkpoint", "exec-history"],
+		});
 	});
 
 	type CodexResponsesApi = "openai-responses" | "openai-codex-responses";
@@ -82,6 +92,7 @@ export function registerResponsesProviderRuntime(
 	});
 	pi.on("session_shutdown", async (_event, ctx) => {
 		stopGrammarDiscovery();
+		stopTranscriptDiscovery();
 		prewarm.reset();
 		presentation?.flush();
 		closeProviderWebSocketSessions(ctx?.sessionManager?.getSessionId?.());

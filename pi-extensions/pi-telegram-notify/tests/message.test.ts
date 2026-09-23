@@ -4,8 +4,6 @@ import {
 	formatNotification,
 	isSubagentSession,
 	lastAssistantMessageEntry,
-	questionSummaryFromInput,
-	questionSummaryFromPromptEvent,
 	terminalNotificationFromMessage,
 	truncateSummary,
 } from "../src/message.js";
@@ -121,16 +119,5 @@ test("selects the last assistant message entry from the active branch", () => {
 			{ type: "label", id: "label", parentId: last.id, timestamp: "2026-01-01T00:00:04.000Z", targetId: last.id, label: "active" },
 		] as any),
 		{ id: last.id, message: last.message },
-	);
-});
-
-test("uses the first question for both supported ask-user-question shapes", () => {
-	assert.equal(
-		questionSummaryFromInput({ questions: [{ question: "Should I continue?" }] }),
-		"Should I continue?",
-	);
-	assert.equal(
-		questionSummaryFromPromptEvent({ questions: [{ question: "Which option?" }] }),
-		"Which option?",
 	);
 });

@@ -197,7 +197,7 @@ function registerCoreTools(pi: ExtensionAPI): void {
 	} as never);
 	registerCodeModeOwnedTool(pi, createApplyPatchToolDefinition({
 		deferRendering: loadSettings().deferApplyPatchRendering,
-	}));
+	}), "codex_core");
 }
 
 

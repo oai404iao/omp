@@ -26,6 +26,8 @@ function fakePi() {
 		},
 		registerMessageRenderer() {},
 		registerTool(tool: any) { tools.push(tool); },
+		getAllTools() { return tools.map(tool => ({ ...tool,
+			sourceInfo: { path: "/fixture/extension.ts", source: "fixture", scope: "temporary", origin: "top-level" } })); },
 		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },
 		getActiveTools() { return activeTools; },
 		setActiveTools(next: string[]) { activeTools = next; this.activeTools = next; },

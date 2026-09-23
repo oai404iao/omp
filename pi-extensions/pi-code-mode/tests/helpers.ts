@@ -24,6 +24,7 @@ export async function piSession(t: TestContext, options: {
 	protocol?: string; grammar?: boolean; factories?: ExtensionFactory[];
 	expectedToolConflict?: string;
 	maxCells?: number;
+	sessionManager?: SessionManager;
 } = {}) {
 	const cwd = options.cwd ?? await scratch("pi");
 	const agentDir = join(cwd, "agent");
@@ -66,7 +67,7 @@ export async function piSession(t: TestContext, options: {
 	const errors: string[] = [];
 	const { session } = await createAgentSession({
 		cwd, agentDir, modelRuntime, model: modelRuntime.getModel("s1-fixture", "s1"),
-		resourceLoader: loader, sessionManager: SessionManager.inMemory(cwd), settingsManager, thinkingLevel: "off",
+		resourceLoader: loader, sessionManager: options.sessionManager ?? SessionManager.inMemory(cwd), settingsManager, thinkingLevel: "off",
 		tools: options.activeTools,
 	});
 	await session.bindExtensions({ mode: "print", onError: (error) => errors.push(error.error) });

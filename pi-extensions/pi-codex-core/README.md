@@ -20,6 +20,23 @@ history switching. Optional Code Mode discovery offers `codex_core__apply_patch`
 using the existing executor (not root-confined); an exact Code Mode grant is
 required. Core has no dependency on Code Mode and does not hide the direct tool.
 
+`apply_patch` participates in Pi's native per-file mutation queues across its
+whole read/modify/write window. Multi-file locks follow canonical target order.
+Use one consistent path for each target within a patch: distinct paths aliasing
+the same file are rejected before mutation, including hardlinks, aliases through
+directory symlinks and move destinations. Existing targets also use device/inode
+snapshots for alias and replacement checks, without changing native path-based
+lock keys or lock ordering. Repeated actions on the same path remain valid.
+Unresolvable identities or identity changes while waiting fail closed; retry
+with stable paths rather than bypassing the queue.
+
+These queues coordinate participating tools, not arbitrary filesystem writers.
+Pi uses lexical keys for nonexistent files, so separate invocations creating a
+new file through different directory aliases do not have guaranteed shared
+locking. Separate calls through different hardlinks likewise do not share a
+native queue. Use consistent paths across tools as well; concurrent directory/symlink
+replacement is not an atomic filesystem isolation guarantee.
+
 Uses the existing
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json` configuration
 and Pi authentication. Set global `config.json.webSocketEnabled` to `false` to

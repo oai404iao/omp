@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createEventBus, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveGrammarConstrainedSampling } from "@earendil-works/pi-ai/api/constrained-sampling";
-import { decodeExec, encodeExec, EXEC_SAMPLING, projectExecHistory, protocolMode, resolveProtocol, TRANSPORT_DISCOVER } from "../src/protocol.ts";
+import { decodeExec, encodeExec, EXEC_SAMPLING, projectExecHistory, protocolMode, resolveProtocol, TRANSPORT_DISCOVER, TRANSPORT_DISCOVER_V2, TRANSCRIPT_SEMANTICS } from "../src/protocol.ts";
 import { execParameters } from "../src/public-tools.ts";
 import { piSession } from "./helpers.ts";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
@@ -14,6 +14,29 @@ function assistant(content: AssistantMessage["content"]): AssistantMessage {
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
 }
+
+test("v2 transport: exact stream, bounded declarations, required semantics and no false v1 downgrade", () => {
+	const pi = { events: createEventBus() } as unknown as ExtensionAPI;
+	const stream = () => {};
+	const ctx = {
+		model: { provider: "fixture", api: "openai-responses", compat: { supportsOpenAIGrammarTools: true } },
+		modelRegistry: { getRegisteredProviderConfig: () => ({ streamSimple: stream }) },
+		sessionManager: { getBranch: () => [] },
+	} as unknown as ExtensionContext;
+	let semantics: readonly string[] = TRANSCRIPT_SEMANTICS;
+	pi.events.on(TRANSPORT_DISCOVER, (value) => (value as any).accept(stream));
+	pi.events.on(TRANSPORT_DISCOVER_V2, (value) => (value as any).accept({
+		stream, input: "pi-transcript/1", formats: ["json", "grammar"], projection: "effective-checkpoint", semantics,
+	}));
+	assert.match(resolveProtocol(pi, ctx, "auto").reason, /effective-checkpoint/);
+	semantics = ["sections"];
+	assert.equal(resolveProtocol(pi, ctx, "auto").grammar, false, "an invalid v2 offer cannot use its legacy mirror");
+	semantics = TRANSCRIPT_SEMANTICS;
+	pi.events.on(TRANSPORT_DISCOVER_V2, (value) => (value as any).accept({
+		stream, input: "pi-transcript/1", formats: ["json", "grammar"], projection: "effective-checkpoint", semantics,
+	}));
+	assert.equal(resolveProtocol(pi, ctx, "auto").grammar, false, "duplicate stream owners fail closed");
+});
 
 test("protocol: JSON default and a provider-neutral single-string grammar contract", () => {
 	assert.equal(protocolMode(undefined), "json");

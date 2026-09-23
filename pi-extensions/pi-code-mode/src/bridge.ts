@@ -5,7 +5,7 @@ import type { CodeModeTool, CodeModePolicy, CodeModeObserver, CodeModeApproval, 
 import { ApprovalQueue } from "./approvals.ts";
 import { frozen } from "./catalog.ts";
 import { Scheduler } from "./scheduler.ts";
-import { UnsettledEffect } from "./process.ts";
+import { isUnsettledEffect, unsettledEffect } from "./errors.ts";
 import { LIMITS, errorText } from "./limits.ts";
 import { observeCompletion } from "./observers.ts";
 
@@ -158,10 +158,10 @@ export class ToolBridge {
 					return value;
 				} catch (error) {
 					// Must happen BEFORE Scheduler releases the exclusive slot/pumps.
-					if (error instanceof UnsettledEffect) {
-						this.unsettled = error;
-						this.scheduler.stop(error);
-						this.fatal(error);
+					if (isUnsettledEffect(error)) {
+						this.unsettled = unsettledEffect(error.message);
+						this.scheduler.stop(this.unsettled);
+						this.fatal(this.unsettled);
 					}
 					throw error;
 				} finally { this.running--; }
