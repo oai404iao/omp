@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-code-mode",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Independent provider-neutral JavaScript tool orchestration for Pi, with supervised execution and explicitly authorized local reads.",
   "type": "module",

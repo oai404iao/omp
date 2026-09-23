@@ -1,5 +1,16 @@
 # @oai404iao/pi-codex-imagegen
 
+## 0.2.1
+
+### Patch Changes
+
+- 8af3b86: Update exact workspace dependency pins for the pending dependency releases.
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+  - @oai404iao/pi-codex-runtime@0.3.1
+
 ## 0.2.0
 
 ### Minor Changes

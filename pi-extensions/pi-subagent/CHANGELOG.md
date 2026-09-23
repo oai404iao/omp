@@ -1,5 +1,16 @@
 # @oai404iao/pi-subagent
 
+## 0.5.1
+
+### Patch Changes
+
+- 8af3b86: Use Pi 0.86.1's native interfaces: order multi-file mutation locks by canonical
+  target identity, reject conflicting aliases and identity drift without an unqueued
+  fallback, contribute stable Code Mode prompt sections,
+  and enforce child report exclusions at registry creation. Telegram waiting
+  notifications now follow native blocking-UI events for all extension dialogs,
+  using their titles rather than tool-name timers or rpiv questionnaire summaries.
+
 ## 0.5.0
 
 ### Minor Changes

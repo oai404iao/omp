@@ -1,5 +1,21 @@
 # @oai404iao/pi-codex-minimal-tools
 
+## 3.0.1
+
+### Patch Changes
+
+- 8af3b86: Update exact workspace dependency pins for the pending dependency releases.
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+  - @oai404iao/pi-codex-runtime@0.3.1
+  - @oai404iao/pi-codex-core@0.3.1
+  - @oai404iao/pi-codex-web-search@0.2.1
+  - @oai404iao/pi-codex-imagegen@0.2.1
+
 ## 3.0.0
 
 ### Major Changes

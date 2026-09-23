@@ -1,5 +1,40 @@
 # @oai404iao/pi-code-mode
 
+## 0.3.0
+
+### Minor Changes
+
+- 8af3b86: Complete v2 contribution declarations, bounded consumer generations/revision
+  checks, public structural unsettled-effect errors, classified/coalesced refresh,
+  Codex's optional structural client and transcript-aware transport negotiation.
+  Add explicit, default-off inventory and native-local ls pilots with exact grants;
+  keep subagent, multimedia and control tools direct.
+
+### Patch Changes
+
+- 8af3b86: Complete fail-closed required-policy admission, policy readiness and legacy
+  revocation gates. Close all owner controls before shutdown callbacks, retain
+  cleanup retries after foreign replacements, and attempt independent cleanup and
+  native mutation-tool restoration even when another receipt fails.
+- 8af3b86: Gate approval-dependent Code Mode contributions from legacy consumers, retain
+  retryable owner cleanup and live-control budgets, strengthen exec/wait ownership,
+  and reconcile current owner intent and Codex tool suppression after tree replay.
+- 8af3b86: Reject same-patch hardlink aliases and inode replacement while acquiring native
+  mutation queues. Reset native-tool suppression receipts on session/tree changes,
+  bind nested direct-tool visibility to the registered provider owner, reject
+  duplicate owned definitions, and validate feature requirement syntax before
+  discovery offers.
+  
+  Keep the Codex stream's effective-checkpoint contract on native fallback paths
+  as well as enabled transports. Correct Telegram's package description to describe
+  native blocking extension UI prompt notifications.
+- 8af3b86: Use Pi 0.86.1's native interfaces: order multi-file mutation locks by canonical
+  target identity, reject conflicting aliases and identity drift without an unqueued
+  fallback, contribute stable Code Mode prompt sections,
+  and enforce child report exclusions at registry creation. Telegram waiting
+  notifications now follow native blocking-UI events for all extension dialogs,
+  using their titles rather than tool-name timers or rpiv questionnaire summaries.
+
 ## 0.2.0
 
 ### Minor Changes

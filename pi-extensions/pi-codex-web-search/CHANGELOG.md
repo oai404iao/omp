@@ -1,5 +1,24 @@
 # @oai404iao/pi-codex-web-search
 
+## 0.2.1
+
+### Patch Changes
+
+- 8af3b86: Reject same-patch hardlink aliases and inode replacement while acquiring native
+  mutation queues. Reset native-tool suppression receipts on session/tree changes,
+  bind nested direct-tool visibility to the registered provider owner, reject
+  duplicate owned definitions, and validate feature requirement syntax before
+  discovery offers.
+  
+  Keep the Codex stream's effective-checkpoint contract on native fallback paths
+  as well as enabled transports. Correct Telegram's package description to describe
+  native blocking extension UI prompt notifications.
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+- Updated dependencies [8af3b86]
+  - @oai404iao/pi-codex-runtime@0.3.1
+
 ## 0.2.0
 
 ### Minor Changes
