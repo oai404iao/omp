@@ -157,6 +157,25 @@ test("v2: explicit and implicit policy approval requirements compose", () => {
 	assert.equal(collect(pi).policies[0].approval, "permit");
 });
 
+test("structural client rejects malformed features before offering and preserves unrelated providers", async () => {
+	for (const feature of ["", "future", "Future/1", "future/0", "future/01", "future feature/1", "x".repeat(129) + "/1"]) {
+		const f = fixture();
+		registerCodeModeTools(f.pi, { id: "healthy", tools: [tool] });
+		registerCodeModeContribution(f.pi, "invalid", () => [
+			{ ...tool, name: "valid", effect: "read" },
+			{ ...tool, effect: "read", requires: [feature] },
+		]);
+		await f.emit("session_start");
+		const catalog = collect(f.pi);
+		assert.deepEqual(catalog.tools.map((item) => item.name), ["healthy__lookup"], feature);
+		assert(catalog.diagnostics?.some((item) => item.reason === "owner-not-ready"));
+		const legacy: unknown[] = [];
+		f.pi.events.emit(DISCOVER, { version: 1, provider: (value: unknown) => legacy.push(value), policy() {} });
+		assert.equal(legacy.length, 1, "only the unrelated healthy provider may offer to legacy consumers");
+		await f.emit("session_shutdown");
+	}
+});
+
 test("structural client resolves inline executors once per revision, not once per discovery", async () => {
 	const f = fixture();
 	let resolutions = 0;

@@ -1,5 +1,5 @@
 import {
-	streamSimpleOpenAICodexResponses, streamSimpleOpenAIResponses,
+	collapseSystemMessages, streamSimpleOpenAICodexResponses, streamSimpleOpenAIResponses,
 	type Api, type TranscriptContext, type Model, type SimpleStreamOptions,
 } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -27,9 +27,12 @@ export function registerResponsesProviderRuntime(
 			|| !settings.modelProfile?.effective.enabled
 			|| !settings.providerShimActive
 		) {
+			// The exact stream advertises checkpoint projection even when a
+			// native model supports preserving intermediate system messages.
+			const checkpoint = collapseSystemMessages(context);
 			return model.api === "openai-codex-responses"
-				? streamSimpleOpenAICodexResponses(model as Model<"openai-codex-responses">, context, streamOptions)
-				: streamSimpleOpenAIResponses(model as Model<"openai-responses">, context, streamOptions);
+				? streamSimpleOpenAICodexResponses(model as Model<"openai-codex-responses">, checkpoint, streamOptions)
+				: streamSimpleOpenAIResponses(model as Model<"openai-responses">, checkpoint, streamOptions);
 		}
 		return createCodexStream(model, projectCodexTranscript(context), streamOptions, {
 			ownsNativeTool: options.ownsNativeTool,

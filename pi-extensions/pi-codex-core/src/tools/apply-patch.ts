@@ -1,4 +1,4 @@
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { applyPatch, resolvePatchPath, type ApplyPatchResult } from "../patch/apply.js";
@@ -32,6 +32,7 @@ interface MutationTarget {
 	path: string;
 	key: string;
 	identity: string;
+	inode?: string;
 }
 
 async function missingTargetIdentity(path: string): Promise<string> {
@@ -56,7 +57,8 @@ async function missingTargetIdentity(path: string): Promise<string> {
 async function mutationTarget(path: string): Promise<MutationTarget> {
 	try {
 		const key = await realpath(path);
-		return { path, key, identity: key };
+		const info = await stat(key, { bigint: true });
+		return { path, key, identity: key, inode: `${info.dev}:${info.ino}` };
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		return { path, key: path, identity: await missingTargetIdentity(path) };
@@ -70,9 +72,13 @@ export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string
 	try {
 		targets = await Promise.all(applyPatchTargetPaths(params.input, cwd).map(mutationTarget));
 		const identities = new Set<string>();
+		const inodes = new Set<string>();
 		for (const target of targets) {
-			if (identities.has(target.identity)) throw new Error(`Patch paths alias the same target: ${target.path}`);
+			if (identities.has(target.identity) || (target.inode !== undefined && inodes.has(target.inode))) {
+				throw new Error(`Patch paths alias the same target: ${target.path}`);
+			}
 			identities.add(target.identity);
+			if (target.inode !== undefined) inodes.add(target.inode);
 		}
 		// Order by semantic identity even for missing files: Pi's queue key can
 		// become canonical when another mutation creates a file while we wait.
@@ -86,7 +92,7 @@ export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string
 		signal?.throwIfAborted();
 		for (const target of targets) {
 			const current = await mutationTarget(target.path);
-			if (current.key !== target.key || current.identity !== target.identity) {
+			if (current.key !== target.key || current.identity !== target.identity || current.inode !== target.inode) {
 				throw new Error(`Patch target identity changed while acquiring mutation queues: ${target.path}`);
 			}
 		}

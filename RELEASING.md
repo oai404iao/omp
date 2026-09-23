@@ -252,6 +252,25 @@ Official references:
 
 ## Normal release flow
 
+### Pi 0.86.1 migration release note
+
+Include this retirement notice in the migration release announcement:
+`@oai404iao/pi-keep-defaults` is retired from this repository and future artifact
+batches. Existing users must remove their installed copy and fully restart Pi;
+`/reload` cannot reliably remove its old process-global patches. Pi 0.86.1 keeps
+ordinary model/thinking changes session-local, but the retired settings-file
+watcher's stronger protection against explicit saves and external edits is
+intentionally **not** retained. See the
+[migration instructions](pi-extensions/pi-keep-defaults/README.md).
+
+The last recorded stable release is `0.1.3`; there is no new retirement package
+version or changeset for the removed workspace. This change does not run
+`npm deprecate`, unpublish, or alter installed copies. Thus existing npm users
+will not receive a registry-level deprecation warning; any such operation needs
+separate publication authorization.
+
+### Release steps
+
 1. Add a changeset in each package-facing pull request:
 
    ```bash

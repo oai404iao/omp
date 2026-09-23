@@ -20,7 +20,7 @@ export interface CodexBroker {
 	readonly closed: boolean;
 	readonly tools: Map<PackageToolName, InstalledTool>;
 	coreEnabled: boolean;
-	codeModeDefinitions?: Map<string, { parameters: unknown; description: string }>;
+	codeModeDefinitions?: Map<string, { parameters: unknown; description: string; providerId: string }>;
 	claim(name: string): boolean;
 	addPresentation(name: string, presentation: ProviderPresentation): void;
 	presentation: ProviderPresentation;

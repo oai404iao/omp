@@ -7,13 +7,16 @@ import { randomUUID } from "node:crypto";
 /** Unique public schema reference proves which registration won Pi's registry.
  * If a future Pi clones metadata, cooperation fails closed instead of claiming
  * a name/source belonging to another extension. */
-export function registerCodeModeOwnedTool(pi: ExtensionAPI, definition: Record<string, unknown>): void {
+export function registerCodeModeOwnedTool(pi: ExtensionAPI, definition: Record<string, unknown>, providerId: string): void {
 	if (typeof definition.name !== "string" || typeof definition.description !== "string"
-		|| !definition.parameters || typeof definition.parameters !== "object") throw new Error("Invalid owned Code Mode tool definition");
+		|| !definition.parameters || typeof definition.parameters !== "object"
+		|| !/^[a-z][a-z0-9_]{0,39}$/.test(providerId)) throw new Error("Invalid owned Code Mode tool definition");
 	const broker = getCodexBroker(pi);
+	const definitions = broker.codeModeDefinitions ??= new Map();
+	if (definitions.has(definition.name)) throw new Error(`Duplicate Code Mode tool definition: ${definition.name}`);
 	const owned = { ...definition, name: definition.name, description: definition.description, parameters: { ...definition.parameters } };
-	(broker.codeModeDefinitions ??= new Map()).set(owned.name, owned);
 	pi.registerTool(owned as never);
+	definitions.set(owned.name, { ...owned, providerId });
 }
 
 export interface NestedCodeModeContext {
@@ -57,16 +60,24 @@ export function registerCodeModeContribution(pi: ExtensionAPI, id: string,
 		const broker = getCodexBroker(pi);
 		const offered = context ? (resolved ??= tools(context).map((tool) => ({ ...tool }))) : [];
 		if (offered.length > 64) throw new Error("Code Mode declaration budget exceeded");
-		return { id, tools: offered.filter((tool) => !legacy || (!tool.requires?.length && !tool.requiredPolicies?.length
-			&& tool.approval === undefined && (!tool.availability || tool.availability.state === "available"))).map((tool) => {
+		const declarations = offered.map((tool) => {
+			if (tool.requires !== undefined && (!Array.isArray(tool.requires) || tool.requires.length > 32))
+				throw new Error("Invalid Code Mode feature requirements");
 			const requires = [...new Set([...(tool.requires ?? []), ...(tool.approval ? ["approval/1"] : []),
 				...(tool.requiredPolicies?.length ? ["required-policies/1"] : [])])];
-			if (requires.length > 32 || requires.some((feature) => typeof feature !== "string" || feature.length > 128))
+			if (requires.length > 32 || requires.some((feature) => typeof feature !== "string" || feature.length > 128
+				|| !/^[a-z][a-z0-9-]*\/[1-9][0-9]*$/.test(feature)))
 				throw new Error("Invalid Code Mode feature requirements");
-			if (requires.some((feature) => !features.includes(feature)) || (tool.availability && tool.availability.state !== "available"))
-				return { ...tool, requires, direct: undefined, invoke: unavailableInvoke };
+			return { ...tool, requires };
+		});
+		return { id, tools: declarations.filter((tool) => !legacy || (!tool.requires.length && !tool.requiredPolicies?.length
+			&& tool.approval === undefined && (!tool.availability || tool.availability.state === "available"))).map((tool) => {
+			if (tool.requires.some((feature) => !features.includes(feature)) || (tool.availability && tool.availability.state !== "available"))
+				return { ...tool, direct: undefined, invoke: unavailableInvoke };
 			const owned = broker.tools.get(tool.name as PackageToolName);
-			return { ...tool, direct: owned ? codeModeOwner(pi, tool.name, owned, broker.codeModeDefinitions?.get(tool.name))?.binding : undefined };
+			const definition = broker.codeModeDefinitions?.get(tool.name);
+			return { ...tool, direct: owned && definition?.providerId === id
+				? codeModeOwner(pi, tool.name, owned, definition)?.binding : undefined };
 		}) };
 	};
 	const offV2 = pi.events.on("@oai404iao/pi-code-mode:discover/v2", (value) => {
@@ -101,7 +112,11 @@ export function registerCodeModeContribution(pi: ExtensionAPI, id: string,
 			}
 			if (discovery.consumer && accepted.has(discovery.consumer) && Array.isArray(discovery.receipts) && discovery.receipts.length <= 80
 				&& discovery.receipts.some((receipt) => receipt.consumer === discovery.consumer && receipt.registration === registration)) return;
-			discovery.provider(snapshot([], true));
+			let provider: ReturnType<typeof snapshot>;
+			// Validate the whole declaration before filtering legacy tools:
+			// a failed v2 provider must not reappear as a partial v1 mirror.
+			try { provider = snapshot([], true); } catch { return; }
+			if (provider.tools.length) discovery.provider(provider);
 		}
 	});
 	const update = (_event: unknown, ctx: ExtensionContext) => {

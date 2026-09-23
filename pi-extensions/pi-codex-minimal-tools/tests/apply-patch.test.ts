@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -52,6 +52,49 @@ test("apply_patch rejects distinct aliases rather than losing one of their edits
 -one
 +ONE
 *** End Patch` }, cwd), /alias the same target/);
+});
+
+test("apply_patch rejects hardlink updates and move aliases before any effects", async () => {
+	const cwd = tempDir();
+	writeFileSync(join(cwd, "a.txt"), "one\ntwo\n");
+	linkSync(join(cwd, "a.txt"), join(cwd, "b.txt"));
+	for (const actions of [
+		"*** Update File: a.txt\n@@\n-one\n+ONE\n*** Update File: b.txt\n@@\n-two\n+TWO",
+		"*** Update File: a.txt\n*** Move to: b.txt\n@@\n-one\n+ONE",
+	]) {
+		await assert.rejects(executeApplyPatchTool({
+			input: `*** Begin Patch\n*** Add File: untouched.txt\n+no\n${actions}\n*** End Patch`,
+		}, cwd), /alias the same target/);
+		assert.equal(existsSync(join(cwd, "untouched.txt")), false);
+		assert.equal(readFileSync(join(cwd, "a.txt"), "utf8"), "one\ntwo\n");
+		assert.equal(readFileSync(join(cwd, "b.txt"), "utf8"), "one\ntwo\n");
+	}
+});
+
+test("apply_patch rejects inode replacement while waiting and releases the queue", { timeout: 5000 }, async (t) => {
+	const cwd = tempDir();
+	const target = join(cwd, "file.txt");
+	writeFileSync(target, "before\n");
+	writeFileSync(join(cwd, "replacement.txt"), "before\n");
+	let release!: () => void;
+	const held = withFileMutationQueue(target, () => new Promise<void>((resolve) => { release = resolve; }));
+	await new Promise((resolve) => setImmediate(resolve));
+	const signal = new AbortController().signal;
+	let captured!: () => void;
+	const ready = new Promise<void>((resolve) => { captured = resolve; });
+	let checkpoints = 0;
+	t.mock.method(signal, "throwIfAborted", () => { if (++checkpoints === 3) captured(); });
+	const task = executeApplyPatchTool({
+		input: "*** Begin Patch\n*** Update File: file.txt\n@@\n-before\n+after\n*** End Patch",
+	}, cwd, signal);
+	const rejected = assert.rejects(task, /identity changed/);
+	try {
+		await ready;
+		renameSync(join(cwd, "replacement.txt"), target);
+	} finally { release(); await held; }
+	await rejected;
+	await withFileMutationQueue(target, async () => {});
+	assert.equal(readFileSync(target, "utf8"), "before\n");
 });
 
 test("apply_patch rejects missing aliases before waiting on native creation", { timeout: 5000 }, async () => {

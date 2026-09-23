@@ -15,21 +15,22 @@ Gitea remote is retained as a migration backup.
 All ten npm workspace packages use the `@oai404iao` scope. Scope naming does
 not change the private/public eligibility below.
 
-| Package | Checkout version | Release track |
-| --- | ---: | --- |
-| `@oai404iao/pi-codex-minimal-tools` | `1.4.1-alpha.0` | guarded; unpublished alpha candidate |
-| `@oai404iao/pi-external-thinking` | `0.1.1-alpha.0` | guarded; unpublished alpha candidate |
-| `@oai404iao/pi-subagent` | `0.4.0-alpha.0` | guarded; unpublished alpha candidate |
-| `@oai404iao/pi-telegram-notify` | `0.1.4-alpha.0` | guarded; unpublished alpha candidate |
-| `@oai404iao/pi-tree-continue` | `0.1.0` | private; blocked pending a public Pi continuation API |
-| `@oai404iao/pi-codex-runtime` | `0.1.0-alpha.1` | published alpha; guarded recovery |
-| `@oai404iao/pi-codex-core` | `0.1.0-alpha.1` | published alpha; guarded recovery |
-| `@oai404iao/pi-codex-web-search` | `0.1.0-alpha.1` | published alpha; guarded recovery |
-| `@oai404iao/pi-codex-imagegen` | `0.1.0-alpha.1` | published alpha; guarded recovery |
-| [`@oai404iao/pi-code-mode`](pi-extensions/pi-code-mode/README.md) | `0.1.0` | private; S1 local evaluation, publication blocked |
+| Package manifest (checkout version) | Release track |
+| --- | --- |
+| [`@oai404iao/pi-codex-minimal-tools`](pi-extensions/pi-codex-minimal-tools/package.json) | guarded |
+| [`@oai404iao/pi-external-thinking`](pi-extensions/pi-external-thinking/package.json) | guarded |
+| [`@oai404iao/pi-subagent`](pi-extensions/pi-subagent/package.json) | guarded |
+| [`@oai404iao/pi-telegram-notify`](pi-extensions/pi-telegram-notify/package.json) | guarded |
+| [`@oai404iao/pi-tree-continue`](pi-extensions/pi-tree-continue/package.json) | private; blocked pending a public Pi continuation API |
+| [`@oai404iao/pi-codex-runtime`](pi-extensions/pi-codex-runtime/package.json) | guarded |
+| [`@oai404iao/pi-codex-core`](pi-extensions/pi-codex-core/package.json) | guarded |
+| [`@oai404iao/pi-codex-web-search`](pi-extensions/pi-codex-web-search/package.json) | guarded |
+| [`@oai404iao/pi-codex-imagegen`](pi-extensions/pi-codex-imagegen/package.json) | guarded |
+| [`@oai404iao/pi-code-mode`](pi-extensions/pi-code-mode/package.json) | private; local evaluation, publication blocked |
 
-The scoped npm packages use independent versions. These rows describe the
-checkout; verified registry observations are recorded separately. Guarded
+The scoped npm packages use independent versions. The linked manifests are the
+source of truth for checkout versions, including Changesets updates; this table
+does not claim those versions are published. Verified registry observations are recorded separately. Guarded
 preparation excludes the retired keep-defaults package.
 The new packages' initial `latest` aliases do not make them stable; use explicit
 `@next` or exact alpha versions. Do not mix new capabilities with an old monolith.

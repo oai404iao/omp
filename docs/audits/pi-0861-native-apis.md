@@ -4,12 +4,18 @@ Implemented after I0 (`c976ab9e`). I0's policy, approval, ownership, lease,
 retryable cleanup and tree-intent guarantees remain in place. This is not
 completion of the remaining I1–I3 interoperability work.
 
+This is a historical validation checkpoint. A later review reproduced a hardlink
+alias blind spot in the original implementation; the original alias claims below
+covered canonical paths, not all same-inode directory entries. The
+[review corrections](pi-code-mode-review-fixes.md) add inode checks and record
+their separate verification.
+
 ## Changes
 
 - **File mutations:** Codex directly imports Pi's `withFileMutationQueue`;
   there is no silent unqueued fallback. Multi-file acquisition is ordered by
   semantic target identity, including missing targets. Different lexical paths
-  aliasing one target are rejected before mutation, while repeated actions on
+  resolving to one canonical target are rejected before mutation, while repeated actions on
   the same path remain valid. Snapshots are rechecked after queue waits and
   before mutation; drift fails closed and unwinds acquired queues.
 - **Code Mode:** stable instructions use `sections.code_mode`, not a forced
@@ -34,8 +40,8 @@ completion of the remaining I1–I3 interoperability work.
 Initial canonical lock deduplication was insufficient: the patch planner keeps
 lexical virtual-file identities and could lose edits through aliases. A missing
 file becoming present during a wait could also make native lock keys converge.
-The implementation now rejects conflicting aliases, orders by semantic identity
-instead of transient queue keys, and checks identity drift after waits.
+That implementation rejected conflicting canonical-path aliases, ordered by semantic identity
+instead of transient queue keys, and checked identity drift after waits.
 
 A follow-up review found no further production must-fix within the documented
 boundaries. Its timing-dependent test observation was addressed with an explicit
@@ -82,7 +88,7 @@ Retained logs:
 ## Boundaries
 
 Pi's queue is cooperative, not filesystem isolation. It uses lexical keys for
-missing files; separate calls through different aliases of a nonexistent file
+missing files; separate calls through different hardlinks or aliases of a nonexistent file
 are not guaranteed to share one queue. Use consistent paths. Arbitrary concurrent
 directory/symlink replacement is not made atomic by snapshot checks.
 

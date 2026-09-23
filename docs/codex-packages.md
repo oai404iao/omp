@@ -123,7 +123,9 @@ Code Mode's v2 contract includes required-policy expectations, legacy approval
 gates, feature/availability declarations and bounded revision/generation checks.
 Codex contributes through a structural v2 client plus a legacy-safe v1 mirror;
 it resolves executable snapshots once per revision and retains no Code Mode
-package dependency. Classified diagnostics/presentation refresh preserves cells
+package dependency. Direct bindings require the provider ID recorded with the
+owned Pi registration, not just a matching tool name; duplicate owned definitions
+are rejected. Classified diagnostics/presentation refresh preserves cells
 and store; execution changes revoke immediately.
 SDK/builtin/foreign replacements cannot be activated or suppress native tools
 on behalf of the old Codex owner. Pending cleanup is retried even after ownership
@@ -132,7 +134,10 @@ loss; shutdown attempts all owners and retains failed native restoration receipt
 Core advertises its exact stream function on the optional grammar handshake.
 Its v2 transport capability declares effective-checkpoint projection of Pi
 transcripts, including section updates, tool replacement/removal, forced prompt
-and compaction semantics. This does not claim in-place deltas or cache retention.
+and compaction semantics. Disabled-profile/shim fallback also collapses the
+transcript through Pi's native checkpoint helper before native streaming, even
+for models supporting mid-conversation system messages. This does not claim
+in-place deltas or cache retention.
 Runtime handles generic grammar tool declarations, canonical string arguments,
 escaped JSON deltas and replay for Standard/Lite SSE/WS; it does not special-case
 Code Mode's `exec`. Selection still requires explicit model grammar metadata.

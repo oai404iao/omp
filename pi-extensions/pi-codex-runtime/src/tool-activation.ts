@@ -98,11 +98,17 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	});
 	pi.on("session_start", (_event, ctx) => {
 		broker.presentation.clear();
+		suppressed.clear();
 		sync(ctx);
 	});
 	pi.on("model_select", (_event, ctx) => sync(ctx));
 	pi.on("thinking_level_select", (_event, ctx) => sync(ctx));
-	pi.on("session_tree", (_event, ctx) => sync(ctx, true));
+	pi.on("session_tree", (_event, ctx) => {
+		// Restoration receipts belong to the previous physical loadout, not
+		// to tools absent from the newly selected branch.
+		suppressed.clear();
+		sync(ctx, true);
+	});
 	pi.on("agent_end", () => broker.presentation.scheduleFlush());
 	pi.on("session_shutdown", () => {
 		offOwner();
