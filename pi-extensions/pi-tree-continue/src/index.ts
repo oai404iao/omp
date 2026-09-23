@@ -1,12 +1,13 @@
-import { AgentSession, VERSION, type BuildSystemPromptOptions, type ExtensionAPI, type SessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import { AgentSession, VERSION, type BuildSystemPromptOptions, type ExtensionAPI, type SessionContext } from "@earendil-works/pi-coding-agent";
 import type { SystemMessage } from "@earendil-works/pi-ai";
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
+import { continuationContext, findContinuationTarget, sameContinuationContext } from "./target.js";
 
 const PATCHED = Symbol.for("pi-tree-continue.agent-session-patched");
 const ORIGINAL_BIND = Symbol.for("pi-tree-continue.original-bind-extension-core");
 const STATE = Symbol.for("pi-tree-continue.state");
 const PATCH_VERSION = 3;
-export const TESTED_PI_VERSION = "0.86.1";
+export const TESTED_PI_VERSIONS = ["0.87.0", "0.87.1"] as const;
 
 interface InternalAgentSession {
 	agent: { state: { messages: SessionContext["messages"] } };
@@ -25,23 +26,18 @@ interface ContinueOptions {
 	error?: string;
 }
 
-interface ContinuationTargetResult {
-	target?: SessionEntry;
-	reason?: string;
-}
-
 interface TreeContinueState {
 	sessions: WeakMap<object, InternalAgentSession>;
 }
 
 export function supportsTestedPiVersion(version = VERSION): boolean {
-	return version === TESTED_PI_VERSION;
+	return TESTED_PI_VERSIONS.some((tested) => tested === version);
 }
 
 export default function treeContinueExtension(pi: ExtensionAPI) {
 	if (!supportsTestedPiVersion()) {
 		console.warn(
-			`[pi-tree-continue] disabled: this private AgentSession hook supports Pi ${TESTED_PI_VERSION} only (found ${VERSION}).`,
+			`[pi-tree-continue] disabled: this private AgentSession hook supports Pi ${TESTED_PI_VERSIONS.join(", ")} only (found ${VERSION}).`,
 		);
 		return;
 	}
@@ -95,7 +91,7 @@ export default function treeContinueExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			const targetResult = findContinuationTarget(ctx.sessionManager.getBranch(), options);
+			const targetResult = findContinuationTarget(ctx.sessionManager.getBranch(), options.force);
 			if (!targetResult.target) {
 				ctx.ui.notify(targetResult.reason ?? "No previous tool result found to continue from.", "warning");
 				return;
@@ -110,7 +106,15 @@ export default function treeContinueExtension(pi: ExtensionAPI) {
 			}
 
 			try {
-				await continueWithoutMessage(session, ctx.getSystemPromptOptions());
+				const currentContext = () => {
+					const context = continuationContext(ctx.sessionManager.getBranch());
+					if (!ctx.isIdle() || ctx.hasPendingMessages()
+						|| !sameContinuationContext(context, targetResult.context!)) {
+						throw new Error("Session changed while preparing continuation; retry /continue.");
+					}
+					return context.map(({ message }) => message);
+				};
+				await continueWithoutMessage(session, ctx.getSystemPromptOptions(), currentContext);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				ctx.ui.notify(`/continue failed: ${message}`, "error");
@@ -167,76 +171,15 @@ function parseArgs(args: string): ContinueOptions {
 	return { force, help: false };
 }
 
-function findContinuationTarget(branch: SessionEntry[], options: ContinueOptions): ContinuationTargetResult {
-	if (branch.length === 0) return { reason: "No session entries found to continue from." };
-
-	const leaf = branch[branch.length - 1];
-	if (isToolResultEntry(leaf)) return { target: leaf };
-
-	const targetIndex = findLatestToolResultIndex(branch);
-	if (targetIndex === -1) return { reason: "No previous tool result found to continue from." };
-
-	const trailingEntries = branch.slice(targetIndex + 1);
-	if (trailingEntries.length > 0 && trailingEntries.every(isIgnorableAfterToolResult)) {
-		// Keep prompt/tool updates and metadata; only rewind the terminal empty errors.
-		return { target: trailingEntries.reverse().find((entry) => !isEmptyAssistantError(entry)) ?? branch[targetIndex] };
-	}
-	if (options.force) return { target: branch[targetIndex] };
-
-	return {
-		reason:
-			"Current branch does not end at a tool result or empty assistant error. Use /continue --force to abandon later entries.",
-	};
-}
-
-function findLatestToolResultIndex(branch: SessionEntry[]): number {
-	for (let i = branch.length - 1; i >= 0; i--) {
-		if (isToolResultEntry(branch[i])) return i;
-	}
-	return -1;
-}
-
-function isToolResultEntry(entry: SessionEntry | undefined): entry is SessionEntry & { type: "message" } {
-	return entry?.type === "message" && entry.message.role === "toolResult";
-}
-
-function isIgnorableAfterToolResult(entry: SessionEntry): boolean {
-	if (isEmptyAssistantError(entry)) return true;
-	if (entry.type === "message" && entry.message.role === "system") return true;
-	return (
-		entry.type === "model_change" ||
-		entry.type === "thinking_level_change" ||
-		entry.type === "label" ||
-		entry.type === "session_info"
-	);
-}
-
-function isEmptyAssistantError(entry: SessionEntry | undefined): boolean {
-	if (entry?.type !== "message") return false;
-	const message = entry.message;
-	if (message.role !== "assistant") return false;
-	if (message.stopReason !== "error" && message.stopReason !== "aborted") return false;
-	return !hasMeaningfulAssistantContent(message.content);
-}
-
-function hasMeaningfulAssistantContent(content: unknown): boolean {
-	if (!Array.isArray(content)) return false;
-
-	return content.some((part) => {
-		if (!part || typeof part !== "object") return false;
-		const block = part as { type?: unknown; text?: unknown; thinking?: unknown };
-		if (block.type === "toolCall") return true;
-		if (block.type === "text" && typeof block.text === "string") return block.text.trim().length > 0;
-		if (block.type === "thinking" && typeof block.thinking === "string") return block.thinking.trim().length > 0;
-		return false;
-	});
-}
-
-async function continueWithoutMessage(session: InternalAgentSession, options: BuildSystemPromptOptions): Promise<void> {
+async function continueWithoutMessage(
+	session: InternalAgentSession, options: BuildSystemPromptOptions,
+	currentContext: () => SessionContext["messages"],
+): Promise<void> {
 	if (typeof session._preparePromptAndToolLoadout !== "function" || typeof session._runAgentPrompt !== "function" || typeof session._emitAgentSettled !== "function") {
 		throw new Error("Pi prompt preparation/run hooks are not available");
 	}
 	session._flushPendingBashMessages?.();
+	const messages = currentContext();
 	const prepare = session._preparePromptAndToolLoadout;
 	const settled = session._emitAgentSettled;
 	// There is no new user turn to recompute before_agent_start sections for.
@@ -259,7 +202,7 @@ async function continueWithoutMessage(session: InternalAgentSession, options: Bu
 	session._preparePromptAndToolLoadout = prepareContinuation;
 	session._emitAgentSettled = emitSettled;
 	try {
-		const update = session._preparePromptAndToolLoadout(options);
+		const update = session._preparePromptAndToolLoadout(options, messages);
 		session._runSystemPromptOptions = options;
 		// An empty/system-only prompt adds no user message. Pi owns abort reset,
 		// retries, compaction, prompt cleanup and agent_settled.

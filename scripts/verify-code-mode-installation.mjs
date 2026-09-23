@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { isolatedConsumerLock } from "./isolated-consumer-lock.mjs";
 import { root } from "./workspaces.mjs";
+import { piVersion } from "./pi-baselines.mjs";
 
 const args = process.argv.slice(2);
 assert((args.length === 2 || (args.length === 3 && args[2] === "--codex")) && args[0] === "--host",
@@ -39,6 +40,7 @@ const env = {
 	PATH: process.env.PATH, HOME: join(directory, "home"), TMPDIR: directory,
 	XDG_STATE_HOME: join(directory, "state"), XDG_CONFIG_HOME: join(directory, "config"), XDG_CACHE_HOME: join(directory, "cache"),
 	PI_CODING_AGENT_DIR: join(directory, "agent"), PI_OFFLINE: "1", CODE_MODE_TEST_HOST: host,
+	OMP_PI_EXPECTED_VERSION: piVersion(),
 	npm_config_cache: npmCache,
 	npm_config_userconfig: join(directory, "npmrc"),
 };

@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { isPiDependency, piVersion } from "./pi-baselines.mjs";
+import { isPiDependency, piFloorArtifacts, piVersion } from "./pi-baselines.mjs";
 import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
 import { root, workspaces } from "./workspaces.mjs";
 
@@ -66,7 +66,7 @@ for (const baseline of baselines) {
       }
       run("npm", ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"]);
       const path = join(cwd, "package-lock.json");
-      const lock = preserveRegistryIntegrity(sourceLock, JSON.parse(readFileSync(path, "utf8")));
+      const lock = preserveRegistryIntegrity(sourceLock, JSON.parse(readFileSync(path, "utf8")), piFloorArtifacts);
       writeFileSync(path, `${JSON.stringify(lock, null, 2)}\n`);
     }
     run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);

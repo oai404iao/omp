@@ -226,7 +226,7 @@ interface Activation {
 	parent: ParentRef;
 	runtime: AgentSessionRuntime;
 	seedMessageCount: number;
-	epochMessageStart: number;
+	turnMessages: AgentSessionRuntime["session"]["messages"];
 	controlState: AgentControlState;
 	trace: TraceItem[];
 	streamedText: string;
@@ -2188,7 +2188,7 @@ export class SubagentCoordinator {
 				parent: options.parent,
 				runtime,
 				seedMessageCount: options.prepared.seedMessageCount,
-				epochMessageStart: runtime.session.messages.length,
+				turnMessages: [],
 				controlState: createAgentControlState(),
 				trace: [],
 				streamedText: "",
@@ -2544,7 +2544,7 @@ export class SubagentCoordinator {
 	}
 
 	private resetTurnCapture(activation: Activation): void {
-		activation.epochMessageStart = activation.runtime.session.messages.length;
+		activation.turnMessages = [];
 		activation.streamedText = "";
 		activation.usage = emptyUsage();
 	}
@@ -2554,9 +2554,8 @@ export class SubagentCoordinator {
 		turnId: string,
 		fallback: SubagentStopReason,
 	): SubagentRunResult {
-		const messages = activation.runtime.session.messages;
-		const output = finalAssistantText(messages, activation.epochMessageStart, activation.streamedText);
-		const stopReason = finalStopReason(messages, activation.epochMessageStart, fallback);
+		const output = finalAssistantText(activation.turnMessages, 0, activation.streamedText);
+		const stopReason = finalStopReason(activation.turnMessages, 0, fallback);
 		const truncated = truncateUtf8(output, activation.descriptor.runtime.maxOutputBytes);
 		const sessionFile = activation.runtime.session.sessionFile;
 		return {
@@ -2635,6 +2634,7 @@ export class SubagentCoordinator {
 			return;
 		}
 		if (event.message.role !== "assistant") return;
+		activation.turnMessages.push(event.message);
 		activation.persistenceGate.resolve();
 		addUsage(activation.usage, event.message.usage);
 		const text = event.message.content

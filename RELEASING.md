@@ -230,16 +230,16 @@ validating the prepared artifact and published identity; it cannot require a
 release-lock entry that is only added after verified bootstrap. See
 [the correction record](docs/audits/codex-bootstrap-latest.md).
 
-Public and supported-package peer ranges currently require Pi 0.86.1 or
-newer; the exact development target is also 0.86.1, with both lock-validation
+Public and supported-package peer ranges currently require Pi 0.87.0 or
+newer; the exact development target is 0.87.1, with both lock-validation
 roles checked by `npm run ci:pi-matrix`. Actual SDK resolution is checked, not
 inferred from peer declarations. Update the development baseline, peer ranges,
 lockfile, compatibility notes, and tests together. Do not lower the minimum
 below the tested baseline.
 The open-ended upper range is an intentional forward-compatibility policy;
 evaluate each new Pi baseline in CI and tighten the range if an incompatibility
-is found. `@oai404iao/pi-tree-continue` is audited against the exact 0.86.1
-baseline while it remains a private unsupported hook into Pi internals, so it
+is found. `@oai404iao/pi-tree-continue` is audited against exactly 0.87.0 and 0.87.1
+while it remains a private unsupported hook into Pi internals, so it
 stays blocked from publication.
 See [Pi compatibility](docs/pi-compatibility.md) for the verified scope and
 the transcript-context migration.

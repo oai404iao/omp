@@ -17,6 +17,7 @@ const expectedHashes = new Map([
 const codexRepository = "https://github.com/openai/codex";
 const codexRevision = "eb9dceba1a2e658142a456c5898836774835616b";
 const astraRevision = "ddea03ad049142943bdbf13e937b1d67e8c1ba0c";
+const solLunaRevision = "40eac3ce8a0c10cbcb9db910d529355eb2f8fc09";
 const expectedCodexReservedToolSources = {
   LICENSE: {
     gitBlobSha: "4606e72e042564097e8780d66c1d4dcb611869bd",
@@ -106,6 +107,22 @@ function text(path) {
 
 function check(condition, message) {
   if (!condition) errors.push(message);
+}
+
+const solLunaPath = "provenance/openai-codex-40eac3ce-sol-luna.json";
+const solLuna = JSON.parse(text(`pi-extensions/pi-codex-runtime/${solLunaPath}`));
+check(solLuna.upstream.revision === solLunaRevision && solLuna.upstream.license === "Apache-2.0",
+  "Sol/Luna capabilities must retain their independently verified revision");
+for (const [file, sha256] of Object.entries({
+  "codex-rs/models-manager/models.json": "0178d235c589a31abd6ed0ea1e870935dc5819240eb0e813e178d3ebedf534f4",
+  "codex-rs/core/src/client.rs": "0d590b240bdbfeafacbe597a02e4bdce467f8850d597814f214184dfb89ee510",
+  "codex-rs/core/src/tools/spec_plan.rs": "8dfa01644163e4826021815d064444ec12799aeaf8f7a952ec6289319f2fd36e",
+})) check(solLuna.files[file]?.sha256 === sha256, `Sol/Luna: unreviewed source ${file}`);
+for (const name of ["pi-codex-runtime", "pi-codex-core", "pi-codex-minimal-tools"]) {
+  check(read(`pi-extensions/${name}/${solLunaPath}`).equals(read(`pi-extensions/pi-codex-runtime/${solLunaPath}`)),
+    `${name}: Sol/Luna provenance must match its catalog owner`);
+  check(text(`pi-extensions/${name}/THIRD_PARTY_NOTICES.md`).includes(solLunaRevision),
+    `${name}: missing Sol/Luna adaptation notice`);
 }
 
 for (const packageName of ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"]) {

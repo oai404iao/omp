@@ -74,7 +74,7 @@ function compactionEntry(
 		tokensBefore: 100,
 		details: {
 			kind: NATIVE_COMPACTION_DETAILS_KIND,
-			version: mode === "responses-context-management" ? 1 : NATIVE_COMPACTION_DETAILS_VERSION,
+			version: mode === "responses-context-management" ? 1 : 3,
 			mode,
 			provider: model.provider,
 			model: model.id,
@@ -388,7 +388,7 @@ test("responses compaction is requested through Pi's session compaction hook", a
 			ui: { notify() {} },
 		});
 
-		assert.equal(result.compaction.firstKeptEntryId, "user1");
+		assert.equal(result.compaction.firstKeptEntryId, null);
 		assert.match(result.compaction.summary, /Responses compaction replaced/);
 		assert.equal(result.compaction.details.version, NATIVE_COMPACTION_DETAILS_VERSION);
 		assert.equal(result.compaction.details.mode, "responses");

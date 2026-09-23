@@ -1,16 +1,12 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { TESTED_PI_VERSION, supportsTestedPiVersion } from "../index.js";
+import { test } from "node:test";
+import { supportsTestedPiVersion, TESTED_PI_VERSIONS } from "../src/index.js";
 
-test("only enables the private hook for its exact audited Pi version", () => {
-	assert.equal(TESTED_PI_VERSION, "0.86.1");
-	assert.equal(supportsTestedPiVersion(), true);
-	assert.equal(supportsTestedPiVersion("0.86.1"), true);
-	assert.equal(supportsTestedPiVersion("0.85.1"), false);
-	assert.equal(supportsTestedPiVersion("0.84.2"), false);
-	assert.equal(supportsTestedPiVersion("0.85.0"), false);
-	assert.equal(supportsTestedPiVersion("0.85.2"), false);
-	assert.equal(supportsTestedPiVersion("0.84.3"), false);
-	assert.equal(supportsTestedPiVersion("0.86.1-beta.1"), false);
-	assert.equal(supportsTestedPiVersion("0.86.0"), false);
+test("only enables the private hook for its exact audited Pi versions", () => {
+	assert.deepEqual(TESTED_PI_VERSIONS, ["0.87.0", "0.87.1"]);
+	assert(supportsTestedPiVersion());
+	for (const version of TESTED_PI_VERSIONS) assert(supportsTestedPiVersion(version));
+	for (const version of ["0.86.1", "0.87.2", "0.88.0", "0.87.1-beta.1", "unknown"]) {
+		assert.equal(supportsTestedPiVersion(version), false);
+	}
 });

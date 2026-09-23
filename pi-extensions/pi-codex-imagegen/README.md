@@ -2,7 +2,7 @@
 
 Alpha bootstrap candidate; initial npm publication is still pending.
 
-Peer floor: Pi 0.86.1; tested against 0.86.1.
+Peer floor: Pi 0.87.0; development target: 0.87.1.
 
 `/image-gen` jobs are cancelled when the session is replaced or closed.
 Late authentication/results cannot notify the replacement session or initiate

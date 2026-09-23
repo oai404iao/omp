@@ -53,9 +53,9 @@ Requirements:
 
 - Node.js 22.19 or newer
 - npm 11.5.1 or newer; the repository pins npm 11.19.0
-- Pi 0.86.1 peer floor and exact supported-package development target.
+- Pi 0.87.0 peer floor and exact 0.87.1 development target.
   Full CI verifies both lock-validation roles. The private
-  `pi-tree-continue` hook is audited for exactly 0.86.1 and stays
+  `pi-tree-continue` hook is audited for exactly 0.87.0 and 0.87.1 and stays
   blocked from publication.
 
 ```bash

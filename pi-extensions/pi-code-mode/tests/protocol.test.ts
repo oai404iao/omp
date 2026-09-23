@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createEventBus, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createEventBus, SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveGrammarConstrainedSampling } from "@earendil-works/pi-ai/api/constrained-sampling";
 import { decodeExec, encodeExec, EXEC_SAMPLING, projectExecHistory, protocolMode, resolveProtocol, TRANSPORT_DISCOVER, TRANSPORT_DISCOVER_V2, TRANSCRIPT_SEMANTICS } from "../src/protocol.ts";
 import { execParameters } from "../src/public-tools.ts";
@@ -13,6 +13,38 @@ function assistant(content: AssistantMessage["content"]): AssistantMessage {
 		timestamp: 1, stopReason: "toolUse", content,
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+}
+
+for (const transport of ["builtin", "v2"] as const) {
+	test(`grammar checks effective history, including omissions and replacements (${transport})`, () => {
+		const manager = SessionManager.inMemory();
+		const bad = manager.appendMessage(assistant([{ type: "toolCall", id: "bad", name: "exec", arguments: { code: 1 } }]));
+		const pi = { events: createEventBus() } as unknown as ExtensionAPI;
+		const stream = () => {};
+		const ctx = {
+			model: { provider: "fixture", api: "openai-responses", compat: { supportsOpenAIGrammarTools: true } },
+			modelRegistry: {
+				getRegisteredProviderConfig: () => transport === "v2" ? { streamSimple: stream } : undefined,
+				getRegisteredNativeProvider: () => undefined,
+			},
+			sessionManager: manager,
+		} as unknown as ExtensionContext;
+		pi.events.on(TRANSPORT_DISCOVER_V2, (value) => (value as any).accept({
+			stream, input: "pi-transcript/1", formats: ["json", "grammar"],
+			projection: "effective-checkpoint", semantics: TRANSCRIPT_SEMANTICS,
+		}));
+		for (const edit of ["none", "omit", "replace"] as const) {
+			manager.branch(bad);
+			if (edit !== "none") manager.appendContextEdit(bad, edit === "omit" ? null : {
+				content: [{ type: "toolCall", id: "bad", name: "exec", arguments: { code: "text(1)" } }],
+			});
+			for (const mode of ["auto", "grammar"] as const) {
+				assert.equal(resolveProtocol(pi, ctx, mode).grammar, edit !== "none");
+			}
+			assert.equal(resolveProtocol(pi, ctx, "json").grammar, false);
+			assert.match(JSON.stringify(manager.getEntry(bad)), /"code":1/);
+		}
+	});
 }
 
 test("v2 transport: exact stream, bounded declarations, required semantics and no false v1 downgrade", () => {

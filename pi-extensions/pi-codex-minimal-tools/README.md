@@ -3,7 +3,7 @@
 Codex-specific Responses support for Pi, driven by an exact per-model JSON
 catalog instead of model-name heuristics.
 
-Peer floor: Pi 0.86.1; tested against 0.86.1.
+Peer floor: Pi 0.87.0; development target: 0.87.1.
 
 > npm identity stays `@oai404iao/pi-codex-minimal-tools`. This checkout composes
 > core, web-search and imagegen through a shared runtime. The four new packages
@@ -323,8 +323,7 @@ The pre-Astra entries include equivalent `openai/...` and
 ChatGPT subscription route. A public-API or proxy Astra deployment requires an
 explicit user profile for that endpoint.
 
-Pi 0.86.1 provides the Astra model descriptor; it is now the package peer
-floor. The extension composes its stream shim over that provider and does not
+Pi supplies the Astra model descriptor. The extension composes its stream shim over that provider and does not
 replace authentication, streams, or the model catalog.
 The descriptor keeps the production default at 272,000 context tokens and
 128,000 output tokens. A backend-authorized larger context must be selected
@@ -334,6 +333,14 @@ that entitlement from the Astra slug.
 These entries are defaults, not claims that every proxy with the same model
 slug supports the protocol. Override or disable a profile for the endpoint
 actually in use.
+
+`openai-codex/gpt-6-sol` and `openai-codex/gpt-6-luna` use separately verified
+Lite profiles: developer placement, custom patch, standalone web/image,
+parallel calls disabled on the wire, and no reasoning summary. Pi 0.87.1 supplies
+their descriptors and `off -> none` mapping; no `ultra`, larger context,
+pricing multiplier or public-API cache TTL is inferred. Fast mode is disabled.
+See `provenance/openai-codex-40eac3ce-sol-luna.json`. Source/fixture verification
+does not establish that a particular account can access these endpoints.
 
 ## Web Search
 
@@ -404,10 +411,19 @@ response IDs. A failed or timed-out prewarm is not retried on every user
 message. Continuation reuse always requires the new request to extend the
 previous logical request exactly.
 
-Native compaction stores opaque encrypted state in the Pi session. New
-checkpoints replay only to the same provider, model, API, and effective
-profile hash. Switching any of those falls back to Pi's retained local
-context. Treat session files containing native compaction as sensitive data.
+Native compaction stores opaque encrypted state in the Pi session. Version 4
+keeps no preceding messages in model context; the raw session/UI history remains.
+It preserves other context handlers' changes and lets Pi restore current
+system/tool state. Replay requires the same provider, model, API and effective
+profile hash. If these change, restore the original configuration or navigate
+before compaction: an opaque checkpoint's placeholder is not a usable text summary.
+
+Legacy checkpoints still replay unchanged canonical contexts. If an earlier
+context handler transforms a legacy checkpoint, continuation stops rather than
+guessing its boundary or restoring filtered content. Run `/compact` on the
+original model to migrate it. Failed recompression preserves the old checkpoint.
+Treat sessions containing native compaction as sensitive data; older extension
+versions cannot replay v4 checkpoints.
 
 ## Apply Patch
 

@@ -3,7 +3,7 @@
 Adds `/continue` for Pi sessions. It resumes the agent without adding a new user
 or custom message. Pi may append system prompt/tool updates before the request.
 
-Compatibility: experimental against Pi 0.86.1 only. It is not compatible by
+Compatibility: experimental against exactly Pi 0.87.0 and 0.87.1. It is not compatible by
 contract with any Pi version.
 
 > npm identity: `@oai404iao/pi-tree-continue`. This experimental package
@@ -49,6 +49,11 @@ Instead, it:
 By default, `/continue` is conservative. It only continues from the current leaf if the leaf is already a `toolResult`, or if everything after the latest `toolResult` consists of system updates, ignorable metadata, or empty assistant `error` / `aborted` entries. This avoids silently abandoning normal user or assistant messages.
 
 Use `/continue --force` when you intentionally want to roll the branch back to the latest `toolResult` even if normal entries exist after it.
+
+Selection uses the effective context, including append-only edits. `--force`
+may discard a suffix but cannot restore omitted or replaced content. If no
+existing branch preserves that prefix, the command refuses rather than silently
+undoing an edit. Navigation and pending-message state are rechecked before running.
 
 Because Pi does not currently expose a public extension API for message-free
 continuation, this package installs a runtime hook into private

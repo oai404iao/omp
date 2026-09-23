@@ -247,6 +247,50 @@ test("/continue resumes from a toolResult without appending a user message", asy
 	assert.equal(fixture.session.isStreaming, false);
 });
 
+test("/continue uses canonical edits without adding a user message", async () => {
+	const f = await harness();
+	try {
+		const result = seedToolResultTurn(f);
+		const manager = f.session.sessionManager;
+		manager.appendContextEdit(result, { content: "REDACTED_RESULT" });
+		const leaf = manager.getLeafId();
+		await f.session.prompt("/continue");
+		assert.deepEqual(f.notifications, []);
+		assert.equal(f.contexts.length, 1);
+		assert.match(JSON.stringify(f.contexts[0].messages), /REDACTED_RESULT/);
+		assert.doesNotMatch(JSON.stringify(f.contexts[0].messages), /seed result/);
+		assert(manager.getBranch().some((entry) => entry.id === leaf));
+		assert.equal(manager.getBranch().filter((entry) => entry.type === "message" && entry.message.role === "user").length, 1);
+	} finally { f.session.dispose(); }
+});
+
+test("/continue lets Pi finish a before-settle continuation before notifying settled handlers", async () => {
+	const observed: string[] = [];
+	let once = false;
+	const f = await harness({ factory: (pi) => {
+		pi.on("agent_before_settle", (event) => {
+			observed.push("before");
+			if (once || event.outcome !== "completed") return;
+			once = true;
+			return { entries: [...event.entries, {
+				type: "custom_message", customType: "test/continue", content: "finish the boundary work", display: false,
+			}], continue: true };
+		});
+		pi.on("agent_settled", (_event, ctx) => {
+			assert(ctx.isIdle());
+			observed.push("settled");
+		});
+	} });
+	try {
+		seedToolResultTurn(f);
+		await f.session.prompt("/continue");
+		assert.deepEqual(f.notifications, []);
+		assert.equal(f.contexts.length, 2);
+		assert.deepEqual(observed, ["before", "before", "settled"]);
+		assert.equal(f.session.sessionManager.getBranch().filter((entry) => entry.type === "message" && entry.message.role === "user").length, 1);
+	} finally { f.session.dispose(); }
+});
+
 test("/continue skips an empty assistant error after the tool result", async () => {
 	const fixture = await harness();
 	const toolResultId = seedToolResultTurn(fixture);

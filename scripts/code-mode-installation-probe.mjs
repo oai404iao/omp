@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SettingsManager, SessionManager, VERSION } from "@earendil-works/pi-coding-agent";
 
 const root = process.cwd();
-assert.equal(VERSION, "0.86.1");
+assert.equal(VERSION, process.env.OMP_PI_EXPECTED_VERSION);
 const sdkPath = realpathSync(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
 assert(sdkPath.startsWith(`${root}/node_modules/`));
 const packageRoot = join(root, "node_modules/@oai404iao/pi-code-mode");

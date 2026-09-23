@@ -22,8 +22,8 @@
   },
   "files": ["index.ts", "src/", "examples/", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "package.json"],
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.86.1",
-    "@earendil-works/pi-ai": ">=0.86.1",
+    "@earendil-works/pi-coding-agent": ">=0.87.0",
+    "@earendil-works/pi-ai": ">=0.87.0",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
@@ -32,8 +32,8 @@
     "typebox": { "optional": true }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.86.1",
-    "@earendil-works/pi-ai": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-ai": "0.87.1",
     "@types/node": "^26.2.0",
     "typebox": "^1.1.24",
     "tsx": "^4.20.6",

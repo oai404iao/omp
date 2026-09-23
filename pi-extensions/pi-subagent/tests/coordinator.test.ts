@@ -541,6 +541,71 @@ export default function lateReport(pi) {
 	}
 });
 
+test("fork completion uses finalized events even when a boundary omits the entire conversation", async () => {
+	const { coordinator, parent } = await fixture({
+		childExtension: `export default function (pi) {
+			pi.on("turn_end", (event) => ({
+				entries: [...event.entries, ...event.context.contextEntries
+					.filter(({ sourceEntry }) => sourceEntry.type === "message" && sourceEntry.message.role !== "system")
+					.map(({ sourceEntry }) => ({ type: "context_edit", targetId: sourceEntry.id, replacement: null }))],
+			}));
+		}`,
+		streamSimple(model) {
+			const stream = createAssistantMessageEventStream();
+			queueMicrotask(() => {
+				const error: AssistantMessage = {
+					role: "assistant", api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(),
+					content: [{ type: "text", text: "final failure" }], stopReason: "error", errorMessage: "terminal fixture failure",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+				};
+				stream.push({ type: "error", reason: "error", error });
+				stream.end();
+			});
+			return stream;
+		},
+	});
+	try {
+		for (let index = 0; index < 3; index++) appendCompletedParentTurn(parent.sessionManager as SessionManager, `q${index}`, `a${index}`);
+		const outcome = await coordinator.delegate(parent, "fork", {
+			agent: "scout", description: "projected context", prompt: "Inspect it.",
+		}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true });
+		assert.equal(outcome.kind, "foreground");
+		if (outcome.kind !== "foreground") return;
+		assert.equal(outcome.result.stopReason, "error");
+		assert.equal(outcome.result.output, "final failure");
+		assert(outcome.result.sessionFile);
+		const child = SessionManager.open(outcome.result.sessionFile);
+		assert(child.getBranch().some((entry) => entry.type === "context_edit"));
+		assert(!child.buildSessionContext().messages.some((message) => message.role === "assistant"));
+	} finally { await coordinator.shutdown(); }
+});
+
+test("delegation waits for before-settle work and returns only its last finalized answer", async () => {
+	const { coordinator, parent, eventDetails } = await fixture({
+		childExtension: `export default function (pi) {
+			let continued = false;
+			pi.on("agent_before_settle", (event) => {
+				if (continued || event.outcome !== "completed") return;
+				continued = true;
+				return { entries: [...event.entries, {
+					type: "custom_message", customType: "test/boundary", content: "finish verification", display: false,
+				}], continue: true };
+			});
+		}`,
+	});
+	try {
+		const outcome = await coordinator.delegate(parent, "spawn", {
+			agent: "scout", description: "boundary work", prompt: "Inspect it.",
+		}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true });
+		assert.equal(outcome.kind, "foreground");
+		if (outcome.kind !== "foreground") return;
+		assert.equal(outcome.result.output, "child answer 2");
+		assert.equal(outcome.result.usage.turns, 2);
+		assert.equal(eventDetails.filter((event) => event.name === "pi-subagent:end").length, 1);
+	} finally { await coordinator.shutdown(); }
+});
+
 test("delegation assigns stable readable paths and disambiguates generated siblings", async () => {
 	const { coordinator, parent } = await fixture();
 	try {
