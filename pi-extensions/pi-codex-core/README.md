@@ -1,6 +1,6 @@
 # pi-codex-core
 
-Alpha bootstrap candidate; initial npm publication is still pending.
+See the package guide below for release status; source edits do not publish artifacts.
 
 Peer floor: Pi 0.87.0; development target: 0.87.1.
 
@@ -49,5 +49,14 @@ See [the package guide](../../docs/codex-packages.md). From repository root:
 
 ```bash
 npm run check -w @oai404iao/pi-codex-core
+npm run test:codex-composition
 npm run test:codex-packages
 ```
+
+Owner regressions and transport fixtures are in `tests/`. Protocol references:
+[Standard Responses](reference/responses-standard.md),
+[Responses Lite](reference/responses-lite.md),
+[patch protocols](reference/apply-patch-protocols.md) and
+[patch behavior](reference/apply-patch-behavior.md).
+The [patch rendering example](assets/apply-patch-rendering.png) is a repository
+asset, not part of the runtime tarball.

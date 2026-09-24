@@ -933,7 +933,7 @@ cherry-pick 回新 main。只承接原文档提交并修订。
   types、示例、实现均有该字段，不能照简略摘录断言功能不存在。
 - 独立 review 的 visibility unit suite **12/12**。
 - 本轮针对性测试 **24/24**：
-  `pi-codex-minimal-tools/tests/pi-transcript.test.ts`、
+  `pi-codex-core/tests/pi-transcript.test.ts`（已迁移至实现 owner）、
   `pi-code-mode/tests/protocol.test.ts`、`pi-code-mode/tests/visibility-pi.test.ts`。
 - credential-free probe 验证 live metadata/reference、真实 SDK tree 重新激活
   显式 inactive 工具、factory 65th allocation、失败 owner transition 不重试。

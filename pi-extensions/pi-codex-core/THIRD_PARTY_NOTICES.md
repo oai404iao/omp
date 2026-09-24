@@ -5,7 +5,7 @@ revision `40eac3ce8a0c10cbcb9db910d529355eb2f8fc09` and the MIT Pi 0.87.1
 catalog. See `provenance/openai-codex-40eac3ce-sol-luna.json`. Request adaptation
 uses Pi's Off mapping; it does not add public-API TTL fields to Codex Lite.
 
-This unpublished package is split from `@oai404iao/pi-codex-minimal-tools`.
+This package owns core code split from `@oai404iao/pi-codex-minimal-tools`.
 Project material remains Copyright (c) 2026 oai404iao. The composite LICENSE
 and verified Apache license/NOTICE snapshots are retained.
 
@@ -25,6 +25,14 @@ identifiers are recorded in
 
 The substantially modified TypeScript apply-patch adaptations and grammar are
 under `src/patch/` and `src/providers/`; retain their source modification notices.
+`src/providers/codex-apply-patch.lark` is an exact copy of
+`codex-rs/core/src/tools/handlers/apply_patch.lark` at the pinned protocol revision.
+The parser and executor adapt `codex-rs/apply-patch/src/{parser,streaming_parser,
+seek_sequence,lib}.rs` and the core apply-patch handlers at the compatibility
+revision. Local changes include virtual-state preflight, symlink/overwrite
+checks, serialized mutation, rollback, CRLF preservation and preview integration.
+The included Apache-2.0 terms and upstream NOTICE apply to that material.
 The internal Responses Lite transport is an unsupported compatibility boundary.
 
-See the original package's reference/source-map.md for the pinned evidence map.
+See `pi-codex-runtime/reference/source-map.md` in the repository for the pinned
+evidence map. Immutable provenance paths describe the original source snapshot.

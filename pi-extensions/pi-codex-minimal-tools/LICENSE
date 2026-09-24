@@ -1,8 +1,4 @@
-Licensing for pi-codex-minimal-tools
-
-Except for the third-party materials identified in THIRD_PARTY_NOTICES.md,
-the project-authored portions of this package are available under the
-following MIT License:
+MIT License
 
 Copyright (c) 2026 oai404iao
 
@@ -23,6 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-Third-party materials remain under their respective terms. See
-THIRD_PARTY_NOTICES.md and the license texts under LICENSES/.

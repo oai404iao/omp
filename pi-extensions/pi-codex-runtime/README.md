@@ -1,6 +1,6 @@
 # pi-codex-runtime
 
-Alpha bootstrap candidate; initial npm publication is still pending.
+See the package guide below for release status; source edits do not publish artifacts.
 It has no Pi extension entry
 and does not automatically register tools or providers.
 
@@ -32,5 +32,12 @@ constraints. From repository root, run:
 
 ```bash
 npm run check -w @oai404iao/pi-codex-runtime
+npm run test:codex-composition
 npm run test:codex-packages
 ```
+
+Shared behavior regressions are in `tests/`. See the
+[configuration guide](reference/configuration.md), [reference index](reference/README.md)
+and [source map](reference/source-map.md). This package exclusively owns
+[config.schema.json](config.schema.json) and [models.schema.json](models.schema.json);
+the composition bundle no longer mirrors them.

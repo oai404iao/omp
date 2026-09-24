@@ -1,7 +1,7 @@
 {
   "name": "@oai404iao/pi-codex-minimal-tools",
   "version": "4.0.0",
-  "description": "Model-profiled Codex Responses tools for Pi: WebSocket, Lite, web search, images, compaction, and apply_patch",
+  "description": "Composition package for Pi Codex core, web search, and image generation",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/oai404iao/omp.git",
@@ -13,8 +13,8 @@
   },
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./subagent-inline": "./src/subagent-inline.ts"
+    ".": "./index.ts",
+    "./subagent-inline": "./subagent-inline.ts"
   },
   "keywords": [
     "pi-package",
@@ -26,7 +26,7 @@
     "web-search",
     "apply-patch"
   ],
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -59,19 +59,14 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test tests/**/*.test.ts",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck"
   },
   "files": [
     "index.ts",
-    "src/",
-    "provenance/",
+    "subagent-inline.ts",
     "README.md",
     "LICENSE",
-    "LICENSES/",
     "THIRD_PARTY_NOTICES.md",
-    "config.schema.json",
-    "models.schema.json",
     "package.json"
   ],
   "engines": {

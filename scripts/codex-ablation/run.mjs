@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { runIsolatedTests } from "./run-isolated.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const require = createRequire(new URL("../../pi-extensions/pi-codex-minimal-tools/package.json", import.meta.url));
+const require = createRequire(new URL("../../pi-extensions/pi-codex-core/package.json", import.meta.url));
 const piPackage = join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-ai"))), "../package.json");
 const piVersion = JSON.parse(readFileSync(piPackage, "utf8")).version;
 assert.equal(piVersion, "0.87.1", "Characterization expectations are pinned to Pi 0.87.1; review them before changing the baseline.");

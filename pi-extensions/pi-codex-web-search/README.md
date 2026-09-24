@@ -1,6 +1,6 @@
 # pi-codex-web-search
 
-Alpha bootstrap candidate; initial npm publication is still pending.
+See the package guide below for release status; source edits do not publish artifacts.
 
 Peer floor: Pi 0.87.0; development target: 0.87.1.
 
@@ -27,5 +27,11 @@ See [the package guide](../../docs/codex-packages.md). From repository root:
 
 ```bash
 npm run check -w @oai404iao/pi-codex-web-search
+npm run test:codex-composition
 npm run test:codex-packages
 ```
+
+Standalone client/activity/rendering regressions are in `tests/`; hosted transport
+integration is in root `tests/codex/`. See the
+[search protocol reference](reference/web-search-streaming-rendering.md) and
+[shared configuration guide](../pi-codex-runtime/reference/configuration.md).

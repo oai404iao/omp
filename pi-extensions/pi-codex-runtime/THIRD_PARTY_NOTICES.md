@@ -6,7 +6,7 @@ catalog. See `provenance/openai-codex-40eac3ce-sol-luna.json` for exact source
 hashes and limits. The local catalog adapts those capabilities; it does not
 copy model instructions, enable unverified billing multipliers or imply access.
 
-This unpublished package is split from `@oai404iao/pi-codex-minimal-tools`.
+This package owns shared code split from `@oai404iao/pi-codex-minimal-tools`.
 Project material remains Copyright (c) 2026 oai404iao. The composite LICENSE
 and verified Apache license/NOTICE snapshots are retained.
 
@@ -29,4 +29,12 @@ Modified namespace-tool compatibility serialization is in
 assets. This is not a license or authorization to access
 private endpoints; the internal Responses Lite path remains unsupported upstream.
 
-See the original package's reference/source-map.md for the pinned evidence map.
+The descriptions match the pinned Codex `web_run_description.md` and
+`imagegen_description.md`; the parameter schemas are derived compatibility
+serializations, not verbatim source copies. Exact upstream paths, hashes and
+canonical-JSON fingerprints are in the reserved-tools provenance record.
+
+See `reference/source-map.md` for the pinned evidence map and
+`reference/legacy-source-notices.md` for the historical bundle attribution.
+Provenance `localPaths` retain their original snapshot names even when a path
+has since moved to its owner package.

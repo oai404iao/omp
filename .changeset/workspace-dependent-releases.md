@@ -1,7 +1,4 @@
 ---
-"@oai404iao/pi-codex-imagegen": patch
-"@oai404iao/pi-codex-minimal-tools": patch
-"@oai404iao/pi-codex-web-search": patch
 "@oai404iao/pi-subagent": patch
 ---
 

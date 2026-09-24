@@ -61,7 +61,10 @@ runtime 是纯库，不声明 `pi.extensions`，不能成为另一个 god packag
 图方向为 bundle → capability → runtime；capability 之间不互相依赖。
 先保留旧包名，不同时再创建第二个功能相同的 bundle。
 
-已落实的迁移（完整历史路径表见 `scripts/codex-source-owners.json`）：
+已落实的迁移（完整历史路径表现存于
+`pi-extensions/pi-codex-runtime/reference/historical-source-owners.json`；
+这是当时的迁移快照，当前 bundle 已移除私有 facade 和资源镜像，
+当前归属见 runtime 的 `reference/source-map.md`）：
 
 - `tools/web-search.ts` + `tools/web-search/*` → web-search；
 - `tools/image-generation.ts`、`background-image-generation.ts`、
