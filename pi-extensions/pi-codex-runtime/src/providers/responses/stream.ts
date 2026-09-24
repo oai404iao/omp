@@ -1,6 +1,6 @@
 import { type Api, type AssistantMessage, type AssistantMessageEventStream, type Model } from "@earendil-works/pi-ai";
 import { type ResponseStreamEvent } from "openai/resources/responses/responses.js";
-import { encodeTextSignature } from "./signatures.js";
+import { backfillReasoningSignatures, encodeTextSignature } from "./signatures.js";
 import { createResponsesStreamState } from "./stream-state.js";
 import { createResponseTextRenderer } from "./text-renderer.js";
 import { localToolName, parseStreamingJson } from "./text.js";
@@ -352,6 +352,7 @@ export async function processResponsesStream<TApi extends Api>(
 			const finalOutput = Array.isArray((response as { output?: unknown } | undefined)?.output)
 				? ((response as unknown as { output: unknown[] }).output)
 				: [];
+			backfillReasoningSignatures(output, finalOutput);
 			for (let outputIndex = 0; outputIndex < finalOutput.length; outputIndex++) {
 				const item = finalOutput[outputIndex];
 				if ((item as { type?: unknown } | undefined)?.type === "web_search_call") {

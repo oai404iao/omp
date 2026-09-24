@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 import { proxyForWebSocketUrl, webSocketOptionsForUrl } from "../src/provider-shim.js";
+import { webSocketCacheKey, webSocketFallbackKey } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/cache-key";
 
 const originalEnv = {
 	HTTP_PROXY: process.env.HTTP_PROXY,
@@ -54,4 +55,45 @@ test("proxyForWebSocketUrl honors NO_PROXY host entries", () => {
 	process.env.NO_PROXY = ".chatgpt.com,localhost";
 	assert.equal(proxyForWebSocketUrl("wss://chatgpt.com/backend-api/codex/responses"), undefined);
 	assert.equal(proxyForWebSocketUrl("wss://api.chatgpt.com/backend-api/codex/responses"), undefined);
+});
+
+test("provider proxy environment overrides ambient values, with port/IPv6 NO_PROXY", async () => {
+	process.env.HTTPS_PROXY = "http://ambient.invalid:8080";
+	delete process.env.NO_PROXY;
+	delete process.env.no_proxy;
+	const env = { https_proxy: "http://provider.invalid:8080", NO_PROXY: ".example.test:443,[::1]:8080" };
+	assert.equal(proxyForWebSocketUrl("wss://api.example.test/path", env), undefined);
+	assert.equal(proxyForWebSocketUrl("wss://api.example.test:8443/path", env), env.https_proxy);
+	assert.equal(proxyForWebSocketUrl("ws://[::1]:8080/path", env), undefined);
+	assert.equal(proxyForWebSocketUrl("wss://remote.invalid", { ...env, NO_PROXY: "*" }), undefined);
+	assert.equal(proxyForWebSocketUrl("wss://remote.invalid", env), env.https_proxy);
+	const options = await webSocketOptionsForUrl("wss://remote.invalid", {}, env);
+	assert.ok(options.dispatcher);
+	await options.dispatcher.close();
+});
+
+test("socket reuse and fallback are separated by effective proxy route, not unrelated env", () => {
+	const model = { provider: "openai", api: "openai-responses", id: "gpt-5.5" } as any;
+	const url = "wss://remote.invalid";
+	const first = { HTTPS_PROXY: "http://first.invalid:8080", NO_PROXY: "unrelated.invalid" };
+	const second = { ...first, HTTPS_PROXY: "http://second.invalid:8080" };
+	const key = (env: Record<string, string>) => webSocketCacheKey("session", model, url, new Headers(), "profile", env);
+	assert.notEqual(key(first), key(second));
+	assert.equal(key(first), key({ ...first, UNRELATED: "value" }));
+	assert.notEqual(key(first), key({ ...first, NO_PROXY: "*" }));
+	assert.notEqual(webSocketFallbackKey("session", model, url, "profile", first), webSocketFallbackKey("session", model, url, "profile", second));
+});
+
+test("explicit empty provider overrides clear ambient proxy and NO_PROXY settings", () => {
+	process.env.HTTPS_PROXY = "http://ambient.invalid:8080";
+	process.env.NO_PROXY = "*";
+	const url = "wss://remote.invalid";
+	const env = { HTTPS_PROXY: "http://provider.invalid:8080", NO_PROXY: "" };
+	assert.equal(proxyForWebSocketUrl(url, env), env.HTTPS_PROXY);
+	assert.equal(proxyForWebSocketUrl(url, { HTTPS_PROXY: "", NO_PROXY: "" }), undefined);
+	const model = { provider: "openai", api: "openai-responses", id: "gpt-5.5" } as any;
+	assert.notEqual(
+		webSocketCacheKey("session", model, url, new Headers()),
+		webSocketCacheKey("session", model, url, new Headers(), undefined, env),
+	);
 });

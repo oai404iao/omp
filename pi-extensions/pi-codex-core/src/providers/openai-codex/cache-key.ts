@@ -1,4 +1,6 @@
 import { type Api, type Model } from "@earendil-works/pi-ai/compat";
+import type { ProviderEnv } from "@earendil-works/pi-ai";
+import { proxyForWebSocketUrl } from "./proxy.js";
 
 function shortHash(str: string): string {
 	let h1 = 0xdeadbeef;
@@ -34,9 +36,10 @@ export function webSocketCacheKey(
 	url: string,
 	headers: Headers,
 	profileHash?: string,
+	env?: ProviderEnv,
 ): string | undefined {
 	return sessionId
-		? `${sessionId}\n${model.provider}\n${model.api}\n${model.id}\n${url}\n${profileHash ?? "no-profile"}\n${webSocketHeaderIdentity(headers)}`
+		? `${sessionId}\n${model.provider}\n${model.api}\n${model.id}\n${url}\n${profileHash ?? "no-profile"}\n${webSocketHeaderIdentity(headers)}\n${shortHash(proxyForWebSocketUrl(url, env) ?? "direct")}`
 		: undefined;
 }
 
@@ -45,8 +48,9 @@ export function webSocketFallbackKey(
 	model: Model<Api>,
 	url: string,
 	profileHash?: string,
+	env?: ProviderEnv,
 ): string | undefined {
 	return sessionId
-		? `${sessionId}\n${model.provider}\n${model.api}\n${model.id}\n${url}\n${profileHash ?? "no-profile"}`
+		? `${sessionId}\n${model.provider}\n${model.api}\n${model.id}\n${url}\n${profileHash ?? "no-profile"}\n${shortHash(proxyForWebSocketUrl(url, env) ?? "direct")}`
 		: undefined;
 }

@@ -45,7 +45,7 @@ export async function collectCodexCompactionStream(
 	};
 }
 
-export async function collectCodexCompactionOutput(response: Response, sessionKey?: string): Promise<unknown> {
-	const result = await collectCodexCompactionStream(mapCodexEvents(parseSSE(response), sessionKey));
+export async function collectCodexCompactionOutput(response: Response, sessionKey?: string, signal?: AbortSignal): Promise<unknown> {
+	const result = await collectCodexCompactionStream(mapCodexEvents(parseSSE(response, signal), sessionKey));
 	return result.item;
 }

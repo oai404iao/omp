@@ -1,17 +1,22 @@
 import { SESSION_WEBSOCKET_CACHE_TTL_MS } from "./constants.js";
+import type { ProviderEnv } from "@earendil-works/pi-ai";
 import { type AcquiredWebSocket, type SessionWebSocketCacheEntry, type WebSocketAcquireWaiter } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { connectWebSocket } from "./websocket-connection.js";
 import { closeWebSocketSilently, isWebSocketReusable } from "./websocket-socket.js";
 
 export const websocketSessionCache = new Map<string, SessionWebSocketCacheEntry>();
 
-const websocketConnectionPromises = new Map<string, Promise<SessionWebSocketCacheEntry>>();
+const websocketConnectionPromises = new Map<string, {
+	promise: Promise<SessionWebSocketCacheEntry>;
+	abort: AbortController;
+}>();
 
 export const websocketHttpFallbackSessions = new Set<string>();
 
 export function closeProviderWebSocketSessions(sessionId?: string): void {
-	for (const cacheKey of websocketConnectionPromises.keys()) {
+	for (const [cacheKey, pending] of websocketConnectionPromises) {
 		if (sessionId && !cacheKey.startsWith(`${sessionId}\n`)) continue;
+		pending.abort.abort();
 		websocketConnectionPromises.delete(cacheKey);
 	}
 	for (const [cacheKey, entry] of websocketSessionCache) {
@@ -121,6 +126,31 @@ async function waitForCachedWebSocket(
 	});
 }
 
+function waitForConnection(
+	connection: Promise<SessionWebSocketCacheEntry>,
+	signal: AbortSignal | undefined,
+	timeoutMs: number,
+): Promise<SessionWebSocketCacheEntry> {
+	return new Promise((resolve, reject) => {
+		const cleanup = () => {
+			if (timer) clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+		};
+		const onAbort = () => { cleanup(); reject(new Error("Request was aborted")); };
+		const timer = timeoutMs > 0 ? setTimeout(() => {
+			cleanup();
+			reject(new Error(`OpenAI Responses WebSocket connection timed out after ${timeoutMs}ms`));
+		}, timeoutMs) : undefined;
+		signal?.addEventListener("abort", onAbort, { once: true });
+		if (signal?.aborted) onAbort();
+		// A joining caller owns only its wait, not the shared handshake.
+		connection.then(
+			(entry) => { cleanup(); resolve(entry); },
+			(error) => { cleanup(); reject(error); },
+		);
+	});
+}
+
 export async function acquireWebSocket(
 	url: string,
 	headers: Headers,
@@ -128,9 +158,11 @@ export async function acquireWebSocket(
 	sessionId: string | undefined,
 	signal: AbortSignal | undefined,
 	connectTimeoutMs: number,
+	env?: ProviderEnv,
 ): Promise<AcquiredWebSocket> {
+	if (signal?.aborted) throw new Error("Request was aborted");
 	if (!cacheKey || !sessionId) {
-		const socket = await connectWebSocket(url, headers, signal, connectTimeoutMs);
+		const socket = await connectWebSocket(url, headers, signal, connectTimeoutMs, env);
 		return {
 			socket,
 			reused: false,
@@ -166,11 +198,14 @@ export async function acquireWebSocket(
 	}
 
 	let pendingConnection = websocketConnectionPromises.get(cacheKey);
+	const joiningConnection = pendingConnection !== undefined;
 	if (!pendingConnection) {
+		const abort = new AbortController();
+		const connectionSignal = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
 		let connectionPromise!: Promise<SessionWebSocketCacheEntry>;
-		connectionPromise = connectWebSocket(url, headers, signal, connectTimeoutMs)
+		connectionPromise = connectWebSocket(url, headers, connectionSignal, connectTimeoutMs, env)
 			.then((socket) => {
-				if (websocketConnectionPromises.get(cacheKey) !== connectionPromise) {
+				if (websocketConnectionPromises.get(cacheKey)?.promise !== connectionPromise) {
 					closeWebSocketSilently(socket, 1000, "session_shutdown");
 					throw new Error("WebSocket session closed");
 				}
@@ -179,14 +214,16 @@ export async function acquireWebSocket(
 				return entry;
 			})
 			.finally(() => {
-				if (websocketConnectionPromises.get(cacheKey) === connectionPromise) {
+				if (websocketConnectionPromises.get(cacheKey)?.promise === connectionPromise) {
 					websocketConnectionPromises.delete(cacheKey);
 				}
 			});
-		websocketConnectionPromises.set(cacheKey, connectionPromise);
-		pendingConnection = connectionPromise;
+		pendingConnection = { promise: connectionPromise, abort };
+		websocketConnectionPromises.set(cacheKey, pendingConnection);
 	}
-	const entry = await pendingConnection;
+	const entry = joiningConnection
+		? await waitForConnection(pendingConnection.promise, signal, connectTimeoutMs)
+		: await pendingConnection.promise;
 	if (entry.busy) return waitForCachedWebSocket(cacheKey, entry, signal);
 	return acquireCachedWebSocketEntry(cacheKey, entry, false);
 }

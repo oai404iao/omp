@@ -3,13 +3,15 @@ import { type CitationSource, type WebSearchCitationSource } from "@oai404iao/pi
 import { webSocketCacheKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";
 import type { ProviderStreamEffects } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/stream-effects";
-import { WEBSOCKET_CONNECT_TIMEOUT_MS, WEBSOCKET_SEND_TIMEOUT_MS } from "./constants.js";
+import { WEBSOCKET_CONNECT_TIMEOUT_MS, WEBSOCKET_IDLE_TIMEOUT_MS, WEBSOCKET_SEND_TIMEOUT_MS } from "./constants.js";
 import { buildCachedWebSocketRequestBody, prepareWebSocketRequestBodyForWire } from "./continuation.js";
 import { withWebSocketRequestMetadata } from "./request-metadata.js";
 import { isPreviousResponseNotFoundError, isRetryableEarlyWebSocketError } from "./retry.js";
 import { type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { countWebSocketEvents, parseWebSocket, sendWebSocketRequest, startWebSocketOutputOnFirstEvent } from "./websocket-events.js";
 import { acquireWebSocket } from "./websocket-session.js";
+import { assertSuccessfulOutput } from "./message.js";
+import { timeoutFromOption } from "./timeouts.js";
 
 export async function processWebSocketStream<TApi extends Api>(
 	url: string,
@@ -34,18 +36,22 @@ export async function processWebSocketStream<TApi extends Api>(
 	let disableCachedContext = false;
 	let staleSocketRetried = false;
 	let missingPreviousResponseRetried = false;
+	const cacheEnabled = options?.cacheRetention !== "none";
+	const connectTimeoutMs = timeoutFromOption(options?.websocketConnectTimeoutMs, WEBSOCKET_CONNECT_TIMEOUT_MS, "websocketConnectTimeoutMs");
+	const idleTimeoutMs = timeoutFromOption(options?.timeoutMs, WEBSOCKET_IDLE_TIMEOUT_MS, "timeoutMs");
 
 	while (true) {
-		if (startupPrewarm) {
+		if (cacheEnabled && startupPrewarm) {
 			await startupPrewarm;
 			startupPrewarm = undefined;
 		}
 		const cacheKey = webSocketCacheKey(
-			options?.sessionId,
+			cacheEnabled ? options?.sessionId : undefined,
 			model as Model<Api>,
 			url,
 			headers,
 			profileHash,
+			options?.env,
 		);
 		const { socket, entry, release, reused } = await acquireWebSocket(
 			url,
@@ -53,7 +59,8 @@ export async function processWebSocketStream<TApi extends Api>(
 			cacheKey,
 			options?.sessionId,
 			options?.signal,
-			WEBSOCKET_CONNECT_TIMEOUT_MS,
+			connectTimeoutMs,
+			options?.env,
 		);
 		let keepConnection = true;
 		let released = false;
@@ -90,7 +97,7 @@ export async function processWebSocketStream<TApi extends Api>(
 			};
 			const continuationResult = await processCapturedResponsesStream(
 				startWebSocketOutputOnFirstEvent(
-					countWebSocketEvents(parseWebSocket(socket, options?.signal), () => {
+					countWebSocketEvents(parseWebSocket(socket, options?.signal, idleTimeoutMs), () => {
 						eventCount++;
 					}),
 					startOutput,
@@ -107,6 +114,7 @@ export async function processWebSocketStream<TApi extends Api>(
 				historicalCitationSources,
 				grammarToolInputProperties,
 			);
+			assertSuccessfulOutput(output);
 			if (options?.signal?.aborted) {
 				keepConnection = false;
 			} else if (entry && continuationResult.responseId) {

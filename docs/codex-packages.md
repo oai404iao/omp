@@ -103,6 +103,16 @@ Upgrade the bundle to a broker-enabled release before mixing installations.
 
 ## Verification
 
+The repository-only [offline ablation audit](audits/codex-ablation.md) compares
+selected components and Pi 0.87.1's built-in Codex stream implementation.
+Run `npm run test:codex-ablation` for reproducible fixtures without credentials
+or model requests. These characterize current behavior, including known gaps;
+they are not model-quality or latency benchmarks.
+The same audit records the implemented transport fixes, synthetic compression
+measurements, and the explicitly authorized, compatibility-limited
+`openai/gpt-6-sol` live smoke. `test:codex-live` requires `--execute provider/model`
+and is never invoked by CI or the offline experiment.
+
 ### Optional Code Mode integration
 
 The independent, private `pi-code-mode` package is not part of the Codex dependency

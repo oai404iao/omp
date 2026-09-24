@@ -1,4 +1,5 @@
 import { WEBSOCKET_CONNECT_TIMEOUT_MS } from "./constants.js";
+import type { ProviderEnv } from "@earendil-works/pi-ai";
 import { WebSocketHandshakeError, extractWebSocketCloseError, extractWebSocketError } from "./errors.js";
 import { proxyForWebSocketUrl } from "./proxy.js";
 import { dynamicImport } from "./runtime.js";
@@ -51,10 +52,11 @@ export async function connectWebSocket(
 	headers: Headers,
 	signal: AbortSignal | undefined,
 	timeoutMs = WEBSOCKET_CONNECT_TIMEOUT_MS,
+	env?: ProviderEnv,
 ): Promise<WebSocketLike> {
 	if (signal?.aborted) throw new Error("Request was aborted");
 	const { WebSocket } = await loadNodeWebSocketModule();
-	const proxy = proxyForWebSocketUrl(url);
+	const proxy = proxyForWebSocketUrl(url, env);
 	let agent: unknown;
 	if (proxy) {
 		const protocol = new URL(proxy).protocol.toLowerCase();
@@ -211,6 +213,7 @@ export async function connectWebSocket(
 		socket.on("close", onClose);
 		socket.on("unexpected-response", onUnexpectedResponse);
 		signal?.addEventListener("abort", onAbort, { once: true });
-		timeout = setTimeout(onTimeout, Math.max(1, timeoutMs));
+		if (timeoutMs > 0) timeout = setTimeout(onTimeout, timeoutMs);
+		if (signal?.aborted) onAbort();
 	});
 }

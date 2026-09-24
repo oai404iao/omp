@@ -445,7 +445,7 @@ test("processResponsesStream records reasoning token usage and incomplete stop r
 			{ type: "response.output_item.added", output_index: 0, item: { type: "reasoning", id: "rs_1" } },
 			{ type: "response.reasoning_text.delta", output_index: 0, delta: "hidden chain" },
 			{ type: "response.output_item.done", output_index: 0, item: { type: "reasoning", id: "rs_1", summary: [], content: [{ text: "preserved reasoning" }] } },
-			{ type: "response.incomplete", response: { id: "resp_2", status: "incomplete", usage: { input_tokens: 11, output_tokens: 7, total_tokens: 18, input_tokens_details: { cached_tokens: 3 }, output_tokens_details: { reasoning_tokens: 5 } } } },
+			{ type: "response.incomplete", response: { id: "resp_2", status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, usage: { input_tokens: 11, output_tokens: 7, total_tokens: 18, input_tokens_details: { cached_tokens: 3 }, output_tokens_details: { reasoning_tokens: 5 } } } },
 		]),
 		output,
 		{ push() {} } as any,

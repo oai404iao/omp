@@ -26,10 +26,15 @@ export class WebSocketHandshakeError extends Error {
 const HTTP_STATUS_MESSAGE_PREFIX = /^HTTP\s+\d{3}(?::|\b)/i;
 
 export function isRetryableError(status: number, errorText: string): boolean {
+	if (isTerminalQuotaError(errorText)) return false;
 	if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
 		return true;
 	}
 	return /rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused/i.test(errorText);
+}
+
+export function isTerminalQuotaError(errorText: string): boolean {
+	return /usage_limit_reached|usage_not_included|insufficient_quota|billing_hard_limit_reached|GoUsageLimitError|FreeUsageLimitError|monthly usage limit reached|quota[_ ](?:exceeded|exhausted)|out of budget|insufficient (?:balance|credits)/i.test(errorText);
 }
 
 export function withHttpStatusPrefix(status: number, message: string): string {

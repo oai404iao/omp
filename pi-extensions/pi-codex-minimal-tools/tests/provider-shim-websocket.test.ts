@@ -3,6 +3,11 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import type { Socket } from "node:net";
+import { parseWebSocket } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/websocket-events";
+import { timeoutFromOption } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/timeouts";
 import { resetCodexWireState } from "../src/codex-wire-identity.js";
 import {
 	buildWebSocketHeaders,
@@ -137,6 +142,144 @@ test("OpenAI WebSocket URL and headers use the normal Responses endpoint and Pi 
 	assert.equal(threadId, sessionId);
 	assert.equal(headers.get("x-client-request-id"), threadId);
 	assert.ok(headers.get("x-codex-window-id") && UUID_V7_PATTERN.test(headers.get("x-codex-window-id")!));
+});
+
+test("cacheRetention none uses full input on fresh sockets but preserves session identity", async () => {
+	writeSettings({ openaiTransport: "websocket-cached" });
+	const server = await startWebSocketServer([
+		() => successEvents("resp_first", "first"),
+		() => successEvents("resp_second", "second"),
+	]);
+	try {
+		const provider = createProviderHarness().openai;
+		const first = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }], { cacheRetention: "none" });
+		const second = await runOpenAIProvider(provider, server.url, [
+			{ role: "user", content: "hello" }, first, { role: "user", content: "again" },
+		], { cacheRetention: "none" });
+		assert.equal(second.stopReason, "stop");
+		assert.equal(server.connections, 2);
+		assert.equal(server.requests[0]?.prompt_cache_key, undefined);
+		assert.equal(server.requests[1]?.prompt_cache_key, undefined);
+		assert.equal(server.requests[1]?.previous_response_id, undefined);
+		assert.equal(server.requests[1]?.input.length, 3);
+		assert.ok(server.handshakes[0]?.headers["session-id"]);
+		assert.equal(server.handshakes[1]?.headers["session-id"], server.handshakes[0]?.headers["session-id"]);
+		assert.equal(server.handshakes[1]?.headers["thread-id"], server.handshakes[0]?.headers["thread-id"]);
+	} finally {
+		await server.close();
+	}
+});
+
+test("WebSocket caller connect timeout bounds a stalled loopback handshake", { timeout: 3000 }, async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = createServer();
+	const sockets = new Set<Socket>();
+	server.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
+	server.on("upgrade", () => {});
+	server.listen(0, "127.0.0.1");
+	await once(server, "listening");
+	try {
+		const address = server.address() as { port: number };
+		const result = await runOpenAIProvider(createProviderHarness().openai, `http://127.0.0.1:${address.port}/v1`, [
+			{ role: "user", content: "hello" },
+		], { websocketConnectTimeoutMs: 25, maxRetries: 0, env: { NO_PROXY: "*" } });
+		assert.equal(result.stopReason, "error");
+		assert.match(result.errorMessage, /connection timed out after 25ms/);
+	} finally {
+		for (const socket of sockets) socket.destroy();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+});
+
+test("WebSocket idle timeout honors timeoutMs after a successful upgrade", { timeout: 3000 }, async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([
+		() => [{ type: "response.created", response: { id: "resp_stalled" } }],
+	]);
+	try {
+		const result = await runOpenAIProvider(createProviderHarness().openai, server.url, [
+			{ role: "user", content: "hello" },
+		], { timeoutMs: 25, maxRetries: 0 });
+		assert.equal(result.stopReason, "error");
+		assert.match(result.errorMessage, /idle timeout after 25ms/);
+		assert.equal(server.requests.length, 1);
+	} finally {
+		await server.close();
+	}
+});
+
+test("joining a shared stalled handshake has an independent deadline and abort", { timeout: 3000 }, async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const ownerAbort = new AbortController();
+	const joinerAbort = new AbortController();
+	const server = createServer();
+	const sockets = new Set<Socket>();
+	let upgraded!: () => void;
+	const upgrading = new Promise<void>((resolve) => { upgraded = resolve; });
+	let handshakes = 0;
+	server.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
+	server.on("upgrade", () => { handshakes++; upgraded(); });
+	server.listen(0, "127.0.0.1");
+	await once(server, "listening");
+	const provider = createProviderHarness().openai;
+	const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
+	const options = { maxRetries: 0, env: { NO_PROXY: "*" }, websocketConnectTimeoutMs: 0 };
+	const messages = [{ role: "user", content: "hello" }];
+	const owner = runOpenAIProvider(provider, url, messages, { ...options, signal: ownerAbort.signal });
+	try {
+		await upgrading;
+		const timedOut = await runOpenAIProvider(provider, url, messages, { ...options, websocketConnectTimeoutMs: 25 });
+		assert.match(timedOut.errorMessage, /connection timed out after 25ms/);
+		const joiner = runOpenAIProvider(provider, url, messages, { ...options, signal: joinerAbort.signal });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		joinerAbort.abort();
+		assert.equal((await joiner).stopReason, "aborted");
+		assert.equal(handshakes, 1);
+		assert.equal(ownerAbort.signal.aborted, false);
+		closeProviderWebSocketSessions("pi-session");
+		assert.equal((await owner).stopReason, "error");
+	} finally {
+		ownerAbort.abort();
+		await owner;
+		for (const socket of sockets) socket.destroy();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+});
+
+test("zero disables WS idle timer; invalid timeouts fail before I/O", async (t) => {
+	assert.equal(timeoutFromOption(undefined, 15000, "timeout"), 15000);
+	assert.equal(timeoutFromOption(0, 15000, "timeout"), 0);
+	for (const invalid of [-1, Number.NaN, Infinity]) {
+		assert.throws(() => timeoutFromOption(invalid, 15000, "timeout"), /Invalid timeout/);
+	}
+	const listeners = new Map<string, (event: unknown) => void>();
+	const socket = {
+		readyState: 1, send() {}, close() {},
+		addEventListener(name: string, listener: (event: unknown) => void) { listeners.set(name, listener); },
+		removeEventListener(name: string) { listeners.delete(name); },
+	};
+	const timer = t.mock.method(globalThis, "setTimeout");
+	const iterator = parseWebSocket(socket, undefined, 0)[Symbol.asyncIterator]();
+	const next = iterator.next();
+	listeners.get("message")?.({ data: JSON.stringify({ type: "response.completed", response: { status: "completed" } }) });
+	assert.equal((await next).value.type, "response.completed");
+	await iterator.return?.();
+	assert.equal(timer.mock.calls.length, 0);
+	assert.equal(listeners.size, 0);
+});
+
+test("provider NO_PROXY overrides a supplied WS proxy without touching ambient settings", async () => {
+	writeSettings({ openaiTransport: "websocket" });
+	const server = await startWebSocketServer([() => successEvents("resp_direct", "direct")]);
+	try {
+		const result = await runOpenAIProvider(createProviderHarness().openai, server.url, [
+			{ role: "user", content: "hello" },
+		], { env: { HTTP_PROXY: "http://127.0.0.1:1", NO_PROXY: "*" }, maxRetries: 0 });
+		assert.equal(result.stopReason, "stop");
+		assert.equal(server.connections, 1);
+	} finally {
+		await server.close();
+	}
 });
 
 test("WebSocket request send has an abortable timeout", async () => {
@@ -1064,6 +1207,41 @@ test("openai auto keeps output-limit completions on WebSocket", async () => {
 		await server.close();
 	}
 });
+
+for (const terminal of [
+	{ status: "cancelled" },
+	{ status: "incomplete", incomplete_details: { reason: "content_filter" } },
+	{ status: "incomplete" },
+]) {
+	test(`openai auto rejects ${JSON.stringify(terminal)} without caching or HTTP fallback`, async () => {
+		writeSettings({ openaiTransport: "auto" });
+		let sseRequests = 0;
+		const server = await startWebSocketServer([
+			() => [{
+				type: "response.completed",
+				response: { id: "resp_invalid", output: [], ...terminal },
+			}],
+			() => successEvents("resp_next", "next"),
+		], (_request, response) => {
+			sseRequests++;
+			response.writeHead(500).end();
+		});
+		try {
+			const provider = createProviderHarness().openai;
+			const failed = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
+			assert.equal(failed.stopReason, "error");
+			assert.ok(failed.errorMessage);
+			assert.equal(server.requests.length, 1);
+			const next = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }]);
+			assert.equal(next.stopReason, "stop");
+			assert.equal(server.connections, 2);
+			assert.equal(server.requests[1]?.previous_response_id, undefined);
+			assert.equal(sseRequests, 0);
+		} finally {
+			await server.close();
+		}
+	});
+}
 
 test("openai auto keeps retryable pre-start model errors on WebSocket", async () => {
 	writeSettings({ openaiTransport: "auto" });

@@ -234,7 +234,7 @@ test("final HTTP 429 provider failure preserves friendly usage-limit text after 
 
 	const result = await runCodexProvider();
 
-	assert.equal(fetchCalls(), 4);
+	assert.equal(fetchCalls(), 1);
 	assert.equal(result.stopReason, "error");
 	assert.equal(result.errorMessage, "HTTP 429: You have hit your ChatGPT usage limit (plus plan).");
 });
