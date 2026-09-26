@@ -85,10 +85,12 @@ test("policies: final frozen args, denial/throw/abort, redaction and usage accou
 	}
 	assert.equal(effects, 0);
 	const controller = new AbortController();
-	const pending = bridge([{ id: "guard", before: () => new Promise(() => {}) }], controller.signal)
-		.invoke("echo", { value: 1 }, "call", controller.signal);
+	let release!: () => void;
+	const cancelled = bridge([{ id: "guard", before: () => new Promise<void>((resolve) => { release = resolve; }) }], controller.signal);
+	const pending = cancelled.invoke("echo", { value: 1 }, "call", controller.signal);
 	setTimeout(() => controller.abort(), 10);
 	await assert.rejects(pending);
+	release(); await cancelled.settled();
 	assert.equal(effects, 0);
 	const value = await bridge([{
 		id: "guard", before: (call) => { assert(Object.isFrozen(call.input)); assert.deepEqual(call.input, { value: 1 }); },

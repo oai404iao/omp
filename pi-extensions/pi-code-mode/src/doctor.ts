@@ -19,7 +19,7 @@ export async function doctor(pi: ExtensionAPI, ctx: ExtensionContext, probe: boo
 	const protocol = resolveProtocol(pi, ctx, config.value.protocol);
 	const lines = [`Code Mode configuration: ${config.path}`, `Sources: ${JSON.stringify(config.sources)}`,
 		`Configured shared Host capacity: ${config.value.maxCells} cells (not an authority grant)`,
-		`Expected Host: ${HOST.release} (${HOST.target}; glibc >=${HOST.glibcMinimum}, OpenSSL 3)`];
+		`Expected Host: ${HOST.release} (${HOST.target}; official static musl build)`];
 	let ready = true;
 	const check = async (label: string, action: () => Promise<unknown>) => {
 		try { const result = await action(); lines.push(`${label}: OK${result ? ` ${result}` : ""}`); }

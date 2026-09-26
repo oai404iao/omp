@@ -12,18 +12,20 @@ the defaults; Codex integration is optional.
 ## Requirements and authorization
 
 - Pi >=0.87.0 (development target 0.87.1); Node >=22.19.
-- Linux x64 **glibc >=2.39 and OpenSSL 3** for the current local patched artifact,
+- Linux x64 for the official static musl Host (no Host glibc/OpenSSL requirement),
   `/usr/bin/systemd-run`, `/usr/bin/systemctl`, `/usr/bin/env`,
   a user systemd manager and effective cgroup v2 memory/pids/CPU controllers.
   The optional process adapter additionally uses `/bin/bash`.
-- A regular (not symlink) executable for the local patched `codex-code-mode-host`
-  **`rust-v0.155.1+pi-v8-sort.1`**, SHA-256
-  `4c5824da1cdf4652ce08e13ed572a7d488814d9fe0f9dd6ac0ce683422c27690`.
-  Identity/build metadata lives in `src/host-manifest.json`; see
-  [`build recipe`](../../scripts/code-mode-host-build.md) and `THIRD_PARTY_NOTICES.md`.
-  Official 0.155.1/old 0.145.0 binaries are rejected. This artifact backports the
-  upstream V8 array-sort optimization workaround; it is **not** an official musl
-  release or a general security certification. No automatic download/fallback.
+- A regular (not symlink) executable extracted from the official
+  [`rust-v0.157.1` Host archive](https://github.com/openai/codex/releases/download/rust-v0.157.1/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz),
+  SHA-256 `67b86142bac5cead11b8420cf32d3a2bf88c8868d71733f351ed7c5d95a953e0`.
+  Archive SHA-256: `3516f9b8bbe6bc06ee7bdb92b293a17eab194b3f10b9b9ea10c5b839e972d7fc`.
+  Exact source/artifact metadata lives in `src/host-manifest.json`; see
+  `THIRD_PARTY_NOTICES.md`. The release includes the upstream V8 array-sort
+  optimization workaround; no local patch/build is needed. Older official
+  binaries and the former local GNU build are rejected. Digest verification
+  is not signature verification or a general security certification.
+  No automatic download/fallback.
 
 ```sh
 pi -e ./pi-extensions/pi-code-mode \
@@ -45,7 +47,7 @@ Optional `<agentDir>/extensions/pi-code-mode/config.json`:
 ```json
 {
   "version": 1,
-  "hostPath": "/absolute/path/to/patched/codex-code-mode-host",
+  "hostPath": "/absolute/path/to/codex-code-mode-host-x86_64-unknown-linux-musl",
   "protocol": "auto",
   "visibility": "mixed",
   "maxCells": 1,
@@ -361,6 +363,9 @@ Owners that cannot confirm effect settlement must throw `unsettledEffect(message
 from `/contributions`. Across physical installations its structural discriminator
 is `{code:"PI_CODE_MODE_UNSETTLED_EFFECT",version:1,message:string}`; matching
 does not depend on `instanceof`. It blocks queued effects and poisons the session.
+This also applies to `prepare`, policy and approval failures, including late
+rejections after cancellation. A synchronous preflight failure closes admission
+before another invocation can start.
 Do not use it for ordinary failures whose effects have settled. Result adapters
 must explicitly return `{value,usage?}` with bounded JSON, not blindly expose
 native `details`, drop media, or swallow agent-control results.
@@ -632,7 +637,14 @@ Adapters must honor abort and await their real effects before resolving.
 before invocation. `after(call,value)` returns redacted JSON before JS sees it.
 Hooks run in sorted policy-ID order, with frozen data and a five-second signal
 budget. They must cooperate with cancellation; use policy hooks for checks/
-redaction, not independent side effects. Discovery caps: 32 providers, 64 tools,
+redaction, not independent side effects. Abort/timeout rejects the JS binding
+promptly, but an entered hook remains part of the invocation until its actual
+promise settles. An exclusive invocation retains its scheduler slot through
+that cleanup; cell completion and diagnostic receipts also wait. Late values
+cannot resume execution or bypass redaction. Ordinary cooperative cleanup does
+not poison the session; an explicit unsettled-effect rejection does. A hook
+that never settles can keep a cell nonterminal and trigger the existing blocked
+teardown path. Discovery caps: 32 providers, 64 tools,
 16 policies; schema 8 KiB, description 2000 characters, entire catalog 24 KiB.
 
 For initialization that can fail, use
@@ -699,7 +711,7 @@ before code/commands run. Unknown stop state retains the OS watchdog and blocks
 reuse; killing a proxy is not proof that effects ended.
 
 Verified binaries share one private, content-addressed cache under
-`${XDG_STATE_HOME:-$HOME/.local/state}/pi-code-mode/hosts/` (about 66 MB per pinned
+`${XDG_STATE_HOME:-$HOME/.local/state}/pi-code-mode/hosts/` (about 74 MB per pinned
 artifact), while each Host/process retains a separate working directory.
 The caller's executable and cached bytes are stream-hashed on **every** launch;
 publication is atomic and never replaces an existing cache inode. Symlinks,
@@ -726,7 +738,9 @@ npm run test:code-mode-package -- --host /absolute/path/to/pinned-host --codex
 Host tests require the real executable/systemd and fail rather than silently
 skip prerequisites. Native OpenAI Responses/Completions, Anthropic and Codex
 Standard/Lite tests use real Pi adapters with fixture HTTP or loopback WebSocket,
-**not live provider accounts**. See
+**not live provider accounts**. Current pin and settlement verification:
+[`official Host audit`](../../docs/audits/pi-code-mode-official-host-settlement.md).
+Earlier scope and evidence:
 [`S2 audit`](../../docs/audits/pi-code-mode-s2.md) and
 [`S4 audit`](../../docs/audits/pi-code-mode-s4.md), plus the
 [`S3 audit`](../../docs/audits/pi-code-mode-s3.md) for actual evidence and remaining

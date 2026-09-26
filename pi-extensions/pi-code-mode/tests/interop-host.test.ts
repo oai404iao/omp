@@ -9,6 +9,8 @@ import { registerPiBuiltinLs } from "../src/builtin-adapters.ts";
 import inventory from "../examples/inventory.ts";
 import { piSession, scratch } from "./helpers.ts";
 import { Runtime } from "../src/runtime.ts";
+import { CodeSession } from "../src/session.ts";
+import { unsettledEffect } from "../src/errors.ts";
 
 const host = process.env.CODE_MODE_TEST_HOST;
 assert(host, "CODE_MODE_TEST_HOST required; no silent interoperability skips");
@@ -81,3 +83,51 @@ test("real Host: approved I3 pilots execute only via exact grants while inventor
 	assert(f.session.getActiveToolNames().includes("inventory_lookup"));
 	assert.deepEqual(f.errors, []);
 });
+
+for (const lateFatal of [false, true]) {
+	test(`real Host: caught policy timeout cannot retire pending cleanup (lateFatal=${lateFatal})`, { timeout: 20000 }, async (t) => {
+		const session = new CodeSession();
+		let release!: () => void, reject!: (error: Error) => void, timedOut!: () => void;
+		const cleanup = new Promise<void>((yes, no) => { release = yes; reject = no; });
+		const aborted = new Promise<void>((resolve) => { timedOut = resolve; });
+		const usage = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+		t.after(async () => {
+			release();
+			if (session.blocked) await assert.rejects(session.revoke(true), /Unconfirmed tool effects/);
+			else await session.revoke(true);
+		});
+		await session.authorize(await scratch("policy-settlement"), host!, { write: false, process: false, tools: ["fixture__read"] });
+		const first = await session.execute('try { text(await tools.fixture__read({})); } catch { text("caught"); }',
+			undefined, { yield_time_ms: 0 }, {
+				tools: [{ name: "fixture__read", description: "fixture", effect: "read", parameters: Type.Object({}),
+					async invoke() { return { value: "private result", usage }; } }],
+				policies: [{ id: "guard", async after(call, value) {
+					call.context.signal.addEventListener("abort", timedOut, { once: true });
+					await cleanup;
+					return value;
+				} }],
+			});
+		await aborted;
+		let pending = await session.wait(first.cellId, { yield_time_ms: 1000 });
+		const receipts = [first.usage, pending.usage].filter(Boolean);
+		for (let i = 0; i < 5 && !pending.hostCompleted; i++) {
+			pending = await session.wait(first.cellId, { yield_time_ms: 500 });
+			if (pending.usage) receipts.push(pending.usage);
+		}
+		assert.equal(pending.hostCompleted, true);
+		assert.equal(pending.state, "settling", "Host completion is not invocation settlement");
+		assert.equal(session.cellList.length, 1);
+		await assert.rejects(session.execute("text('too early')"), /capacity/);
+		assert.deepEqual(receipts, [usage], "usage is delivered once even before cleanup finishes");
+		if (lateFatal) reject(unsettledEffect("late policy cleanup unconfirmed"));
+		else release();
+		const last = await session.wait(first.cellId, { yield_time_ms: 10000 });
+		assert.equal(last.state, lateFatal ? "failed" : "completed", last.error ?? "unexpected terminal state");
+		assert.equal(last.effectsUnsettled, lateFatal);
+		assert.equal(last.usage, undefined);
+		assert.equal(session.blocked, lateFatal);
+		if (lateFatal) await assert.rejects(session.execute("text('blocked')"), /blocked/);
+		else assert.equal((await session.execute("text('reusable')", undefined, { yield_time_ms: 5000 })).text, "reusable");
+	});
+}

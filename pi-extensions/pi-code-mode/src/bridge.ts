@@ -40,15 +40,17 @@ export function jsonValue(value: unknown): JsonValue {
 	if (Buffer.byteLength(text) > LIMITS.resultBytes) throw new Error("Tool result byte budget exceeded");
 	return JSON.parse(text) as JsonValue;
 }
-async function policyWork<T>(run: (signal: AbortSignal) => T | Promise<T>, outer: AbortSignal): Promise<T> {
+async function policyWork<T>(run: (signal: AbortSignal) => T | Promise<T>, outer: AbortSignal, interrupt: (error: unknown) => void): Promise<T> {
 	const signal = AbortSignal.any([outer, AbortSignal.timeout(LIMITS.policyMs)]);
 	signal.throwIfAborted();
-	let abort!: () => void;
+	const abort = () => interrupt(signal.reason);
+	signal.addEventListener("abort", abort, { once: true });
 	try {
-		return await Promise.race([Promise.resolve().then(() => run(signal)), new Promise<never>((_, reject) => {
-			abort = () => reject(signal.reason);
-			signal.addEventListener("abort", abort, { once: true });
-		})]);
+		// Interrupt delivery promptly, but retain the actual hook in the invocation
+		// lifetime (and any exclusive slot) until its cleanup really settles.
+		const value = await run(signal);
+		signal.throwIfAborted();
+		return value;
 	} finally { signal.removeEventListener("abort", abort); }
 }
 
@@ -76,6 +78,18 @@ export class ToolBridge {
 		this.approvalQueue = diagnostics.approvalQueue ?? new ApprovalQueue();
 		this.scheduler = diagnostics.scheduler ?? new Scheduler();
 	}
+	private failUnsettled(error: unknown): void {
+		if (!isUnsettledEffect(error) || this.unsettled) return;
+		this.unsettled = unsettledEffect(error.message);
+		// Close shared admission BEFORE aborting preflight can pump queued work.
+		this.scheduler.stop(this.unsettled);
+		this.stop(this.unsettled);
+		this.fatal(this.unsettled);
+	}
+	private async ownerWork<T>(run: () => T | Promise<T>): Promise<T> {
+		try { return await run(); }
+		catch (error) { this.failUnsettled(error); throw error; }
+	}
 	get origin(): string | undefined { return this.diagnostics.origin; }
 	get pendingApprovals(): number { return this.approvalTasks.size; }
 	async waitForApprovals(signal?: AbortSignal): Promise<void> {
@@ -99,6 +113,8 @@ export class ToolBridge {
 		const preflightSignal = AbortSignal.any([signal, this.preflight.signal]);
 		const trace: Trace = { id, name, state: "queued", queuedAt: Date.now() };
 		this.traces.push(trace);
+		let interrupt!: (error: unknown) => void;
+		const interrupted = new Promise<never>((_, reject) => { interrupt = reject; });
 		const execute = async () => {
 			preflightSignal.throwIfAborted();
 			const rawContext = this.getContext();
@@ -110,14 +126,20 @@ export class ToolBridge {
 			// Host V1 serializes absent, undefined and top-level null identically.
 			// Contributions require object schemas; field-level null stays intact.
 			const normalized = input ?? {};
-			const args = frozen(structuredClone(tool.prepare ? tool.prepare(normalized) : normalized));
+			let args: unknown;
+			try { args = frozen(structuredClone(tool.prepare ? tool.prepare(normalized) : normalized)); }
+			catch (error) {
+				// Synchronous owner failures must stop a sibling invoked immediately
+				// afterward, not wait for the outer promise's rejection handler.
+				this.failUnsettled(error); throw error;
+			}
 			if (!Check(tool.parameters, args)) throw new Error("Invalid nested tool arguments");
 			const call: PolicyCall = Object.freeze({ name, effect: tool.effect, input: args, context });
 			for (const policy of this.policies) {
 				if (!policy.before) continue;
-				const decision = await policyWork((policySignal) => policy.before!({
+				const decision = await policyWork((policySignal) => this.ownerWork(() => policy.before!({
 					...call, context: { ...context, signal: policySignal, pi: rawContext ? { ...rawContext, signal: policySignal } : undefined },
-				}), preflightSignal);
+				})), preflightSignal, interrupt);
 				if (decision?.block) throw new Error(decision.reason ?? "Code Mode policy denied the call");
 			}
 			const required = [...new Set([tool.approval, ...this.policies.map((p) => p.approval)].filter((id): id is string => id !== undefined))];
@@ -128,7 +150,9 @@ export class ToolBridge {
 			});
 			for (const provider of providers) {
 				trace.state = "awaiting_approval";
-				const pending = this.approvalQueue.request(provider, Object.freeze({ ...call, context: Object.freeze({
+				const pending = this.approvalQueue.request({
+					id: provider.id, approve: (call) => this.ownerWork(() => provider.approve(call)),
+				}, Object.freeze({ ...call, context: Object.freeze({
 					...context, signal: preflightSignal, pi: rawContext ? { ...rawContext, signal: preflightSignal } : undefined,
 				}) }));
 				this.approvalTasks.add(pending);
@@ -149,27 +173,24 @@ export class ToolBridge {
 					}
 					let value = jsonValue(result.value);
 					for (const policy of this.policies) {
-						if (policy.after) value = jsonValue(await policyWork((policySignal) => policy.after!({
+						if (policy.after) value = jsonValue(await policyWork((policySignal) => this.ownerWork(() => policy.after!({
 							...call, context: { ...context, signal: policySignal, pi: rawContext ? { ...rawContext, signal: policySignal } : undefined },
-						}, frozen(structuredClone(value))), signal));
+						}, frozen(structuredClone(value)))), signal, interrupt));
 					}
 					signal.throwIfAborted();
 					trace.state = "completed";
 					return value;
 				} catch (error) {
 					// Must happen BEFORE Scheduler releases the exclusive slot/pumps.
-					if (isUnsettledEffect(error)) {
-						this.unsettled = unsettledEffect(error.message);
-						this.scheduler.stop(this.unsettled);
-						this.fatal(this.unsettled);
-					}
+					this.failUnsettled(error);
 					throw error;
 				} finally { this.running--; }
 			});
 		};
 		const task = execute().catch((error) => {
+			this.failUnsettled(error);
 			trace.state = preflightSignal.aborted ? "cancelled" : "failed";
-			throw new Error(errorText(error));
+			throw error;
 		}).finally(() => {
 			trace.settledAt = Date.now();
 			observeCompletion(this.diagnostics.observers ?? [], Object.freeze({
@@ -180,7 +201,11 @@ export class ToolBridge {
 		});
 		this.tasks.add(task);
 		void task.finally(() => this.tasks.delete(task)).catch(() => {});
-		return task;
+		// Only delivery races cancellation. Settlement/receipts follow task,
+		// including policy cleanup and late structural fatal errors.
+		return Promise.race([task, interrupted]).catch((error) => {
+			throw new Error(errorText(isUnsettledEffect(error) ? unsettledEffect(error.message) : error));
+		});
 	}
 	stop(error = new Error("Code Mode bridge stopped")): void { this.preflight.abort(error); }
 	stopScheduling(error: Error): void { this.scheduler.stop(error); }

@@ -89,7 +89,7 @@ test("real S1 runtime: parent execution deadline is finite", { timeout: 45000 },
 	assert(Date.now() - started < LIMITS.watchdogSeconds * 1000 + 5000);
 });
 
-test("U0 patched Host: empty args, undefined store, negotiated durations and ordinary sorting", { timeout: 15000 }, async (t) => {
+test("official Host: empty args, undefined store, negotiated durations and ordinary sorting", { timeout: 15000 }, async (t) => {
 	const session = new CodeSession();
 	t.after(() => session.revoke(true));
 	await session.authorize(await scratch("u0-host"), source);
