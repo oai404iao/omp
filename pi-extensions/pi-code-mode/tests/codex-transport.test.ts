@@ -8,8 +8,8 @@ import { createEventBus, type ExtensionAPI, type ExtensionContext } from "@earen
 import { normalizeContext, type ApiStreamSimpleFunction, type Model, type TranscriptContext } from "@earendil-works/pi-ai/compat";
 import { registerResponsesProviderRuntime } from "../../pi-codex-core/src/extension/provider-runtime.ts";
 import { createInitialAssistantMessage } from "../../pi-codex-core/src/providers/openai-codex/message.ts";
-import { withCodexSettings, responsesModel } from "../../pi-codex-minimal-tools/tests/support/provider-lifecycle-test-support.ts";
-import { codexJwt } from "../../pi-codex-minimal-tools/tests/support/openai-codex-test-support.ts";
+import { withCodexSettings, responsesModel } from "../../../tests/codex/support/provider-lifecycle-test-support.ts";
+import { codexJwt } from "../../pi-codex-core/tests/support/openai-codex-test-support.ts";
 import { EXEC_SAMPLING, projectExecHistory, resolveProtocol, TRANSPORT_DISCOVER_V2, TRANSCRIPT_SEMANTICS, type TransportCapability } from "../src/protocol.ts";
 import { grammarResponse, wireTools } from "./grammar-fixtures.ts";
 

@@ -1,3 +1,4 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { sanitizeResponseMessageItem, sanitizeWebSearchCallItem } from "./items.js";
 import { type ReplayableResponseMessageItem, type ReplayableWebSearchCallItem, type TextSignaturePhase } from "./types.js";
 
@@ -98,5 +99,23 @@ export function decodeWebSearchActivityTextSignature(signature: string | undefin
 		return item?.id === callId ? item : undefined;
 	} catch {
 		return undefined;
+	}
+}
+export function backfillReasoningSignatures(output: AssistantMessage, items: unknown[]): void {
+	const encryptedById = new Map<string, string>();
+	for (const value of items) {
+		const item = value as { type?: unknown; id?: unknown; encrypted_content?: unknown } | null;
+		if (item?.type === "reasoning" && typeof item.id === "string" && typeof item.encrypted_content === "string" && item.encrypted_content) {
+			encryptedById.set(item.id, item.encrypted_content);
+		}
+	}
+	if (encryptedById.size === 0) return;
+	for (const block of output.content) {
+		if (block.type !== "thinking" || !block.thinkingSignature) continue;
+		const item = JSON.parse(block.thinkingSignature);
+		const encrypted = encryptedById.get(item.id);
+		if (item.type === "reasoning" && encrypted && !item.encrypted_content) {
+			block.thinkingSignature = JSON.stringify({ ...item, encrypted_content: encrypted });
+		}
 	}
 }

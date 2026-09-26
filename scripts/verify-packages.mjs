@@ -12,16 +12,33 @@ const seenNames = new Set();
 const testedPiVersion = piFloor;
 const requiredRuntimeFiles = {
   "@oai404iao/pi-external-thinking": ["THIRD_PARTY_NOTICES.md"],
-  "@oai404iao/pi-codex-minimal-tools": [
+  "@oai404iao/pi-codex-minimal-tools": ["subagent-inline.ts", "THIRD_PARTY_NOTICES.md"],
+  "@oai404iao/pi-codex-runtime": [
     "LICENSES/Apache-2.0.txt",
     "LICENSES/OpenAI-Codex-NOTICE.txt",
     "THIRD_PARTY_NOTICES.md",
     "provenance/openai-codex-eb9dceba-reserved-tools.json",
+    "provenance/openai-codex-ddea03ad-astra.json",
+    "provenance/openai-codex-40eac3ce-sol-luna.json",
     "config.schema.json",
     "models.schema.json",
     "src/model-catalog/default-models.json",
     "src/codex-reserved-tools.ts",
+  ],
+  "@oai404iao/pi-codex-core": [
+    "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "THIRD_PARTY_NOTICES.md",
+    "provenance/openai-codex-eb9dceba-reserved-tools.json",
+    "provenance/openai-codex-ddea03ad-astra.json",
+    "provenance/openai-codex-40eac3ce-sol-luna.json",
     "src/providers/codex-apply-patch.lark",
+  ],
+  "@oai404iao/pi-codex-web-search": [
+    "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "THIRD_PARTY_NOTICES.md",
+    "provenance/openai-codex-eb9dceba-reserved-tools.json",
+  ],
+  "@oai404iao/pi-codex-imagegen": [
+    "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "THIRD_PARTY_NOTICES.md",
+    "provenance/openai-codex-eb9dceba-reserved-tools.json",
   ],
   "@oai404iao/pi-code-mode": ["THIRD_PARTY_NOTICES.md", "src/limits.ts"],
   "@oai404iao/pi-subagent": [
@@ -157,7 +174,12 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   if (!packOutput) continue;
 
   const packedPaths = new Set(packOutput.files.map((file) => normalizePackagePath(file.path)));
-  if (expectedName.startsWith("@oai404iao/pi-codex-") || expectedName === "@oai404iao/pi-code-mode") {
+  if (expectedName === "@oai404iao/pi-codex-minimal-tools") {
+    const allowed = new Set(["index.ts", "subagent-inline.ts", "package.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]);
+    for (const path of packedPaths) {
+      if (!allowed.has(path)) report(`${manifest.name}: composition tarball must not contain ${path}`);
+    }
+  } else if (expectedName.startsWith("@oai404iao/pi-codex-") || expectedName === "@oai404iao/pi-code-mode") {
     for (const path of readdirSync(resolve(root, directory, "src"), { recursive: true })) {
       if (!path.endsWith(".ts")) continue;
       const runtimePath = `src/${normalizePackagePath(path)}`;

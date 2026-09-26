@@ -10,12 +10,13 @@ export function finalizeResponseUsage(
 ): void {
 	if (response?.usage) {
 		const cachedTokens = response.usage.input_tokens_details?.cached_tokens || 0;
+		const cacheWriteTokens = (response.usage.input_tokens_details as { cache_write_tokens?: number } | undefined)?.cache_write_tokens || 0;
 		const reasoningTokens = (response.usage as { output_tokens_details?: { reasoning_tokens?: number } }).output_tokens_details?.reasoning_tokens || 0;
 		output.usage = {
-			input: (response.usage.input_tokens || 0) - cachedTokens,
+			input: Math.max(0, (response.usage.input_tokens || 0) - cachedTokens - cacheWriteTokens),
 			output: response.usage.output_tokens || 0,
 			cacheRead: cachedTokens,
-			cacheWrite: 0,
+			cacheWrite: cacheWriteTokens,
 			totalTokens: response.usage.total_tokens || 0,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		};
@@ -28,25 +29,38 @@ export function finalizeResponseUsage(
 			: (response?.service_tier ?? options.serviceTier);
 		options.applyServiceTierPricing(output.usage, serviceTier);
 	}
-	output.stopReason = mapStopReason(response?.status);
+	const incompleteReason = response?.status === "incomplete" ? response.incomplete_details?.reason : undefined;
+	output.rawStopReason = incompleteReason ? `${response.status}.${incompleteReason}` : response?.status;
+	const terminal = mapStopReason(response?.status, incompleteReason);
+	output.stopReason = terminal.stopReason;
+	if (terminal.errorMessage) output.errorMessage = response?.error?.message || terminal.errorMessage;
+	else delete output.errorMessage;
 	if (output.content.some((block) => block.type === "toolCall") && output.stopReason === "stop") {
 		output.stopReason = "toolUse";
 	}
 }
 
-function mapStopReason(status: string | undefined): AssistantMessage["stopReason"] {
-	if (!status) return "stop";
+function mapStopReason(
+	status: string | undefined,
+	incompleteReason: string | undefined,
+): { stopReason: AssistantMessage["stopReason"]; errorMessage?: string } {
+	if (!status) return { stopReason: "stop" };
 	switch (status) {
 		case "completed":
-			return "stop";
+			return { stopReason: "stop" };
 		case "incomplete":
-			return "length";
+			return incompleteReason === "max_output_tokens"
+				? { stopReason: "length" }
+				: {
+						stopReason: "error",
+						errorMessage: incompleteReason ? `Response incomplete: ${incompleteReason}` : "Response incomplete without a provider reason",
+					};
 		case "failed":
 		case "cancelled":
-			return "error";
+			return { stopReason: "error", errorMessage: `Response ${status}` };
 		case "in_progress":
 		case "queued":
-			return "stop";
+			return { stopReason: "error", errorMessage: `Response ended with non-terminal status: ${status}` };
 		default:
 			throw new Error(`Unhandled stop reason: ${status}`);
 	}

@@ -28,7 +28,7 @@ Independent image capability, using runtime without core or web-search.
 ## Workflow and verification
 
 Read root CONTRIBUTING.md, RELEASING.md and docs/codex-packages.md. Source evidence
-is in pi-codex-minimal-tools/reference/source-map.md.
+is in pi-codex-runtime/reference/source-map.md.
 Use the root package-lock.json; never add package locks. All new modules must be
 at most 400 lines. Preserve the Pi 0.87.0 floor and exact 0.87.1 target; run
 `npm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
@@ -39,14 +39,15 @@ From repository root:
 
 ```bash
 npm run check -w @oai404iao/pi-codex-imagegen
-npm run check -w @oai404iao/pi-codex-minimal-tools
+npm run test:codex-composition
 npm run check:architecture
 npm run test:codex-packages
 npm run ci
 ```
 
-Most behavioral regressions remain in the compatibility package's tests and
-shared fixtures; the owner package's entry smoke alone is not sufficient.
+Behavioral regressions live in `tests/`; neutral fixtures and cross-capability
+integration live in root `tests/codex/`. Owner tests must not import core or
+web-search implementations; hosted transport integration belongs at root.
 Tests use mocked HTTP/loopback, not real credentials. Tarball tests npm-install
 Codex and external host archives independently from the root lock, without external links.
 Restore process environment, fetch, timers and sockets when adding fixtures.

@@ -22,15 +22,15 @@ Shared library, not a Pi extension. No default factory or `pi.extensions`.
 2. Broker v1 requires identical runtime versions. Shutdown closes discovery;
    actual Pi runtime invalidation disposes tracked subscriptions on reload.
 3. Capture presentation sinks before I/O; observer state is response-attempt-local.
-4. Schemas/default-models here are canonical. Update their checked legacy mirrors
-   without changing old configuration locations. Do not infer unknown model support.
+4. Schemas/default-models here are the sole copies. Preserve existing configuration
+   locations; do not add bundle mirrors or infer unknown model support.
 5. Preserve namespace JSON fingerprints, modification notices and license snapshots.
    Wire identity and catalog have inherited, downward-only line exceptions.
 
 ## Workflow and verification
 
 Read root CONTRIBUTING.md, RELEASING.md and docs/codex-packages.md. Source evidence
-is in pi-codex-minimal-tools/reference/source-map.md.
+is in this package's reference/source-map.md.
 Use the root package-lock.json; never add package locks. All new modules must be
 at most 400 lines. Preserve the Pi 0.87.0 floor and exact 0.87.1 target; run
 `npm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
@@ -41,14 +41,15 @@ From repository root:
 
 ```bash
 npm run check -w @oai404iao/pi-codex-runtime
-npm run check -w @oai404iao/pi-codex-minimal-tools
+npm run test:codex-composition
 npm run check:architecture
 npm run test:codex-packages
 npm run ci
 ```
 
-Most behavioral regressions remain in the compatibility package's tests and
-shared fixtures; the owner package's entry smoke alone is not sufficient.
+Behavioral regressions live in `tests/`; neutral fixtures and cross-capability
+integration live in root `tests/codex/`. Runtime tests must not import core or
+capability implementations, including indirectly through a shared harness.
 Tests use mocked HTTP/loopback, not real credentials. Tarball tests npm-install
 Codex and external host archives independently from the root lock, without external links.
 Restore process environment, fetch, timers and sockets when adding fixtures.

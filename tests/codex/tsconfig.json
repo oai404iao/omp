@@ -1,0 +1,4 @@
+{
+  "extends": "../../pi-extensions/pi-codex-core/tsconfig.json",
+  "include": ["**/*.ts"]
+}

@@ -40,7 +40,7 @@ export async function sendWebSocketRequest(
 	});
 }
 
-export async function* parseWebSocket(socket: WebSocketLike, signal: AbortSignal | undefined): AsyncIterable<StreamEventShape> {
+export async function* parseWebSocket(socket: WebSocketLike, signal: AbortSignal | undefined, idleTimeoutMs = WEBSOCKET_IDLE_TIMEOUT_MS): AsyncIterable<StreamEventShape> {
 	const queue: StreamEventShape[] = [];
 	let pending: (() => void) | null = null;
 	let done = false;
@@ -161,10 +161,10 @@ export async function* parseWebSocket(socket: WebSocketLike, signal: AbortSignal
 			}
 			if (done && pendingMessages === 0) break;
 			await new Promise<void>((resolve, reject) => {
-				const timeout = setTimeout(() => {
+				const timeout = idleTimeoutMs > 0 ? setTimeout(() => {
 					pending = null;
-					reject(new Error(`OpenAI Responses WebSocket idle timeout after ${WEBSOCKET_IDLE_TIMEOUT_MS}ms`));
-				}, WEBSOCKET_IDLE_TIMEOUT_MS);
+					reject(new Error(`OpenAI Responses WebSocket idle timeout after ${idleTimeoutMs}ms`));
+				}, idleTimeoutMs) : undefined;
 				pending = () => {
 					clearTimeout(timeout);
 					resolve();

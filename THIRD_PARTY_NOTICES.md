@@ -5,34 +5,34 @@ following components retain their own licenses and attribution.
 
 ## OpenAI Codex
 
-In the S3 split, implementation ownership moves to the private
-`pi-codex-core` package (patch grammar/adaptations) and `pi-codex-runtime`
+Implementation ownership belongs to
+`pi-codex-core` (patch grammar/adaptations) and `pi-codex-runtime`
 (`src/reserved-tools/{web-search,image-generation,types}.ts` and serialization).
-Historical paths below in `pi-codex-minimal-tools` remain compatibility forwards
-or checked asset mirrors. All four new packages retain identical reviewed
-LICENSE/NOTICE and provenance snapshots; their own notices describe local ownership.
+The bundle is composition-only; private forwards and asset mirrors are removed.
+All four owners retain reviewed Apache license/NOTICE and provenance snapshots;
+their package-specific composite licenses and notices describe local ownership.
 
-`pi-extensions/pi-codex-minimal-tools` includes material from
+The owner packages include material from
 [OpenAI Codex](https://github.com/openai/codex), analyzed at revision
 [`eb9dceba1a2e658142a456c5898836774835616b`](https://github.com/openai/codex/commit/eb9dceba1a2e658142a456c5898836774835616b).
 
-- `src/providers/codex-apply-patch.lark` is an exact snapshot of
+- Core's `src/providers/codex-apply-patch.lark` is an exact snapshot of
   `codex-rs/core/src/tools/handlers/apply_patch.lark` at that revision.
-- `src/patch/parser.ts` and `src/patch/apply.ts` are substantially modified
+- Core's `src/patch/parser.ts` and `src/patch/apply.ts` are substantially modified
   TypeScript adaptations of the apply-patch parsing and matching behavior
   analyzed at
   [`03bb3b12367397e14a8facc2e018d645ff4d8e83`](https://github.com/openai/codex/commit/03bb3b12367397e14a8facc2e018d645ff4d8e83).
-- The package's `reference/` documentation contains protocol analysis based
-  on both revisions, as recorded in `reference/source-map.md` and
-  `reference/apply-patch-behavior.md`.
-- `src/codex-reserved-tools.ts` is a modified TypeScript compatibility
+- Owner `reference/` documentation contains protocol analysis based on both
+  revisions, indexed in `pi-codex-runtime/reference/source-map.md` and
+  `pi-codex-core/reference/apply-patch-behavior.md`.
+- Runtime's `src/codex-reserved-tools.ts` is a modified TypeScript compatibility
   serialization of the pinned Codex `web.run` and
   `image_gen.imagegen` namespace-tool construction. Its two descriptions
   exactly match the upstream Markdown sources; its parameter declarations are
   source-derived compatibility serializations of the pinned schema types and
   generators. Immutable source/blob IDs, SHA-256 checksums, source URLs, and
   local fingerprints are recorded in
-  `pi-extensions/pi-codex-minimal-tools/provenance/openai-codex-eb9dceba-reserved-tools.json`.
+  `pi-extensions/pi-codex-runtime/provenance/openai-codex-eb9dceba-reserved-tools.json`.
 
 OpenAI Codex is distributed under the Apache License 2.0. The verified license
 and upstream NOTICE are identical at both analyzed revisions and are

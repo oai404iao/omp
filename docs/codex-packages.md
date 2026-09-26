@@ -16,7 +16,7 @@ All package names below have the `@oai404iao/` scope.
 | `pi-codex-core` | Responses SSE/WS, prewarm, compaction, apply_patch/view_image, diagnostics and fast commands | runtime |
 | `pi-codex-web-search` | web_search, standalone alpha/search, activity/citation capture | runtime only |
 | `pi-codex-imagegen` | image_generation, standalone Images API, background jobs, persistence/preview | runtime only |
-| `pi-codex-minimal-tools` | Compatible default composition and old forwarding paths | runtime + all three capabilities |
+| `pi-codex-minimal-tools` | Pure default composition and public `subagent-inline` re-export | runtime + all three capabilities |
 
 All internal dependency versions are exact. Installing web or image alone does
 not install core or the other capability. Core alone retains protocol/replay
@@ -26,7 +26,7 @@ boundary. Existing reserved tool names must not be reused by unrelated tools.
 Packages continue shipping TypeScript source for Pi/TS-aware loaders, not
 compiled JavaScript for plain Node imports.
 
-`./internal/*` exports support package wiring and compatibility forwards; they
+`./internal/*` exports support package wiring and owner tests; they
 are not stable user-facing APIs. The old bundle's `./subagent-inline` remains
 supported, forwarding to runtime's identically named subpath.
 
@@ -49,7 +49,8 @@ All combinations read the same existing configuration:
 
 `PI_CODING_AGENT_DIR` still selects the agent directory. Existing project-level
 settings precedence is unchanged. Runtime owns the canonical schemas/default
-catalog; the bundle retains byte-checked compatibility copies. Do not create
+catalog; the bundle no longer contains copies. Use runtime's schema URLs in
+new configurations; old version-pinned bundle URLs remain unchanged. Do not create
 parallel configuration directories named after the new capabilities.
 
 Global `config.json.imageGeneration:false` is a generation kill switch. It
@@ -102,6 +103,16 @@ is not covered: an unchanged old factory cannot participate in the handshake.
 Upgrade the bundle to a broker-enabled release before mixing installations.
 
 ## Verification
+
+The repository-only [offline ablation audit](audits/codex-ablation.md) compares
+selected components and Pi 0.87.1's built-in Codex stream implementation.
+Run `npm run test:codex-ablation` for reproducible fixtures without credentials
+or model requests. These characterize current behavior, including known gaps;
+they are not model-quality or latency benchmarks.
+The same audit records the implemented transport fixes, synthetic compression
+measurements, and the explicitly authorized, compatibility-limited
+`openai/gpt-6-sol` live smoke. `test:codex-live` requires `--execute provider/model`
+and is never invoked by CI or the offline experiment.
 
 ### Optional Code Mode integration
 
@@ -175,6 +186,14 @@ Separate registry and limited real-smoke evidence is recorded in the
 
 Unit tests additionally exercise activation, unknown/disabled models, legacy
 configuration, new/fork, no UI, abort, late image results and old replay fixtures.
+Behavioral tests live with their runtime/core/web-search/imagegen owners.
+Root `tests/codex/` owns cross-package integration and the pure-bundle boundary;
+run `npm run test:codex-composition`. It is included in `npm run ci`.
+The [reference index](../pi-extensions/pi-codex-runtime/reference/README.md) and
+[source map](../pi-extensions/pi-codex-runtime/reference/source-map.md) locate
+protocol documentation, schemas, fixtures and source/licensing evidence.
+The [composition cleanup inventory](audits/codex-composition-cleanup.md) records
+the final resource ownership, preserved interfaces and verification results.
 Architecture checks include type/re-export edges, cycles, exported cross-package
 paths, exact declared dependencies and forbidden optional/peer package edges.
 

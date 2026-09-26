@@ -1,5 +1,5 @@
 import { BASE_DELAY_MS, CODEX_REMOTE_COMPACTION_STREAM_RETRIES, MAX_RETRIES, SSE_RESPONSE_HEADER_TIMEOUT_MS } from "../../providers/openai-codex/constants.js";
-import { NonRetryableProviderError, isRetryableError, parseErrorResponse, withHttpStatusPrefix } from "../../providers/openai-codex/errors.js";
+import { NonRetryableProviderError, ProviderProtocolError, ProviderResponseError, isRetryableError, isTerminalQuotaError, parseErrorResponse, withHttpStatusPrefix } from "../../providers/openai-codex/errors.js";
 import { proxyDispatcherForUrl } from "../../providers/openai-codex/proxy.js";
 import { sleep } from "../../providers/openai-codex/retry.js";
 import { fetchWithResponseHeaderTimeout } from "../../providers/openai-codex/sse.js";
@@ -42,7 +42,7 @@ export async function postJsonWithRetries(
 			}));
 			throw new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message));
 		} catch (error) {
-			if (error instanceof NonRetryableProviderError) throw error;
+			if (error instanceof NonRetryableProviderError || error instanceof ProviderProtocolError) throw error;
 			if (signal?.aborted) throw new Error("Request was aborted");
 			lastError = error instanceof Error ? error : new Error(String(error));
 			if (attempt < MAX_RETRIES) {
@@ -74,7 +74,7 @@ export async function requestCodexCompactionTrigger(
 				body: bodyJson,
 				...(dispatcher ? { dispatcher } : {}),
 			} as RequestInit, signal);
-			if (response.ok) return await collectCodexCompactionOutput(response, sessionKey);
+			if (response.ok) return await collectCodexCompactionOutput(response, sessionKey, signal);
 
 			const errorText = await response.text();
 			if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
@@ -87,7 +87,8 @@ export async function requestCodexCompactionTrigger(
 			}));
 			throw new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message));
 		} catch (error) {
-			if (error instanceof NonRetryableProviderError) throw error;
+			if (error instanceof NonRetryableProviderError || error instanceof ProviderProtocolError) throw error;
+			if (error instanceof ProviderResponseError && isTerminalQuotaError(`${error.code ?? ""} ${error.errorType ?? ""} ${error.message}`)) throw error;
 			if (signal?.aborted) throw new Error("Request was aborted");
 			lastError = error instanceof Error ? error : new Error(String(error));
 			if (attempt < maxRetries) {

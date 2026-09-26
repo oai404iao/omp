@@ -9,7 +9,7 @@ const expectedHashes = new Map([
   ["LICENSES/DeepSeek-Harness-MIT.txt", "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"],
   ["LICENSES/oh-my-pi-MIT.txt", "545636e19386d3d4e0ae6d77354527499999c3ebfbca61b9fa5aa4ead7c0b308"],
   [
-    "pi-extensions/pi-codex-minimal-tools/src/providers/codex-apply-patch.lark",
+    "pi-extensions/pi-codex-core/src/providers/codex-apply-patch.lark",
     "d6367f4826ed608c424b0a308f3d6163527df63c22513d089b91863552f8bfeb",
   ],
 ]);
@@ -118,7 +118,7 @@ for (const [file, sha256] of Object.entries({
   "codex-rs/core/src/client.rs": "0d590b240bdbfeafacbe597a02e4bdce467f8850d597814f214184dfb89ee510",
   "codex-rs/core/src/tools/spec_plan.rs": "8dfa01644163e4826021815d064444ec12799aeaf8f7a952ec6289319f2fd36e",
 })) check(solLuna.files[file]?.sha256 === sha256, `Sol/Luna: unreviewed source ${file}`);
-for (const name of ["pi-codex-runtime", "pi-codex-core", "pi-codex-minimal-tools"]) {
+for (const name of ["pi-codex-runtime", "pi-codex-core"]) {
   check(read(`pi-extensions/${name}/${solLunaPath}`).equals(read(`pi-extensions/pi-codex-runtime/${solLunaPath}`)),
     `${name}: Sol/Luna provenance must match its catalog owner`);
   check(text(`pi-extensions/${name}/THIRD_PARTY_NOTICES.md`).includes(solLunaRevision),
@@ -127,38 +127,32 @@ for (const name of ["pi-codex-runtime", "pi-codex-core", "pi-codex-minimal-tools
 
 for (const packageName of ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"]) {
   const directory = `pi-extensions/${packageName}`;
-  for (const file of ["LICENSE", "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "provenance/openai-codex-eb9dceba-reserved-tools.json"]) {
-    check(read(`${directory}/${file}`).equals(read(`pi-extensions/pi-codex-minimal-tools/${file}`)),
+  for (const file of ["LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "provenance/openai-codex-eb9dceba-reserved-tools.json"]) {
+    check(read(`${directory}/${file}`).equals(read(`pi-extensions/pi-codex-runtime/${file}`)),
       `${packageName}: ${file} must retain the reviewed source/license snapshot`);
   }
+  const license = text(`${directory}/LICENSE`);
+  check(license.replace(`Licensing for ${packageName}`, "Licensing for pi-codex-runtime")
+    === text("pi-extensions/pi-codex-runtime/LICENSE"), `${packageName}: composite license terms must match runtime`);
+  check(license.includes(`Licensing for ${packageName}`) && license.includes("Copyright (c) 2026 oai404iao"),
+    `${packageName}: missing package identity or project copyright`);
+  check(readManifest(directory).license === "SEE LICENSE IN LICENSE", `${packageName}: must use its composite LICENSE`);
+  check(readManifest(directory).files?.includes("provenance/"), `${packageName}: must package provenance`);
   check(text(`${directory}/THIRD_PARTY_NOTICES.md`).includes(codexRevision), `${packageName}: missing pinned source notice`);
 }
 for (const packageName of ["pi-codex-runtime", "pi-codex-core"]) {
   const directory = `pi-extensions/${packageName}`;
   check(
     read(`${directory}/provenance/openai-codex-ddea03ad-astra.json`).equals(
-      read("pi-extensions/pi-codex-minimal-tools/provenance/openai-codex-ddea03ad-astra.json"),
+      read("pi-extensions/pi-codex-runtime/provenance/openai-codex-ddea03ad-astra.json"),
     ),
-    `${packageName}: Astra provenance must match the compatibility package`,
+    `${packageName}: Astra provenance must match its catalog owner`,
   );
   check(
     text(`${directory}/THIRD_PARTY_NOTICES.md`).includes(astraRevision),
     `${packageName}: missing Astra source notice`,
   );
 }
-check(
-  read("pi-extensions/pi-codex-core/src/providers/codex-apply-patch.lark").equals(
-    read("pi-extensions/pi-codex-minimal-tools/src/providers/codex-apply-patch.lark")),
-  "the core grammar must match the verified legacy compatibility asset",
-);
-for (const file of ["config.schema.json", "models.schema.json"]) {
-  check(read(`pi-extensions/pi-codex-runtime/${file}`).equals(read(`pi-extensions/pi-codex-minimal-tools/${file}`)),
-    `${file}: legacy schema URL must mirror the canonical runtime schema`);
-}
-check(read("pi-extensions/pi-codex-runtime/src/model-catalog/default-models.json").equals(
-  read("pi-extensions/pi-codex-minimal-tools/src/model-catalog/default-models.json")),
-  "legacy default catalog must mirror its canonical runtime owner");
-
 for (const [path, expected] of expectedHashes) {
   const actual = createHash("sha256").update(read(path)).digest("hex");
   check(actual === expected, `${path}: expected sha256 ${expected}, found ${actual}`);
@@ -167,9 +161,9 @@ for (const [path, expected] of expectedHashes) {
 for (const filename of ["Apache-2.0.txt", "OpenAI-Codex-NOTICE.txt"]) {
   check(
     read(`LICENSES/${filename}`).equals(
-      read(`pi-extensions/pi-codex-minimal-tools/LICENSES/${filename}`),
+      read(`pi-extensions/pi-codex-runtime/LICENSES/${filename}`),
     ),
-    `pi-codex-minimal-tools LICENSES/${filename} differs from the verified root copy`,
+    `pi-codex-runtime LICENSES/${filename} differs from the verified root copy`,
   );
 }
 
@@ -182,6 +176,7 @@ check(
 
 const projectLicense = read("LICENSE");
 for (const name of [
+  "pi-codex-minimal-tools",
   "pi-subagent",
   "pi-telegram-notify",
   "pi-tree-continue",
@@ -193,9 +188,8 @@ for (const name of [
   check(readManifest(`pi-extensions/${name}`).license === "MIT", `${name}: manifest license must be MIT`);
 }
 
-const codexDirectory = "pi-extensions/pi-codex-minimal-tools";
-const codexManifest = readManifest(codexDirectory);
-const codexLicense = text(`${codexDirectory}/LICENSE`);
+const codexDirectory = "pi-extensions/pi-codex-runtime";
+const codexManifest = readManifest("pi-extensions/pi-codex-minimal-tools");
 const codexNotice = text(`${codexDirectory}/THIRD_PARTY_NOTICES.md`);
 const codexReservedTools = text("pi-extensions/pi-codex-runtime/src/codex-reserved-tools.ts");
 const codexReservedProvenancePath =
@@ -213,23 +207,21 @@ check(
   codexWorkspace?.releaseStatus === "publishable",
   "pi-codex-minimal-tools must enter the guarded publishable release track after bootstrap",
 );
-check(codexManifest.license === "SEE LICENSE IN LICENSE", "pi-codex-minimal-tools must use its composite LICENSE");
-check(codexLicense.includes("Copyright (c) 2026 oai404iao"), "pi-codex-minimal-tools LICENSE lacks project copyright");
 check(
-  codexManifest.files?.includes("provenance/"),
-  "pi-codex-minimal-tools must package its Codex provenance record",
+  text("pi-extensions/pi-codex-minimal-tools/THIRD_PARTY_NOTICES.md").includes("@oai404iao/pi-codex-runtime"),
+  "pi-codex-minimal-tools must identify its dependency license owner",
 );
 check(
   codexNotice.includes(codexRevision),
-  "pi-codex-minimal-tools notice lacks the analyzed Codex revision",
+  "pi-codex-runtime notice lacks the analyzed Codex revision",
 );
 check(
-  codexNotice.includes("03bb3b12367397e14a8facc2e018d645ff4d8e83"),
-  "pi-codex-minimal-tools notice lacks the apply-patch compatibility revision",
+  text("pi-extensions/pi-codex-core/THIRD_PARTY_NOTICES.md").includes("03bb3b12367397e14a8facc2e018d645ff4d8e83"),
+  "pi-codex-core notice lacks the apply-patch compatibility revision",
 );
 check(
   codexNotice.includes(astraRevision),
-  "pi-codex-minimal-tools notice lacks the Astra source revision",
+  "pi-codex-runtime notice lacks the Astra source revision",
 );
 check(
   astraProvenance.upstream?.repository === codexRepository
@@ -244,18 +236,18 @@ check(
     && astraProvenance.catalogReference?.license === "MIT"
     && astraProvenance.catalogReference?.sha256
       === "a10bfcfd34db6bcb98d8ee46175e154cab30530a137dbf31ac1434020ed3ffdd",
-  "pi-codex-minimal-tools Astra provenance must retain verified source and catalog identifiers",
+  "pi-codex-runtime Astra provenance must retain verified source and catalog identifiers",
 );
 for (const path of ["src/patch/parser.ts", "src/patch/apply.ts"]) {
   check(
     text(`pi-extensions/pi-codex-core/${path}`).includes("Substantially modified TypeScript adaptation"),
-    `pi-codex-minimal-tools/${path} lacks its source modification notice`,
+    `pi-codex-core/${path} lacks its source modification notice`,
   );
 }
 check(
   codexReservedTools.includes("SPDX-License-Identifier: Apache-2.0")
     && codexReservedTools.includes("Modified TypeScript compatibility serialization"),
-  "pi-codex-minimal-tools reserved-tool serialization lacks its Apache modification notice",
+  "pi-codex-runtime reserved-tool serialization lacks its Apache modification notice",
 );
 for (const file of ["web-search.ts", "image-generation.ts", "types.ts"]) {
   const source = text(`pi-extensions/pi-codex-runtime/src/reserved-tools/${file}`);
@@ -265,16 +257,17 @@ for (const file of ["web-search.ts", "image-generation.ts", "types.ts"]) {
 }
 check(
   codexNotice.includes("Modified namespace-tool compatibility serialization")
-    && codexNotice.includes("internal Responses Lite path")
-    && /one-time manual npm\s+bootstrap/.test(codexNotice),
-  "pi-codex-minimal-tools notice must retain its source map, Lite warning, and immutable bootstrap record",
+    && codexNotice.includes("internal Responses Lite path"),
+  "pi-codex-runtime notice must retain its source map and Lite warning",
 );
+check(/one-time manual npm\s+bootstrap/.test(text(`${codexDirectory}/reference/legacy-source-notices.md`)),
+  "historical source notices must retain the immutable bootstrap record");
 check(
   codexReservedProvenance.upstream?.repository === codexRepository
     && codexReservedProvenance.upstream?.revision === codexRevision
     && codexReservedProvenance.upstream?.commitUrl === `${codexRepository}/commit/${codexRevision}`
     && codexReservedProvenance.upstream?.license === "Apache-2.0",
-  "pi-codex-minimal-tools provenance must identify the pinned Apache-2.0 Codex source",
+  "pi-codex-runtime provenance must identify the pinned Apache-2.0 Codex source",
 );
 for (const [path, expected] of Object.entries(expectedCodexReservedToolSources)) {
   const actual = codexReservedProvenance.files?.[path];
@@ -283,7 +276,7 @@ for (const [path, expected] of Object.entries(expectedCodexReservedToolSources))
     actual?.gitBlobSha === expected.gitBlobSha
       && actual?.sha256 === expected.sha256
       && actual?.rawUrl === expectedRawUrl,
-    `pi-codex-minimal-tools provenance must retain verified identifiers for ${path}`,
+    `pi-codex-runtime provenance must retain verified identifiers for ${path}`,
   );
 }
 for (const [name, expected] of Object.entries(expectedCodexReservedToolFingerprints)) {
@@ -295,7 +288,7 @@ for (const [name, expected] of Object.entries(expectedCodexReservedToolFingerpri
       && actual?.description?.sha256 === expected.descriptionSha256
       && actual?.parameters?.canonicalJsonSha256 === expected.parametersSha256
       && actual?.canonicalJsonSha256 === expected.namespaceSha256,
-    `pi-codex-minimal-tools provenance must retain the ${name} compatibility fingerprint`,
+    `pi-codex-runtime provenance must retain the ${name} compatibility fingerprint`,
   );
 }
 

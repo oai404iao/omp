@@ -21,13 +21,13 @@ Provider/transport capability. Does not install web or image generation.
    ignores abort; consume late promise rejections without opening old connections.
 4. Preserve exact-prefix continuation, opaque compaction items, event ordering,
    output indices and signatures. HTTP fallback is not a generic retry.
-5. Preserve grammar hashes and Apache adaptation notices. Keep the legacy grammar
-   mirror byte-identical; source maps remain in the compatibility package reference.
+5. Preserve grammar hashes and Apache adaptation notices. Core owns the sole
+   grammar asset and transport/apply-patch references under `reference/`.
 
 ## Workflow and verification
 
 Read root CONTRIBUTING.md, RELEASING.md and docs/codex-packages.md. Source evidence
-is in pi-codex-minimal-tools/reference/source-map.md.
+is in pi-codex-runtime/reference/source-map.md.
 Use the root package-lock.json; never add package locks. All new modules must be
 at most 400 lines. Preserve the Pi 0.87.0 floor and exact 0.87.1 target; run
 `npm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
@@ -38,14 +38,15 @@ From repository root:
 
 ```bash
 npm run check -w @oai404iao/pi-codex-core
-npm run check -w @oai404iao/pi-codex-minimal-tools
+npm run test:codex-composition
 npm run check:architecture
 npm run test:codex-packages
 npm run ci
 ```
 
-Most behavioral regressions remain in the compatibility package's tests and
-shared fixtures; the owner package's entry smoke alone is not sufficient.
+Behavioral regressions and transport harnesses live in `tests/`. Neutral fixtures
+and cross-capability integration live in root `tests/codex/`. Core tests must not
+import web-search/imagegen implementations; move such cases to root integration.
 Tests use mocked HTTP/loopback, not real credentials. Tarball tests npm-install
 Codex and external host archives independently from the root lock, without external links.
 Restore process environment, fetch, timers and sockets when adding fixtures.

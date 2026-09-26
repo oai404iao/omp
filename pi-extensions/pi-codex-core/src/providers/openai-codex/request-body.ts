@@ -93,7 +93,7 @@ export function buildRequestBody<TApi extends Api>(
 		input: [],
 		text: { verbosity: ((options as { textVerbosity?: string } | undefined)?.textVerbosity ?? "low") as string },
 		include: ["reasoning.encrypted_content"],
-		prompt_cache_key: requestIdentity?.sessionId ?? options?.sessionId,
+		prompt_cache_key: options?.cacheRetention === "none" ? undefined : requestIdentity?.sessionId ?? options?.sessionId,
 		tool_choice: "auto",
 		parallel_tool_calls: profile.supportsParallelTools,
 	};

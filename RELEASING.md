@@ -187,7 +187,7 @@ guarded workflow. Their trusted-publisher configuration and
 
 `@oai404iao/pi-codex-minimal-tools@1.3.0` was manually bootstrapped from
 `596d799c6f7db3508b6d46bb05cdca6ea9e3b716`. Its Apache source map is
-recorded in `pi-extensions/pi-codex-minimal-tools/provenance/`; its internal
+recorded in `pi-extensions/pi-codex-runtime/provenance/`; its internal
 Responses Lite compatibility boundary remains documented in the package README
 and notice. Its trusted publisher is configured, so it now enters guarded
 GitHub Actions release artifacts. `@oai404iao/pi-tree-continue` remains

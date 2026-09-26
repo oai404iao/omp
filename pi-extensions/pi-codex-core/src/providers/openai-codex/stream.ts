@@ -11,22 +11,22 @@ import { responseGrammarProperties } from "@oai404iao/pi-codex-runtime/internal/
 import { webSocketFallbackKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";
 import type { ProviderStreamEffects } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/stream-effects";
-import { BASE_DELAY_MS, MAX_RETRIES } from "./constants.js";
-import { NonRetryableProviderError, isRetryableError, parseErrorResponse, withHttpStatusPrefix } from "./errors.js";
+import { NonRetryableProviderError, isRetryableError, isTerminalQuotaError, parseErrorResponse, withHttpStatusPrefix } from "./errors.js";
 import { applyConfiguredResponsesFeatureHeaders, buildSSEHeaders, buildWebSocketHeaders, headersToRecord, providerHeadersToHeaders } from "./headers.js";
 import { withResponsesLiteWebSocketMetadata } from "./lite.js";
-import { createErrorMessage, createInitialAssistantMessage } from "./message.js";
+import { assertSuccessfulOutput, createErrorMessage, createInitialAssistantMessage } from "./message.js";
 import { proxyDispatcherForUrl } from "./proxy.js";
 import { buildRequestBody, ensureWebSearchDetailsIncluded } from "./request-body.js";
 import { getLatestUserText } from "./request-context.js";
 import { createCodexRequestId, createPiTurnId, withSseRequestMetadata } from "./request-metadata.js";
-import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, isWebSocketUpgradeRejectedError, sleep, webSocketRetryDelayMs, webSocketStreamMaxRetries } from "./retry.js";
+import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, isWebSocketUpgradeRejectedError, sleep, sseMaxRetries, sseRetryDelayMs, webSocketRetryDelayMs, webSocketStreamMaxRetries } from "./retry.js";
 import { fetchWithResponseHeaderTimeout, parseSSE, responseHeaderTimeoutMsFromOptions } from "./sse.js";
 import { type ProviderTransport, type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { resolveCodexUrl, resolveResponsesWebSocketUrl } from "./urls.js";
 import { finalizeUsage, withRequestServiceTier } from "./usage.js";
 import { websocketHttpFallbackSessions } from "./websocket-session.js";
 import { processWebSocketStream } from "./websocket-stream.js";
+import { prepareSseBody } from "./request-compression.js";
 
 export function createCodexStream<TApi extends Api>(
 	model: Model<TApi>,
@@ -164,10 +164,11 @@ export function createCodexStream<TApi extends Api>(
 
 			const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport });
 			const fallbackKey = webSocketFallbackKey(
-				options?.sessionId,
+				options?.cacheRetention === "none" ? undefined : options?.sessionId,
 				model as Model<Api>,
 				websocketUrl,
 				settings.modelProfileHash,
+				options?.env,
 			);
 			const sessionFellBackToHttp = transport === "auto"
 				&& fallbackKey !== undefined
@@ -181,7 +182,7 @@ export function createCodexStream<TApi extends Api>(
 						),
 					);
 				}
-				const startupPrewarmTask = options?.sessionId
+				const startupPrewarmTask = options?.sessionId && options.cacheRetention !== "none"
 					? deps.getStartupPrewarm?.(options.sessionId, model as Model<Api>)
 					: undefined;
 				const websocketBody = withResponsesLiteWebSocketMetadata(body, requestProfile.responsesMode);
@@ -216,7 +217,8 @@ export function createCodexStream<TApi extends Api>(
 							throw new Error("Request was aborted");
 						}
 						finalizeUsage(model, output);
-						stream.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output });
+						assertSuccessfulOutput(output);
+						stream.push({ type: "done", reason: output.stopReason, message: output });
 						stream.end();
 						return;
 					} catch (error) {
@@ -270,14 +272,16 @@ export function createCodexStream<TApi extends Api>(
 			let response: Response | undefined;
 			let lastError: Error | undefined;
 			const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: apiKeyTransport });
-			const sseDispatcher = await proxyDispatcherForUrl(sseUrl);
+			const sseDispatcher = options?.fetch ? undefined : await proxyDispatcherForUrl(sseUrl, options?.env);
 			if (transformHeaders) {
 				sseHeaders = providerHeadersToHeaders(
 					await transformHeaders(headersToRecord(sseHeaders)),
 				);
 			}
 
-			for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+			const sseBody = prepareSseBody(sseUrl, bodyJson, sseHeaders, apiKeyTransport);
+			const maxRetries = sseMaxRetries(options);
+			for (let attempt = 0; attempt <= maxRetries; attempt++) {
 				if (options?.signal?.aborted) {
 					throw new Error("Request was aborted");
 				}
@@ -286,9 +290,9 @@ export function createCodexStream<TApi extends Api>(
 					response = await fetchWithResponseHeaderTimeout(sseUrl, {
 						method: "POST",
 						headers: sseHeaders,
-						body: bodyJson,
+						body: sseBody,
 						...(sseDispatcher ? { dispatcher: sseDispatcher } : {}),
-					} as RequestInit, options?.signal, responseHeaderTimeoutMs);
+					} as RequestInit, options?.signal, responseHeaderTimeoutMs, options?.fetch);
 
 					await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 
@@ -303,8 +307,8 @@ export function createCodexStream<TApi extends Api>(
 					}
 
 					const errorText = await response.text();
-					if (attempt < MAX_RETRIES && isRetryableError(response.status, errorText)) {
-						await sleep(BASE_DELAY_MS * 2 ** attempt, options?.signal);
+					if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
+						await sleep(sseRetryDelayMs(attempt, options, headersToRecord(response.headers)), options?.signal);
 						continue;
 					}
 
@@ -323,8 +327,8 @@ export function createCodexStream<TApi extends Api>(
 					}
 
 					lastError = error instanceof Error ? error : new Error(String(error));
-					if (attempt < MAX_RETRIES && !lastError.message.includes("usage limit")) {
-						await sleep(BASE_DELAY_MS * 2 ** attempt, options?.signal);
+					if (attempt < maxRetries && !lastError.message.includes("usage limit") && !isTerminalQuotaError(lastError.message)) {
+						await sleep(sseRetryDelayMs(attempt, options), options?.signal);
 						continue;
 					}
 					throw lastError;
@@ -341,7 +345,7 @@ export function createCodexStream<TApi extends Api>(
 
 			stream.push({ type: "start", partial: output });
 			await processCapturedResponsesStream(
-				parseSSE(response),
+				parseSSE(response, options?.signal),
 				output,
 				stream,
 				model,
@@ -360,7 +364,8 @@ export function createCodexStream<TApi extends Api>(
 				throw new Error("Request was aborted");
 			}
 
-			stream.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output });
+			assertSuccessfulOutput(output);
+			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
 			stream.push({

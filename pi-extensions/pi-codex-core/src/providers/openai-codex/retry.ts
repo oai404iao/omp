@@ -1,6 +1,6 @@
 import { type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
-import { DEFAULT_WEBSOCKET_STREAM_MAX_RETRIES, MAX_WEBSOCKET_STREAM_MAX_RETRIES, PREVIOUS_RESPONSE_NOT_FOUND_CODE, WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE, WEBSOCKET_RETRY_BASE_DELAY_MS, WEBSOCKET_RETRY_MAX_DELAY_MS } from "./constants.js";
-import { NonRetryableProviderError, ProviderProtocolError, ProviderResponseError, WebSocketHandshakeError, isRetryableError } from "./errors.js";
+import { BASE_DELAY_MS, MAX_RETRIES, DEFAULT_WEBSOCKET_STREAM_MAX_RETRIES, MAX_WEBSOCKET_STREAM_MAX_RETRIES, PREVIOUS_RESPONSE_NOT_FOUND_CODE, WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE, WEBSOCKET_RETRY_BASE_DELAY_MS, WEBSOCKET_RETRY_MAX_DELAY_MS } from "./constants.js";
+import { NonRetryableProviderError, ProviderProtocolError, ProviderResponseError, WebSocketHandshakeError, isRetryableError, isTerminalQuotaError } from "./errors.js";
 
 export function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -9,15 +9,16 @@ export function sleep(ms: number, signal: AbortSignal | undefined): Promise<void
 			return;
 		}
 
-		const timeout = setTimeout(resolve, ms);
-		signal?.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timeout);
-				reject(new Error("Request was aborted"));
-			},
-			{ once: true },
-		);
+		const onAbort = () => {
+			clearTimeout(timeout);
+			signal?.removeEventListener("abort", onAbort);
+			reject(new Error("Request was aborted"));
+		};
+		const timeout = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal?.addEventListener("abort", onAbort, { once: true });
 	});
 }
 
@@ -30,12 +31,12 @@ export function retryAfterMsFromHeaders(headers: Record<string, string> | undefi
 	if (!headers) return undefined;
 	const retryAfterMs = Object.entries(headers).find(([name]) => name.toLowerCase() === "retry-after-ms")?.[1];
 	if (retryAfterMs) {
-		const parsed = Number.parseFloat(retryAfterMs);
+		const parsed = Number(retryAfterMs);
 		if (Number.isFinite(parsed) && parsed >= 0) return parsed;
 	}
 	const retryAfter = Object.entries(headers).find(([name]) => name.toLowerCase() === "retry-after")?.[1];
 	if (!retryAfter) return undefined;
-	const seconds = Number.parseFloat(retryAfter);
+	const seconds = Number(retryAfter);
 	if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
 	const date = Date.parse(retryAfter);
 	return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
@@ -47,7 +48,7 @@ export function isRetryableWebSocketError(error: unknown): boolean {
 	}
 	if (error instanceof ProviderResponseError) {
 		if (
-			/usage_limit_reached|usage_not_included/i.test(`${error.code ?? ""} ${error.errorType ?? ""}`)
+			isTerminalQuotaError(`${error.code ?? ""} ${error.errorType ?? ""} ${error.message}`)
 		) {
 			return false;
 		}
@@ -71,9 +72,10 @@ function explicitWebSocketRetryDelayMs(error: unknown): number | undefined {
 			: undefined;
 }
 
-function boundedWebSocketRetryDelayMs(
+function boundedRetryDelayMs(
 	delayMs: number,
 	options: SimpleStreamOptions | undefined,
+	transport: "SSE" | "WebSocket",
 ): number {
 	const configuredMax = options?.maxRetryDelayMs;
 	const maxDelay = typeof configuredMax === "number" && Number.isFinite(configuredMax) && configuredMax >= 0
@@ -81,10 +83,24 @@ function boundedWebSocketRetryDelayMs(
 		: WEBSOCKET_RETRY_MAX_DELAY_MS;
 	if (maxDelay > 0 && delayMs > maxDelay) {
 		throw new NonRetryableProviderError(
-			`WebSocket retry delay ${Math.round(delayMs)}ms exceeds maxRetryDelayMs ${Math.round(maxDelay)}ms`,
+			`${transport} retry delay ${Math.round(delayMs)}ms exceeds maxRetryDelayMs ${Math.round(maxDelay)}ms`,
 		);
 	}
 	return delayMs;
+}
+
+export function sseMaxRetries(options: SimpleStreamOptions | undefined): number {
+	const value = options?.maxRetries;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : MAX_RETRIES;
+}
+
+export function sseRetryDelayMs(
+	attempt: number,
+	options: SimpleStreamOptions | undefined,
+	headers?: Record<string, string>,
+): number {
+	const delay = retryAfterMsFromHeaders(headers) ?? BASE_DELAY_MS * 2 ** attempt;
+	return boundedRetryDelayMs(delay, options, "SSE");
 }
 
 export function webSocketRetryDelayMs(
@@ -105,7 +121,7 @@ export function webSocketRetryDelayMs(
 	const jittered = explicit === undefined && !connectionFailure
 		? Math.round(base * (0.9 + Math.random() * 0.2))
 		: base;
-	return boundedWebSocketRetryDelayMs(jittered, options);
+	return boundedRetryDelayMs(jittered, options, "WebSocket");
 }
 
 export function webSocketCompactionRetryDelayMs(
@@ -118,7 +134,7 @@ export function webSocketCompactionRetryDelayMs(
 	const jittered = explicit === undefined
 		? Math.round(base * (0.9 + Math.random() * 0.2))
 		: base;
-	return boundedWebSocketRetryDelayMs(jittered, options);
+	return boundedRetryDelayMs(jittered, options, "WebSocket");
 }
 
 export function webSocketStreamMaxRetries(options: SimpleStreamOptions | undefined): number {
