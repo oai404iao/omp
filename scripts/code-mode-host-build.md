@@ -1,5 +1,11 @@
 # Patched Code Mode Host build
 
+**Historical recipe only.** The current pin is the official static musl
+`rust-v0.157.1` Host, which already includes the workaround below. No local build
+is required; see [current requirements](../pi-extensions/pi-code-mode/README.md).
+This recipe still produces the old GNU candidate, which the current allowlist
+rejects. Retained build hashes and audit records are not rewritten.
+
 U0 targets a **local patched** `rust-v0.155.1+pi-v8-sort.1`, not the official
 0.155.1 release binary. The user authorized backporting upstream
 [`aaa2cabfbc`](https://github.com/openai/codex/commit/aaa2cabfbcb8d9997ce67e166f796f46d5b72342)

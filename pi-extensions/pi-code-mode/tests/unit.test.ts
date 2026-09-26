@@ -10,7 +10,7 @@ import { ToolBridge } from "../src/bridge.ts";
 import { Type } from "typebox";
 import { Wire } from "../src/wire.ts";
 import { LIMITS } from "../src/limits.ts";
-import { prepareHost } from "../src/asset.ts";
+import { prepareHost, verifyPlatform } from "../src/asset.ts";
 import { CodeSession } from "../src/session.ts";
 import { Supervisor } from "../src/supervisor.ts";
 import { scratch } from "./helpers.ts";
@@ -116,6 +116,23 @@ function frame(message: unknown): Buffer {
 	data.copy(buffer, 4);
 	return buffer;
 }
+
+test("official static Host platform gate ignores Node libc but still requires Linux x64", (t) => {
+	t.mock.method(process.report, "getReport", () => { throw new Error("Host must not depend on Node libc"); });
+	assert.doesNotThrow(verifyPlatform);
+	const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+	const arch = Object.getOwnPropertyDescriptor(process, "arch")!;
+	try {
+		Object.defineProperty(process, "platform", { value: "darwin" });
+		assert.throws(verifyPlatform, /Linux x64/);
+		Object.defineProperty(process, "platform", platform);
+		Object.defineProperty(process, "arch", { value: "arm64" });
+		assert.throws(verifyPlatform, /Linux x64/);
+	} finally {
+		Object.defineProperty(process, "platform", platform);
+		Object.defineProperty(process, "arch", arch);
+	}
+});
 
 test("wire: fragmented frames, malformed responses, budgets and late dispatch", async () => {
 	const { child, wire } = fakeWire();

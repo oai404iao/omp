@@ -7,11 +7,7 @@ import { HOST, errorText } from "./limits.ts";
 
 export function verifyPlatform(): void {
 	if (process.platform !== "linux" || process.arch !== "x64") throw new Error("Code Mode requires Linux x64 with user systemd/cgroup v2");
-	const report = process.report.getReport() as { header?: { glibcVersionRuntime?: string } };
-	const glibc = report.header?.glibcVersionRuntime?.split(".").map(Number);
-	const [major, minor] = HOST.glibcMinimum.split(".").map(Number);
-	if (!glibc || !Number.isFinite(glibc[0]) || !Number.isFinite(glibc[1])
-		|| glibc[0] < major || (glibc[0] === major && glibc[1] < minor)) throw new Error(`Patched Host requires GNU/glibc >= ${HOST.glibcMinimum} and OpenSSL 3; this is not the official musl build`);
+	// The pinned official musl Host is static; Node's libc is not a Host requirement.
 }
 async function verify(source: string, destination?: FileHandle): Promise<void> {
 	const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);

@@ -5,6 +5,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+// Historical 0.155.1 backport recipe. Production now pins the official 0.157.1
+// musl release and rejects this recipe's GNU candidate; see code-mode-host-build.md.
 const [, , flag, repository, ...rest] = process.argv;
 assert(flag === "--repo" && repository && !rest.length, "usage: node scripts/build-code-mode-host.mjs --repo /path/to/openai/codex");
 assert(process.platform === "linux" && process.arch === "x64", "This recipe builds a local Linux x64 GNU artifact, not musl");

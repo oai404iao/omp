@@ -129,7 +129,7 @@ export default function codeMode(pi: ExtensionAPI): void {
 		pi.registerTool(execDefinition); // supported Pi dynamic definition refresh; no provider shim
 		rememberTool("exec", execSchema);
 	};
-	pi.registerFlag("code-mode-host", { description: `Path to verified ${HOST.release} Linux x64 Host (no download)`, type: "string" });
+	pi.registerFlag("code-mode-host", { description: `Path to verified official ${HOST.release} Linux x64 musl Host (no download)`, type: "string" });
 	pi.registerFlag("code-mode-read-root", { description: "EXPLICIT local read grant for cwd, including hidden files; enables Code Mode. Does not inherit Pi guards.", type: "string" });
 	pi.registerFlag("code-mode-write", { description: "EXPLICITLY grant atomic file create/replace inside the Code Mode root; separate from read permission.", type: "boolean", default: false });
 	pi.registerFlag("code-mode-process", { description: "EXPLICITLY grant full current-user local command execution. NOT a filesystem/network sandbox; commands can write outside cwd.", type: "boolean", default: false });
