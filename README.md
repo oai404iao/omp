@@ -12,7 +12,7 @@ Gitea remote is retained as a migration backup.
 
 ## Packages
 
-All ten npm workspace packages use the `@oai404iao` scope. Scope naming does
+All nine npm workspace packages use the `@oai404iao` scope. Scope naming does
 not change the private/public eligibility below.
 
 | Package manifest (checkout version) | Release track |
@@ -26,7 +26,6 @@ not change the private/public eligibility below.
 | [`@oai404iao/pi-codex-core`](pi-extensions/pi-codex-core/package.json) | guarded |
 | [`@oai404iao/pi-codex-web-search`](pi-extensions/pi-codex-web-search/package.json) | guarded |
 | [`@oai404iao/pi-codex-imagegen`](pi-extensions/pi-codex-imagegen/package.json) | guarded |
-| [`@oai404iao/pi-code-mode`](pi-extensions/pi-code-mode/package.json) | private; local evaluation, publication blocked |
 
 The scoped npm packages use independent versions. The linked manifests are the
 source of truth for checkout versions, including Changesets updates; this table
@@ -41,6 +40,11 @@ See [Codex composition](docs/codex-packages.md) for package boundaries and
 session-local. Remove existing installations and restart Pi; see the
 [migration guide](pi-extensions/pi-keep-defaults/README.md). Historical npm
 artifacts and release locks remain unchanged.
+
+The experimental `pi-code-mode` extension has been removed pending an official
+Pi implementation or extension API. It was never published. Remove any local
+installation/configuration and restart Pi; no automatic migration is available.
+Upstream Codex Code Mode reference material in the Codex packages is unaffected.
 
 > **Codex 1.3.0 documentation note:** the package README and notice inside the
 > immutable `1.3.0` tarball are bootstrap-stage snapshots and retain

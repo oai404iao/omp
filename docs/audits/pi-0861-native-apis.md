@@ -1,14 +1,11 @@
 # Pi 0.86.1 native API migration
 
-Implemented after I0 (`c976ab9e`). I0's policy, approval, ownership, lease,
-retryable cleanup and tree-intent guarantees remain in place. This is not
-completion of the remaining I1–I3 interoperability work.
+This historical checkpoint covered Pi 0.86.1 migrations. Its experimental
+Code Mode extension and related plans were subsequently removed.
 
-This is a historical validation checkpoint. A later review reproduced a hardlink
-alias blind spot in the original implementation; the original alias claims below
-covered canonical paths, not all same-inode directory entries. The
-[review corrections](pi-code-mode-review-fixes.md) add inode checks and record
-their separate verification.
+A later review reproduced a hardlink alias blind spot in the original
+implementation; the original alias claims below covered canonical paths, not
+all same-inode directory entries.
 
 ## Changes
 
@@ -18,10 +15,6 @@ their separate verification.
   resolving to one canonical target are rejected before mutation, while repeated actions on
   the same path remain valid. Snapshots are rechecked after queue waits and
   before mutation; drift fails closed and unwinds acquired queues.
-- **Code Mode:** stable instructions use `sections.code_mode`, not a forced
-  whole prompt or transient cell list. Unavailability removes the contribution
-  on the next prompt. Other sections and explicitly forced prompts retain their
-  native semantics. Historical sections never restore executable authority.
 - **Subagent:** one-shot `report` denial uses native `excludeTools`, including
   late inherited registrations when no allowlist was supplied. Continuable
   reporting, mandatory-tool validation and `$mutation` selection remain.
@@ -50,7 +43,6 @@ abort-checkpoint barrier instead of a 50 ms scheduling assumption.
 ## Verification actually run
 
 - Final root `npm run ci`: passed.
-  - Code Mode: **116/116**.
   - Codex compatibility: **326/326**.
   - Subagent: **159/159**.
   - Telegram: **21/21**.
@@ -59,9 +51,6 @@ abort-checkpoint barrier instead of a 50 ms scheduling assumption.
   - **17** isolated Codex production tarball/Pi combinations passed.
 - `npm run ci:pi-matrix`: complete CI passed in separate floor and target
   installations, both resolving **Pi 0.86.1**.
-- Real Pi prompt tests cover both extension orders, exact forced prompts,
-  section deletion, manual and automatic compaction, grammar/JSON changes,
-  unavailable grammar, and a fresh restored session without grants.
 - Real Pi runner tests cover overlapping dialogs, closing an outstanding dialog
   after shutdown, and a subsequent waiting span. UI callbacks and Telegram
   responses are fixtures, not live terminal/Telegram acceptance.
@@ -95,4 +84,3 @@ directory/symlink replacement is not made atomic by snapshot checks.
 No real Host suite, real provider/account calls, live Telegram delivery,
 interactive terminal acceptance, npm publication/deprecation, global
 uninstallation or main-branch integration was performed in this migration.
-The prior I0 Host verification is historical evidence, not a test rerun here.

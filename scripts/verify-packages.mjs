@@ -40,7 +40,6 @@ const requiredRuntimeFiles = {
     "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "THIRD_PARTY_NOTICES.md",
     "provenance/openai-codex-eb9dceba-reserved-tools.json",
   ],
-  "@oai404iao/pi-code-mode": ["THIRD_PARTY_NOTICES.md", "src/limits.ts"],
   "@oai404iao/pi-subagent": [
     "LICENSES/DeepSeek-Harness-MIT.txt",
     "THIRD_PARTY_NOTICES.md",
@@ -179,7 +178,7 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
     for (const path of packedPaths) {
       if (!allowed.has(path)) report(`${manifest.name}: composition tarball must not contain ${path}`);
     }
-  } else if (expectedName.startsWith("@oai404iao/pi-codex-") || expectedName === "@oai404iao/pi-code-mode") {
+  } else if (expectedName.startsWith("@oai404iao/pi-codex-")) {
     for (const path of readdirSync(resolve(root, directory, "src"), { recursive: true })) {
       if (!path.endsWith(".ts")) continue;
       const runtimePath = `src/${normalizePackagePath(path)}`;

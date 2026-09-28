@@ -25,7 +25,6 @@
     "pi-extensions/pi-codex-core",
     "pi-extensions/pi-codex-web-search",
     "pi-extensions/pi-codex-imagegen",
-    "pi-extensions/pi-code-mode",
     "pi-extensions/pi-subagent",
     "pi-extensions/pi-telegram-notify",
     "pi-extensions/pi-tree-continue"
@@ -50,8 +49,6 @@
     "test:codex-ablation": "node scripts/codex-ablation/run.mjs",
     "test:codex-compression": "node --import tsx scripts/codex-ablation/compression.mjs",
     "test:codex-live": "node --import tsx scripts/codex-ablation/live.ts",
-    "test:code-mode-s0": "node scripts/code-mode-s0/run.mjs",
-    "test:code-mode-package": "node scripts/verify-code-mode-installation.mjs",
     "license:check": "node scripts/verify-licenses.mjs",
     "pack:check": "node scripts/verify-packages.mjs",
     "release:artifacts": "node scripts/prepare-release-artifacts.mjs",
