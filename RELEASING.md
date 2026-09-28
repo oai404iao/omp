@@ -29,9 +29,10 @@ Its tests version temporary fixtures; actual alpha versions belong in a reviewed
 version PR, never in an unreviewed direct main update.
 
 The original preparation cohort was nine alpha packages. The current artifact
-selection contains eight publishable workspaces: keep-defaults is retired, while
-Code Mode and tree-continue remain private/blocked. Historical keep-defaults
-release locks are retained, but it must not enter new artifact batches.
+selection contains eight publishable workspaces: keep-defaults and the unpublished
+Code Mode experiment are retired; tree-continue remains private/blocked.
+Historical keep-defaults release locks are retained, but it must not enter
+new artifact batches.
 Prerelease artifacts use the `next` dist-tag when prerelease mode is active.
 Limited real smoke on the immutable bootstrap
 artifacts has been performed, with important harness/coverage limitations
@@ -178,7 +179,7 @@ Release eligibility is explicit in two places:
 2. only `blocked` packages may set `"private": true`.
 
 CI rejects mismatches. The guarded release scripts select the eight publishable
-workspaces, excluding private Code Mode/tree-continue and retired keep-defaults.
+workspaces, excluding private tree-continue and retired keep-defaults/Code Mode.
 The historical manual releases below remain locked; they are not a live registry
 inventory. See the root README and activation audit for this alpha cohort.
 All future releases require a maintainer to manually dispatch and approve the

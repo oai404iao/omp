@@ -20,7 +20,6 @@ export const workspaces = [
   { name: "@oai404iao/pi-codex-core", directory: "pi-extensions/pi-codex-core", releaseStatus: "publishable" },
   { name: "@oai404iao/pi-codex-web-search", directory: "pi-extensions/pi-codex-web-search", releaseStatus: "publishable" },
   { name: "@oai404iao/pi-codex-imagegen", directory: "pi-extensions/pi-codex-imagegen", releaseStatus: "publishable" },
-  { name: "@oai404iao/pi-code-mode", directory: "pi-extensions/pi-code-mode", releaseStatus: "blocked" },
   {
     name: "@oai404iao/pi-subagent",
     directory: "pi-extensions/pi-subagent",

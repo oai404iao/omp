@@ -35,10 +35,8 @@ import { createApplyPatchToolDefinition } from "./tools/apply-patch.js";
 import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInput } from "./tools/view-image.js";
 
 import { addPackageTool, ensureCodexServices } from "@oai404iao/pi-codex-runtime";
-import { registerCodeModeOwnedTool } from "@oai404iao/pi-codex-runtime/internal/code-mode-contributions";
 
 import { registerResponsesProviderRuntime } from "./extension/provider-runtime.js";
-import { registerPatchContribution } from "./code-mode-adapter.js";
 
 
 
@@ -174,7 +172,7 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 	});
 }
 
-function registerCoreTools(pi: ExtensionAPI): void {
+function registerCoreTools(pi: ExtensionAPI, broker: ReturnType<typeof ensureCodexServices>): void {
 	pi.registerTool({
 		renderShell: "self",
 		name: "view_image",
@@ -195,9 +193,12 @@ function registerCoreTools(pi: ExtensionAPI): void {
 			return viewImageResultComponent(result, options, theme, context);
 		},
 	} as never);
-	registerCodeModeOwnedTool(pi, createApplyPatchToolDefinition({
+	const patch = createApplyPatchToolDefinition({
 		deferRendering: loadSettings().deferApplyPatchRendering,
-	}), "codex_core");
+	});
+	const parameters = { ...(patch.parameters as object) };
+	pi.registerTool({ ...patch, parameters } as never);
+	broker.ownedTools.set("apply_patch", { parameters, description: patch.description as string });
 }
 
 
@@ -220,12 +221,11 @@ export default function codexCore(pi: ExtensionAPI): void {
 	let registered = false;
 	const register = () => {
 		if (registered) return;
-		registerCoreTools(pi);
+		registerCoreTools(pi, broker);
 		registered = true;
 	};
 	addPackageTool(broker, "view_image", register);
 	addPackageTool(broker, "apply_patch", register);
-	registerPatchContribution(pi);
 	registerDiagnosticCommand(pi);
 	registerFastMode(pi);
 

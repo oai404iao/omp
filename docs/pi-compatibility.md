@@ -48,9 +48,6 @@ including edits; `--force` cannot restore omitted or replaced content.
 Notifications and cleanup remain on `agent_settled`. Real SDK regressions
 exercise bounded `agent_before_settle` continuation without adding automatic
 parent wakeups or an idle-command replacement.
-Code Mode's owner-side leases retain their released restoration intent across
-Pi's historical tool-loadout restoration, without activating replaced or
-explicitly inactive definitions.
 
 ## Commands
 

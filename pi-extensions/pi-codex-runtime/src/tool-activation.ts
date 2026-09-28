@@ -8,7 +8,22 @@ import {
 import { installCodexIdentityLifecycle } from "./codex-identity-extension.js";
 import { loadModelSettings } from "./model-catalog/runtime.js";
 import { loadSettings } from "./settings.js";
-import { codeModeOwner, disposeCodeModeOwner, OWNER_CHANGED } from "./code-mode-owner.js";
+
+function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_patch" | "web_search"): boolean {
+	if (!broker.tools.get(name)?.registered) return false;
+	const expected = broker.ownedTools.get(name);
+	if (!expected || expected.replaced) return false;
+	const info = pi.getAllTools?.().find((item) => item.name === name);
+	if (!info?.sourceInfo || ["builtin", "sdk"].includes(info.sourceInfo.source)
+		|| info.parameters !== expected.parameters || info.description !== expected.description) {
+		expected.replaced = true;
+		return false;
+	}
+	const identity = JSON.stringify([info.sourceInfo, info.description, info.parameters, info.promptGuidelines]);
+	expected.identity ??= identity;
+	if (expected.identity !== identity) expected.replaced = true;
+	return !expected.replaced;
+}
 
 function enableDefinitions(broker: CodexBroker) {
 	for (const tool of broker.tools.values()) {
@@ -40,10 +55,8 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		}
 		return active;
 	};
-	let latest: ExtensionContext | undefined;
 	let syncing = false;
-	const sync = (ctx: ExtensionContext, fromTree = false) => {
-		latest = ctx;
+	const sync = (ctx: ExtensionContext) => {
 		if (syncing) return;
 		syncing = true;
 		try {
@@ -54,48 +67,32 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		const active = new Set(current);
 		const capabilities = computeToolCapabilities(ctx.model as ModelLike | undefined, settings);
 		const model = loadModelSettings(ctx.model as ModelLike | undefined, ctx.cwd, settings);
-		const controls = new Map<string, NonNullable<ReturnType<typeof codeModeOwner>>>();
+		const ownsPatch = broker.tools.has("apply_patch") && ownsRegisteredTool(pi, broker, "apply_patch");
 		for (const name of PACKAGE_TOOL_NAMES) {
 			const owned = broker.tools.get(name);
 			if (!owned) continue; // Other extensions retain ownership of uninstalled names.
-			const control = codeModeOwner(pi, name, owned, broker.codeModeDefinitions?.get(name));
-			if (owned.codeModeOwner?.replaced) continue;
-			if (control) {
-				controls.set(name, control);
-				if (control.activeIntent === undefined) continue; // foreign replacement
-				if (control.activeIntent) active.add(name); else active.delete(name);
-			}
+			if (name === "apply_patch" && !ownsPatch) continue;
+			if (name === "web_search" && !ownsRegisteredTool(pi, broker, "web_search")) continue;
 			const hostedWithoutCore = !broker.coreEnabled && (
 				(name === "web_search" && model.webSearchImplementation === "hosted")
 				|| (name === "image_generation" && model.imageGenerationImplementation === "hosted" && !settings.directImageApiFallback)
 			);
 			const desired = available && owned.registered && capabilities[name].enabled && !hostedWithoutCore;
 			if (!desired) active.delete(name);
-			else if (settings.autoEnable && !(fromTree && control?.activeIntent !== undefined)) active.add(name);
+			else if (settings.autoEnable) active.add(name);
 		}
-		const ownsPatch = broker.tools.has("apply_patch") && !broker.tools.get("apply_patch")?.codeModeOwner?.replaced;
 		if (ownsPatch && active.has("apply_patch")) {
 			for (const name of NATIVE_MUTATION_TOOL_NAMES) {
 				if (active.delete(name) && !suppressed.has(name)) suppressed.set(name, current.indexOf(name));
 			}
 		}
-		const physical = new Set(active);
-		for (const [name, control] of controls) {
-			const projected = control.projectActive(active.has(name));
-			if (projected === undefined) { if (current.includes(name)) physical.add(name); else physical.delete(name); }
-			else if (projected) physical.add(name); else physical.delete(name);
-		}
-		const next = current.filter(name => physical.has(name));
-		for (const name of physical) if (!next.includes(name)) next.push(name);
+		const next = current.filter(name => active.has(name));
+		for (const name of active) if (!next.includes(name)) next.push(name);
 		if (!ownsPatch || !active.has("apply_patch")) restore(next);
 		if (next.join("\0") !== current.join("\0")) pi.setActiveTools(next);
 		if (!ownsPatch || !active.has("apply_patch")) suppressed.clear();
-		for (const control of controls.values()) control.reconcile();
 		} finally { syncing = false; }
 	};
-	const offOwner = pi.events.on(OWNER_CHANGED, (message) => {
-		if ((message as { version?: number })?.version === 1 && latest && !broker.closed) sync(latest);
-	});
 	pi.on("session_start", (_event, ctx) => {
 		broker.presentation.clear();
 		suppressed.clear();
@@ -107,16 +104,11 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		// Restoration receipts belong to the previous physical loadout, not
 		// to tools absent from the newly selected branch.
 		suppressed.clear();
-		sync(ctx, true);
+		sync(ctx);
 	});
 	pi.on("agent_end", () => broker.presentation.scheduleFlush());
 	pi.on("session_shutdown", () => {
-		offOwner();
 		const errors: unknown[] = [];
-		for (const tool of broker.tools.values()) if (tool.codeModeOwner) tool.codeModeOwner.closed = true;
-		for (const tool of broker.tools.values()) {
-			try { disposeCodeModeOwner(tool); } catch (error) { errors.push(error); }
-		}
 		try { broker.presentation.flush(); } catch (error) { errors.push(error); }
 		try { broker.presentation.clear(); } catch (error) { errors.push(error); }
 		try {
@@ -125,7 +117,7 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 			if (next.join("\0") !== current.join("\0")) pi.setActiveTools(next);
 			suppressed.clear();
 		} catch (error) { errors.push(error); }
-		if (errors.length) throw new AggregateError(errors, "Codex owner shutdown failed");
+		if (errors.length) throw new AggregateError(errors, "Codex shutdown failed");
 	});
 	return broker;
 }

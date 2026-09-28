@@ -58,7 +58,9 @@ test("Codex minimal tools enters guarded artifacts after bootstrap activation", 
   assert(artifactWorkspaces(true).some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
 });
 
-test("Code Mode S1 is installable locally but excluded from publication", () => {
-  assert.equal(workspaces.find(({ name }) => name === "@oai404iao/pi-code-mode")?.releaseStatus, "blocked");
-  assert(!artifactWorkspaces(true).some(({ name }) => name === "@oai404iao/pi-code-mode"));
+test("retired pi-code-mode is absent from workspaces and artifacts", () => {
+  assert(!readManifest(".").workspaces.includes("pi-extensions/pi-code-mode"));
+  for (const entries of [workspaces, publishableWorkspaces, artifactWorkspaces(), artifactWorkspaces(true)]) {
+    assert(!entries.some(({ name }) => name === "@oai404iao/pi-code-mode"));
+  }
 });

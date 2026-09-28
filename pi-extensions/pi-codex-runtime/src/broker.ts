@@ -2,7 +2,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createRequire } from "node:module";
 import type { PackageToolName } from "./capabilities.js";
 import type { ProviderPresentation } from "./extension/provider-presentation.js";
-import type { OwnerState } from "./code-mode-owner.js";
 
 export const CODEX_BROKER_CHANNEL = "@oai404iao/pi-codex:broker";
 export const CODEX_RUNTIME_VERSION: string = createRequire(import.meta.url)("../package.json").version;
@@ -11,7 +10,13 @@ const CACHE = Symbol.for("@oai404iao/pi-codex/broker/v1");
 export interface InstalledTool {
 	register(): void;
 	registered: boolean;
-	codeModeOwner?: OwnerState;
+}
+
+export interface OwnedTool {
+	readonly parameters: unknown;
+	readonly description: string;
+	identity?: string;
+	replaced?: boolean;
 }
 
 export interface CodexBroker {
@@ -20,7 +25,7 @@ export interface CodexBroker {
 	readonly closed: boolean;
 	readonly tools: Map<PackageToolName, InstalledTool>;
 	coreEnabled: boolean;
-	codeModeDefinitions?: Map<string, { parameters: unknown; description: string; providerId: string }>;
+	readonly ownedTools: Map<"apply_patch" | "web_search", OwnedTool>;
 	claim(name: string): boolean;
 	addPresentation(name: string, presentation: ProviderPresentation): void;
 	presentation: ProviderPresentation;
@@ -29,6 +34,7 @@ export interface CodexBroker {
 function createBroker(): CodexBroker & { close(): void } {
 	const claims = new Set<string>();
 	const tools = new Map<PackageToolName, InstalledTool>();
+	const ownedTools = new Map<"apply_patch" | "web_search", OwnedTool>();
 	const presentations = new Map<string, ProviderPresentation>();
 	const rendered = new Set<string>();
 	let closed = false;
@@ -39,6 +45,7 @@ function createBroker(): CodexBroker & { close(): void } {
 		get closed() { return closed; },
 		coreEnabled: false,
 		tools,
+		ownedTools,
 		claim(name) {
 			if (closed) throw new Error("Codex broker belongs to a closed session");
 			if (claims.has(name)) return false;
@@ -84,6 +91,8 @@ function isCompatible(candidate: CodexBroker): boolean {
 		&& typeof candidate.addPresentation === "function"
 		&& typeof candidate.tools?.get === "function"
 		&& typeof candidate.tools?.set === "function"
+		&& typeof candidate.ownedTools?.get === "function"
+		&& typeof candidate.ownedTools?.set === "function"
 		&& typeof candidate.closed === "boolean"
 		&& typeof candidate.coreEnabled === "boolean"
 		&& ["clear", "flush", "scheduleFlush", "registerRenderers", "streamEffects"].every(
