@@ -24,12 +24,15 @@ export default function codexImagegen(pi: ExtensionAPI): void {
 			return { createEventObserver: context => createImageCapture(context, sink) };
 		},
 	});
-	addPackageTool(broker, "image_generation", () => {
-		pi.registerTool(createImageGenerationToolDefinition({
-			loadSettings: (cwd, model) => loadModelSettings(model, cwd),
-			getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
-			hasProviderRuntime: () => broker.coreEnabled,
-		}) as never);
+	const definition = createImageGenerationToolDefinition({
+		loadSettings: (cwd, model) => loadModelSettings(model, cwd),
+		getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
+		hasProviderRuntime: () => broker.coreEnabled,
+	});
+	const parameters = { ...definition.parameters };
+	broker.ownedTools.set("image_generation", { parameters, description: definition.description });
+	addPackageTool(broker, "image_generation", exposure => {
+		pi.registerTool({ ...definition, parameters, exposure } as never);
 	});
 	registerBackgroundImageGenerationCommand(pi);
 }

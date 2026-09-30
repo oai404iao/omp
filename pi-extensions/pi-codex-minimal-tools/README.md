@@ -9,7 +9,11 @@ Composition-only entry for Pi's Codex extensions. It loads:
 
 All three use [`pi-codex-runtime`](../pi-codex-runtime/README.md). Compatible
 duplicate installations are deduplicated by the shared broker.
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
+
+Native codemode may call active `apply_patch` and standalone web/image tools.
+Hosted web/image tools and `view_image` remain model-only. The bundle does not
+activate codemode or load MCP servers.
 
 The package name, default extension factory and
 `@oai404iao/pi-codex-minimal-tools/subagent-inline` remain supported.

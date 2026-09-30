@@ -3,7 +3,7 @@
 Codex-specific Responses support for Pi, driven by an exact per-model JSON
 catalog instead of model-name heuristics.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
 
 > `@oai404iao/pi-codex-minimal-tools` is a composition-only package.
 > Runtime owns shared configuration and schemas; core, web-search and imagegen

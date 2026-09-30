@@ -382,6 +382,7 @@ export function createWebSearchToolDefinition(options: {
 				throw new Error("Hosted web_search requires pi-codex-core. Use a catalog-supported standalone profile for independent execution.");
 			}
 			return {
+				isError: true,
 				content: [{ type: "text", text: "web_search is hosted-provider-first for this model profile and should be rewritten before execution." }],
 				details: { phase: "native-provider", nativeTool: "web_search" },
 			};

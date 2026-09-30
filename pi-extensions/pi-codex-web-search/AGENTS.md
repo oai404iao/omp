@@ -27,7 +27,7 @@ Read root CONTRIBUTING.md, RELEASING.md and docs/codex-packages.md. Source evide
 is in pi-codex-runtime/reference/source-map.md; search protocol notes are in
 this package's reference/web-search-streaming-rendering.md.
 Use the root package-lock.json; never add package locks. All new modules must be
-at most 400 lines. Preserve the Pi 0.87.0 floor and exact 0.87.1 target; run
+at most 400 lines. Preserve the Pi 0.99.1 floor and exact 0.99.1 target; run
 `npm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
 Tarball-facing changes require a changeset. AGENTS/tests/reference are not shipped.
 Run `npm run changeset:sync` for recursive consumers; never loosen exact workspace pins.

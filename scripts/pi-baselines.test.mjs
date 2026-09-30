@@ -4,9 +4,9 @@ import { isPiDependency, piFloor, piFloorArtifacts, piTarget, piVersion } from "
 import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
 
 test("explicit floor/target selection resolves the audited Pi baseline", () => {
-  assert.notEqual(piFloor, piTarget);
-  assert.equal(piVersion("floor"), "0.87.0");
-  assert.equal(piVersion("target"), "0.87.1");
+  assert.equal(piFloor, piTarget);
+  assert.equal(piVersion("floor"), "0.99.1");
+  assert.equal(piVersion("target"), "0.99.1");
   assert.throws(() => piVersion("latest"), /Unknown Pi baseline/);
   assert.equal(isPiDependency("@earendil-works/pi-ai"), true);
   assert.equal(isPiDependency("typescript-ast"), false);
@@ -22,15 +22,17 @@ test("new target shrinkwrap entries reuse only matching hashed artifacts from th
 });
 
 test("floor-only evidence fills exact artifacts without weakening unknown/mutated hash rejection", () => {
-  for (const artifact of piFloorArtifacts) {
-    assert.equal(artifact.version, piFloor);
+  assert.deepEqual(piFloorArtifacts, []);
+  for (const artifact of [{
+    version: piFloor, resolved: "https://registry.npmjs.org/floor-fixture.tgz", integrity: "sha512-fixture",
+  }]) {
     const { integrity, ...unhashed } = artifact;
     const lock = { packages: { nested: { ...unhashed } } };
     assert.throws(() => preserveRegistryIntegrity({ packages: {} }, structuredClone(lock)), /Missing reviewed/);
-    assert.equal(preserveRegistryIntegrity({ packages: {} }, lock, piFloorArtifacts).packages.nested.integrity, integrity);
+    assert.equal(preserveRegistryIntegrity({ packages: {} }, lock, [artifact]).packages.nested.integrity, integrity);
     assert.throws(() => preserveRegistryIntegrity({ packages: {} },
-      { packages: { nested: { ...artifact, integrity: "sha512-tampered" } } }, piFloorArtifacts), /integrity changed/);
+      { packages: { nested: { ...artifact, integrity: "sha512-tampered" } } }, [artifact]), /integrity changed/);
     assert.throws(() => preserveRegistryIntegrity({ packages: {} },
-      { packages: { nested: { ...unhashed, version: "0.87.2" } } }, piFloorArtifacts), /Missing reviewed/);
+      { packages: { nested: { ...unhashed, version: "0.99.2" } } }, [artifact]), /Missing reviewed/);
   }
 });

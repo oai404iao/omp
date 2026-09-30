@@ -2,7 +2,12 @@
 
 See the package guide below for release status; source edits do not publish artifacts.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
+
+Hosted search is model-only, including with native codemode in `only` mode.
+Standalone search remains directly callable and is also available to codemode
+while active. Exposure follows the selected model profile; this does not
+enable codemode itself.
 
 Installs `web_search` and search activity rendering. Depends only on
 `pi-codex-runtime`, not core, imagegen or the old bundle.

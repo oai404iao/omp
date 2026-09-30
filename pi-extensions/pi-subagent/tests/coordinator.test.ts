@@ -15,6 +15,7 @@ import {
 import {
 	type ExtensionAPI,
 	type ExtensionContext,
+	type ExtensionToolContext,
 	ModelRegistry,
 	ModelRuntime,
 	SessionManager,
@@ -2688,7 +2689,7 @@ test("mailbox prompt preflight failure leaves the unclaimed batch pending", asyn
 		modelRuntime.registerProvider("scripted", withoutAuth);
 		await assert.rejects(
 			() => coordinator.followupTask(parent, outcome.details.agentId),
-			/prompt was rejected before acceptance/,
+			/No API key found for scripted/,
 		);
 		const listed = await coordinator.list(parent, "children");
 		const child = listed.find(
@@ -2775,6 +2776,24 @@ export default function transformMailbox(pi) {
 	} finally {
 		await coordinator.shutdown();
 	}
+});
+
+test("foreground delegation rejects an input-handled prompt instead of publishing a successful task", async () => {
+	const { coordinator, parent, messages } = await fixture({
+		childExtension: `export default function (pi) {
+			pi.on("input", () => ({ action: "handled" }));
+		}`,
+	});
+	try {
+		await assert.rejects(
+			coordinator.delegate(parent, "spawn", {
+				agent: "worker", description: "handled task", prompt: "Do not report a fake completion.",
+			}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true }),
+			/handled before a user turn started/,
+		);
+		assert.deepEqual(messages, []);
+		assert.deepEqual(await coordinator.list(parent, "children"), []);
+	} finally { await coordinator.shutdown(); }
 });
 
 test("mailbox rejects an input-handled prompt without claiming its batch", async () => {
@@ -3808,6 +3827,7 @@ test("foreground children hide background lifecycle controls", async () => {
 			},
 			"foreground",
 		);
+		for (const tool of staleDefinitions) assert.equal(tool.exposure, "model-only", tool.name);
 		for (const [toolName, args] of [
 			[
 				"send_message",
@@ -3827,7 +3847,7 @@ test("foreground children hide background lifecycle controls", async () => {
 						args,
 						undefined,
 						undefined,
-						{} as ExtensionContext,
+						{} as ExtensionToolContext,
 					),
 				/foreground-only mode/,
 			);

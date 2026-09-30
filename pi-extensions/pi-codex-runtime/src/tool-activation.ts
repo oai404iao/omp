@@ -9,7 +9,7 @@ import { installCodexIdentityLifecycle } from "./codex-identity-extension.js";
 import { loadModelSettings } from "./model-catalog/runtime.js";
 import { loadSettings } from "./settings.js";
 
-function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_patch" | "web_search"): boolean {
+function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_patch" | "web_search" | "image_generation"): boolean {
 	if (!broker.tools.get(name)?.registered) return false;
 	const expected = broker.ownedTools.get(name);
 	if (!expected || expected.replaced) return false;
@@ -28,7 +28,7 @@ function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_
 function enableDefinitions(broker: CodexBroker) {
 	for (const tool of broker.tools.values()) {
 		if (tool.registered) continue;
-		tool.register();
+		tool.register(tool.exposure);
 		tool.registered = true;
 	}
 	broker.presentation.registerRenderers();
@@ -37,10 +37,10 @@ function enableDefinitions(broker: CodexBroker) {
 export function addPackageTool(
 	broker: CodexBroker,
 	name: PackageToolName,
-	register: () => void,
+	register: (exposure: "direct" | "model-only") => void,
 ): void {
 	if (broker.tools.has(name)) throw new Error(`Duplicate Codex tool owner: ${name}`);
-	broker.tools.set(name, { register, registered: false });
+	broker.tools.set(name, { register, registered: false, exposure: name === "apply_patch" ? "direct" : "model-only" });
 	if (loadSettings().enabled) enableDefinitions(broker);
 }
 
@@ -73,6 +73,15 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 			if (!owned) continue; // Other extensions retain ownership of uninstalled names.
 			if (name === "apply_patch" && !ownsPatch) continue;
 			if (name === "web_search" && !ownsRegisteredTool(pi, broker, "web_search")) continue;
+			if (name === "image_generation" && !ownsRegisteredTool(pi, broker, "image_generation")) continue;
+			if (owned.registered && (name === "web_search" || name === "image_generation")) {
+				const implementation = name === "web_search" ? model.webSearchImplementation : model.imageGenerationImplementation;
+				const exposure = implementation === "standalone" ? "direct" : "model-only";
+				if (owned.exposure !== exposure) {
+					owned.register(exposure);
+					owned.exposure = exposure;
+				}
+			}
 			const hostedWithoutCore = !broker.coreEnabled && (
 				(name === "web_search" && model.webSearchImplementation === "hosted")
 				|| (name === "image_generation" && model.imageGenerationImplementation === "hosted" && !settings.directImageApiFallback)
@@ -89,7 +98,8 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		const next = current.filter(name => active.has(name));
 		for (const name of active) if (!next.includes(name)) next.push(name);
 		if (!ownsPatch || !active.has("apply_patch")) restore(next);
-		if (next.join("\0") !== current.join("\0")) pi.setActiveTools(next);
+		// Re-registration can auto-activate a tool; keep the existing activation policy authoritative.
+		if (next.join("\0") !== (pi.getActiveTools?.() ?? []).join("\0")) pi.setActiveTools(next);
 		if (!ownsPatch || !active.has("apply_patch")) suppressed.clear();
 		} finally { syncing = false; }
 	};

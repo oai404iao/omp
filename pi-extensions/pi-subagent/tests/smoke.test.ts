@@ -117,6 +117,10 @@ test("extension loads and registers its model-facing surface", async () => {
 			true,
 			"background mode should activate wait_agent",
 		);
+		for (const name of ["subagent", "subagent_fork", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents"]) {
+			assert.equal(session.getToolDefinition(name)?.exposure, "model-only", name);
+			assert.equal(session.getCallableToolNames().includes(name), false, name);
+		}
 		for (const toolName of ["subagent", "subagent_fork"]) {
 			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
 			assert.deepEqual(agentEnum(tool), ["planner", "reviewer", "scout", "worker"]);

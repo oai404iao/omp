@@ -5,7 +5,13 @@ The design independently adapts the
 [DeepSeek Harness subagent seam](https://github.com/deepseek-ai/deepseek-harness/tree/4d03472cd098dc48a630e526ca620f4f37f18a0e/docs/subsystems)
 to Pi's extension and SDK APIs.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
+
+All delegation and control tools, including child-only `report`, are
+`model-only`: they remain independent model tools and cannot be called from
+native codemode. In particular, `wait_agent` requires a separately persisted
+tool result to acknowledge completion delivery. Child SDK sessions do not
+automatically load the CLI's codemode or MCP extensions.
 
 > npm identity: `@oai404iao/pi-subagent`. Once the selected version is
 > available on npm, install it from npm; use a local checkout before its
@@ -67,7 +73,7 @@ For a temporary test:
 pi -e /absolute/path/to/pi-extensions/pi-subagent
 ```
 
-The supported compatibility floor is Pi `0.87.0`; development targets `0.87.1`.
+The supported compatibility floor and development target are Pi `0.99.1`.
 Inherited context uses the parent's canonical projection, including omissions and
 content replacements, before selecting completed turns. Parent system authority
 is not inherited. Completion comes from finalized events, not context-array offsets.

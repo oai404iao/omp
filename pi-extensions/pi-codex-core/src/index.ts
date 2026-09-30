@@ -176,6 +176,7 @@ function registerCoreTools(pi: ExtensionAPI, broker: ReturnType<typeof ensureCod
 	pi.registerTool({
 		renderShell: "self",
 		name: "view_image",
+		exposure: "model-only",
 		label: "View Image",
 		description: "Inspect a local image file by returning image content to the model. Relative paths resolve against ctx.cwd; a leading @ is accepted.",
 		promptSnippet: "Inspect local image files by path.",

@@ -281,6 +281,7 @@ export function createImageGenerationToolDefinition(options: {
 				throw new Error("Hosted image_generation requires pi-codex-core. Use a catalog-supported standalone profile or explicitly enable directImageApiFallback.");
 			}
 			return {
+				isError: true,
 				content: [{ type: "text", text: "image_generation should be handled by the current model profile. If no hosted or standalone implementation is configured, enable directImageApiFallback with OPENAI_API_KEY." }],
 				details: { phase: "native-provider", nativeTool: "image_generation" },
 			};

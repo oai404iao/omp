@@ -4,7 +4,7 @@ See the package guide below for release status; source edits do not publish arti
 It has no Pi extension entry
 and does not automatically register tools or providers.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
 
 Owns shared Codex authentication/headers, wire identity, settings/catalog,
 Responses replay contracts and the session-scoped composition broker.

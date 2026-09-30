@@ -8,8 +8,9 @@ export const CODEX_RUNTIME_VERSION: string = createRequire(import.meta.url)("../
 const CACHE = Symbol.for("@oai404iao/pi-codex/broker/v1");
 
 export interface InstalledTool {
-	register(): void;
+	register(exposure: "direct" | "model-only"): void;
 	registered: boolean;
+	exposure: "direct" | "model-only";
 }
 
 export interface OwnedTool {
@@ -25,7 +26,7 @@ export interface CodexBroker {
 	readonly closed: boolean;
 	readonly tools: Map<PackageToolName, InstalledTool>;
 	coreEnabled: boolean;
-	readonly ownedTools: Map<"apply_patch" | "web_search", OwnedTool>;
+	readonly ownedTools: Map<"apply_patch" | "web_search" | "image_generation", OwnedTool>;
 	claim(name: string): boolean;
 	addPresentation(name: string, presentation: ProviderPresentation): void;
 	presentation: ProviderPresentation;
@@ -34,7 +35,7 @@ export interface CodexBroker {
 function createBroker(): CodexBroker & { close(): void } {
 	const claims = new Set<string>();
 	const tools = new Map<PackageToolName, InstalledTool>();
-	const ownedTools = new Map<"apply_patch" | "web_search", OwnedTool>();
+	const ownedTools = new Map<"apply_patch" | "web_search" | "image_generation", OwnedTool>();
 	const presentations = new Map<string, ProviderPresentation>();
 	const rendered = new Set<string>();
 	let closed = false;

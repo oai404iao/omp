@@ -69,7 +69,14 @@ export function createCompositionHost(directory: string, bus = new EventEmitter(
 		on(name: string, handler: Function) {
 			handlers.set(name, [...(handlers.get(name) ?? []), handler]);
 		},
-		registerTool: (tool: any) => add(tools, tool.name, tool),
+		registerTool: (tool: any) => {
+			const previous = tools.get(tool.name);
+			if (previous) {
+				assert.equal(tool.parameters, previous.parameters, `re-registration must retain schema identity: ${tool.name}`);
+				assert.equal(tool.description, previous.description);
+			}
+			tools.set(tool.name, tool);
+		},
 		registerProvider: (providerOrName: string | { id: string }, value?: any) => {
 			if (typeof providerOrName === "string") add(providers, providerOrName, {
 				...value,
@@ -79,7 +86,7 @@ export function createCompositionHost(directory: string, bus = new EventEmitter(
 		},
 		registerCommand: (name: string, value: any) => add(commands, name, value),
 		registerMessageRenderer: (name: string, value: any) => add(renderers, name, value),
-		getAllTools: () => [...tools.values()].map(tool => ({ ...tool,
+		getAllTools: () => [...tools.values()].map(tool => ({ ...tool, exposure: tool.exposure ?? "direct",
 			sourceInfo: tool.sourceInfo ?? { path: "/fixture/extension.ts", source: "fixture", scope: "temporary", origin: "top-level" } })),
 		getActiveTools: () => [...active],
 		setActiveTools: (next: string[]) => { active = [...next]; },

@@ -13,14 +13,14 @@ export default function codexWebSearch(pi: ExtensionAPI): void {
 		registerRenderers: () => registerWebSearchActivityRenderer(pi),
 		streamEffects: () => ({ createEventObserver: createWebSearchCapture }),
 	});
-	addPackageTool(broker, "web_search", () => {
-		const definition = createWebSearchToolDefinition({
-			getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
-			getRequestIdentity: sessionId => resolveCodexRequestIdentity(sessionId, undefined, "turn"),
-			hasProviderRuntime: () => broker.coreEnabled,
-		});
-		const parameters = { ...definition.parameters };
-		pi.registerTool({ ...definition, parameters } as never);
-		broker.ownedTools.set("web_search", { parameters, description: definition.description });
+	const definition = createWebSearchToolDefinition({
+		getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
+		getRequestIdentity: sessionId => resolveCodexRequestIdentity(sessionId, undefined, "turn"),
+		hasProviderRuntime: () => broker.coreEnabled,
+	});
+	const parameters = { ...definition.parameters };
+	broker.ownedTools.set("web_search", { parameters, description: definition.description });
+	addPackageTool(broker, "web_search", exposure => {
+		pi.registerTool({ ...definition, parameters, exposure } as never);
 	});
 }

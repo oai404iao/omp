@@ -2,7 +2,10 @@
 
 See the package guide below for release status; source edits do not publish artifacts.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
+
+`apply_patch` remains callable through native codemode while active.
+`view_image` is model-only so image content reaches the model directly.
 
 Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
 `apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,

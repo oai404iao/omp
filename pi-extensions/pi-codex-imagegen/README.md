@@ -2,7 +2,13 @@
 
 See the package guide below for release status; source edits do not publish artifacts.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
+
+Hosted generation is model-only, including with native codemode in `only` mode.
+Standalone generation remains directly callable and is also available to
+codemode while active. Exposure follows the selected model profile; this does
+not enable codemode itself. A hosted profile with explicit direct fallback
+remains model-only.
 
 `/image-gen` jobs are cancelled when the session is replaced or closed.
 Late authentication/results cannot notify the replacement session or initiate
