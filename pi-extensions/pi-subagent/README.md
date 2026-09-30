@@ -10,8 +10,26 @@ Peer floor and development target: Pi 0.99.1.
 All delegation and control tools, including child-only `report`, are
 `model-only`: they remain independent model tools and cannot be called from
 native codemode. In particular, `wait_agent` requires a separately persisted
-tool result to acknowledge completion delivery. Child SDK sessions do not
-automatically load the CLI's codemode or MCP extensions.
+tool result to acknowledge completion delivery.
+
+With `inheritExtensions: true`, child SDK sessions can load Pi's built-in
+`codemode` and `tool-search`, respecting `-builtin:codemode` and
+`-builtin:tool-search` extension settings. They remain inactive unless the
+agent's `tools` or Pi's `defaultTools` selects them. With inheritance disabled
+they do not load, even if requested explicitly; enable inheritance or remove
+those names from the agent definition. Built-in MCP is not injected.
+The supplied child codemode factory has classifier/model calls disabled; it is
+for tool orchestration only. Fork/context inheritance copies conversation
+projection, not a parent's `codemode-store` custom entries.
+
+An agent's `tools` remains a hard registry ceiling, not just a prompt filter.
+Requested `codemode`/`deferred` exposure tools are permitted without declaring
+them directly at startup; scripts may call them, or `tool_search` may declare
+them later. Excluded and unlisted tools remain unreachable even if an inherited
+extension registers them later. Nested trace items retain `toolCallId` and
+`parentToolCallId`; nested usage is counted once via the outer tool result.
+Declarations discovered on a child's canonical branch survive cold resume;
+they are not reset to callable-only on each activation.
 
 > npm identity: `@oai404iao/pi-subagent`. Once the selected version is
 > available on npm, install it from npm; use a local checkout before its

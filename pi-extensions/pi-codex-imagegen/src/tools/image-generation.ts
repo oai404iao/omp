@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, resolve } from "node:path";
 import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { saveBase64Image } from "../utils/images.js";
+import { imageGenerationOutput, imageGenerationOutputSchema } from "./image-generation/output.js";
 import type { CodexMinimalToolsSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
 import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import {
@@ -79,6 +80,7 @@ export async function directImageGeneration(input: ImageGenerationInput, cwd: st
 	return {
 		content: [{ type: "text", text: `Generated image with ${settings.imageModel}; saved to ${saved.path}${saved.latestPath ? ` (latest: ${saved.latestPath})` : ""}.` }],
 		details: { saved, revisedPrompt: first?.revised_prompt, mode: "direct-images-api" },
+		structuredContent: imageGenerationOutput(saved, base64),
 	};
 }
 
@@ -246,6 +248,7 @@ export async function standaloneImageGeneration(
 			{ type: "text", text: `Generated image with ${settings.imageModel}; saved to ${saved.path}${saved.latestPath ? ` (latest: ${saved.latestPath})` : ""}.` },
 		],
 		details: { saved, mode: "standalone-images-api" },
+		structuredContent: imageGenerationOutput(saved, base64),
 	};
 }
 
@@ -260,6 +263,7 @@ export function createImageGenerationToolDefinition(options: {
 		description: "Generate or edit images using the hosted or standalone implementation selected by the current model profile. Results are saved under imageOutputDir and mirrored to latest.<ext>.",
 		promptSnippet: "Generate or edit images with the implementation selected by the current model profile.",
 		parameters: imageGenerationToolSchema,
+		outputSchema: imageGenerationOutputSchema,
 		async execute(toolCallId: string, params: ImageGenerationInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ImageGenerationToolContext) {
 			const cwd = ctx?.cwd ?? process.cwd();
 			const settings = options.loadSettings?.(cwd, ctx.model) ?? loadModelSettings(ctx.model, cwd);

@@ -19,6 +19,43 @@ afterEach(() => {
 	resetCodexWireState();
 });
 
+for (const name of ["codemode", "tool_search"]) {
+	test(`${name} suppresses speculative prewarm before auth`, async () => {
+		await withCodexSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true }, async () => {
+			const lifecycle = createStartupPrewarmLifecycle({ ...pi, getActiveTools: () => [name, "read"] });
+			const ctx = eventContext();
+			let calls = 0;
+			ctx.modelRegistry.getApiKeyAndHeaders = async () => { calls++; throw new Error("unexpected auth"); };
+			try {
+				lifecycle.start(ctx);
+				assert.equal(lifecycle.get("lifecycle-test", responsesModel), undefined);
+				assert.equal(calls, 0);
+			} finally { lifecycle.reset(); }
+		});
+	});
+}
+
+test("activating codemode while auth is pending prevents a stale prewarm request", async () => {
+	await withCodexSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true }, async () => {
+		const server = await startWebSocketServer([]);
+		let active = ["read"];
+		const lifecycle = createStartupPrewarmLifecycle({ ...pi, getActiveTools: () => active });
+		const auth = deferred<Auth>();
+		const ctx = eventContext({ ...responsesModel, baseUrl: server.url });
+		ctx.modelRegistry.getApiKeyAndHeaders = () => auth.promise;
+		try {
+			lifecycle.start(ctx);
+			const pending = lifecycle.get("lifecycle-test", ctx.model!);
+			assert(pending);
+			active = ["read", "codemode"];
+			auth.resolve({ ok: true, apiKey: "fixture" });
+			await pending;
+			assert.equal(server.connections, 0);
+			assert.equal(server.requests.length, 0);
+		} finally { lifecycle.reset(); await server.close(); }
+	});
+});
+
 test("reset detaches pending auth and prevents an old generation from opening sockets", async () => {
 	await withCodexSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true }, async () => {
 		const server = await startWebSocketServer([]);

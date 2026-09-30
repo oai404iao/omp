@@ -15,7 +15,7 @@ See the [upstream changelog](https://github.com/earendil-works/pi/blob/v0.99.1/p
 The floor role regenerates its projected lock; the target uses the committed lock.
 Both roles now use the same version but retain these distinct lock checks.
 
-## Native codemode: first migration stage
+## Native codemode integration
 
 - Active standalone `web_search` and `image_generation` use `direct` exposure
   and can be called from codemode. Hosted profiles use `model-only`, retaining
@@ -30,11 +30,36 @@ Both roles now use the same version but retain these distinct lock checks.
   result; a nested-call summary cannot satisfy that contract.
 - Subagent acceptance uses Pi's `started` disposition and, for mailbox work,
   the persisted user-message boundary. Handled inputs are not successful tasks.
-- This stage does not enable codemode, inject CLI builtin extensions into
-  children, load MCP servers, add structured tool results, or add model profiles.
+- Script-callable Codex tools have output schemas and structured results:
+  patch `{ summary, files }`, search `{ output, results }`, image generation
+  `{ path, latestPath?, image }`. Images require explicit `image(result.image)`
+  forwarding. Tool execution failures throw; model-facing content and existing
+  renderers remain. Pi deliberately passes structured data through even when a
+  `tool_result` hook sets `isError: true`. A hook that needs script rejection
+  must also replace `content` without supplying `structuredContent`; changing
+  `isError` alone is not a rejection/redaction boundary.
+- Children supply builtin codemode/tool-search factories only through Pi's
+  normal builtin loader policy. `inheritExtensions: false` prevents loading;
+  inherited extension settings may also disable them. Loading does not activate
+  them: agent `tools` or Pi `defaultTools` must select them. The supplied child
+  codemode factory disables classifier/model calls. Parent `codemode-store`
+  custom entries are not inherited by forks.
+- Child `tools`/`excludeTools` still constrain the registry, including tools
+  registered late. An allowlist grants `codemode`/`deferred` tools callable
+  access without forcing declarations; tool search may declare them afterward.
+  Those discoveries persist across cold resumes on the child's canonical branch.
+  Subagent tools themselves remain model-only. Nested traces retain call
+  hierarchy and nested usage is collected from the outer result only.
+- While codemode/tool-search is active, prewarm is skipped rather than guessing
+  the final `prepareLoadout` projection. Without a native checkpoint, compaction
+  delegates to Pi's tool-free text summarizer. With one, recompaction is refused
+  without discarding opaque state; disable both tools and retry on the original
+  model, or navigate before the checkpoint. This guard recognizes the built-in
+  tool names, not arbitrary third-party `prepareLoadout` hooks.
+- The packages do not globally enable codemode, inject MCP into children, or add
+  model profiles.
 
-Follow-up work still needs to align prewarm/compaction snapshots with
-`prepareLoadout` projections, review OpenAI ChatGPT OAuth request compatibility,
+Follow-up work still needs to review OpenAI ChatGPT OAuth request compatibility
 and validate the new `gpt-6.1-sol` exact profile. Unknown models continue using
 Pi's native implementation. This is not a blanket claim that all new Pi model,
 authentication, or orchestration features are supported.
@@ -136,6 +161,10 @@ have already passed.
   Real SDK tests exercise Standard/Lite prompts and dynamic tool changes;
   additional regressions cover compaction checkpoints, inherited system
   authority, continuation after cancellation and JSON argument shapes.
+- Native QuickJS tests exercise structured patch/search/image results, image
+  forwarding, permission rejection, result redaction and cancellation while a
+  nested patch waits on a file queue. Real child SDK tests cover builtin loading,
+  deferred discovery, hard registry ceilings and single-counted nested usage.
 
 ## Limits and known issues
 

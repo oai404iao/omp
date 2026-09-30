@@ -16,6 +16,7 @@ import { isWebSocketUpgradeRejectedError } from "../providers/openai-codex/retry
 import { resolveResponsesWebSocketUrl } from "../providers/openai-codex/urls.js";
 import { websocketHttpFallbackSessions, websocketSessionCache } from "../providers/openai-codex/websocket-session.js";
 import { startupPrewarmSnapshot, type StartupPrewarmSnapshot } from "./prewarm-snapshot.js";
+import { hasProjectedToolLoadout } from "./tool-snapshot.js";
 import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 
 interface StartupPrewarmState {
@@ -86,6 +87,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 		if (
 			startupSignal.aborted
 			|| generation !== sessionGeneration
+			|| hasProjectedToolLoadout(pi)
 			|| !auth.ok
 			|| !hasCodexRequestAuth({
 				modelHeaders: model.headers,
@@ -224,6 +226,8 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 	})();
 
 	const start = (ctx: ExtensionContext) => {
+		// Pi exposes raw definitions, not the request's prepareLoadout projection.
+		if (hasProjectedToolLoadout(pi)) return;
 		const generation = sessionGeneration;
 		// Do not block session startup. The first provider request naturally
 		// serializes behind this socket operation if it is still pending.

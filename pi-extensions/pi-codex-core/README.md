@@ -6,6 +6,19 @@ Peer floor and development target: Pi 0.99.1.
 
 `apply_patch` remains callable through native codemode while active.
 `view_image` is model-only so image content reaches the model directly.
+Scripts receive patch data as `{ summary, files }`; failures reject rather than
+returning success-shaped data. Normal model-facing text and rendering are unchanged.
+For `tool_result` hooks, Pi passes retained structured data through even with
+`isError: true`; a policy that requires script rejection must also replace
+`content` without supplying `structuredContent`.
+
+While native `codemode` or `tool_search` is active, speculative WebSocket
+prewarm is skipped because Pi does not expose the final `prepareLoadout` tool
+projection. Compaction falls back to Pi's text summarization only when no opaque
+native checkpoint exists. Existing native checkpoints are preserved and
+recompaction is refused: disable both orchestration tools and retry `/compact`
+on the original model, or navigate before the checkpoint. Other third-party
+`prepareLoadout` implementations are not covered by this built-in-name guard.
 
 Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
 `apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,

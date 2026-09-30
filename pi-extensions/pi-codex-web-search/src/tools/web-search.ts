@@ -1,4 +1,5 @@
 import { webSearchToolSchema, type WebSearchInput } from "./web-search/schema.js";
+import { webSearchOutputSchema } from "./web-search/output.js";
 export { webSearchToolSchema } from "./web-search/schema.js";
 export type { SearchQuery, WebSearchInput } from "./web-search/schema.js";
 import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -327,8 +328,10 @@ export async function standaloneWebSearch(
 		throw new Error("Standalone web search returned no output.");
 	}
 	assertStandaloneSearchOutput(result.output, input);
+	if (result.results !== undefined && !Array.isArray(result.results)) throw new Error("Standalone web search returned invalid result metadata.");
 	return {
 		content: [{ type: "text", text: result.output }],
+		structuredContent: { output: result.output, results: result.results ?? [] },
 		details: {
 			mode: "standalone",
 			results: (result.results ?? []) as StandaloneWebSearchResult[],
@@ -350,6 +353,7 @@ export function createWebSearchToolDefinition(options: {
 		promptSnippet: "Search the web when current information or citations are needed.",
 		promptGuidelines: ["Use web_search when current web information or cited sources are needed."],
 		parameters: webSearchToolSchema,
+		outputSchema: webSearchOutputSchema,
 		renderCall(input: WebSearchInput, theme: any, context: { cwd?: string }) {
 			return renderStandaloneWebSearchCall(input ?? {}, theme, context?.cwd);
 		},

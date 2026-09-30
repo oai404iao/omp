@@ -65,3 +65,32 @@ test("unknown logical tool groups fail loud", () => {
 		/unsupported logical tool "\$unknown"/,
 	);
 });
+
+test("requested callable-only tools do not become direct declarations", () => {
+	const policy = resolveToolPolicy({
+		requested: ["codemode", "deferred_tool"],
+		registered: ["codemode", "deferred_tool", "report"],
+		active: ["codemode"],
+		callable: ["deferred_tool"],
+		mandatory: ["report"],
+	});
+	assert.deepEqual(policy.activeTools, ["codemode", "report"]);
+	assert.deepEqual(policy.resolvedRequestedTools, ["codemode", "deferred_tool"]);
+});
+
+test("the permission ceiling does not eagerly declare deferred tools activated during SDK setup", () => {
+	const policy = resolveToolPolicy({
+		requested: ["codemode", "deferred_tool"],
+		registered: ["codemode", "deferred_tool"],
+		active: ["codemode", "deferred_tool"],
+		callable: ["deferred_tool"],
+		callableOnly: ["deferred_tool"],
+	});
+	assert.deepEqual(policy.activeTools, ["codemode"]);
+});
+
+test("callability cannot bypass registration or denial", () => {
+	const options = { requested: ["restricted"], active: [], callable: ["restricted"] };
+	assert.throws(() => resolveToolPolicy({ ...options, registered: [] }), /not registered/);
+	assert.throws(() => resolveToolPolicy({ ...options, registered: ["restricted"], denied: ["restricted"] }), /unavailable/);
+});

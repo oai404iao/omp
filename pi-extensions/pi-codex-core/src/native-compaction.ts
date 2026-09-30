@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import type { Api, AssistantMessage, Context, Model, ThinkingLevel, Tool } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import { getCurrentSystemMessage, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import type {
 	CompactionEntry,
@@ -16,6 +16,7 @@ import { requestOpenAINativeCompaction } from "./adapter/compaction/request.js";
 import { normalizeNativeCompactionToolPairs } from "./adapter/compaction/tool-pairs.js";
 export { normalizeNativeCompactionToolPairs } from "./adapter/compaction/tool-pairs.js";
 import { trackCompactionPrompt } from "./extension/compaction-prompt.js";
+import { activeToolSnapshot, hasProjectedToolLoadout } from "./extension/tool-snapshot.js";
 import type { ModelLike } from "@oai404iao/pi-codex-runtime/internal/capabilities";
 import { hasCodexRequestAuth } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveModelProfile } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
@@ -264,17 +265,6 @@ export function applyNativeCompactionContext(
 	return messages;
 }
 
-function activeTools(pi: ExtensionAPI): Tool[] {
-	const active = new Set(pi.getActiveTools());
-	return pi.getAllTools()
-		.filter((tool) => active.has(tool.name))
-		.map((tool) => ({
-			name: tool.name,
-			description: tool.description,
-			parameters: tool.parameters,
-		})) as Tool[];
-}
-
 function compactionSummary(mode: NativeCompactionMode): string {
 	return mode === "responses"
 		? "OpenAI Responses compaction replaced the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools."
@@ -296,7 +286,7 @@ async function buildNativeCompactionContext(
 			event.branchEntries,
 			model,
 		).filter((message) => message.role !== "system") as Context["messages"],
-		tools: activeTools(pi),
+		tools: activeToolSnapshot(pi),
 	};
 }
 
@@ -335,6 +325,11 @@ export function registerNativeCompaction(
 			ctx.ui.notify("Cannot replace an opaque native checkpoint with a placeholder summary. Restore its original model/profile and native compaction, or navigate before compaction.", "warning");
 			return { cancel: true };
 		}
+		if (hasProjectedToolLoadout(pi)) {
+			if (!nativeCheckpoint) return undefined;
+			ctx.ui.notify("Native compaction cannot snapshot the active codemode/tool_search projection. Disable those tools and retry /compact on the original model, or navigate before compaction. The existing checkpoint is preserved.", "warning");
+			return { cancel: true };
+		}
 		const leafId = ctx.sessionManager.getLeafId();
 		try {
 			if (event.branchEntries.at(-1)?.id !== leafId) return { cancel: true };
@@ -350,6 +345,7 @@ export function registerNativeCompaction(
 			}
 			const sessionId = ctx.sessionManager.getSessionId();
 			const context = await buildNativeCompactionContext(pi, event, ctx, model, forcedPrompt());
+			if (hasProjectedToolLoadout(pi)) throw new Error("Tool projection changed while preparing native compaction.");
 			const output = await requestOpenAINativeCompaction(model, context, {
 				ownsNativeTool: providerController?.ownsNativeTool,
 				mode,
@@ -361,8 +357,8 @@ export function registerNativeCompaction(
 				turnId: providerController?.getCurrentTurnId(sessionId),
 				settings,
 			});
-			if (ctx.sessionManager.getLeafId() !== leafId) {
-				ctx.ui.notify("Native compaction cancelled: session changed while compacting. Retry /compact.", "warning");
+			if (ctx.sessionManager.getLeafId() !== leafId || hasProjectedToolLoadout(pi)) {
+				ctx.ui.notify("Native compaction cancelled: session or tool projection changed while compacting. Retry /compact.", "warning");
 				return { cancel: true };
 			}
 			const checkpointId = randomUUID();

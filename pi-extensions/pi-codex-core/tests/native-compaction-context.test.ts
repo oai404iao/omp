@@ -2,12 +2,76 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createAgentSession, DefaultResourceLoader, ExtensionRunner, ModelRuntime, SessionManager, SettingsManager, type ExtensionFactory, type ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { getCurrentSystemPrompt, getCurrentTools, InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { createAgentSession, createCodemodeExtension, DefaultResourceLoader, ExtensionRunner, ModelRuntime, SessionManager, SettingsManager, type ExtensionFactory, type ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { createAssistantMessageEventStream, getCurrentSystemPrompt, getCurrentTools, InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { applyNativeCompactionContext, registerNativeCompaction, NATIVE_COMPACTION_DETAILS_KIND } from "@oai404iao/pi-codex-core/internal/native-compaction";
 import { responsesModel as model, withCodexSettings } from "../../../tests/codex/support/provider-lifecycle-test-support.js";
 
 const tool = (name: string, description: string) => ({ name, description, parameters: { type: "object" } });
+
+for (const mode of ["on", "only"] as const) {
+	test(`real session with codemode ${mode} uses Pi text compaction but preserves opaque checkpoints`, () =>
+		withCodexSettings({ compactionMode: "responses", openaiTransport: "sse" }, async cwd => {
+			const manager = SessionManager.inMemory(cwd);
+			for (let index = 0; index < 4; index++) manager.appendMessage({ role: "user", content: `history ${index} `.repeat(1000), timestamp: index });
+			let summaries = 0;
+			const runtime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: false });
+			runtime.registerProvider("openai", {
+				apiKey: "fixture", baseUrl: model.baseUrl, api: model.api, models: [model],
+				streamSimple(activeModel, context) {
+					summaries++;
+					assert.deepEqual(getCurrentTools(context.messages), []);
+					const stream = createAssistantMessageEventStream();
+					queueMicrotask(() => {
+						stream.push({ type: "done", reason: "stop", message: {
+							role: "assistant", content: [{ type: "text", text: "PI_TEXT_SUMMARY" }], timestamp: 10,
+							api: activeModel.api, provider: activeModel.provider, model: activeModel.id, stopReason: "stop",
+							usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+						} });
+						stream.end();
+					});
+					return stream;
+				},
+			});
+			const settingsManager = SettingsManager.inMemory({ defaultTools: ["+codemode"], compaction: { keepRecentTokens: 10 }, retry: { enabled: false } });
+			const loader = new DefaultResourceLoader({
+				cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true, noThemes: true,
+				noPromptTemplates: true, noContextFiles: true,
+				extensionFactories: [pi => registerNativeCompaction(pi), createCodemodeExtension({ mode, models: false })],
+			});
+			await loader.reload();
+			const { session } = await createAgentSession({
+				cwd, agentDir: cwd, model: runtime.getModel("openai", model.id)!, modelRuntime: runtime,
+				sessionManager: manager, settingsManager, resourceLoader: loader,
+			});
+			const previousFetch = globalThis.fetch;
+			globalThis.fetch = async () => { throw new Error("Unexpected native compaction request"); };
+			try {
+				await session.bindExtensions({ mode: "print" });
+				assert(session.getActiveToolNames().includes("codemode"));
+				const result = await session.compact();
+				assert.match(result.summary, /PI_TEXT_SUMMARY/);
+				assert(summaries > 0);
+				assert.notEqual((result.details as any)?.kind, NATIVE_COMPACTION_DETAILS_KIND);
+				manager.appendCompaction("opaque [native-checkpoint:fixture]", null, 100, {
+					kind: NATIVE_COMPACTION_DETAILS_KIND, version: 4, checkpointId: "fixture", mode: "responses",
+					provider: model.provider, model: model.id, api: model.api,
+					output: [{ type: "compaction", encrypted_content: "OPAQUE" }],
+				}, true);
+				for (let index = 0; index < 3; index++) manager.appendMessage({ role: "user", content: `tail ${index} `.repeat(1000), timestamp: 11 + index });
+				const before = structuredClone(manager.getEntries());
+				const summariesBefore = summaries;
+				await assert.rejects(session.compact(), /cancelled/i);
+				assert.equal(summaries, summariesBefore);
+				assert.deepEqual(manager.getEntries(), before);
+			} finally {
+				globalThis.fetch = previousFetch;
+				session.dispose();
+				loader.getExtensions().runtime.invalidate();
+			}
+		}));
+}
 
 test("real session migrates legacy checkpoints with retain-none and preserves them on failed or stale recompression", () =>
 	withCodexSettings({ compactionMode: "responses", openaiTransport: "sse" }, async (cwd) => {

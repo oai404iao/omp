@@ -80,11 +80,15 @@ export function resolveToolPolicy(
 	options: ToolPolicyOptions & {
 		registered: readonly string[];
 		active: readonly string[];
+		callable?: readonly string[];
+		callableOnly?: readonly string[];
 	},
 ): ResolvedToolPolicy {
 	assertSupportedToolReferences(options.requested ?? []);
 	const registered = new Set(options.registered);
 	const active = new Set(options.active);
+	const callable = new Set(options.callable ?? []);
+	const callableOnly = new Set(options.callableOnly ?? []);
 	const mandatory = unique(options.mandatory ?? []);
 	const mandatorySet = new Set(mandatory);
 	const denied = new Set(options.denied ?? []);
@@ -112,7 +116,7 @@ export function resolveToolPolicy(
 		if (!registered.has(tool)) {
 			throw new Error(`requested tool "${tool}" is not registered by Pi or a loaded child extension`);
 		}
-		if (!active.has(tool) && !mandatorySet.has(tool)) {
+		if (!active.has(tool) && !callable.has(tool) && !mandatorySet.has(tool)) {
 			throw new Error(
 				`requested tool "${tool}" is inactive for the selected model or child extension policy`,
 			);
@@ -120,7 +124,8 @@ export function resolveToolPolicy(
 		resolvedRequestedTools.push(tool);
 	}
 
-	const selected = unique(resolvedRequestedTools.filter((tool) => !denied.has(tool)));
+	// Callable-only tools stay registered under the SDK ceiling without being declared.
+	const selected = unique(resolvedRequestedTools.filter((tool) => !denied.has(tool) && active.has(tool) && !callableOnly.has(tool)));
 	for (const tool of mandatory) {
 		if (!selected.includes(tool)) selected.push(tool);
 	}

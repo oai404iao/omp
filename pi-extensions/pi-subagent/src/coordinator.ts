@@ -1,6 +1,6 @@
 import { join, relative, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { type Model, uuidv7 } from "@earendil-works/pi-ai";
+import { getCurrentTools, type Model, uuidv7 } from "@earendil-works/pi-ai";
 import {
 	type AgentSessionEvent,
 	type AgentToolResult,
@@ -15,6 +15,8 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
+	createCodemodeExtension,
+	createToolSearchExtension,
 	defineTool,
 	getAgentDir,
 	ModelRuntime,
@@ -2052,6 +2054,10 @@ export class SubagentCoordinator {
 						),
 					]
 				: [];
+		extensionFactories.push(
+			{ name: "codemode", factory: createCodemodeExtension({ models: false }), builtin: true, replaceable: true },
+			{ name: "tool-search", factory: createToolSearchExtension(), builtin: true, replaceable: true },
+		);
 
 		const appendSystemPrompt = [
 			descriptor.agent.systemPrompt,
@@ -2093,6 +2099,7 @@ export class SubagentCoordinator {
 						extensions: base.extensions.filter(
 							(extension) =>
 								extension.resolvedPath.startsWith("<inline:")
+								|| extension.resolvedPath.startsWith("builtin:")
 								|| !isPathInside(this.packageRoot, extension.resolvedPath),
 						),
 					}),
@@ -2133,12 +2140,20 @@ export class SubagentCoordinator {
 			}
 			await runtime.session.bindExtensions({ mode: "print" });
 			try {
+				const registered = runtime.session.getAllTools();
+				// Keep discoveries on this child's canonical branch, not declarations inherited by a new fork.
+				const restoredDeclarations = new Set(options.isNew ? [] : getCurrentTools(
+					runtime.session.sessionManager.buildSessionContext().messages,
+				).map(tool => tool.name));
 				const policy = resolveToolPolicy({
 					requested: descriptor.agent.tools,
 					mandatory: mandatoryTools,
 					denied: deniedTools,
-					registered: runtime.session.getAllTools().map((tool) => tool.name),
+					registered: registered.map((tool) => tool.name),
 					active: runtime.session.getActiveToolNames(),
+					callable: runtime.session.getCallableToolNames(),
+					callableOnly: registered.filter(tool => (tool.exposure === "codemode" || tool.exposure === "deferred")
+						&& !restoredDeclarations.has(tool.name)).map(tool => tool.name),
 				});
 				const activeTools = policy.activeTools.filter((tool) => {
 					if (
@@ -2588,6 +2603,8 @@ export class SubagentCoordinator {
 		if (event.type === "tool_execution_start") {
 			this.pushTrace(activation, {
 				type: "tool",
+				toolCallId: event.toolCallId,
+				...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
 				name: event.toolName,
 				text: formatToolArguments(event.toolName, event.args as Record<string, unknown>),
 			});

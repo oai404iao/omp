@@ -14,6 +14,11 @@ Peer floor and development target: Pi 0.99.1.
 Native codemode may call active `apply_patch` and standalone web/image tools.
 Hosted web/image tools and `view_image` remain model-only. The bundle does not
 activate codemode or load MCP servers.
+Script results are structured: patch `{ summary, files }`, search
+`{ output, results }`, and image generation `{ path, latestPath?, image }`.
+With native codemode/tool-search active, core skips speculative prewarm and
+uses Pi text compaction only without an existing opaque native checkpoint;
+otherwise it preserves the checkpoint and refuses recompaction.
 
 The package name, default extension factory and
 `@oai404iao/pi-codex-minimal-tools/subagent-inline` remain supported.
