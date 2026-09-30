@@ -49,6 +49,7 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	if (!broker.claim("activation")) return broker;
 	installCodexIdentityLifecycle(pi);
 	const suppressed = new Map<NativeMutationToolName, number>();
+	const warned = new Set<string>();
 	const restore = (active: string[]) => {
 		for (const [name, index] of [...suppressed].sort(([, a], [, b]) => a - b)) {
 			if (!active.includes(name)) active.splice(Math.min(index, active.length), 0, name);
@@ -67,6 +68,13 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		const active = new Set(current);
 		const capabilities = computeToolCapabilities(ctx.model as ModelLike | undefined, settings);
 		const model = loadModelSettings(ctx.model as ModelLike | undefined, ctx.cwd, settings);
+		if (settings.enabled && ctx.ui?.notify) {
+			for (const diagnostic of model.requestDiagnostics) {
+				if (warned.has(diagnostic)) continue;
+				warned.add(diagnostic);
+				ctx.ui.notify(diagnostic, "warning");
+			}
+		}
 		const ownsPatch = broker.tools.has("apply_patch") && ownsRegisteredTool(pi, broker, "apply_patch");
 		for (const name of PACKAGE_TOOL_NAMES) {
 			const owned = broker.tools.get(name);
@@ -106,6 +114,7 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	pi.on("session_start", (_event, ctx) => {
 		broker.presentation.clear();
 		suppressed.clear();
+		warned.clear();
 		sync(ctx);
 	});
 	pi.on("model_select", (_event, ctx) => sync(ctx));

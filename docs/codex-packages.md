@@ -71,6 +71,14 @@ Standalone clients obtain authentication from Pi's model registry. Without core:
 - No endpoint or unsupported model-family capability is guessed.
 - Missing authentication produces a tool error, not an implicit alternate account.
 
+The maintained OpenAI route is `openai`, using either Pi's API-key or ChatGPT
+OAuth login; both default to `/v1/responses`. `openai-codex` is frozen,
+deprecated compatibility, not an automatic OAuth fallback. Plugin routing
+overrides apply only to that legacy provider. Main requests consume Pi's
+prepared auth, while auxiliary requests honor model-registry auth and its
+resolved base URL. Even the explicit direct image fallback no longer reads
+a separate environment key or forces another provider's endpoint.
+
 The internal Lite and reserved endpoints remain unsupported compatibility
 surfaces. Fixture success is not proof that a real account may access them.
 

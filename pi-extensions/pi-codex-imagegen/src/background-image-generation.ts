@@ -7,6 +7,8 @@ import { supportsImageInput, type ModelLike } from "@oai404iao/pi-codex-runtime/
 import {
 	buildCodexJsonHeaders,
 	hasCodexRequestAuth,
+	resolveResponsesUrl,
+	type ResponsesProtocol,
 } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { createBackgroundImageJobs, panelBranch } from "./background-image-jobs.js";
 import { listResolvedModelProfiles } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
@@ -21,7 +23,6 @@ import {
 import { IMAGE_SAVE_DISPLAY_MESSAGE_TYPE, type SavedGeneratedImage } from "./tools/image-generation/types.js";
 import { projectRoot } from "./utils/images.js";
 
-const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const BACKGROUND_IMAGE_INSTRUCTIONS = "Generate or edit images with the hosted image_generation tool. Use the user's prompt and any provided reference images. Return the image_generation_call result.";
 const IMAGE_GEN_ERROR_MESSAGE_TYPE = "codex-image-generation-error";
 
@@ -170,27 +171,15 @@ async function loadReferenceImage(cwd: string, rawPath: string): Promise<Referen
 	return { path, mimeType: mimeTypeForPath(path), base64: buffer.toString("base64") };
 }
 
-function resolveCodexUrl(baseUrl: string | undefined, options?: { apiKeyMode?: boolean }): string {
-	const raw = baseUrl && baseUrl.trim().length > 0 ? baseUrl : DEFAULT_CODEX_BASE_URL;
-	const normalized = raw.replace(/\/+$/, "");
-	if (options?.apiKeyMode) {
-		if (normalized.endsWith("/responses")) return normalized;
-		return `${normalized}/responses`;
-	}
-	if (normalized.endsWith("/codex/responses")) return normalized;
-	if (normalized.endsWith("/codex")) return `${normalized}/responses`;
-	return `${normalized}/codex/responses`;
-}
-
 function buildHeaders(
 	model: Model<Api>,
 	auth: { apiKey?: string; headers?: ProviderHeaders },
-	options?: { apiKeyMode?: boolean },
+	endpoint: ResponsesProtocol,
 ): Headers {
 	const headers = buildCodexJsonHeaders({
 		modelHeaders: model.headers,
 		auth,
-		apiKeyMode: options?.apiKeyMode ?? false,
+		endpoint,
 	});
 	setProviderGeneratedHeader(headers, "OpenAI-Beta", "responses=experimental");
 	setProviderGeneratedHeader(headers, "accept", "text/event-stream");
@@ -378,13 +367,13 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 		responsesModel: model.id,
 		imageModel: settings.imageModel,
 	});
-	const response = await fetch(resolveCodexUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode }), {
+	const response = await fetch(resolveResponsesUrl(auth.baseUrl ?? model.baseUrl, settings.responsesEndpoint), {
 		signal,
 		method: "POST",
 		headers: buildHeaders(model, {
 			apiKey: auth.apiKey,
 			headers: auth.headers,
-		}, { apiKeyMode: settings.apiKeyMode }),
+		}, settings.responsesEndpoint),
 		body: JSON.stringify(body),
 	});
 	signal.throwIfAborted();

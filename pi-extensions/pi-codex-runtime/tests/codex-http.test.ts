@@ -4,6 +4,10 @@ import {
 	buildCodexJsonHeaders,
 	hasCodexRequestAuth,
 	resolveCodexRequestAccountId,
+	resolveResponsesUrl,
+	resolveCodexApiEndpoint,
+	responsesProtocol,
+	withResolvedAuthBaseUrl,
 } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 
 test("provider auth headers can remove inherited values with null", () => {
@@ -20,7 +24,7 @@ test("provider auth headers can remove inherited values with null", () => {
 				"x-request": "kept",
 			},
 		},
-		apiKeyMode: true,
+		endpoint: "openai",
 	});
 
 	assert.equal(headers.get("authorization"), null);
@@ -38,7 +42,7 @@ test("null Authorization suppresses API-key bearer generation", () => {
 				"x-api-key": "proxy-key",
 			},
 		},
-		apiKeyMode: true,
+		endpoint: "openai" as const,
 	};
 	const headers = buildCodexJsonHeaders(options);
 
@@ -63,7 +67,7 @@ test("removed model Authorization is not reused for account-id extraction", () =
 				"x-api-key": "valid-request-key",
 			},
 		},
-		apiKeyMode: false,
+		endpoint: "codex",
 	}), undefined);
 });
 
@@ -75,7 +79,7 @@ test("model-level null suppresses generated authorization and originator", () =>
 			"x-generated": null,
 		},
 		auth: { apiKey: "secret" },
-		apiKeyMode: true,
+		endpoint: "openai",
 		extraHeaders: { "x-generated": "generated" },
 	});
 
@@ -94,7 +98,7 @@ test("empty request Authorization does not fall back to an unrelated API key for
 				"x-api-key": "valid-request-key",
 			},
 		},
-		apiKeyMode: false,
+		endpoint: "codex",
 	}), undefined);
 });
 
@@ -104,8 +108,35 @@ test("explicit resolved authorization takes precedence over the API key", () => 
 			apiKey: "fallback",
 			headers: { Authorization: "Bearer resolved" },
 		},
-		apiKeyMode: true,
+		endpoint: "openai",
 	});
 
 	assert.equal(headers.get("authorization"), "Bearer resolved");
+});
+
+test("request protocol follows Pi API, not plugin endpoint or credential shape", () => {
+	assert.equal(responsesProtocol({ provider: "openai", api: "openai-responses" }, "codex"), "openai");
+	assert.equal(responsesProtocol({ provider: "proxy", api: "openai-codex-responses" }, "openai"), "codex");
+	assert.equal(responsesProtocol({ provider: "proxy", api: "openai-responses" }, "codex"), "openai");
+	assert.equal(responsesProtocol({ provider: "openai-codex", api: "openai-codex-responses" }, "openai"), "openai");
+	for (const apiKey of ["sk-fixture", "chatgpt-access-token"]) {
+		assert.equal(resolveCodexRequestAccountId({ endpoint: "openai", auth: { apiKey } }), undefined);
+		assert.equal(buildCodexJsonHeaders({ endpoint: "openai", auth: { apiKey } }).get("chatgpt-account-id"), null);
+	}
+	assert.equal(hasCodexRequestAuth({ auth: { headers: { "cf-aig-authorization": "Bearer gateway" } } }), true);
+});
+
+test("shared endpoint assembly honors Pi's resolved base URL without mutating its model", () => {
+	const model = { baseUrl: "https://api.openai.com/v1" };
+	const resolved = withResolvedAuthBaseUrl(model, { baseUrl: "https://proxy.invalid/root" });
+	assert.equal(model.baseUrl, "https://api.openai.com/v1");
+	assert.equal(resolveResponsesUrl(resolved.baseUrl, "openai"), "https://proxy.invalid/root/responses");
+	for (const base of ["https://proxy.invalid/root", "https://proxy.invalid/root/responses/"]) {
+		assert.equal(resolveCodexApiEndpoint(base, "openai", "images/generations"), "https://proxy.invalid/root/images/generations");
+	}
+	for (const base of ["https://proxy.invalid/root", "https://proxy.invalid/root/codex", "https://proxy.invalid/root/codex/responses"]) {
+		assert.equal(resolveCodexApiEndpoint(base, "codex", "alpha/search"), "https://proxy.invalid/root/codex/alpha/search");
+	}
+	assert.equal(resolveResponsesUrl(undefined, "openai"), "https://api.openai.com/v1/responses");
+	assert.equal(resolveResponsesUrl(undefined, "codex"), "https://chatgpt.com/backend-api/codex/responses");
 });

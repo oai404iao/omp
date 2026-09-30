@@ -11,6 +11,12 @@ All three use [`pi-codex-runtime`](../pi-codex-runtime/README.md). Compatible
 duplicate installations are deduplicated by the shared broker.
 Peer floor and development target: Pi 0.99.1.
 
+Use Pi's `openai` provider for API keys or ChatGPT OAuth (`/login openai`).
+`openai-codex` remains deprecated compatibility only. No credentials, model
+selection or session history are migrated automatically. New requests follow
+Pi's API/base URL rather than plugin `apiKeyMode` or `responses.endpoint`
+overrides outside the legacy provider.
+
 Native codemode may call active `apply_patch` and standalone web/image tools.
 Hosted web/image tools and `view_image` remain model-only. The bundle does not
 activate codemode or load MCP servers.
@@ -28,7 +34,10 @@ The latter re-exports runtime's identity-only SDK extension.
 
 Existing configuration stays at
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json`.
-No user-file migration is needed. Schemas now belong only to runtime:
+The file locations are unchanged. Move nonlegacy endpoint overrides to Pi's
+own `models.json`; `directImageApiFallback` now uses the selected provider's
+Pi credentials and endpoint, not a separate `OPENAI_API_KEY` account.
+Schemas belong only to runtime:
 
 - [config.schema.json](https://unpkg.com/@oai404iao/pi-codex-runtime/config.schema.json)
 - [models.schema.json](https://unpkg.com/@oai404iao/pi-codex-runtime/models.schema.json)

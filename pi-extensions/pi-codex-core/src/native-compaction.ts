@@ -351,6 +351,7 @@ export function registerNativeCompaction(
 				mode,
 				apiKey: auth.apiKey ?? "",
 				headers: auth.headers,
+				baseUrl: auth.baseUrl,
 				signal: event.signal,
 				reasoning: pi.getThinkingLevel() as ThinkingLevel,
 				sessionId,

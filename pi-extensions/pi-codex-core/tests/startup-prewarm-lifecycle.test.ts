@@ -135,7 +135,8 @@ test("ready prewarm remains one-shot and lifecycle instances do not share task o
 		const server = await startWebSocketServer([() => successEvents("resp_prewarm")]);
 		const first = createStartupPrewarmLifecycle(pi);
 		const second = createStartupPrewarmLifecycle(pi);
-		const ctx = eventContext({ ...responsesModel, baseUrl: server.url });
+		const ctx = eventContext({ ...responsesModel, baseUrl: "https://unused.invalid/v1" });
+		ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: true, apiKey: "fixture", baseUrl: server.url });
 		try {
 			first.reset();
 			first.start(ctx);
@@ -145,11 +146,13 @@ test("ready prewarm remains one-shot and lifecycle instances do not share task o
 			assert.equal(second.get("lifecycle-test", ctx.model!), undefined);
 			second.reset();
 			assert.equal(first.get("lifecycle-test", ctx.model!), pending);
+			assert.equal(first.get("lifecycle-test", { ...ctx.model!, baseUrl: server.url }), pending);
 			first.start(ctx);
 			await first.get("lifecycle-test", ctx.model!);
 			assert.equal(server.requests.length, 1);
 			assert.equal(server.requests[0].generate, false);
 			assert.deepEqual(server.requests[0].input, []);
+			assert.equal(ctx.model!.baseUrl, "https://unused.invalid/v1");
 		} finally {
 			first.reset();
 			second.reset();

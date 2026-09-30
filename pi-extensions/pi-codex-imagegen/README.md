@@ -31,6 +31,10 @@ fallback execution before authentication or network I/O.
 Catalog-supported standalone profiles call Images generation/edit endpoints with
 Pi authentication. Hosted profiles need core unless the existing
 `directImageApiFallback` option was explicitly enabled.
+All image paths, including this explicit fallback and background jobs, use
+the selected provider's Pi-resolved credentials, headers and base URL. The
+fallback no longer reads a separate `OPENAI_API_KEY` or forces the public
+OpenAI endpoint. Authentication failure never switches accounts or providers.
 
 Uses the existing
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json` settings and

@@ -72,6 +72,14 @@ blob IDs and SHA-256 hashes for this delta.
 
 ## Request construction
 
+The OpenAI auth migration separately follows MIT-licensed Pi 0.99.1 at
+`d86654abb8862e201933517d6f1fce9f88dd117f`: `packages/ai/src/providers/openai.ts`,
+`packages/ai/src/api/openai-responses.ts`, and
+`packages/ai/src/auth/resolve.ts`. Core's request-body adapter matches the
+official-endpoint/token guard for ChatGPT field restrictions and the standard
+output-token compatibility/minimum. This is not a credential selector.
+Pi retains ownership of login, refresh, credential priority and resolved auth.
+
 | Source | Evidence |
 | --- | --- |
 | `codex-rs/codex-api/src/common.rs` | Defines Standard and WebSocket request fields including instructions, tools, reasoning, cache key, text, and metadata. |

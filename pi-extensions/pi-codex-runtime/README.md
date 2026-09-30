@@ -10,6 +10,12 @@ Owns shared Codex authentication/headers, wire identity, settings/catalog,
 Responses replay contracts and the session-scoped composition broker.
 Capability-specific HTTP clients, storage and transports live in other packages.
 
+`openai` is the actively maintained OpenAI provider, for both API keys and
+Pi's ChatGPT OAuth login. `openai-codex` is deprecated compatibility only;
+its existing profiles remain, with a once-per-session migration warning.
+Credentials, refresh and effective base URLs come from Pi. Legacy `apiKeyMode`
+and `responses.endpoint` overrides do not route nonlegacy providers.
+
 Responses helpers encode/decode generic grammar tools and replay calls/results
 according to the current declaration, preserving legacy custom patch behavior.
 

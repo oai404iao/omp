@@ -22,7 +22,7 @@ interface WebSearchToolContext {
 	model?: Model<Api>;
 	modelRegistry?: {
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			| { ok: true; apiKey?: string; headers?: ProviderHeaders }
+			| { ok: true; apiKey?: string; headers?: ProviderHeaders; baseUrl?: string }
 			| { ok: false; error: string }
 		>;
 	};
@@ -259,7 +259,6 @@ export async function standaloneWebSearch(
 	if (input.image_query?.length && !contentTypes.includes("image")) {
 		throw new Error("Image search is disabled by the current model profile.");
 	}
-	const url = resolveCodexApiEndpoint(model.baseUrl, settings.apiKeyMode, "alpha/search");
 	const piSessionId = ctx.sessionManager?.getSessionId();
 	const identity = invocation.identity
 		?? resolveCodexRequestIdentity(
@@ -291,6 +290,7 @@ export async function standaloneWebSearch(
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	signal?.throwIfAborted();
 	if (!auth.ok) throw new Error(auth.error);
+	const url = resolveCodexApiEndpoint(auth.baseUrl ?? model.baseUrl, settings.responsesEndpoint, "alpha/search");
 	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth: { apiKey: auth.apiKey, headers: auth.headers } })) {
 		throw new Error(`No request authentication for provider: ${model.provider}`);
 	}
@@ -299,7 +299,7 @@ export async function standaloneWebSearch(
 		headers: buildCodexJsonHeaders({
 			modelHeaders: model.headers,
 			auth: { apiKey: auth.apiKey, headers: auth.headers },
-			apiKeyMode: settings.apiKeyMode,
+			endpoint: settings.responsesEndpoint,
 			...(turnMetadata
 				? { extraHeaders: { "x-codex-turn-metadata": turnMetadata } }
 				: {}),

@@ -9,7 +9,7 @@ import {
 	resolveModelProfile,
 } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
-import { DEFAULT_SETTINGS } from "@oai404iao/pi-codex-runtime/internal/settings";
+import { configPath, DEFAULT_SETTINGS } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 function withAgentDir<T>(fn: (agentDir: string) => T): T {
 	const previous = process.env.PI_CODING_AGENT_DIR;
@@ -29,6 +29,35 @@ function writeModels(agentDir: string, value: unknown): void {
 	mkdirSync(join(path, ".."), { recursive: true });
 	writeFileSync(path, typeof value === "string" ? value : JSON.stringify(value));
 }
+
+test("deprecated routing config cannot change modern API or activate the legacy profile", () => withAgentDir(agentDir => {
+	writeModels(agentDir, { version: 1, models: [{
+		id: "openai/gpt-5.6-sol", responses: { endpoint: "codex" },
+	}] });
+	writeFileSync(configPath(agentDir), JSON.stringify({ apiKeyMode: false }));
+	const modern = loadModelSettings({ provider: "openai", api: "openai-responses", id: "gpt-5.6-sol" });
+	assert.equal(modern.responsesEndpoint, "openai");
+	assert.equal(modern.requestProfile.responsesMode, "lite");
+	assert.equal(modern.modelProfile?.sources.includes("legacy"), false);
+	assert.equal(modern.requestDiagnostics.length, 2);
+	assert.match(modern.requestDiagnostics.join("\n"), /responses.endpoint.*ignored/);
+	assert.match(modern.requestDiagnostics.join("\n"), /apiKeyMode.*ignored/);
+}));
+
+test("legacy apiKeyMode omitted, false and true preserve their prior profile semantics", () => withAgentDir(agentDir => {
+	writeModels(agentDir, { version: 1, models: [{
+		id: "openai-codex/gpt-5.6-sol", responses: { endpoint: "openai" },
+	}] });
+	for (const value of [undefined, false, true]) {
+		writeFileSync(configPath(agentDir), JSON.stringify(value === undefined ? {} : { apiKeyMode: value }));
+		const legacy = loadModelSettings({ provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.6-sol" });
+		assert.equal(legacy.responsesEndpoint, value === false ? "codex" : "openai");
+		assert.equal(legacy.requestProfile.responsesMode, value === undefined ? "lite" : "standard");
+		assert.equal(legacy.openaiTransport, value === undefined ? "auto" : "sse");
+		assert.equal(legacy.compactionMode, value === undefined ? "responses" : "pi");
+		assert.match(legacy.requestDiagnostics[0]!, /deprecated compatibility only/);
+	}
+}));
 
 test("bundled profiles expose independent Standard and Lite Codex capabilities", () => withAgentDir(() => {
 	const standard = resolveModelProfile(
@@ -75,7 +104,7 @@ test("bundled profiles expose independent Standard and Lite Codex capabilities",
 	);
 	assert.deepEqual(astra.modelProfile?.sources, ["bundled"]);
 	assert.equal(astra.providerShimActive, true);
-	assert.equal(astra.apiKeyMode, false);
+	assert.equal(astra.responsesEndpoint, "codex");
 	assert.equal(astra.openaiTransport, "auto");
 	assert.equal(astra.openaiWebSocketPrewarm, true);
 	assert.equal(astra.requestProfile.responsesMode, "lite");
@@ -197,7 +226,7 @@ test("users can add an exact custom model profile with extends", () => withAgent
 	assert.equal(settings.requestProfile.patchTransport, "custom");
 	assert.equal(settings.webSearchImplementation, "hosted");
 	assert.equal(settings.imageGenerationImplementation, undefined);
-	assert.equal(settings.apiKeyMode, true);
+	assert.equal(settings.responsesEndpoint, "openai");
 	assert.equal(settings.modelProfile?.effective.responses.providerShim, true);
 }));
 

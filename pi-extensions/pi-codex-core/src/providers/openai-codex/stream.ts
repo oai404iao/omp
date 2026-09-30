@@ -1,5 +1,5 @@
 import { type ProviderHeaders } from "@earendil-works/pi-ai";
-import { appendAssistantMessageDiagnostic, createAssistantMessageDiagnostic, createAssistantMessageEventStream, getEnvApiKey, type Api, type AssistantMessageEventStream, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import { appendAssistantMessageDiagnostic, createAssistantMessageDiagnostic, createAssistantMessageEventStream, type Api, type AssistantMessageEventStream, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
 import { hasCodexRequestAuth, resolveCodexRequestAccountId } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { captureCodexTurnState, resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
@@ -22,7 +22,7 @@ import { createCodexRequestId, createPiTurnId, withSseRequestMetadata } from "./
 import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, isWebSocketUpgradeRejectedError, sleep, sseMaxRetries, sseRetryDelayMs, webSocketRetryDelayMs, webSocketStreamMaxRetries } from "./retry.js";
 import { fetchWithResponseHeaderTimeout, parseSSE, responseHeaderTimeoutMsFromOptions } from "./sse.js";
 import { type ProviderTransport, type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
-import { resolveCodexUrl, resolveResponsesWebSocketUrl } from "./urls.js";
+import { resolveResponsesUrl, resolveResponsesWebSocketUrl } from "./urls.js";
 import { finalizeUsage, withRequestServiceTier } from "./usage.js";
 import { websocketHttpFallbackSessions } from "./websocket-session.js";
 import { processWebSocketStream } from "./websocket-stream.js";
@@ -48,7 +48,7 @@ export function createCodexStream<TApi extends Api>(
 		const historicalCitationSources = collectHistoricalCitationSources(model, context);
 
 		try {
-			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
+			const apiKey = options?.apiKey ?? "";
 			const requestHeaders = options?.headers;
 			const auth = { apiKey: apiKey || undefined, headers: requestHeaders };
 			if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
@@ -64,11 +64,11 @@ export function createCodexStream<TApi extends Api>(
 			) {
 				throw new Error(`No enabled Codex model profile for ${model.provider}/${model.id}`);
 			}
-			const apiKeyTransport = settings.apiKeyMode;
+			const endpoint = settings.responsesEndpoint;
 			const accountId = resolveCodexRequestAccountId({
 				modelHeaders: model.headers,
 				auth,
-				apiKeyMode: apiKeyTransport,
+				endpoint,
 			});
 			const requestIdentity = resolveCodexRequestIdentity(
 				options?.sessionId,
@@ -162,7 +162,7 @@ export function createCodexStream<TApi extends Api>(
 					? options.transport
 					: configuredTransport;
 
-			const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: apiKeyTransport });
+			const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, endpoint);
 			const fallbackKey = webSocketFallbackKey(
 				options?.cacheRetention === "none" ? undefined : options?.sessionId,
 				model as Model<Api>,
@@ -271,7 +271,7 @@ export function createCodexStream<TApi extends Api>(
 
 			let response: Response | undefined;
 			let lastError: Error | undefined;
-			const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: apiKeyTransport });
+			const sseUrl = resolveResponsesUrl(model.baseUrl, endpoint);
 			const sseDispatcher = options?.fetch ? undefined : await proxyDispatcherForUrl(sseUrl, options?.env);
 			if (transformHeaders) {
 				sseHeaders = providerHeadersToHeaders(
@@ -279,7 +279,7 @@ export function createCodexStream<TApi extends Api>(
 				);
 			}
 
-			const sseBody = prepareSseBody(sseUrl, bodyJson, sseHeaders, apiKeyTransport);
+			const sseBody = prepareSseBody(sseUrl, bodyJson, sseHeaders, endpoint === "openai");
 			const maxRetries = sseMaxRetries(options);
 			for (let attempt = 0; attempt <= maxRetries; attempt++) {
 				if (options?.signal?.aborted) {

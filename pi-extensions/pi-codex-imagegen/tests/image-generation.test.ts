@@ -16,14 +16,22 @@ test("directImageGeneration omits deprecated response_format and passes abort si
 	const controller = new AbortController();
 	let body: any;
 	let seenSignal: AbortSignal | undefined;
-	process.env.OPENAI_API_KEY = "test";
-	globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+	process.env.OPENAI_API_KEY = "must-not-use-environment-key";
+	globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+		assert.equal(String(url), "https://resolved.invalid/v1/images/generations");
+		assert.equal(new Headers(init?.headers).get("authorization"), "Bearer pi-resolved-token");
 		body = JSON.parse(String(init?.body));
 		seenSignal = init?.signal ?? undefined;
 		return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from("png").toString("base64") }] }), { status: 200, headers: { "content-type": "application/json" } });
 	}) as typeof fetch;
 	try {
-		await directImageGeneration({ prompt: "test" }, tempDir(), { ...DEFAULT_SETTINGS, directImageApiFallback: true }, controller.signal);
+		await directImageGeneration({ prompt: "test" }, {
+			cwd: tempDir(),
+			model: { provider: "openai", api: "openai-responses", id: "gpt-5.5", baseUrl: "https://unused.invalid" } as any,
+			modelRegistry: { async getApiKeyAndHeaders() {
+				return { ok: true, apiKey: "pi-resolved-token", baseUrl: "https://resolved.invalid/v1" };
+			} },
+		}, { ...DEFAULT_SETTINGS, directImageApiFallback: true }, controller.signal);
 		assert.equal("response_format" in body, false);
 		assert.equal(seenSignal, controller.signal);
 	} finally {
@@ -44,7 +52,7 @@ test("global image gate blocks direct fallback before authentication or network 
 		await assert.rejects(
 			directImageGeneration(
 				{ prompt: "test" },
-				tempDir(),
+				{ cwd: tempDir() },
 				{
 					...DEFAULT_SETTINGS,
 					imageGeneration: false,
@@ -56,6 +64,31 @@ test("global image gate blocks direct fallback before authentication or network 
 		assert.equal(fetched, false);
 	} finally {
 		globalThis.fetch = previousFetch;
+	}
+});
+
+test("direct image fallback does not borrow an environment key after Pi auth fails", async () => {
+	const previousKey = process.env.OPENAI_API_KEY;
+	const previousFetch = globalThis.fetch;
+	process.env.OPENAI_API_KEY = "must-not-use";
+	let requests = 0;
+	globalThis.fetch = async () => { requests++; throw new Error("unexpected request"); };
+	try {
+		for (const throws of [false, true]) {
+			await assert.rejects(directImageGeneration({ prompt: "test" }, {
+				cwd: tempDir(),
+				model: { provider: "openai", api: "openai-responses", id: "gpt-5.5" } as any,
+				modelRegistry: { async getApiKeyAndHeaders() {
+					if (throws) throw new Error("fixture auth failure");
+					return { ok: false, error: "fixture auth failure" };
+				} },
+			}, { ...DEFAULT_SETTINGS, directImageApiFallback: true }), /fixture auth failure/);
+		}
+		assert.equal(requests, 0);
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+		else process.env.OPENAI_API_KEY = previousKey;
 	}
 });
 

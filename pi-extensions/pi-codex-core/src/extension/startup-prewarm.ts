@@ -1,6 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { hasCodexRequestAuth, resolveCodexRequestAccountId } from "@oai404iao/pi-codex-runtime/internal/codex-http";
+import { hasCodexRequestAuth, resolveCodexRequestAccountId, withResolvedAuthBaseUrl } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { applyFastModeServiceTier } from "../fast-mode.js";
@@ -28,6 +28,7 @@ interface StartupPrewarmState {
 interface SessionStartupPrewarmTask {
 	generation: number;
 	modelIdentity: string;
+	resolvedModelIdentity?: string;
 	promise: Promise<void>;
 	abortController: AbortController;
 }
@@ -69,7 +70,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 		snapshot: StartupPrewarmSnapshot,
 	): Promise<void> => (async () => {
 		if (startupSignal.aborted) return;
-		const model = ctx.model as Model<Api> | undefined;
+		let model = ctx.model as Model<Api> | undefined;
 		const sessionId = ctx?.sessionManager?.getSessionId?.();
 		if (!model || !sessionId || generation !== sessionGeneration) return;
 		const settings = loadModelSettings(model, ctx.cwd);
@@ -97,6 +98,9 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 			return;
 		}
 
+		model = withResolvedAuthBaseUrl(model, auth);
+		const task = sessionStartupPrewarmTasks.get(sessionId);
+		if (task?.generation === generation) task.resolvedModelIdentity = modelIdentity(model);
 		const profile = resolveCodexRequestProfile(settings.requestProfile);
 		const requestIdentity = resolveCodexRequestIdentity(
 			sessionId,
@@ -137,7 +141,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 		ensureWebSearchDetailsIncluded(body);
 		body = withResponsesLiteWebSocketMetadata(body, profile.responsesMode);
 
-		const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: settings.apiKeyMode });
+		const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, settings.responsesEndpoint);
 		const fallbackKey = webSocketFallbackKey(
 			sessionId,
 			model,
@@ -154,7 +158,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 			resolveCodexRequestAccountId({
 				modelHeaders: model.headers,
 				auth: { apiKey: auth.apiKey, headers: auth.headers },
-				apiKeyMode: settings.apiKeyMode,
+				endpoint: settings.responsesEndpoint,
 			}),
 			auth.apiKey ?? "",
 			sessionId,
@@ -259,7 +263,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 			const task = sessionStartupPrewarmTasks.get(sessionId);
 			return task
 				&& task.generation === sessionGeneration
-				&& task.modelIdentity === modelIdentity(requestModel)
+				&& (task.modelIdentity === modelIdentity(requestModel) || task.resolvedModelIdentity === modelIdentity(requestModel))
 				? task.promise
 				: undefined;
 		},

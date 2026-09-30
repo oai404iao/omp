@@ -146,16 +146,29 @@ test("hosted shutdown cancels a pending SSE reader and suppresses late errors", 
 		}
 	}));
 
-test("current background image completes, notifies once and clears status", (t) =>
+for (const id of ["gpt-4.1", "gpt-5.6-sol"]) test(`background ${id} uses resolved auth/base URL, notifies once and clears status`, (t) =>
 	withCompositionDirectory(async directory => {
 		const host = createCompositionHost(directory);
+		host.ctx.model = compositionModel(id);
 		const finished = gate<void>();
 		host.ctx.ui = {
 			...ui([]),
 			setStatus(_key: string, value?: string) { if (value === undefined) finished.resolve(); },
 		};
-		host.ctx.modelRegistry.getApiKeyAndHeaders = async () => auth;
-		t.mock.method(globalThis, "fetch", async () => Response.json({ data: [{ b64_json: png }] }));
+		host.ctx.modelRegistry.getApiKeyAndHeaders = async () => ({
+			...auth, baseUrl: "https://resolved.invalid/v2",
+			headers: { authorization: null, "x-api-key": "resolved" },
+		});
+		t.mock.method(globalThis, "fetch", async (...[url, init]: Parameters<typeof fetch>) => {
+			assert.equal(String(url), `https://resolved.invalid/v2/${id === "gpt-4.1" ? "responses" : "images/generations"}`);
+			assert.equal(new Headers(init?.headers).get("authorization"), null);
+			assert.equal(new Headers(init?.headers).get("x-api-key"), "resolved");
+			return id === "gpt-4.1" ? new Response(`data: ${JSON.stringify({
+				type: "response.completed", response: { id: "fixture", status: "completed", output: [
+					{ type: "image_generation_call", id: "fixture-image", status: "completed", result: png },
+				] },
+			})}\n\n`) : Response.json({ data: [{ b64_json: png }] });
+		});
 		registerBackgroundImageGenerationCommand(host.api());
 		try {
 			await host.commands.get("image-gen").handler("fixture", host.ctx);

@@ -51,12 +51,20 @@ async function urlToBase64(url: string, signal?: AbortSignal): Promise<string> {
 	return buffer.toString("base64");
 }
 
-export async function directImageGeneration(input: ImageGenerationInput, cwd: string, settings: CodexMinimalToolsSettings, signal?: AbortSignal) {
+export async function directImageGeneration(input: ImageGenerationInput, ctx: ImageGenerationToolContext, settings: CodexMinimalToolsSettings, signal?: AbortSignal) {
 	if (!settings.imageGeneration) throw new Error("Image generation is disabled by the global imageGeneration setting.");
-	if (!settings.directImageApiFallback) throw new Error("Direct Images API fallback is disabled. Use native openai or openai-codex handling, or enable directImageApiFallback.");
-	const apiKey = process.env.OPENAI_API_KEY;
-	if (!apiKey) throw new Error("OPENAI_API_KEY is required for direct image_generation fallback.");
+	if (!settings.directImageApiFallback) throw new Error("Direct Images API fallback is disabled. Use the configured image implementation, or enable directImageApiFallback.");
 	if (!input.prompt?.trim()) throw new Error("A prompt is required for direct image_generation fallback.");
+	signal?.throwIfAborted();
+	const model = ctx.model;
+	if (!model || !ctx.modelRegistry) throw new Error("No active model is available for direct image generation.");
+	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	signal?.throwIfAborted();
+	if (!auth.ok) throw new Error(auth.error);
+	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
+		throw new Error(`No request authentication for provider: ${model.provider}`);
+	}
+	const endpoint = loadModelSettings(model, ctx.cwd, settings).responsesEndpoint;
 	const body: Record<string, unknown> = {
 		model: settings.imageModel,
 		prompt: input.prompt,
@@ -65,9 +73,9 @@ export async function directImageGeneration(input: ImageGenerationInput, cwd: st
 	if (input.quality && input.quality !== "auto") body.quality = input.quality;
 	if (input.background && input.background !== "auto") body.background = input.background;
 	if (input.output_format) body.output_format = input.output_format;
-	const response = await fetch("https://api.openai.com/v1/images/generations", {
+	const response = await fetch(resolveCodexApiEndpoint(auth.baseUrl ?? model.baseUrl, endpoint, "images/generations"), {
 		method: "POST",
-		headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+		headers: buildCodexJsonHeaders({ modelHeaders: model.headers, auth, endpoint }),
 		body: JSON.stringify(body),
 		signal,
 	});
@@ -76,7 +84,8 @@ export async function directImageGeneration(input: ImageGenerationInput, cwd: st
 	const first = json.data?.[0];
 	const base64 = first?.b64_json ?? (first?.url ? await urlToBase64(first.url, signal) : undefined);
 	if (!base64) throw new Error("OpenAI Images API returned no image data.");
-	const saved = await saveBase64Image({ base64, callId: "direct", cwd, format: input.output_format, responseId: settings.imageModel, settings });
+	signal?.throwIfAborted();
+	const saved = await saveBase64Image({ base64, callId: "direct", cwd: ctx.cwd, format: input.output_format, responseId: settings.imageModel, settings });
 	return {
 		content: [{ type: "text", text: `Generated image with ${settings.imageModel}; saved to ${saved.path}${saved.latestPath ? ` (latest: ${saved.latestPath})` : ""}.` }],
 		details: { saved, revisedPrompt: first?.revised_prompt, mode: "direct-images-api" },
@@ -89,7 +98,7 @@ interface ImageGenerationToolContext {
 	model?: Model<Api>;
 	modelRegistry?: {
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			| { ok: true; apiKey?: string; headers?: ProviderHeaders }
+			| { ok: true; apiKey?: string; headers?: ProviderHeaders; baseUrl?: string }
 			| { ok: false; error: string }
 		>;
 	};
@@ -198,8 +207,8 @@ export async function standaloneImageGeneration(
 	signal?.throwIfAborted();
 	const response = await fetch(
 		resolveCodexApiEndpoint(
-			model.baseUrl,
-			settings.apiKeyMode,
+			auth.baseUrl ?? model.baseUrl,
+			settings.responsesEndpoint,
 			edit ? "images/edits" : "images/generations",
 		),
 		{
@@ -207,7 +216,7 @@ export async function standaloneImageGeneration(
 			headers: buildCodexJsonHeaders({
 				modelHeaders: model.headers,
 				auth: { apiKey: auth.apiKey, headers: auth.headers },
-				apiKeyMode: settings.apiKeyMode,
+				endpoint: settings.responsesEndpoint,
 				extraHeaders: {
 					"x-codex-image-turn-id": turnId,
 				},
@@ -280,13 +289,13 @@ export function createImageGenerationToolDefinition(options: {
 					turnId: options.getCurrentTurnId?.(sessionId),
 				});
 			}
-			if (settings?.directImageApiFallback) return directImageGeneration(params, cwd, settings, signal);
+			if (settings?.directImageApiFallback) return directImageGeneration(params, { ...ctx, cwd }, settings, signal);
 			if (options.hasProviderRuntime?.() === false) {
 				throw new Error("Hosted image_generation requires pi-codex-core. Use a catalog-supported standalone profile or explicitly enable directImageApiFallback.");
 			}
 			return {
 				isError: true,
-				content: [{ type: "text", text: "image_generation should be handled by the current model profile. If no hosted or standalone implementation is configured, enable directImageApiFallback with OPENAI_API_KEY." }],
+				content: [{ type: "text", text: "image_generation should be handled by the current model profile. If no hosted or standalone implementation is configured, explicitly enable directImageApiFallback using the current provider's Pi authentication." }],
 				details: { phase: "native-provider", nativeTool: "image_generation" },
 			};
 		},

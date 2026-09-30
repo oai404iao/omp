@@ -116,7 +116,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`enabled: ${settings.enabled}`,
 		`autoEnable: ${settings.autoEnable}`,
 		`provider shim: ${modelSettings.providerShimActive ? "active" : "inactive"}`,
-		`responses endpoint: ${modelSettings.apiKeyMode ? "openai" : "codex"}`,
+		`responses endpoint: ${modelSettings.responsesEndpoint}`,
 		`Responses WebSocket enabled: ${settings.webSocketEnabled}`,
 		`responses transport: ${modelSettings.openaiTransport}`,
 		`Responses WebSocket prewarm: ${modelSettings.openaiWebSocketPrewarm}`,
@@ -126,7 +126,8 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`web search: ${modelSettings.webSearchImplementation ?? "off"}`,
 		`image generation: ${settings.imageGeneration ? modelSettings.imageGenerationImplementation ?? "off" : "off (global gate)"}`,
 		`legacy additionalModelIds: ${settings.additionalModelIds.length > 0 ? settings.additionalModelIds.join(", ") : "(none)"}`,
-		`apiKeyMode: ${modelSettings.apiKeyMode}`,
+		`legacy apiKeyMode: ${settings.apiKeyMode} (ignored outside openai-codex)`,
+		...modelSettings.requestDiagnostics.map((line) => `warning: ${line}`),
 		`native provider shim: ${settings.enabled ? "registered" : "disabled"}`,
 		"tools:",
 		...Object.entries(capabilities).map(([name, capability]) => `- ${name}: ${capability.enabled ? "supported" : "disabled"}${active.has(name) ? ", active" : ""} — ${capability.reason}`),
@@ -138,7 +139,9 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 		const settings = loadSettings(ctx.cwd);
 		const lines = statusLines(pi, ctx as ExtensionContext);
 		lines.push(`image output dir: ${settings.imageOutputDir}`);
-		lines.push(`OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? "present" : "not set"}`);
+		const provider = contextModel(ctx)?.provider;
+		const auth = provider ? ctx.modelRegistry?.getProviderAuthStatus?.(provider) : undefined;
+		lines.push(`authentication: Pi managed${auth ? ` (${auth.source ?? "unconfigured"})` : ""}`);
 		const diagnostics = settingsDiagnostics();
 		if (diagnostics.length > 0) lines.push("settings diagnostics:", ...diagnostics.map((line) => `- ${line}`));
 		const catalogDiagnostics = modelCatalogDiagnostics();

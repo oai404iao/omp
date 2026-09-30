@@ -127,7 +127,8 @@ test("native compaction requests replay persisted sections and scope forced prom
 	await withCodexSettings({ compactionMode: "responses", openaiTransport: "sse" }, async (cwd) => {
 		const previousFetch = globalThis.fetch;
 		const bodies: any[] = [];
-		globalThis.fetch = async (_url, init) => {
+		globalThis.fetch = async (url, init) => {
+			assert.equal(String(url), "https://resolved.invalid/v2/responses");
 			bodies.push(JSON.parse(String(init?.body)));
 			const event = { type: "response.completed", response: { id: "compact", status: "completed", output: [item] } };
 			return new Response(`data: ${JSON.stringify(event)}\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -145,7 +146,7 @@ test("native compaction requests replay persisted sections and scope forced prom
 			};
 			const ctx = {
 				cwd, model: { ...model, baseUrl: "https://fixture.invalid/v1" }, getSystemPrompt: () => "STALE_BASE",
-				modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "fixture", headers: {} }) },
+				modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "fixture", headers: {}, baseUrl: "https://resolved.invalid/v2" }) },
 				sessionManager: { getLeafId: () => "user", getSessionId: () => "compaction-transcript" },
 				ui: { notify: (message: string) => assert.fail(message) },
 			};

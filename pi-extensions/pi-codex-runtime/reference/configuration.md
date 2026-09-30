@@ -124,7 +124,7 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `imageGeneration` | Global master switch. Set `false` to omit image tools, `/image-gen`, presentation, hosted injection, standalone requests, and direct fallback without changing other model behavior. |
 | `imageOutputDir` | Generated-image output directory. Relative paths resolve from the workspace root. |
 | `imageModel` | Image model used by standalone/hosted image requests and direct fallback. |
-| `directImageApiFallback` | Permit the separate `OPENAI_API_KEY` Images API fallback. |
+| `directImageApiFallback` | Explicitly permit the direct Images API fallback using the selected provider's Pi-resolved authentication and base URL. |
 | `viewImageWorkspaceOnly` | Restrict `view_image` to the workspace. |
 | `deferApplyPatchRendering` | Use Pi's fallback renderer instead of the streaming patch preview. |
 
@@ -284,14 +284,22 @@ Important constraints:
   `standalone` instead.
 - `tools.applyPatch:"custom"` uses the Codex freeform grammar and requires the
   provider shim. `"function"` works as a normal Pi tool.
-- `responses.endpoint:"openai"` uses API-key endpoint/auth semantics.
-  `"codex"` uses ChatGPT/Codex endpoint/auth semantics. `"auto"` infers from
-  the provider.
+- `responses.endpoint` is deprecated compatibility for `openai-codex` only:
+  `"openai"` uses `/responses`, `"codex"` uses `/codex/responses`, and `"auto"`
+  follows the Pi API. Other providers ignore this override and follow their
+  Pi-configured `api` and resolved `baseUrl`. This setting never selects credentials.
 - `compaction:"responses"` uses `compaction_trigger` through the selected
   SSE/WebSocket transport. `"responses-compact"` uses the legacy unary
   endpoint. `"pi"` keeps Pi summaries.
 
 ## Built-In Profiles
+
+`openai` is the actively maintained OpenAI provider. Pi's ChatGPT OAuth and
+API-key logins both use `openai-responses` at `https://api.openai.com/v1` by
+default. OAuth does not redirect requests to the old ChatGPT backend.
+`openai-codex` profiles below are frozen, deprecated compatibility entries.
+Select `/login openai` and an `openai` model to migrate; the extension never
+copies tokens, aliases providers or rewrites session history.
 
 The bundled catalog is based on local Codex commit
 `eb9dceba1a2e658142a456c5898836774835616b` from August 12, 2026, with the
@@ -441,7 +449,7 @@ model override for compatibility:
 | `requestProfile.reasoningSummary` | `responses.reasoningSummary` |
 | `requestProfile.systemPromptPlacement` | `responses.systemPromptPlacement` |
 | `requestProfile.patchTransport` | `tools.applyPatch` |
-| `apiKeyMode` | `responses.endpoint` |
+| `apiKeyMode` | Deprecated; ignored outside `openai-codex`. Configure authentication and `api`/`baseUrl` in Pi instead. |
 | `webSearchEnabled` | `tools.webSearch` |
 | `viewImage` | `tools.viewImage` |
 | `applyPatchEnabled` | `tools.applyPatch` |

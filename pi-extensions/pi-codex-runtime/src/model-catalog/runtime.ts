@@ -1,16 +1,19 @@
 import type { CodexRequestProfileOverride } from "../codex-request-profile.js";
+import { responsesProtocol, type ResponsesProtocol } from "../codex-http.js";
 import {
 	loadSettings,
 	type CodexMinimalToolsSettings,
 } from "../settings.js";
 import { resolveModelProfile } from "./catalog.js";
+import { requestConfigurationDiagnostics } from "./request-diagnostics.js";
 import type {
 	ModelIdentityLike,
 	ResolvedModelProfile,
-	ResponsesEndpoint,
 } from "./types.js";
 
 export interface ResolvedCodexModelSettings extends CodexMinimalToolsSettings {
+	responsesEndpoint: ResponsesProtocol;
+	requestDiagnostics: string[];
 	modelProfile?: ResolvedModelProfile;
 	modelProfileHash?: string;
 	providerShimActive?: boolean;
@@ -18,12 +21,6 @@ export interface ResolvedCodexModelSettings extends CodexMinimalToolsSettings {
 	imageGenerationImplementation?: "hosted" | "standalone";
 	fastServiceTier?: string;
 	fastCostMultiplier?: number;
-}
-
-function endpointUsesApiKey(endpoint: ResponsesEndpoint, model: ModelIdentityLike | undefined): boolean {
-	if (endpoint === "openai") return true;
-	if (endpoint === "codex") return false;
-	return model?.provider !== "openai-codex";
 }
 
 export function supportsCodexResponsesApi(model: ModelIdentityLike | undefined): boolean {
@@ -54,7 +51,8 @@ export function loadModelSettings(
 				supportsHostedTools: false,
 				supportsParallelTools: true,
 			},
-			apiKeyMode: model?.provider !== "openai-codex",
+			responsesEndpoint: responsesProtocol(model),
+			requestDiagnostics: requestConfigurationDiagnostics(model, baseSettings),
 			imageGeneration: false,
 			webSearchEnabled: false,
 			viewImage: false,
@@ -104,7 +102,8 @@ export function loadModelSettings(
 			&& effective.responses.websocketPrewarm,
 		compactionMode: providerShimActive ? effective.compaction : "pi",
 		requestProfile,
-		apiKeyMode: endpointUsesApiKey(effective.responses.endpoint, model),
+		responsesEndpoint: responsesProtocol(model, effective.responses.endpoint),
+		requestDiagnostics: requestConfigurationDiagnostics(model, baseSettings, effective.responses.endpoint),
 		imageGeneration: imageGenerationImplementation !== undefined,
 		webSearchEnabled: webSearchImplementation !== undefined,
 		viewImage: packageEnabled && effective.tools.viewImage,

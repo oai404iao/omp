@@ -1,6 +1,6 @@
 import { type ProviderHeaders } from "@earendil-works/pi-ai";
 import { type Api, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
-import { hasCodexRequestAuth, resolveCodexRequestAccountId } from "@oai404iao/pi-codex-runtime/internal/codex-http";
+import { hasCodexRequestAuth, resolveCodexRequestAccountId, withResolvedAuthBaseUrl } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { applyFastModeServiceTier } from "../../fast-mode.js";
@@ -16,6 +16,7 @@ import { buildCodexCompactionCheckpoint, compactionItems, sanitizeNativeCompacti
 import { postJsonWithRetries } from "./http.js";
 import { requestCodexCompactionTriggerWithTransport } from "./transport.js";
 import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
+import type { CodexMinimalToolsSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 export async function requestOpenAINativeCompaction(
 	model: Model<Api>,
@@ -25,16 +26,18 @@ export async function requestOpenAINativeCompaction(
 		mode: "responses" | "responses-compact";
 		apiKey: string;
 		headers?: ProviderHeaders;
+		baseUrl?: string;
 		signal?: AbortSignal;
 		reasoning?: SimpleStreamOptions["reasoning"];
 		sessionId?: string;
 		turnId?: string;
 		maxRetries?: number;
 		maxRetryDelayMs?: number;
-		settings: ResolvedCodexModelSettings;
+		settings: ResolvedCodexModelSettings | CodexMinimalToolsSettings;
 	},
 ): Promise<unknown[]> {
-	const settings = options.settings.modelProfile
+	model = withResolvedAuthBaseUrl(model, options);
+	const settings = "responsesEndpoint" in options.settings && options.settings.modelProfile
 		? options.settings
 		: loadModelSettings(model, undefined, options.settings);
 	const auth = { apiKey: options.apiKey || undefined, headers: options.headers };
@@ -48,7 +51,7 @@ export async function requestOpenAINativeCompaction(
 	const accountId = resolveCodexRequestAccountId({
 		modelHeaders: model.headers,
 		auth,
-		apiKeyMode: settings.apiKeyMode,
+		endpoint: settings.responsesEndpoint,
 	});
 	const requestIdentity = resolveCodexRequestIdentity(
 		options.sessionId,
@@ -141,7 +144,7 @@ export async function requestOpenAINativeCompaction(
 		if (body[key] !== undefined) compactBody[key] = body[key];
 	}
 	const response = await postJsonWithRetries(
-		compactUrl(model.baseUrl, settings.apiKeyMode),
+		compactUrl(model.baseUrl, settings.responsesEndpoint),
 		headers,
 		compactBody,
 		options.signal,

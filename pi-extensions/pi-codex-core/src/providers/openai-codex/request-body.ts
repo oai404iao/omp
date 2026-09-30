@@ -122,13 +122,18 @@ export function buildRequestBody<TApi extends Api>(
 		if (tools.length > 0) body.tools = tools;
 	}
 
-	// The Codex ChatGPT-backed endpoint rejects output-token cap fields with
-	// `Unsupported parameter: max_output_tokens`. Pi's branch summarizer passes
-	// `maxTokens`, so forwarding it breaks `/tree` summaries and extensions that
-	// use `ctx.navigateTree(..., { summarize: true })`.
-
-	if ((options as { temperature?: number } | undefined)?.temperature !== undefined) {
-		body.temperature = (options as { temperature?: number }).temperature;
+	// Match Pi 0.99.1's private isChatGPTSignIn predicate, not an auth selector.
+	// Proxies and header-only auth must not be classified by token shape alone.
+	const chatGPTSignIn = model.provider === "openai"
+		&& model.baseUrl === "https://api.openai.com/v1"
+		&& options?.apiKey !== undefined
+		&& !options.apiKey.startsWith("sk-");
+	if (options?.temperature !== undefined && !chatGPTSignIn) {
+		body.temperature = options.temperature;
+	}
+	if (model.api === "openai-responses" && !lite && !chatGPTSignIn
+		&& (model as Model<"openai-responses">).compat?.supportsMaxOutputTokens !== false && options?.maxTokens) {
+		body.max_output_tokens = Math.max(16, options.maxTokens);
 	}
 
 	const serviceTier = (options as { serviceTier?: string } | undefined)?.serviceTier;
