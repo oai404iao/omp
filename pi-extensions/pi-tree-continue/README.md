@@ -3,6 +3,12 @@
 Adds `/continue` for Pi sessions. It resumes the agent without adding a new user
 or custom message. Pi may append system prompt/tool updates before the request.
 
+The workspace now targets Pi 0.99.1, where this hook is intentionally disabled:
+it registers no `/continue` command and does not patch `AgentSession`.
+Its peer/development dependencies track the workspace host, not hook eligibility.
+The loader and version-guard tests enforce this; historical continuation tests
+only run on audited versions and are skipped on 0.99.1.
+
 Compatibility: experimental against exactly Pi 0.87.0 and 0.87.1. It is not compatible by
 contract with any Pi version.
 

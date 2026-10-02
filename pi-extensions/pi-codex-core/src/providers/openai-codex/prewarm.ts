@@ -47,7 +47,7 @@ export async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promis
 		);
 		const responseItems: unknown[] = [];
 		let responseId: string | undefined;
-		for await (const event of mapCodexEvents(parseWebSocket(socket, request.signal), request.requestMetadata.sessionId)) {
+		for await (const event of mapCodexEvents(parseWebSocket(socket, request.signal), request.requestMetadata.codexRequestExtensions === false ? undefined : request.requestMetadata.sessionId)) {
 			if (event.type === "response.created" && event.response?.id) responseId = event.response.id;
 			if (event.type === "response.output_item.done" && event.item) responseItems.push(event.item);
 			if (

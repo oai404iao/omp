@@ -1,23 +1,25 @@
 import { type ProviderHeaders } from "@earendil-works/pi-ai";
 import { type Api, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
-import { hasCodexRequestAuth, resolveCodexRequestAccountId } from "@oai404iao/pi-codex-runtime/internal/codex-http";
+import { hasCodexRequestAuth, resolveCodexRequestAccountId, withResolvedAuthBaseUrl } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { applyFastModeServiceTier } from "../../fast-mode.js";
-import { loadModelSettings, type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+import { applyEndpointPolicy, loadModelSettings, type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { setProviderGeneratedHeader } from "@oai404iao/pi-codex-runtime/internal/provider-headers";
 import { rewriteNativeOpenAiTools } from "../../provider-native-tools.js";
 import { CODEX_COMPACTION_TRIGGER_TYPE, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE } from "../../providers/openai-codex/constants.js";
 import { applyConfiguredResponsesFeatureHeaders, buildJsonHeaders, buildSSEHeaders, buildWebSocketHeaders } from "../../providers/openai-codex/headers.js";
-import { buildRequestBody, ensureWebSearchDetailsIncluded } from "../../providers/openai-codex/request-body.js";
+import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOptions } from "../../providers/openai-codex/request-body.js";
 import { createCodexRequestId } from "../../providers/openai-codex/request-metadata.js";
 import { compactUrl } from "../../providers/openai-codex/urls.js";
 import { buildCodexCompactionCheckpoint, compactionItems, sanitizeNativeCompactionOutput } from "./checkpoint.js";
 import { postJsonWithRetries } from "./http.js";
 import { requestCodexCompactionTriggerWithTransport } from "./transport.js";
 import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
+import type { CodexMinimalToolsSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
+import { rememberResolvedEndpoint, reportEndpointFailure } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 
-export async function requestOpenAINativeCompaction(
+async function requestNativeCompaction(
 	model: Model<Api>,
 	context: Context,
 	options: {
@@ -25,30 +27,33 @@ export async function requestOpenAINativeCompaction(
 		mode: "responses" | "responses-compact";
 		apiKey: string;
 		headers?: ProviderHeaders;
+		baseUrl?: string;
 		signal?: AbortSignal;
 		reasoning?: SimpleStreamOptions["reasoning"];
 		sessionId?: string;
 		turnId?: string;
 		maxRetries?: number;
 		maxRetryDelayMs?: number;
-		settings: ResolvedCodexModelSettings;
+		settings: ResolvedCodexModelSettings | CodexMinimalToolsSettings;
 	},
 ): Promise<unknown[]> {
-	const settings = options.settings.modelProfile
-		? options.settings
-		: loadModelSettings(model, undefined, options.settings);
+	rememberResolvedEndpoint(model, withResolvedAuthBaseUrl(model, options), options.sessionId);
+	model = withResolvedAuthBaseUrl(model, options);
+	const settings = "responsesEndpoint" in options.settings && options.settings.modelProfile
+		? applyEndpointPolicy(options.settings, model, options.sessionId)
+		: loadModelSettings(model, undefined, options.settings, options.sessionId);
 	const auth = { apiKey: options.apiKey || undefined, headers: options.headers };
 	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
 		throw new Error(`No request authentication for provider: ${model.provider}`);
 	}
-	if (settings.compactionMode === "pi") {
+	if (settings.compactionMode === "pi" || settings.compactionMode !== options.mode) {
 		throw new Error("native compaction is disabled by the current model profile");
 	}
 	const profile = resolveCodexRequestProfile(settings.requestProfile);
 	const accountId = resolveCodexRequestAccountId({
 		modelHeaders: model.headers,
 		auth,
-		apiKeyMode: settings.apiKeyMode,
+		endpoint: settings.responsesEndpoint,
 	});
 	const requestIdentity = resolveCodexRequestIdentity(
 		options.sessionId,
@@ -57,7 +62,7 @@ export async function requestOpenAINativeCompaction(
 	);
 	let body = applyFastModeServiceTier(buildRequestBody(model, context, profile, {
 		ownsNativeTool: options.ownsNativeTool,
-		imageGeneration: settings.imageGenerationImplementation ?? false,
+		...requestBodyToolOptions(settings),
 		apiKey: options.apiKey,
 		headers: options.headers,
 		signal: options.signal,
@@ -66,9 +71,9 @@ export async function requestOpenAINativeCompaction(
 	}), settings, model);
 	const webSearch = settings.modelProfile?.effective.tools.webSearch;
 	body = rewriteNativeOpenAiTools(body, {
+		...requestBodyToolOptions(settings),
 		ownsNativeTool: options.ownsNativeTool,
 		imageModel: settings.imageModel,
-		imageGeneration: settings.imageGenerationImplementation ?? false,
 		webSearch: settings.webSearchEnabled
 			&& webSearch
 			? {
@@ -141,7 +146,7 @@ export async function requestOpenAINativeCompaction(
 		if (body[key] !== undefined) compactBody[key] = body[key];
 	}
 	const response = await postJsonWithRetries(
-		compactUrl(model.baseUrl, settings.apiKeyMode),
+		compactUrl(model.baseUrl, settings.responsesEndpoint),
 		headers,
 		compactBody,
 		options.signal,
@@ -155,4 +160,16 @@ export async function requestOpenAINativeCompaction(
 		throw new Error("OpenAI /responses/compact output did not contain a compaction item");
 	}
 	return sanitizedOutput;
+}
+
+export async function requestOpenAINativeCompaction(...args: Parameters<typeof requestNativeCompaction>): Promise<unknown[]> {
+	try {
+		return await requestNativeCompaction(...args);
+	} catch (error) {
+		const [model, , options] = args;
+		if (!options.signal?.aborted) reportEndpointFailure(
+			withResolvedAuthBaseUrl(model, options), options.sessionId, [`compaction.${options.mode}`], error,
+		);
+		throw error;
+	}
 }

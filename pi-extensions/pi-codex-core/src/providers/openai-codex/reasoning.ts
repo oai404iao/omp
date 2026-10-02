@@ -15,9 +15,8 @@ const CODEX_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh
 type CodexThinkingLevel = (typeof CODEX_THINKING_LEVELS)[number];
 
 /**
- * Keep this local instead of delegating to older Pi releases: Pi added `max`
- * after this extension's original minimum version, and an old clamp silently
- * turns it into `off`.
+ * Preserve the legacy Codex/Lite effort mapping. Standard OpenAI requests use
+ * Pi's native clamp, including descriptors that explicitly disallow Off.
  */
 export function clampCodexThinkingLevel(model: Model<Api>, level: ThinkingLevel): CodexThinkingLevel {
 	if (!model.reasoning) return "off";

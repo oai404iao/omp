@@ -101,6 +101,7 @@ function registerDelegationTool(
 	const parameters = delegationParameters(agentNames);
 	pi.registerTool({
 		name: "subagent",
+		exposure: "model-only",
 		label: "Subagent",
 		description: modeDescription(settings),
 		promptSnippet: foregroundOnly
@@ -151,6 +152,7 @@ function registerForkDelegationTool(
 	const parameters = forkDelegationParameters(agentNames);
 	pi.registerTool({
 		name: "subagent_fork",
+		exposure: "model-only",
 		label: "Subagent Fork",
 		description:
 			"Delegate a task to a child seeded with all completed turns in this conversation. " +
@@ -215,6 +217,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "send_message",
+		exposure: "model-only",
 		label: "Send Message",
 		description:
 			"Send a message to a direct continuable child. It is durably appended to the child's FIFO mailbox and requires followup_task to start a turn. " +
@@ -252,6 +255,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "followup_task",
+		exposure: "model-only",
 		label: "Follow-up Task",
 		description:
 			"For a direct continuable child, atomically claim its current pending FIFO mailbox and start exactly one scheduled turn. " +
@@ -288,6 +292,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "wait_agent",
+		exposure: "model-only",
 		label: "Wait Agent",
 		description:
 			"Wait event-driven for unread completion updates from direct children. Existing updates return immediately; timeout does not consume later updates.",
@@ -324,6 +329,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "interrupt_agent",
+		exposure: "model-only",
 		label: "Interrupt Agent",
 		description:
 			"Request cancellation of a live child or descendant's current turn. The child session remains available for later messages. " +
@@ -352,6 +358,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "list_agents",
+		exposure: "model-only",
 		label: "List Agents",
 		description:
 			"List direct continuable children or all descendants. running means an active turn, idle means resident between turns, " +

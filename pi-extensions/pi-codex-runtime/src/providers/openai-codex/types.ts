@@ -50,6 +50,7 @@ export interface WebSocketPrewarmRequest {
 }
 
 export interface WebSocketRequestMetadata {
+	codexRequestExtensions?: boolean;
 	/** Legacy Pi session lookup key used by exported test helpers. */
 	sessionId?: string;
 	threadId?: string;

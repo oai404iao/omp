@@ -489,7 +489,6 @@ function legacySettingsRecord(settings: CodexMinimalToolsSettings): JsonRecord {
 		"openaiWebSocketPrewarm",
 		"compactionMode",
 		"requestProfile",
-		"apiKeyMode",
 		"webSearchEnabled",
 		"viewImage",
 		"applyPatchEnabled",
@@ -521,13 +520,13 @@ function legacyProfilePatch(
 		"openaiWebSocketPrewarm",
 		"compactionMode",
 		"requestProfile",
-		"apiKeyMode",
 		"webSearchEnabled",
 		"viewImage",
 		"applyPatchEnabled",
 		"additionalModelIds",
 	];
-	const legacyMode = additional || legacyKeys.some((key) => Object.hasOwn(raw, key));
+	const legacyMode = additional || legacyKeys.some((key) => Object.hasOwn(raw, key))
+		|| (model.provider === "openai-codex" && (Object.hasOwn(raw, "apiKeyMode") || settings.apiKeyMode));
 	if (!legacyMode) return undefined;
 
 	const fullId = normalizeId(id);
@@ -551,7 +550,9 @@ function legacyProfilePatch(
 		enabled: true,
 		responses: {
 			providerShim: nativeProvider(model) || existing?.responses?.providerShim === true,
-			endpoint: model.provider === "openai" || settings.apiKeyMode ? "openai" : "codex",
+			...(model.provider === "openai-codex"
+				? { endpoint: settings.apiKeyMode ? "openai" as const : "codex" as const }
+				: {}),
 			mode: requestProfile.responsesMode,
 			reasoningSummary: requestProfile.reasoningSummary,
 			systemPromptPlacement: requestProfile.systemPromptPlacement,

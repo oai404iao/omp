@@ -1,4 +1,5 @@
 import type { ProviderHeaders } from "@earendil-works/pi-ai";
+import type { ModelIdentityLike, ResponsesEndpoint } from "./model-catalog/types.js";
 import {
 	isProviderHeaderSuppressed,
 	mergeProviderHeaders,
@@ -14,6 +15,23 @@ const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 export interface CodexRequestAuth {
 	apiKey?: string;
 	headers?: ProviderHeaders;
+	baseUrl?: string;
+}
+
+export type ResponsesProtocol = Exclude<ResponsesEndpoint, "auto">;
+
+export function responsesProtocol(
+	model: ModelIdentityLike | undefined,
+	legacyEndpoint: ResponsesEndpoint = "auto",
+): ResponsesProtocol {
+	// Only the frozen legacy provider honors plugin-owned endpoint overrides.
+	if (model?.provider === "openai-codex" && legacyEndpoint !== "auto") return legacyEndpoint;
+	if (model?.api) return model.api === "openai-codex-responses" ? "codex" : "openai";
+	return model?.provider === "openai-codex" ? "codex" : "openai";
+}
+
+export function withResolvedAuthBaseUrl<T extends { baseUrl: string }>(model: T, auth: CodexRequestAuth): T {
+	return auth.baseUrl !== undefined ? { ...model, baseUrl: auth.baseUrl } : model;
 }
 
 function bearerToken(headers: Headers): string | undefined {
@@ -41,16 +59,16 @@ export function hasCodexRequestAuth(options: {
 	) {
 		return true;
 	}
-	return ["authorization", "api-key", "x-api-key", "x-openai-actor-authorization"]
+	return ["authorization", "api-key", "x-api-key", "cf-aig-authorization", "x-openai-actor-authorization"]
 		.some((name) => Boolean(headers.get(name)?.trim()));
 }
 
 export function resolveCodexRequestAccountId(options: {
 	modelHeaders?: ProviderHeaders;
 	auth: CodexRequestAuth;
-	apiKeyMode: boolean;
+	endpoint: ResponsesProtocol;
 }): string | undefined {
-	if (options.apiKeyMode) return undefined;
+	if (options.endpoint === "openai") return undefined;
 	const headers = authHeaders(options);
 	if (
 		headers.get("chatgpt-account-id")?.trim()
@@ -70,10 +88,10 @@ export function resolveCodexRequestAccountId(options: {
 	return token ? extractCodexAccountId(token) : undefined;
 }
 
-function responseEndpoint(baseUrl: string | undefined, apiKeyMode: boolean): string {
-	const raw = baseUrl?.trim() || (apiKeyMode ? DEFAULT_OPENAI_BASE_URL : DEFAULT_CODEX_BASE_URL);
+export function resolveResponsesUrl(baseUrl: string | undefined, endpoint: ResponsesProtocol): string {
+	const raw = baseUrl?.trim() || (endpoint === "openai" ? DEFAULT_OPENAI_BASE_URL : DEFAULT_CODEX_BASE_URL);
 	const normalized = raw.replace(/\/+$/, "");
-	if (apiKeyMode) {
+	if (endpoint === "openai") {
 		if (normalized.endsWith("/responses")) return normalized;
 		return `${normalized}/responses`;
 	}
@@ -84,10 +102,10 @@ function responseEndpoint(baseUrl: string | undefined, apiKeyMode: boolean): str
 
 export function resolveCodexApiEndpoint(
 	baseUrl: string | undefined,
-	apiKeyMode: boolean,
+	endpoint: ResponsesProtocol,
 	path: string,
 ): string {
-	const root = responseEndpoint(baseUrl, apiKeyMode).replace(/\/responses$/, "");
+	const root = resolveResponsesUrl(baseUrl, endpoint).replace(/\/responses$/, "");
 	return `${root}/${path.replace(/^\/+/, "")}`;
 }
 
@@ -107,8 +125,9 @@ export function extractCodexAccountId(token: string): string {
 export function buildCodexJsonHeaders(options: {
 	modelHeaders?: ProviderHeaders;
 	auth: CodexRequestAuth;
-	apiKeyMode: boolean;
+	endpoint: ResponsesProtocol;
 	extraHeaders?: Record<string, string>;
+	codexRequestExtensions?: boolean;
 }): Headers {
 	const headers = authHeaders(options);
 	for (const [name, value] of Object.entries(options.extraHeaders ?? {})) {
@@ -119,14 +138,14 @@ export function buildCodexJsonHeaders(options: {
 		setProviderGeneratedHeader(headers, "Authorization", `Bearer ${options.auth.apiKey}`);
 	}
 	if (
-		!options.apiKeyMode
+		options.endpoint === "codex"
 		&& !headers.has("chatgpt-account-id")
 		&& !headers.has("x-openai-actor-authorization")
 	) {
 		const accountId = resolveCodexRequestAccountId(options);
 		if (accountId) setProviderDefaultHeader(headers, "chatgpt-account-id", accountId);
 	}
-	setProviderDefaultHeader(headers, "originator", "pi");
+	if (options.codexRequestExtensions !== false || options.endpoint === "codex") setProviderDefaultHeader(headers, "originator", "pi");
 	setProviderDefaultHeader(headers, "accept", "application/json");
 	setProviderDefaultHeader(headers, "content-type", "application/json");
 	return headers;

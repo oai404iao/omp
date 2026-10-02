@@ -23,6 +23,7 @@ import {
 } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
 
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+import { knownEndpointModel } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 
 import { registerNativeCompaction } from "./native-compaction.js";
 
@@ -100,8 +101,9 @@ function contextModel(ctx: ExtensionContext): ModelLike | undefined {
 function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 	const settings = loadSettings(ctx.cwd);
 	const model = contextModel(ctx);
-	const modelSettings = loadModelSettings(model, ctx.cwd, settings);
-	const capabilities = computeToolCapabilities(model, settings);
+	const policyModel = knownEndpointModel(model ?? {}, ctx.sessionManager?.getSessionId?.());
+	const modelSettings = loadModelSettings(policyModel, ctx.cwd, settings, ctx.sessionManager?.getSessionId?.());
+	const capabilities = computeToolCapabilities(policyModel, settings);
 	const requestProfile = resolveCodexRequestProfile(modelSettings.requestProfile);
 	const modelProfile = modelSettings.modelProfile;
 	const active = new Set(pi.getActiveTools?.() ?? []);
@@ -114,9 +116,12 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`model profile: ${modelProfile ? `${modelProfile.sources.join("+")} #${modelProfile.profileHash}` : "(none)"}`,
 		`configured models loaded: ${hasConfiguredModelsLoaded(ctx, settings)}`,
 		`enabled: ${settings.enabled}`,
+		`Codex request extensions: ${settings.codexRequestExtensions}`,
+		`endpoint declarations: ${settings.endpoint_config.length}`,
+		`endpoint policy: ${policyModel.baseUrl ? "resolved by Pi authentication" : "awaiting request authentication"}`,
 		`autoEnable: ${settings.autoEnable}`,
 		`provider shim: ${modelSettings.providerShimActive ? "active" : "inactive"}`,
-		`responses endpoint: ${modelSettings.apiKeyMode ? "openai" : "codex"}`,
+		`responses endpoint: ${modelSettings.responsesEndpoint}`,
 		`Responses WebSocket enabled: ${settings.webSocketEnabled}`,
 		`responses transport: ${modelSettings.openaiTransport}`,
 		`Responses WebSocket prewarm: ${modelSettings.openaiWebSocketPrewarm}`,
@@ -126,7 +131,8 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`web search: ${modelSettings.webSearchImplementation ?? "off"}`,
 		`image generation: ${settings.imageGeneration ? modelSettings.imageGenerationImplementation ?? "off" : "off (global gate)"}`,
 		`legacy additionalModelIds: ${settings.additionalModelIds.length > 0 ? settings.additionalModelIds.join(", ") : "(none)"}`,
-		`apiKeyMode: ${modelSettings.apiKeyMode}`,
+		`legacy apiKeyMode: ${settings.apiKeyMode} (ignored outside openai-codex)`,
+		...modelSettings.requestDiagnostics.map((line) => `warning: ${line}`),
 		`native provider shim: ${settings.enabled ? "registered" : "disabled"}`,
 		"tools:",
 		...Object.entries(capabilities).map(([name, capability]) => `- ${name}: ${capability.enabled ? "supported" : "disabled"}${active.has(name) ? ", active" : ""} — ${capability.reason}`),
@@ -138,7 +144,9 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 		const settings = loadSettings(ctx.cwd);
 		const lines = statusLines(pi, ctx as ExtensionContext);
 		lines.push(`image output dir: ${settings.imageOutputDir}`);
-		lines.push(`OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? "present" : "not set"}`);
+		const provider = contextModel(ctx)?.provider;
+		const auth = provider ? ctx.modelRegistry?.getProviderAuthStatus?.(provider) : undefined;
+		lines.push(`authentication: Pi managed${auth ? ` (${auth.source ?? "unconfigured"})` : ""}`);
 		const diagnostics = settingsDiagnostics();
 		if (diagnostics.length > 0) lines.push("settings diagnostics:", ...diagnostics.map((line) => `- ${line}`));
 		const catalogDiagnostics = modelCatalogDiagnostics();
@@ -176,6 +184,7 @@ function registerCoreTools(pi: ExtensionAPI, broker: ReturnType<typeof ensureCod
 	pi.registerTool({
 		renderShell: "self",
 		name: "view_image",
+		exposure: "model-only",
 		label: "View Image",
 		description: "Inspect a local image file by returning image content to the model. Relative paths resolve against ctx.cwd; a leading @ is accepted.",
 		promptSnippet: "Inspect local image files by path.",
@@ -234,20 +243,21 @@ export default function codexCore(pi: ExtensionAPI): void {
 		currentCwd = ctx.cwd;
 		const settings = loadSettings(ctx.cwd);
 		const model = contextModel(ctx);
-		const modelSettings = loadModelSettings(model, ctx.cwd, settings);
+		const modelSettings = loadModelSettings(knownEndpointModel(model ?? {}, ctx.sessionManager?.getSessionId?.()), ctx.cwd, settings, ctx.sessionManager?.getSessionId?.());
 		const profile = resolveModelProfile(model, { settings });
 		if (
 			!settings.enabled
 			|| !profile?.effective.enabled
 			|| !modelSettings.providerShimActive
 		) return undefined;
-		const capabilities = computeToolCapabilities(contextModel(ctx), settings);
 		const webSearch = profile.effective.tools.webSearch;
 		const result = rewriteNativeOpenAiTools(event.payload, {
+			removeWebSearch: modelSettings.endpointDisabledWebSearch,
+			codexRequestExtensions: modelSettings.codexRequestExtensions,
 			ownsNativeTool,
 			imageModel: settings.imageModel,
 			imageGeneration: modelSettings.imageGenerationImplementation ?? false,
-			webSearch: capabilities.web_search.enabled
+			webSearch: modelSettings.webSearchEnabled
 				&& webSearch
 				? {
 						implementation: webSearch.implementation,

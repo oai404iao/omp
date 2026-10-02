@@ -8,7 +8,7 @@ import { withResponsesLiteWebSocketMetadata } from "../../providers/openai-codex
 import { createPiTurnId, withSseRequestMetadata } from "../../providers/openai-codex/request-metadata.js";
 import { isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, isWebSocketUpgradeRejectedError, sleep, webSocketCompactionRetryDelayMs, webSocketStreamMaxRetries } from "../../providers/openai-codex/retry.js";
 import { type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
-import { resolveCodexUrl, resolveResponsesWebSocketUrl } from "../../providers/openai-codex/urls.js";
+import { resolveResponsesUrl, resolveResponsesWebSocketUrl } from "../../providers/openai-codex/urls.js";
 import { websocketHttpFallbackSessions } from "../../providers/openai-codex/websocket-session.js";
 import { requestCodexCompactionTrigger } from "./http.js";
 import { requestCodexCompactionTriggerWebSocket } from "./websocket.js";
@@ -32,7 +32,7 @@ export async function requestCodexCompactionTriggerWithTransport(
 ): Promise<unknown> {
 	const transport = options.settings.openaiTransport;
 	const responsesMode = resolveCodexRequestProfile(options.settings.requestProfile).responsesMode;
-	const sseUrl = resolveCodexUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
+	const sseUrl = resolveResponsesUrl(model.baseUrl, options.settings.responsesEndpoint);
 	const requestMetadata: WebSocketRequestMetadata = {
 		...(options.sessionId ? { sessionId: options.sessionId } : {}),
 		...(options.requestIdentity?.threadId
@@ -56,7 +56,7 @@ export async function requestCodexCompactionTriggerWithTransport(
 		);
 	}
 
-	const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, { apiKeyMode: options.settings.apiKeyMode });
+	const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, options.settings.responsesEndpoint);
 	const fallbackKey = webSocketFallbackKey(
 		options.sessionId,
 		model,

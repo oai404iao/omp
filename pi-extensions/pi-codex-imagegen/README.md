@@ -2,7 +2,21 @@
 
 See the package guide below for release status; source edits do not publish artifacts.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
+
+Hosted generation is model-only, including with native codemode in `only` mode.
+Standalone generation remains directly callable and is also available to
+codemode while active. Exposure follows the selected model profile; this does
+not enable codemode itself. A hosted profile with explicit direct fallback
+remains model-only.
+
+Codemode scripts receive `{ path, latestPath?, image: { type, data, mimeType } }`.
+The image data is base64; use `image(result.image)` to forward it to the model.
+Saving and direct model-facing image/text output retain their existing behavior.
+Failed generation rejects the call instead of returning success-shaped data.
+Pi intentionally resolves retained structured data if a `tool_result` hook
+only sets `isError: true`. To reject or redact, that hook must also replace
+`content` without supplying `structuredContent`.
 
 `/image-gen` jobs are cancelled when the session is replaced or closed.
 Late authentication/results cannot notify the replacement session or initiate
@@ -17,6 +31,15 @@ fallback execution before authentication or network I/O.
 Catalog-supported standalone profiles call Images generation/edit endpoints with
 Pi authentication. Hosted profiles need core unless the existing
 `directImageApiFallback` option was explicitly enabled.
+All image paths, including this explicit fallback and background jobs, use
+the selected provider's Pi-resolved credentials, headers and base URL. The
+fallback no longer reads a separate `OPENAI_API_KEY` or forces the public
+OpenAI endpoint. Authentication failure never switches accounts or providers.
+`endpoint_config.imageGeneration` limits allowed modes at the authenticated
+endpoint. Rejected/denied standalone jobs do not fall through to hosted jobs.
+Explicit protocol rejection temporarily disables that mode for the session,
+including background jobs. With `codexRequestExtensions:false`, standalone
+requests omit generated Codex image-turn headers.
 
 Uses the existing
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json` settings and

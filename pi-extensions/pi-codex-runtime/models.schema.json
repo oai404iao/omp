@@ -58,7 +58,8 @@
             },
             "endpoint": {
               "enum": ["auto", "openai", "codex"],
-              "description": "Endpoint and authentication shape."
+              "deprecated": true,
+              "description": "Legacy openai-codex protocol override only. Other providers follow Pi's api and resolved baseUrl; authentication always comes from Pi."
             },
             "mode": {
               "enum": ["standard", "lite"],

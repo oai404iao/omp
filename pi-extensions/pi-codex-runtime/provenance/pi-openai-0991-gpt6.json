@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/earendil-works/pi",
+    "revision": "d86654abb8862e201933517d6f1fce9f88dd117f",
+    "tag": "v0.99.1",
+    "license": "MIT"
+  },
+  "files": {
+    "packages/ai/scripts/generate-models.ts": {
+      "role": "Exact OpenAI GPT-6 chat IDs, Standard Responses API, image input, grammar compatibility and reasoning maps",
+      "gitBlobSha": "cddc04015f2245733e4787c577a6b4b73d164589",
+      "sha256": "38726e0656278a517e06c066faab7519bd96e804391a50c1031527e6f61ee37c"
+    },
+    "packages/ai/src/models.ts": {
+      "role": "Public clampThinkingLevel respects null effort mappings, including Off"
+    }
+  },
+  "catalogReference": {
+    "package": "@earendil-works/pi-ai",
+    "version": "0.99.1",
+    "path": "dist/providers/data/openai.json",
+    "sha256": "ca5ec1028efc512502591bf2562a2a6dc330f26a5f4c4a08c8a149a43c5bd7da",
+    "fields": ["type", "id", "api", "input", "thinkingLevelMap", "contextWindow", "maxTokens", "compat"]
+  },
+  "models": ["openai/gpt-6.1-sol", "openai/gpt-6-astra", "openai/gpt-6-sol", "openai/gpt-6-luna"],
+  "decisions": [
+    "Standard Responses with SSE; no Codex Lite inference from model names or legacy profiles.",
+    "Custom apply_patch uses the existing local grammar and Pi's explicit supportsOpenAIGrammarTools metadata.",
+    "view_image is local execution gated by Pi's image-input metadata.",
+    "Search, image generation, native compaction, WebSocket prewarm and Fast remain off by default; users may explicitly configure endpoint capabilities and model implementations.",
+    "Pi owns model descriptors, reasoning mappings, limits and pricing; the plugin does not register replacement descriptors."
+  ],
+  "limits": [
+    "Pinned source/catalog and offline request/activation tests, not real account or endpoint acceptance.",
+    "supportsToolSearch and supportsAdditionalTools describe Pi orchestration, not hosted web_search or Codex Lite entitlement.",
+    "Existing openai-codex profiles are frozen; no openai-codex/gpt-6.1-sol entry is added.",
+    "This is a curated exact-ID addition, not coverage of every model in the OpenAI catalog."
+  ],
+  "localImplementations": ["pi-codex-runtime/src/model-catalog/default-models.json"]
+}

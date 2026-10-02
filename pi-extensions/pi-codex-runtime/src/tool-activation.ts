@@ -7,9 +7,10 @@ import {
 } from "./capabilities.js";
 import { installCodexIdentityLifecycle } from "./codex-identity-extension.js";
 import { loadModelSettings } from "./model-catalog/runtime.js";
-import { loadSettings } from "./settings.js";
+import { loadSettings, settingsDiagnostics } from "./settings.js";
+import { clearEndpointFailures, knownEndpointModel, watchEndpointFailures } from "./endpoint-state.js";
 
-function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_patch" | "web_search"): boolean {
+function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_patch" | "web_search" | "image_generation"): boolean {
 	if (!broker.tools.get(name)?.registered) return false;
 	const expected = broker.ownedTools.get(name);
 	if (!expected || expected.replaced) return false;
@@ -28,7 +29,7 @@ function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_
 function enableDefinitions(broker: CodexBroker) {
 	for (const tool of broker.tools.values()) {
 		if (tool.registered) continue;
-		tool.register();
+		tool.register(tool.exposure);
 		tool.registered = true;
 	}
 	broker.presentation.registerRenderers();
@@ -37,10 +38,10 @@ function enableDefinitions(broker: CodexBroker) {
 export function addPackageTool(
 	broker: CodexBroker,
 	name: PackageToolName,
-	register: () => void,
+	register: (exposure: "direct" | "model-only") => void,
 ): void {
 	if (broker.tools.has(name)) throw new Error(`Duplicate Codex tool owner: ${name}`);
-	broker.tools.set(name, { register, registered: false });
+	broker.tools.set(name, { register, registered: false, exposure: name === "apply_patch" ? "direct" : "model-only" });
 	if (loadSettings().enabled) enableDefinitions(broker);
 }
 
@@ -49,6 +50,9 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	if (!broker.claim("activation")) return broker;
 	installCodexIdentityLifecycle(pi);
 	const suppressed = new Map<NativeMutationToolName, number>();
+	const warned = new Set<string>();
+	let watchedSession: string | undefined;
+	let stopWatching: (() => void) | undefined;
 	const restore = (active: string[]) => {
 		for (const [name, index] of [...suppressed].sort(([, a], [, b]) => a - b)) {
 			if (!active.includes(name)) active.splice(Math.min(index, active.length), 0, name);
@@ -56,7 +60,7 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		return active;
 	};
 	let syncing = false;
-	const sync = (ctx: ExtensionContext) => {
+	const sync = (ctx: ExtensionContext, quiet = false) => {
 		if (syncing) return;
 		syncing = true;
 		try {
@@ -65,19 +69,38 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		if (available) enableDefinitions(broker);
 		const current = pi.getActiveTools?.() ?? [];
 		const active = new Set(current);
-		const capabilities = computeToolCapabilities(ctx.model as ModelLike | undefined, settings);
-		const model = loadModelSettings(ctx.model as ModelLike | undefined, ctx.cwd, settings);
+		const sessionId = ctx.sessionManager?.getSessionId?.();
+		const requestModel = knownEndpointModel(ctx.model ?? {}, sessionId);
+		const capabilities = computeToolCapabilities(requestModel, settings);
+		const model = loadModelSettings(requestModel, ctx.cwd, settings, sessionId);
+		if (settings.enabled && ctx.ui?.notify) {
+			for (const diagnostic of [...settingsDiagnostics(), ...model.requestDiagnostics]) {
+				if (warned.has(diagnostic)) continue;
+				warned.add(diagnostic);
+				if (!quiet) ctx.ui.notify(diagnostic, "warning");
+			}
+		}
 		const ownsPatch = broker.tools.has("apply_patch") && ownsRegisteredTool(pi, broker, "apply_patch");
 		for (const name of PACKAGE_TOOL_NAMES) {
 			const owned = broker.tools.get(name);
 			if (!owned) continue; // Other extensions retain ownership of uninstalled names.
 			if (name === "apply_patch" && !ownsPatch) continue;
 			if (name === "web_search" && !ownsRegisteredTool(pi, broker, "web_search")) continue;
+			if (name === "image_generation" && !ownsRegisteredTool(pi, broker, "image_generation")) continue;
+			if (owned.registered && (name === "web_search" || name === "image_generation")) {
+				const implementation = name === "web_search" ? model.webSearchImplementation : model.imageGenerationImplementation;
+				const exposure = implementation === "standalone" ? "direct" : "model-only";
+				if (owned.exposure !== exposure) {
+					owned.register(exposure);
+					owned.exposure = exposure;
+				}
+			}
 			const hostedWithoutCore = !broker.coreEnabled && (
 				(name === "web_search" && model.webSearchImplementation === "hosted")
 				|| (name === "image_generation" && model.imageGenerationImplementation === "hosted" && !settings.directImageApiFallback)
 			);
-			const desired = available && owned.registered && capabilities[name].enabled && !hostedWithoutCore;
+			const endpointEnabled = name === "web_search" ? model.webSearchEnabled : name === "image_generation" ? model.imageGeneration : true;
+			const desired = available && owned.registered && capabilities[name].enabled && !hostedWithoutCore && endpointEnabled;
 			if (!desired) active.delete(name);
 			else if (settings.autoEnable) active.add(name);
 		}
@@ -89,14 +112,31 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 		const next = current.filter(name => active.has(name));
 		for (const name of active) if (!next.includes(name)) next.push(name);
 		if (!ownsPatch || !active.has("apply_patch")) restore(next);
-		if (next.join("\0") !== current.join("\0")) pi.setActiveTools(next);
+		// Re-registration can auto-activate a tool; keep the existing activation policy authoritative.
+		if (next.join("\0") !== (pi.getActiveTools?.() ?? []).join("\0")) pi.setActiveTools(next);
 		if (!ownsPatch || !active.has("apply_patch")) suppressed.clear();
 		} finally { syncing = false; }
 	};
 	pi.on("session_start", (_event, ctx) => {
+		stopWatching?.();
+		if (watchedSession) clearEndpointFailures(watchedSession);
+		watchedSession = ctx.sessionManager?.getSessionId?.();
+		if (watchedSession) {
+			clearEndpointFailures(watchedSession);
+			stopWatching = watchEndpointFailures(watchedSession, message => {
+				if (message) ctx.ui?.notify?.(message, "warning");
+				sync(ctx, Boolean(message));
+			});
+		}
 		broker.presentation.clear();
 		suppressed.clear();
+		warned.clear();
 		sync(ctx);
+	});
+	pi.on("session_shutdown", () => {
+		stopWatching?.();
+		if (watchedSession) clearEndpointFailures(watchedSession);
+		watchedSession = undefined;
 	});
 	pi.on("model_select", (_event, ctx) => sync(ctx));
 	pi.on("thinking_level_select", (_event, ctx) => sync(ctx));

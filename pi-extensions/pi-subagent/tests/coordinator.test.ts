@@ -15,6 +15,7 @@ import {
 import {
 	type ExtensionAPI,
 	type ExtensionContext,
+	type ExtensionToolContext,
 	ModelRegistry,
 	ModelRuntime,
 	SessionManager,
@@ -507,6 +508,161 @@ test("one-shot child returns only its own final output and usage", async () => {
 	} finally {
 		await coordinator.shutdown();
 	}
+});
+
+for (const scenario of [
+	{ name: "inherited defaults activate native tools", inherit: true, defaults: true, active: true },
+	{ name: "inherited builtins are inactive by default", inherit: true, active: false },
+	{ name: "no inheritance disables builtins even with defaults", inherit: false, defaults: true, active: false },
+	{ name: "settings can disable inherited builtins", inherit: true, defaults: true, disabled: true, active: false },
+	{ name: "explicit ceiling activates native tools", inherit: true, tools: "read, codemode, tool_search", active: true },
+	{ name: "ceiling excludes native tools despite defaults", inherit: true, defaults: true, tools: "read", active: false },
+	{ name: "explicit tools do not override no inheritance", inherit: false, tools: "codemode", error: true },
+	{ name: "explicit tools do not override disabled builtins", inherit: true, disabled: true, tools: "codemode", error: true },
+]) {
+	test(`child codemode policy: ${scenario.name}`, async () => {
+		const observed: string[][] = [];
+		const { coordinator, parent, agentDir } = await fixture({ onRequestTools: tools => observed.push(tools) });
+		mkdirSync(join(agentDir, "agents"), { recursive: true });
+		writeFileSync(join(agentDir, "agents", "native.md"),
+			`---\nname: native\ndescription: Native tools\n${scenario.tools ? `tools: ${scenario.tools}\n` : ""}---\nInspect the task.\n`);
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({
+			...(scenario.defaults ? { defaultTools: ["+codemode", "+tool_search"] } : {}),
+			...(scenario.disabled ? { extensions: ["-builtin:codemode", "-builtin:tool-search"] } : {}),
+		}));
+		try {
+			const pending = coordinator.delegate(parent, "spawn", {
+				agent: "native", description: "native load policy", prompt: "Inspect it.",
+			}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: scenario.inherit });
+			if (scenario.error) {
+				await assert.rejects(pending, /codemode.*not registered/);
+				assert.deepEqual(observed, []);
+			} else {
+				const outcome = await pending;
+				assert.equal(outcome.kind, "foreground");
+				assert.equal(observed.length, 1);
+				for (const name of ["codemode", "tool_search"]) assert.equal(observed[0].includes(name), scenario.active, name);
+				assert(!observed[0].some(name => name.startsWith("mcp__")));
+			}
+		} finally { await coordinator.shutdown(); }
+	});
+}
+
+for (const exposure of ["codemode", "deferred"]) {
+	test(`child ${exposure} tools keep the registry ceiling, nested permissions, trace and usage`, async () => {
+		const declared: string[][] = [];
+		const { coordinator, parent, agentDir } = await fixture({
+			childExtension: `export default function (pi) {
+				pi.registerTool({
+					name: "measure", label: "Measure", description: "Metered fixture", exposure: "${exposure}",
+					parameters: { type: "object", properties: {} },
+					async execute() {
+						return { content: [{ type: "text", text: "measured" }], details: undefined,
+							usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 5,
+								cost: { input: 0.1, output: 0.15, cacheRead: 0, cacheWrite: 0, total: 0.25 } } };
+					},
+				});
+				pi.registerTool({
+					name: "blocked", label: "Blocked", description: "Permission fixture", exposure: "${exposure}",
+					parameters: { type: "object", properties: {} },
+					async execute() { throw new Error("must not execute"); },
+				});
+				pi.on("tool_call", event => event.toolName === "blocked" ? { block: true, reason: "nested permission denied" } : undefined);
+				pi.on("before_agent_start", () => {
+					pi.registerTool({
+						name: "forbidden", label: "Forbidden", description: "Late tool outside ceiling", exposure: "${exposure}",
+						parameters: { type: "object", properties: {} },
+						async execute() { throw new Error("must not execute"); },
+					});
+				});
+			}`,
+			onRequestTools: tools => declared.push(tools),
+			streamSimple(model, context, turn) {
+				if (turn === 1) return toolCallStream(model, {
+					type: "toolCall", id: "nested-parent", name: "codemode", arguments: { code: `
+						if (typeof models !== "undefined") throw new Error("unexpected classifier/model API");
+						if (ALL_TOOLS.some(t => ["forbidden", "subagent", "subagent_fork"].includes(t.name))) throw new Error("ceiling/exposure leak");
+						const values = await Promise.all([tools.measure({}), tools.measure({})]);
+						let denied = false;
+						try { await tools.blocked({}); } catch (error) { denied = String(error).includes("nested permission denied"); }
+						if (!denied) throw new Error("permission bypass");
+						return values.join(", ");
+					` },
+				});
+				const result = context.messages.find(message => message.role === "toolResult" && message.toolName === "codemode");
+				assert(result?.role === "toolResult");
+				assert.equal(result.isError, false, JSON.stringify(result));
+				assert(result.nestedCalls?.calls.some(call => call.name === "blocked" && call.status === "error"));
+				return scriptedStream(model, "nested work complete");
+			},
+		});
+		mkdirSync(join(agentDir, "agents"), { recursive: true });
+		writeFileSync(join(agentDir, "agents", "native.md"),
+			"---\nname: native\ndescription: Native tools\ntools: codemode, measure, blocked, subagent, subagent_fork\n---\nInspect the task.\n");
+		try {
+			const outcome = await coordinator.delegate(parent, "spawn", {
+				agent: "native", description: "nested execution", prompt: "Inspect it.",
+			}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true });
+			assert.equal(outcome.kind, "foreground");
+			if (outcome.kind !== "foreground") return;
+			assert.equal(outcome.result.output, "nested work complete");
+			assert(declared.every(tools => tools.includes("codemode") && !tools.includes("measure") && !tools.includes("blocked") && !tools.includes("forbidden")));
+			assert.equal(outcome.result.usage.input, 8);
+			assert.equal(outcome.result.usage.output, 6);
+			assert.equal(outcome.result.usage.totalTokens, 14);
+			assert.equal(outcome.result.usage.cost.total, 0.5);
+			assert.equal(outcome.result.usage.turns, 2);
+			const nested = outcome.details.trace.filter(item => item.name === "measure");
+			assert.equal(nested.length, 2);
+			assert(nested.every(item => item.parentToolCallId === "nested-parent" && item.toolCallId?.startsWith("nested-parent/")));
+		} finally { await coordinator.shutdown(); }
+	});
+}
+
+for (const maxIdleRuntimes of [0, 1]) test(`child tool_search declarations survive followup with maxIdleRuntimes=${maxIdleRuntimes}`, async () => {
+	const declared: string[][] = [];
+	const { coordinator, parent, agentDir } = await fixture({
+		childExtension: `export default function (pi) {
+			pi.registerTool({
+				name: "measure", label: "Measure", description: "Measure fixture", exposure: "deferred",
+				parameters: { type: "object", properties: {} },
+				async execute() { return { content: [{ type: "text", text: "measured" }], details: undefined }; },
+			});
+		}`,
+		onRequestTools: tools => declared.push(tools),
+		streamSimple(model, _context, turn) {
+			if (turn === 1) return toolCallStream(model, {
+				type: "toolCall", id: "search-tool", name: "tool_search", arguments: { query: "measure" },
+			});
+			if (turn === 2 || turn === 4) return toolCallStream(model, {
+				type: "toolCall", id: `measure-tool-${turn}`, name: "measure", arguments: {},
+			});
+			return scriptedStream(model, "deferred work complete");
+		},
+	});
+	mkdirSync(join(agentDir, "agents"), { recursive: true });
+	writeFileSync(join(agentDir, "agents", "native.md"),
+		"---\nname: native\ndescription: Deferred tools\ntools: tool_search, measure\n---\nInspect the task.\n");
+	try {
+		await coordinator.configureIdleRuntimes(maxIdleRuntimes);
+		const outcome = await coordinator.delegate(parent, "spawn", {
+			agent: "native", description: "deferred discovery", prompt: "Inspect it.",
+		}, { ...DEFAULT_SETTINGS, runtimeMode: "background", inheritExtensions: true, maxIdleRuntimes });
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable") return;
+		await waitForCompletions(parent, 1);
+		await waitForChildStatus(coordinator, parent, outcome.details.agentId, maxIdleRuntimes ? "idle" : "ready");
+		assert.equal(parentCompletions(parent)[0].output, "deferred work complete");
+		assert(!declared[0].includes("measure"));
+		assert(declared[1].includes("measure"));
+		await coordinator.sendMessage(parent, outcome.details.agentId, "Measure again without searching.");
+		await coordinator.followupTask(parent, outcome.details.agentId);
+		await waitForCompletions(parent, 2);
+		await waitForChildStatus(coordinator, parent, outcome.details.agentId, maxIdleRuntimes ? "idle" : "ready");
+		assert.equal(parentCompletions(parent)[1].output, "deferred work complete");
+		assert.equal(declared.length, 5);
+		assert(declared[3].includes("measure"), "a restored declaration must not require another tool_search");
+	} finally { await coordinator.shutdown(); }
 });
 
 test("one-shot children exclude report even when an inherited extension registers and reactivates it late", async () => {
@@ -2688,7 +2844,7 @@ test("mailbox prompt preflight failure leaves the unclaimed batch pending", asyn
 		modelRuntime.registerProvider("scripted", withoutAuth);
 		await assert.rejects(
 			() => coordinator.followupTask(parent, outcome.details.agentId),
-			/prompt was rejected before acceptance/,
+			/No API key found for scripted/,
 		);
 		const listed = await coordinator.list(parent, "children");
 		const child = listed.find(
@@ -2775,6 +2931,24 @@ export default function transformMailbox(pi) {
 	} finally {
 		await coordinator.shutdown();
 	}
+});
+
+test("foreground delegation rejects an input-handled prompt instead of publishing a successful task", async () => {
+	const { coordinator, parent, messages } = await fixture({
+		childExtension: `export default function (pi) {
+			pi.on("input", () => ({ action: "handled" }));
+		}`,
+	});
+	try {
+		await assert.rejects(
+			coordinator.delegate(parent, "spawn", {
+				agent: "worker", description: "handled task", prompt: "Do not report a fake completion.",
+			}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true }),
+			/handled before a user turn started/,
+		);
+		assert.deepEqual(messages, []);
+		assert.deepEqual(await coordinator.list(parent, "children"), []);
+	} finally { await coordinator.shutdown(); }
 });
 
 test("mailbox rejects an input-handled prompt without claiming its batch", async () => {
@@ -3808,6 +3982,7 @@ test("foreground children hide background lifecycle controls", async () => {
 			},
 			"foreground",
 		);
+		for (const tool of staleDefinitions) assert.equal(tool.exposure, "model-only", tool.name);
 		for (const [toolName, args] of [
 			[
 				"send_message",
@@ -3827,7 +4002,7 @@ test("foreground children hide background lifecycle controls", async () => {
 						args,
 						undefined,
 						undefined,
-						{} as ExtensionContext,
+						{} as ExtensionToolContext,
 					),
 				/foreground-only mode/,
 			);

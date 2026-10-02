@@ -36,9 +36,16 @@ The default bundle keeps its existing tool names, activation, mutation-tool
 suppression, commands, schemas, saved message types and wire formats.
 Unknown or disabled model profiles remain on Pi's native implementation.
 `openai-codex/gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna` have exact Responses
-Lite profiles. Pi 0.87.0 is the package floor; 0.87.1 supplies the Sol/Luna
+Lite profiles. Pi 0.99.1 is the package floor; 0.87.1 first supplied the Sol/Luna
 descriptors. Core composes a stream
 shim without replacing provider authentication, streams, or models.
+
+The separate `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and
+`gpt-6-luna` profiles follow Pi 0.99.1 Standard Responses descriptors. They
+default to SSE, local custom patch and image viewing; remote tools, native
+compaction, prewarm and Fast remain off. Their inheritance stays entirely
+within `openai`; no legacy Lite behavior, account entitlement or billing
+multiplier is inferred from similar names.
 
 All combinations read the same existing configuration:
 
@@ -70,6 +77,14 @@ Standalone clients obtain authentication from Pi's model registry. Without core:
   `directImageApiFallback` setting was explicitly enabled.
 - No endpoint or unsupported model-family capability is guessed.
 - Missing authentication produces a tool error, not an implicit alternate account.
+
+The maintained OpenAI route is `openai`, using either Pi's API-key or ChatGPT
+OAuth login; both default to `/v1/responses`. `openai-codex` is frozen,
+deprecated compatibility, not an automatic OAuth fallback. Plugin routing
+overrides apply only to that legacy provider. Main requests consume Pi's
+prepared auth, while auxiliary requests honor model-registry auth and its
+resolved base URL. Even the explicit direct image fallback no longer reads
+a separate environment key or forces another provider's endpoint.
 
 The internal Lite and reserved endpoints remain unsupported compatibility
 surfaces. Fixture success is not proof that a real account may access them.
@@ -176,9 +191,9 @@ and `latest` pointing to their sole initial alpha; that bounded exception is not
 stable-release acceptance. Trusted-publisher configuration is not proof of a
 successful OIDC publish. See [activation evidence](audits/codex-bootstrap-activation.md)
 and [RELEASING.md](../RELEASING.md).
-The public package floor is Pi 0.87.0 and the development target is 0.87.1.
-The private tree-continue hook accepts exactly those two versions but
-remains private/blocked. See
+The public package floor and development target are Pi 0.99.1.
+The private tree-continue hook still accepts only 0.87.0/0.87.1 and is disabled
+on the current baseline; it remains private/blocked. See
 [Pi compatibility](pi-compatibility.md) for verification commands and limits.
 
 The [integration review](audits/codex-integration.md) additionally checks cached

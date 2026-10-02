@@ -4,6 +4,7 @@ import { currentCodexTurn, resolveCodexRequestIdentity } from "@oai404iao/pi-cod
 import { createWebSearchToolDefinition } from "./tools/web-search.js";
 import { createWebSearchCapture } from "./tools/web-search/capture.js";
 import { registerWebSearchActivityRenderer } from "./tools/web-search/render.js";
+import { loadSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 export default function codexWebSearch(pi: ExtensionAPI): void {
 	const broker = ensureCodexServices(pi);
@@ -13,14 +14,14 @@ export default function codexWebSearch(pi: ExtensionAPI): void {
 		registerRenderers: () => registerWebSearchActivityRenderer(pi),
 		streamEffects: () => ({ createEventObserver: createWebSearchCapture }),
 	});
-	addPackageTool(broker, "web_search", () => {
-		const definition = createWebSearchToolDefinition({
-			getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
-			getRequestIdentity: sessionId => resolveCodexRequestIdentity(sessionId, undefined, "turn"),
-			hasProviderRuntime: () => broker.coreEnabled,
-		});
-		const parameters = { ...definition.parameters };
-		pi.registerTool({ ...definition, parameters } as never);
-		broker.ownedTools.set("web_search", { parameters, description: definition.description });
+	const definition = createWebSearchToolDefinition({
+		getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
+		getRequestIdentity: sessionId => loadSettings().codexRequestExtensions ? resolveCodexRequestIdentity(sessionId, undefined, "turn") : undefined,
+		hasProviderRuntime: () => broker.coreEnabled,
+	});
+	const parameters = { ...definition.parameters };
+	broker.ownedTools.set("web_search", { parameters, description: definition.description });
+	addPackageTool(broker, "web_search", exposure => {
+		pi.registerTool({ ...definition, parameters, exposure } as never);
 	});
 }

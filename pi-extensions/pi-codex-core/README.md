@@ -2,13 +2,39 @@
 
 See the package guide below for release status; source edits do not publish artifacts.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
+
+`codexRequestExtensions` defaults to `true`. Turning it off preserves Standard
+tool/replay handling but stops generated Codex metadata, separates WS caches,
+blocks Lite requests and disables native compaction. Existing opaque checkpoints
+are preserved and cannot silently become text summaries. Endpoint capability
+allowlists and explicit session-local rejections are shared through runtime;
+neither selects alternate implementations nor changes Pi authentication.
+
+`apply_patch` remains callable through native codemode while active.
+`view_image` is model-only so image content reaches the model directly.
+Scripts receive patch data as `{ summary, files }`; failures reject rather than
+returning success-shaped data. Normal model-facing text and rendering are unchanged.
+For `tool_result` hooks, Pi passes retained structured data through even with
+`isError: true`; a policy that requires script rejection must also replace
+`content` without supplying `structuredContent`.
+
+While native `codemode` or `tool_search` is active, speculative WebSocket
+prewarm is skipped because Pi does not expose the final `prepareLoadout` tool
+projection. Compaction falls back to Pi's text summarization only when no opaque
+native checkpoint exists. Existing native checkpoints are preserved and
+recompaction is refused: disable both orchestration tools and retry `/compact`
+on the original model, or navigate before the checkpoint. Other third-party
+`prepareLoadout` implementations are not covered by this built-in-name guard.
 
 Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
 `apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,
 including `/codex-minimal-tools` and `/fast`. Unknown models remain native.
-It supplies the Astra descriptor only when the Pi floor catalog lacks it; newer
-Pi catalogs retain their native provider model list.
+Pi supplies all descriptors; the extension does not register replacement models.
+The exact `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna`
+profiles use Standard SSE with local custom patch and image viewing. Remote
+search/image generation, native compaction, prewarm and Fast stay off unless
+explicitly configured. Their legacy `openai-codex` counterparts remain separate.
 
 Depends only on the shared runtime and its transport libraries; it does not
 install web-search or image-generation clients/presentation. Protocol replay of

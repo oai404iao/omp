@@ -11,6 +11,16 @@ import { CODEX_TOOL_CALL_PROVIDERS, WEB_SEARCH_RESULTS_INCLUDE, WEB_SEARCH_SOURC
 import { stripResponsesLiteImageDetails } from "./lite.js";
 import { clampCodexThinkingLevel, clampReasoningEffort } from "./reasoning.js";
 import { type ResponsesBody, type NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
+import type { ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+import { clampThinkingLevel } from "@earendil-works/pi-ai";
+
+export function requestBodyToolOptions(settings: ResolvedCodexModelSettings) {
+	return {
+		codexRequestExtensions: settings.codexRequestExtensions,
+		imageGeneration: settings.imageGenerationImplementation ?? false,
+		removeWebSearch: settings.endpointDisabledWebSearch,
+	} as const;
+}
 
 function hasNativeWebSearchTool(body: ResponsesBody): boolean {
 	return Array.isArray(body.tools) && body.tools.some((tool) => Boolean(tool) && typeof tool === "object" && (tool as { type?: unknown }).type === "web_search");
@@ -30,9 +40,14 @@ export function buildRequestBody<TApi extends Api>(
 	options?: SimpleStreamOptions & {
 		ownsNativeTool?: NativeToolOwnership;
 		imageGeneration?: false | "hosted" | "standalone";
+		codexRequestExtensions?: boolean;
+		removeWebSearch?: boolean;
 	},
 ): ResponsesBody {
-	const requestIdentity = resolveCodexRequestIdentity(
+	if (options?.codexRequestExtensions === false && profile.responsesMode === "lite") {
+		throw new Error("Responses Lite requires codexRequestExtensions:true.");
+	}
+	const requestIdentity = options?.codexRequestExtensions === false ? undefined : resolveCodexRequestIdentity(
 		options?.sessionId,
 		options?.metadata as Record<string, unknown> | undefined,
 		// Only the session-scoped prompt cache key is needed here. Do not
@@ -56,6 +71,7 @@ export function buildRequestBody<TApi extends Api>(
 		}>();
 		for (const tool of tools as Array<Record<string, unknown>>) {
 			if (typeof tool.name !== "string") continue;
+			if (tool.name === "web_search" && options?.ownsNativeTool?.("web_search") === true && options.removeWebSearch) continue;
 			if (tool.name === "image_generation"
 				&& options?.ownsNativeTool?.("image_generation") === true
 				&& options.imageGeneration === false) {
@@ -122,13 +138,18 @@ export function buildRequestBody<TApi extends Api>(
 		if (tools.length > 0) body.tools = tools;
 	}
 
-	// The Codex ChatGPT-backed endpoint rejects output-token cap fields with
-	// `Unsupported parameter: max_output_tokens`. Pi's branch summarizer passes
-	// `maxTokens`, so forwarding it breaks `/tree` summaries and extensions that
-	// use `ctx.navigateTree(..., { summarize: true })`.
-
-	if ((options as { temperature?: number } | undefined)?.temperature !== undefined) {
-		body.temperature = (options as { temperature?: number }).temperature;
+	// Match Pi 0.99.1's private isChatGPTSignIn predicate, not an auth selector.
+	// Proxies and header-only auth must not be classified by token shape alone.
+	const chatGPTSignIn = model.provider === "openai"
+		&& model.baseUrl === "https://api.openai.com/v1"
+		&& options?.apiKey !== undefined
+		&& !options.apiKey.startsWith("sk-");
+	if (options?.temperature !== undefined && !chatGPTSignIn) {
+		body.temperature = options.temperature;
+	}
+	if (model.api === "openai-responses" && !lite && !chatGPTSignIn
+		&& (model as Model<"openai-responses">).compat?.supportsMaxOutputTokens !== false && options?.maxTokens) {
+		body.max_output_tokens = Math.max(16, options.maxTokens);
 	}
 
 	const serviceTier = (options as { serviceTier?: string } | undefined)?.serviceTier;
@@ -137,7 +158,9 @@ export function buildRequestBody<TApi extends Api>(
 	}
 
 	const clampedReasoning = options?.reasoning
-		? clampCodexThinkingLevel(model as Model<Api>, options.reasoning)
+		? profile.responsesMode === "standard" && model.api === "openai-responses"
+			? clampThinkingLevel(model, options.reasoning)
+			: clampCodexThinkingLevel(model as Model<Api>, options.reasoning)
 		: undefined;
 	const reasoningEffort = clampedReasoning === undefined || clampedReasoning === "off"
 		? model.thinkingLevelMap?.off ?? undefined

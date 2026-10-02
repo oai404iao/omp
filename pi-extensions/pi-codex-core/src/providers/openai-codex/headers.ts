@@ -7,6 +7,7 @@ import { isProviderHeaderSuppressed, mergeProviderHeaders, providerHeaderDirecti
 import { CODEX_REMOTE_COMPACTION_V2_FEATURE, OPENAI_BETA_RESPONSES_WEBSOCKETS, X_CODEX_BETA_FEATURES, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE } from "./constants.js";
 import { buildCodexTurnMetadataJson } from "./request-metadata.js";
 import { dynamicImport } from "./runtime.js";
+import type { ResponsesProtocol } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 
 let _os: { platform(): string; release(): string; arch(): string } | null = null;
 
@@ -37,13 +38,14 @@ function buildBaseCodexHeaders(
 	additionalHeaders: ProviderHeaders | undefined,
 	accountId: string | undefined,
 	token: string,
+	codexHeaders = true,
 ): Headers {
 	const headers = mergeProviderHeaders(modelHeaders, additionalHeaders);
 	if (providerHeaderDirective(additionalHeaders, "authorization") === undefined && token) {
 		setProviderGeneratedHeader(headers, "Authorization", `Bearer ${token}`);
 	}
 	if (accountId) setProviderDefaultHeader(headers, "chatgpt-account-id", accountId);
-	setProviderDefaultHeader(headers, "originator", "pi");
+	if (codexHeaders) setProviderDefaultHeader(headers, "originator", "pi");
 	setProviderDefaultHeader(
 		headers,
 		"User-Agent",
@@ -71,7 +73,16 @@ function applyWireIdentityHeaders(
 	sessionId: string | undefined,
 	threadId: string | undefined,
 	requestIdentity?: CodexRequestIdentity,
+	codexRequestExtensions = true,
+	endpoint: ResponsesProtocol = "openai",
 ): void {
+	if (!codexRequestExtensions) {
+		if (sessionId) {
+			setProviderDefaultHeader(headers, endpoint === "codex" ? "session-id" : "session_id", sessionId);
+			setProviderDefaultHeader(headers, "x-client-request-id", sessionId);
+		}
+		return;
+	}
 	const wire = requestIdentity ?? wireIdentityFor(sessionId, threadId);
 	if (!wire) return;
 	setProviderGeneratedHeader(headers, "session-id", wire.sessionId);
@@ -116,16 +127,19 @@ export function buildSSEHeaders(
 	profile: CodexRequestProfile,
 	threadId?: string,
 	requestIdentity?: CodexRequestIdentity,
+	codexRequestExtensions = true,
+	endpoint: ResponsesProtocol = "codex",
 ): Headers {
-	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token);
-	setProviderDefaultHeader(headers, "OpenAI-Beta", "responses=experimental");
+	const codexHeaders = codexRequestExtensions || endpoint === "codex";
+	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token, codexHeaders);
+	if (codexHeaders) setProviderDefaultHeader(headers, "OpenAI-Beta", "responses=experimental");
 	setProviderDefaultHeader(headers, "accept", "text/event-stream");
 	setProviderDefaultHeader(headers, "content-type", "application/json");
-	if (profile.responsesMode === "lite") {
+	if (codexRequestExtensions && profile.responsesMode === "lite") {
 		setProviderDefaultHeader(headers, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
 	}
 
-	applyWireIdentityHeaders(headers, sessionId, threadId, requestIdentity);
+	applyWireIdentityHeaders(headers, sessionId, threadId, requestIdentity, codexRequestExtensions, endpoint);
 
 	return headers;
 }
@@ -144,7 +158,7 @@ export function applyConfiguredResponsesFeatureHeaders(
 	settings: ResolvedCodexModelSettings,
 	_model: Model<Api>,
 ): Headers {
-	if (settings.compactionMode === "responses") {
+	if (settings.codexRequestExtensions && settings.compactionMode === "responses") {
 		appendCommaSeparatedHeader(
 			headers,
 			X_CODEX_BETA_FEATURES,
@@ -162,13 +176,21 @@ export function buildWebSocketHeaders(
 	sessionId: string,
 	threadId = sessionId,
 	requestIdentity?: CodexRequestIdentity,
+	codexRequestExtensions = true,
+	endpoint: ResponsesProtocol = "codex",
 ): Headers {
-	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token);
+	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token, codexRequestExtensions || endpoint === "codex");
 	headers.delete("accept");
 	headers.delete("content-type");
-	headers.delete("OpenAI-Beta");
-	headers.delete("openai-beta");
+	if (codexRequestExtensions) {
+		headers.delete("OpenAI-Beta");
+		headers.delete("openai-beta");
+	}
 	setProviderDefaultHeader(headers, "OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
+	if (!codexRequestExtensions) {
+		applyWireIdentityHeaders(headers, sessionId, undefined, undefined, false, endpoint);
+		return headers;
+	}
 	setProviderDefaultHeader(headers, "x-client-request-id", threadId);
 	setProviderDefaultHeader(headers, "session-id", sessionId);
 	setProviderDefaultHeader(headers, "thread-id", threadId);
@@ -210,8 +232,10 @@ export function buildJsonHeaders(
 	apiKey: string,
 	sessionId?: string,
 	requestIdentity?: CodexRequestIdentity,
+	codexRequestExtensions = true,
+	endpoint: ResponsesProtocol = "codex",
 ): Headers {
-	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, apiKey);
+	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, apiKey, codexRequestExtensions || endpoint === "codex");
 	setProviderDefaultHeader(headers, "accept", "application/json");
 	setProviderDefaultHeader(headers, "content-type", "application/json");
 	applyWireIdentityHeaders(
@@ -219,6 +243,8 @@ export function buildJsonHeaders(
 		sessionId,
 		requestIdentity?.threadId ?? sessionId,
 		requestIdentity,
+		codexRequestExtensions,
+		endpoint,
 	);
 	return headers;
 }

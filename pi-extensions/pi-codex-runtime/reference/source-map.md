@@ -13,6 +13,17 @@ reserved-tool or grammar fingerprints.
 
 ## GPT-6 Astra delta
 
+This section describes the frozen legacy Codex profile. The independent
+modern OpenAI profiles are recorded in
+`provenance/pi-openai-0991-gpt6.json`: Pi 0.99.1's shipped
+`dist/providers/data/openai.json` (SHA-256
+`ca5ec1028efc512502591bf2562a2a6dc330f26a5f4c4a08c8a149a43c5bd7da`)
+and its generator at `d86654abb8862e201933517d6f1fce9f88dd117f`.
+The generated data is not tracked in the upstream Git tree; the installed,
+locked Pi package supplies the audited bytes. It verifies exact chat model
+IDs, Standard Responses, grammar compatibility and image input, not Codex
+Lite or hosted/standalone service entitlements.
+
 | Source | Evidence |
 | --- | --- |
 | `codex-rs/models-manager/models.json` | Declares the Astra context limits, reasoning levels/defaults, modalities, Responses Lite mode, WebSocket preference, freeform patch support, service tier, and experimental-context capability. |
@@ -71,6 +82,14 @@ blob IDs and SHA-256 hashes for this delta.
 | `openai/resources/responses/responses.d.ts` | Defines `response.web_search_call.in_progress`, `.searching`, and `.completed`, each keyed by `item_id` and `output_index`. |
 
 ## Request construction
+
+The OpenAI auth migration separately follows MIT-licensed Pi 0.99.1 at
+`d86654abb8862e201933517d6f1fce9f88dd117f`: `packages/ai/src/providers/openai.ts`,
+`packages/ai/src/api/openai-responses.ts`, and
+`packages/ai/src/auth/resolve.ts`. Core's request-body adapter matches the
+official-endpoint/token guard for ChatGPT field restrictions and the standard
+output-token compatibility/minimum. This is not a credential selector.
+Pi retains ownership of login, refresh, credential priority and resolved auth.
 
 | Source | Evidence |
 | --- | --- |

@@ -93,11 +93,42 @@ const marker = {
 	redacted: true,
 };
 
+for (const projection of ["codemode", "tool_search"]) for (const version of [undefined, 3, 4]) {
+	test(`${projection} falls back only without an opaque checkpoint (version=${version})`, async () => {
+		await withCodexSettings({ compactionMode: "responses" }, async cwd => {
+			const handlers: Record<string, Function> = {};
+			registerNativeCompaction({
+				on: (name: string, handler: Function) => { handlers[name] = handler; },
+				getActiveTools: () => ["read", projection], getAllTools: () => [], getThinkingLevel: () => "off",
+			} as any);
+			const branchEntries = version === undefined ? [] : [compactionEntry("responses", [item], {
+				version, ...(version === 4 ? { checkpointId: "fixture-checkpoint" } : {}),
+			})];
+			const before = structuredClone(branchEntries);
+			let authCalls = 0;
+			const warnings: string[] = [];
+			const result = await handlers.session_before_compact({
+				branchEntries, preparation: { tokensBefore: 100 }, signal: new AbortController().signal,
+			}, {
+				cwd, model,
+				modelRegistry: { getApiKeyAndHeaders: () => { authCalls++; throw new Error("unexpected native auth"); } },
+				ui: { notify: (message: string) => warnings.push(message) },
+			});
+			assert.equal(authCalls, 0);
+			assert.deepEqual(branchEntries, before);
+			assert.deepEqual(result, version === undefined ? undefined : { cancel: true });
+			if (version === undefined) assert.deepEqual(warnings, []);
+			else assert.match(warnings[0], /checkpoint is preserved/);
+		});
+	});
+}
+
 test("native compaction requests replay persisted sections and scope forced prompts to the active run", async () => {
 	await withCodexSettings({ compactionMode: "responses", openaiTransport: "sse" }, async (cwd) => {
 		const previousFetch = globalThis.fetch;
 		const bodies: any[] = [];
-		globalThis.fetch = async (_url, init) => {
+		globalThis.fetch = async (url, init) => {
+			assert.equal(String(url), "https://resolved.invalid/v2/responses");
 			bodies.push(JSON.parse(String(init?.body)));
 			const event = { type: "response.completed", response: { id: "compact", status: "completed", output: [item] } };
 			return new Response(`data: ${JSON.stringify(event)}\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -115,7 +146,7 @@ test("native compaction requests replay persisted sections and scope forced prom
 			};
 			const ctx = {
 				cwd, model: { ...model, baseUrl: "https://fixture.invalid/v1" }, getSystemPrompt: () => "STALE_BASE",
-				modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "fixture", headers: {} }) },
+				modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "fixture", headers: {}, baseUrl: "https://resolved.invalid/v2" }) },
 				sessionManager: { getLeafId: () => "user", getSessionId: () => "compaction-transcript" },
 				ui: { notify: (message: string) => assert.fail(message) },
 			};

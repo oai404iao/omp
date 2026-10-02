@@ -5,6 +5,7 @@ import { sleep } from "../../providers/openai-codex/retry.js";
 import { fetchWithResponseHeaderTimeout } from "../../providers/openai-codex/sse.js";
 import { type ResponsesBody } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { collectCodexCompactionOutput } from "./collect.js";
+import { unsupportedEndpointCapabilities } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 
 export async function postJsonWithRetries(
 	url: string,
@@ -32,7 +33,8 @@ export async function postJsonWithRetries(
 				return parsed as Record<string, unknown>;
 			}
 			const errorText = await response.text();
-			if (attempt < MAX_RETRIES && isRetryableError(response.status, errorText)) {
+			if (attempt < MAX_RETRIES && isRetryableError(response.status, errorText)
+				&& !unsupportedEndpointCapabilities(["compaction.responses-compact"], { status: response.status, responseBody: errorText }).length) {
 				await sleep(BASE_DELAY_MS * 2 ** attempt, signal);
 				continue;
 			}
@@ -40,7 +42,8 @@ export async function postJsonWithRetries(
 				status: response.status,
 				statusText: response.statusText,
 			}));
-			throw new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message));
+			throw Object.assign(new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message)),
+				{ status: response.status, responseBody: errorText });
 		} catch (error) {
 			if (error instanceof NonRetryableProviderError || error instanceof ProviderProtocolError) throw error;
 			if (signal?.aborted) throw new Error("Request was aborted");
@@ -77,7 +80,8 @@ export async function requestCodexCompactionTrigger(
 			if (response.ok) return await collectCodexCompactionOutput(response, sessionKey, signal);
 
 			const errorText = await response.text();
-			if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
+			if (attempt < maxRetries && isRetryableError(response.status, errorText)
+				&& !unsupportedEndpointCapabilities(["compaction.responses"], { status: response.status, responseBody: errorText }).length) {
 				await sleep(BASE_DELAY_MS * 2 ** attempt, signal);
 				continue;
 			}
@@ -85,10 +89,12 @@ export async function requestCodexCompactionTrigger(
 				status: response.status,
 				statusText: response.statusText,
 			}));
-			throw new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message));
+			throw Object.assign(new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message)),
+				{ status: response.status, responseBody: errorText });
 		} catch (error) {
 			if (error instanceof NonRetryableProviderError || error instanceof ProviderProtocolError) throw error;
 			if (error instanceof ProviderResponseError && isTerminalQuotaError(`${error.code ?? ""} ${error.errorType ?? ""} ${error.message}`)) throw error;
+			if (error instanceof ProviderResponseError && /^unsupported_/.test(error.code ?? "")) throw error;
 			if (signal?.aborted) throw new Error("Request was aborted");
 			lastError = error instanceof Error ? error : new Error(String(error));
 			if (attempt < maxRetries) {

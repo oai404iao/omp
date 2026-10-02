@@ -1,4 +1,5 @@
 import { webSearchToolSchema, type WebSearchInput } from "./web-search/schema.js";
+import { webSearchOutputSchema } from "./web-search/output.js";
 export { webSearchToolSchema } from "./web-search/schema.js";
 export type { SearchQuery, WebSearchInput } from "./web-search/schema.js";
 import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -8,9 +9,11 @@ import {
 	buildCodexJsonHeaders,
 	hasCodexRequestAuth,
 	resolveCodexApiEndpoint,
+	withResolvedAuthBaseUrl,
 } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { glyphs, truncateText } from "@oai404iao/pi-codex-runtime/internal/glyphs";
-import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+import { applyEndpointPolicy, loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+import { checkEndpointResponse, rememberResolvedEndpoint } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 import {
 	resolveCodexRequestIdentity,
 	type CodexRequestIdentity,
@@ -21,7 +24,7 @@ interface WebSearchToolContext {
 	model?: Model<Api>;
 	modelRegistry?: {
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			| { ok: true; apiKey?: string; headers?: ProviderHeaders }
+			| { ok: true; apiKey?: string; headers?: ProviderHeaders; baseUrl?: string }
 			| { ok: false; error: string }
 		>;
 	};
@@ -244,7 +247,7 @@ export async function standaloneWebSearch(
 	signal?.throwIfAborted();
 	const model = ctx.model;
 	if (!model || !ctx.modelRegistry) throw new Error("No active model is available for standalone web search.");
-	const settings = loadModelSettings(model, ctx.cwd);
+	let settings = loadModelSettings({ ...model, baseUrl: undefined }, ctx.cwd);
 	if (!settings.enabled) throw new Error("pi-codex-minimal-tools is disabled.");
 	if (settings.webSearchImplementation !== "standalone") {
 		throw new Error(`Standalone web search is not enabled for ${model.provider}/${model.id}.`);
@@ -258,9 +261,8 @@ export async function standaloneWebSearch(
 	if (input.image_query?.length && !contentTypes.includes("image")) {
 		throw new Error("Image search is disabled by the current model profile.");
 	}
-	const url = resolveCodexApiEndpoint(model.baseUrl, settings.apiKeyMode, "alpha/search");
 	const piSessionId = ctx.sessionManager?.getSessionId();
-	const identity = invocation.identity
+	const identity = !settings.codexRequestExtensions ? undefined : invocation.identity
 		?? resolveCodexRequestIdentity(
 			piSessionId,
 			invocation.turnId ? { turn_id: invocation.turnId } : undefined,
@@ -290,15 +292,21 @@ export async function standaloneWebSearch(
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	signal?.throwIfAborted();
 	if (!auth.ok) throw new Error(auth.error);
+	const requestModel = withResolvedAuthBaseUrl(model, auth);
+	rememberResolvedEndpoint(model, requestModel, piSessionId);
+	settings = applyEndpointPolicy(settings, requestModel, piSessionId);
+	if (settings.webSearchImplementation !== "standalone") throw new Error("Standalone web search is disabled for this endpoint.");
+	const url = resolveCodexApiEndpoint(auth.baseUrl ?? model.baseUrl, settings.responsesEndpoint, "alpha/search");
 	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth: { apiKey: auth.apiKey, headers: auth.headers } })) {
 		throw new Error(`No request authentication for provider: ${model.provider}`);
 	}
 	const response = await fetch(url, {
 		method: "POST",
 		headers: buildCodexJsonHeaders({
+			codexRequestExtensions: settings.codexRequestExtensions,
 			modelHeaders: model.headers,
 			auth: { apiKey: auth.apiKey, headers: auth.headers },
-			apiKeyMode: settings.apiKeyMode,
+			endpoint: settings.responsesEndpoint,
 			...(turnMetadata
 				? { extraHeaders: { "x-codex-turn-metadata": turnMetadata } }
 				: {}),
@@ -318,17 +326,17 @@ export async function standaloneWebSearch(
 		}),
 		signal,
 	});
-	if (!response.ok) {
-		throw new Error(`Standalone web search failed: HTTP ${response.status}: ${await response.text()}`);
-	}
+	await checkEndpointResponse(response, requestModel, piSessionId, ["webSearch.standalone"], signal);
 	const result = await response.json() as StandaloneSearchResponse;
 	signal?.throwIfAborted();
 	if (typeof result.output !== "string" || !result.output.trim()) {
 		throw new Error("Standalone web search returned no output.");
 	}
 	assertStandaloneSearchOutput(result.output, input);
+	if (result.results !== undefined && !Array.isArray(result.results)) throw new Error("Standalone web search returned invalid result metadata.");
 	return {
 		content: [{ type: "text", text: result.output }],
+		structuredContent: { output: result.output, results: result.results ?? [] },
 		details: {
 			mode: "standalone",
 			results: (result.results ?? []) as StandaloneWebSearchResult[],
@@ -350,6 +358,7 @@ export function createWebSearchToolDefinition(options: {
 		promptSnippet: "Search the web when current information or citations are needed.",
 		promptGuidelines: ["Use web_search when current web information or cited sources are needed."],
 		parameters: webSearchToolSchema,
+		outputSchema: webSearchOutputSchema,
 		renderCall(input: WebSearchInput, theme: any, context: { cwd?: string }) {
 			return renderStandaloneWebSearchCall(input ?? {}, theme, context?.cwd);
 		},
@@ -368,7 +377,7 @@ export function createWebSearchToolDefinition(options: {
 			_onUpdate: unknown,
 			ctx: WebSearchToolContext,
 		) {
-			const settings = loadModelSettings(ctx.model, ctx.cwd);
+			const settings = loadModelSettings(ctx.model ? { ...ctx.model, baseUrl: undefined } : undefined, ctx.cwd);
 			if (settings.webSearchImplementation === "standalone") {
 				const sessionId = ctx.sessionManager?.getSessionId();
 				const identity = options.getRequestIdentity?.(sessionId);
@@ -382,6 +391,7 @@ export function createWebSearchToolDefinition(options: {
 				throw new Error("Hosted web_search requires pi-codex-core. Use a catalog-supported standalone profile for independent execution.");
 			}
 			return {
+				isError: true,
 				content: [{ type: "text", text: "web_search is hosted-provider-first for this model profile and should be rewritten before execution." }],
 				details: { phase: "native-provider", nativeTool: "web_search" },
 			};

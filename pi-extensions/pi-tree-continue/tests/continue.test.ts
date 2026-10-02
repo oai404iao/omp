@@ -24,8 +24,10 @@ import {
 	type Model,
 	type ToolCall,
 } from "@earendil-works/pi-ai";
+import { supportsTestedPiVersion } from "../src/index.js";
 
 const roots: string[] = [];
+const auditedVersion = { skip: supportsTestedPiVersion() ? false : "private hook is intentionally disabled on this Pi version" };
 
 after(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -217,7 +219,7 @@ function seedToolResultTurn(harness: Harness, trailing?: string): string {
 	return toolResultId;
 }
 
-test("/continue resumes from a toolResult without appending a user message", async () => {
+test("/continue resumes from a toolResult without appending a user message", auditedVersion, async () => {
 	const fixture = await harness();
 	const toolResultId = seedToolResultTurn(fixture);
 	const navigation = await fixture.session.navigateTree(toolResultId, { summarize: false });
@@ -247,7 +249,7 @@ test("/continue resumes from a toolResult without appending a user message", asy
 	assert.equal(fixture.session.isStreaming, false);
 });
 
-test("/continue uses canonical edits without adding a user message", async () => {
+test("/continue uses canonical edits without adding a user message", auditedVersion, async () => {
 	const f = await harness();
 	try {
 		const result = seedToolResultTurn(f);
@@ -264,7 +266,7 @@ test("/continue uses canonical edits without adding a user message", async () =>
 	} finally { f.session.dispose(); }
 });
 
-test("/continue lets Pi finish a before-settle continuation before notifying settled handlers", async () => {
+test("/continue lets Pi finish a before-settle continuation before notifying settled handlers", auditedVersion, async () => {
 	const observed: string[] = [];
 	let once = false;
 	const f = await harness({ factory: (pi) => {
@@ -291,7 +293,7 @@ test("/continue lets Pi finish a before-settle continuation before notifying set
 	} finally { f.session.dispose(); }
 });
 
-test("/continue skips an empty assistant error after the tool result", async () => {
+test("/continue skips an empty assistant error after the tool result", auditedVersion, async () => {
 	const fixture = await harness();
 	const toolResultId = seedToolResultTurn(fixture);
 	fixture.session.sessionManager.appendMessage({
@@ -319,7 +321,7 @@ test("/continue skips an empty assistant error after the tool result", async () 
 	assert(!fixture.contexts[0].messages.some((message) => message.role === "assistant" && message.stopReason === "error"));
 });
 
-test("/continue refuses to abandon normal entries without --force", async () => {
+test("/continue refuses to abandon normal entries without --force", auditedVersion, async () => {
 	const fixture = await harness();
 	seedToolResultTurn(fixture, "normal assistant answer");
 
@@ -335,7 +337,7 @@ test("/continue refuses to abandon normal entries without --force", async () => 
 	]);
 });
 
-test("/continue --force rolls back to the latest toolResult", async () => {
+test("/continue --force rolls back to the latest toolResult", auditedVersion, async () => {
 	const fixture = await harness();
 	const toolResultId = seedToolResultTurn(fixture, "normal assistant answer");
 
@@ -351,7 +353,7 @@ test("/continue --force rolls back to the latest toolResult", async () => {
 	assert.doesNotMatch(JSON.stringify(fixture.contexts[0].messages), /normal assistant answer/);
 });
 
-test("/continue retains system updates and their tool loadout before a failed response", async () => {
+test("/continue retains system updates and their tool loadout before a failed response", auditedVersion, async () => {
 	const fixture = await harness();
 	seedToolResultTurn(fixture);
 	fixture.session.sessionManager.appendMessage({
@@ -380,7 +382,7 @@ test("/continue retains system updates and their tool loadout before a failed re
 });
 
 for (const existingSystem of [false, true]) {
-	test(`/continue cancellation during retry resets the run (existing system=${existingSystem})`, async () => {
+	test(`/continue cancellation during retry resets the run (existing system=${existingSystem})`, auditedVersion, async () => {
 		let fail = true;
 		const fixture = await harness({ failRequest: () => { const value = fail; fail = false; return value; } });
 		if (existingSystem) fixture.session.sessionManager.appendMessage({
@@ -412,7 +414,7 @@ for (const existingSystem of [false, true]) {
 	});
 }
 
-test("/continue settles after cancellation and can start another message-free run", async () => {
+test("/continue settles after cancellation and can start another message-free run", auditedVersion, async () => {
 	const fixture = await harness();
 	const target = seedToolResultTurn(fixture);
 	await fixture.session.navigateTree(target, { summarize: false });
@@ -429,7 +431,7 @@ test("/continue settles after cancellation and can start another message-free ru
 	assert.equal(fixture.session.messages.filter((message) => message.role === "user").length, 1);
 });
 
-test("/continue restores prompt preparation before settled handlers start a new user turn", async () => {
+test("/continue restores prompt preparation before settled handlers start a new user turn", auditedVersion, async () => {
 	let started = false;
 	const fixture = await harness({ factory: (pi) => {
 		pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.next = "NEW_USER_SECTION"; });

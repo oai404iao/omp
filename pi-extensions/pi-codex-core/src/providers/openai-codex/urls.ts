@@ -1,24 +1,14 @@
-import { DEFAULT_CODEX_BASE_URL } from "./constants.js";
+import { resolveResponsesUrl, type ResponsesProtocol } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 
-export function resolveCodexUrl(baseUrl: string | undefined, options?: { apiKeyMode?: boolean }): string {
-	const raw = baseUrl && baseUrl.trim().length > 0 ? baseUrl : DEFAULT_CODEX_BASE_URL;
-	const normalized = raw.replace(/\/+$/, "");
-	if (options?.apiKeyMode) {
-		if (normalized.endsWith("/responses")) return normalized;
-		return `${normalized}/responses`;
-	}
-	if (normalized.endsWith("/codex/responses")) return normalized;
-	if (normalized.endsWith("/codex")) return `${normalized}/responses`;
-	return `${normalized}/codex/responses`;
-}
+export { resolveResponsesUrl };
 
-export function resolveResponsesWebSocketUrl(baseUrl: string | undefined, options?: { apiKeyMode?: boolean }): string {
-	const url = new URL(resolveCodexUrl(baseUrl, options));
+export function resolveResponsesWebSocketUrl(baseUrl: string | undefined, endpoint: ResponsesProtocol): string {
+	const url = new URL(resolveResponsesUrl(baseUrl, endpoint));
 	if (url.protocol === "https:") url.protocol = "wss:";
 	if (url.protocol === "http:") url.protocol = "ws:";
 	return url.toString();
 }
 
-export function compactUrl(baseUrl: string | undefined, apiKeyMode: boolean): string {
-	return `${resolveCodexUrl(baseUrl, { apiKeyMode }).replace(/\/+$/, "")}/compact`;
+export function compactUrl(baseUrl: string | undefined, endpoint: ResponsesProtocol): string {
+	return `${resolveResponsesUrl(baseUrl, endpoint)}/compact`;
 }

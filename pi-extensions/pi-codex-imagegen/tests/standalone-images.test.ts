@@ -35,6 +35,25 @@ function jwt(): string {
 	return `header.${payload}.signature`;
 }
 
+test("standalone OpenAI images honor Pi's resolved OAuth endpoint without legacy account extraction", async () => withAgentDir(async cwd => {
+	const model = {
+		provider: "openai", api: "openai-responses", id: "gpt-5.6-sol",
+		baseUrl: "https://unused.invalid/v1", headers: {}, input: ["text", "image"],
+	} as any;
+	globalThis.fetch = async (url, init) => {
+		assert.equal(String(url), "https://resolved.invalid/v2/images/generations");
+		assert.equal(new Headers(init?.headers).get("authorization"), "Bearer chatgpt-token");
+		assert.equal(new Headers(init?.headers).get("chatgpt-account-id"), null);
+		return Response.json({ data: [{ b64_json: Buffer.from("fixture").toString("base64") }] });
+	};
+	await standaloneImageGeneration({ prompt: "fixture" }, {
+		cwd, model, modelRegistry: { async getApiKeyAndHeaders() {
+			return { ok: true, apiKey: "chatgpt-token", baseUrl: "https://resolved.invalid/v2/responses" };
+		} },
+	}, loadModelSettings(model, cwd));
+	assert.equal(model.baseUrl, "https://unused.invalid/v1");
+}));
+
 test("standalone image generation uses the active provider Images endpoint and saves PNG", async () => withAgentDir(async (agentDir) => {
 	const cwd = mkdtempSync(join(tmpdir(), "pi-codex-standalone-image-output-"));
 	const model = {

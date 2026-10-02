@@ -175,12 +175,16 @@ test("standalone web search surfaces a backend no-tool-response sentinel as an e
 	);
 }));
 
-test("standalone web search supports API-key endpoints for user-added profiles", async () => withAgentDir(async (agentDir) => {
+test("standalone web search uses Pi's resolved endpoint and header-only auth for user-added profiles", async () => withAgentDir(async (agentDir) => {
 	writeModels(agentDir, [{
 		id: "custom/search-model",
 		extends: "openai/gpt-5.6-sol",
-		responses: { endpoint: "openai" },
+		responses: { endpoint: "codex" },
 	}]);
+	writeFileSync(join(agentDir, "extensions/pi-codex-minimal-tools/config.json"), JSON.stringify({
+		codexRequestExtensions: false,
+		endpoint_config: [{ provider: "custom", baseUrl: "https://api.example/v1", webSearch: [] }],
+	}));
 	const model = {
 		provider: "custom",
 		api: "openai-responses",
@@ -194,20 +198,25 @@ test("standalone web search supports API-key endpoints for user-added profiles",
 	globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
 		requestUrl = String(url);
 		accountHeader = new Headers(init?.headers as HeadersInit).get("chatgpt-account-id");
+		assert.equal(new Headers(init?.headers).get("authorization"), null);
+		assert.equal(new Headers(init?.headers).get("x-api-key"), "resolved");
+		assert.equal(new Headers(init?.headers).get("x-codex-turn-metadata"), null);
+		assert.equal(new Headers(init?.headers).get("originator"), null);
 		return Response.json({ output: "search result", results: [] });
 	}) as typeof fetch;
 
 	await standaloneWebSearch({ search_query: [{ q: "query" }] }, {
 		cwd: process.cwd(),
 		model,
+		sessionManager: { getSessionId: () => "wire-off-search" },
 		modelRegistry: {
 			async getApiKeyAndHeaders() {
-				return { ok: true as const, apiKey: "plain-key", headers: {} };
+				return { ok: true as const, headers: { "x-api-key": "resolved" }, baseUrl: "https://resolved.example/v2" };
 			},
 		},
 	});
 
-	assert.equal(requestUrl, "https://api.example/v1/alpha/search");
+	assert.equal(requestUrl, "https://resolved.example/v2/alpha/search");
 	assert.equal(accountHeader, null);
 }));
 

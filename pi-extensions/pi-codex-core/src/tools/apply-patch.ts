@@ -4,6 +4,7 @@ import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { applyPatch, resolvePatchPath, type ApplyPatchResult } from "../patch/apply.js";
 import { parseApplyPatch } from "../patch/parser.js";
 import { createApplyPatchRenderers } from "../patch/render.js";
+import { applyPatchOutputSchema } from "./apply-patch-output.js";
 
 export interface ApplyPatchInput {
 	input: string;
@@ -65,7 +66,7 @@ async function mutationTarget(path: string): Promise<MutationTarget> {
 	}
 }
 
-export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string, signal?: AbortSignal): Promise<{ content: Array<{ type: "text"; text: string }>; details: ApplyPatchResult }> {
+export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string, signal?: AbortSignal): Promise<{ content: Array<{ type: "text"; text: string }>; details: ApplyPatchResult; structuredContent: ApplyPatchResult }> {
 	signal?.throwIfAborted();
 	if (!params || typeof params.input !== "string") throw new Error("apply_patch requires an input string.");
 	let targets: MutationTarget[];
@@ -108,6 +109,7 @@ export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string
 	return {
 		content: [{ type: "text", text: result.summary }],
 		details: result,
+		structuredContent: result,
 	};
 }
 
@@ -124,6 +126,7 @@ export function createApplyPatchToolDefinition(options: { cwd?: string; deferRen
 			"Use *** End of File in apply_patch when a hunk must match the end of a file.",
 		],
 		parameters: applyPatchToolSchema,
+		outputSchema: applyPatchOutputSchema,
 		async execute(_toolCallId: string, params: ApplyPatchInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
 			const cwd = ctx?.cwd ?? options.cwd ?? process.cwd();
 			return executeApplyPatchTool(params, cwd, signal);

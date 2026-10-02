@@ -118,7 +118,7 @@ async function runOpenAIProvider(
 
 test("OpenAI WebSocket URL and headers use the normal Responses endpoint and Pi auth", () => {
 	assert.equal(
-		resolveResponsesWebSocketUrl("https://api.openai.com/v1", { apiKeyMode: true }),
+		resolveResponsesWebSocketUrl("https://api.openai.com/v1", "openai"),
 		"wss://api.openai.com/v1/responses",
 	);
 	const headers = buildWebSocketHeaders(

@@ -25,7 +25,11 @@ function fakePi() {
 			else providers.push({ name: providerOrName.id, value: providerOrName });
 		},
 		registerMessageRenderer() {},
-		registerTool(tool: any) { tools.push(tool); },
+		registerTool(tool: any) {
+			const index = tools.findIndex(existing => existing.name === tool.name);
+			if (index < 0) tools.push(tool);
+			else tools[index] = tool;
+		},
 		getAllTools() { return tools.map(tool => ({ ...tool,
 			sourceInfo: { path: "/fixture/extension.ts", source: "fixture", scope: "temporary", origin: "top-level" } })); },
 		on(event: string, handler: Function) { (handlers[event] ??= []).push(handler); },

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { Model } from "@earendil-works/pi-ai";
-import { VERSION } from "@earendil-works/pi-coding-agent";
 import { buildRequestBody } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/request-body";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
@@ -10,17 +9,8 @@ import { withCodexSettings } from "../../../tests/codex/support/provider-lifecyc
 
 for (const id of ["gpt-6-sol", "gpt-6-luna"]) {
 	test(`${id}: exact descriptor and evidence-backed Lite profile`, () => withCodexSettings({}, async (cwd) => {
-		const actual = getBuiltinModels("openai-codex").find((model) => model.id === id);
-		if (VERSION === "0.87.1") assert(actual, "target Pi must supply the new descriptor");
-		// The floor predates these catalog entries; exercise the same wire
-		// contract without injecting a model into the host registry.
-		const model = actual ?? {
-			id, name: id, provider: "openai-codex", api: "openai-codex-responses", baseUrl: "https://fixture.invalid",
-			reasoning: true, input: ["text", "image"], contextWindow: 272000, maxTokens: 128000,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			thinkingLevelMap: { off: "none", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
-			compat: { supportsOpenAIGrammarTools: true, supportsAdditionalTools: true },
-		} satisfies Model<"openai-codex-responses">;
+		const model: Model<"openai-codex-responses"> | undefined = getBuiltinModels("openai-codex").find((model) => model.id === id);
+		assert(model, "supported Pi must supply the descriptor");
 		assert.deepEqual(model.input, ["text", "image"]);
 		assert.equal(model.contextWindow, 272000);
 		assert.equal(model.maxTokens, 128000);
@@ -36,7 +26,7 @@ for (const id of ["gpt-6-sol", "gpt-6-luna"]) {
 			name, description: name, parameters: { type: "object", properties: { input: { type: "string" } } },
 		}));
 		for (const reasoning of [undefined, "minimal", "max"] as const) {
-			const body = buildRequestBody(model, {
+			const body: ReturnType<typeof buildRequestBody> = buildRequestBody(model, {
 				systemPrompt: "RULE", messages: [{ role: "user", content: "hello", timestamp: 1 }], tools,
 			}, resolveCodexRequestProfile(settings.requestProfile), {
 				reasoning, ownsNativeTool: () => true, imageGeneration: settings.imageGenerationImplementation ?? false,
@@ -53,7 +43,7 @@ for (const id of ["gpt-6-sol", "gpt-6-luna"]) {
 			assert.equal(declarations.tools[0].tools[0].type, "custom");
 			assert.equal((body.input[1] as any).role, "developer");
 		}
-		assert.equal(loadModelSettings({ ...model, provider: "openai" }, cwd).modelProfile?.effective.enabled ?? false, false);
+		assert.equal(loadModelSettings({ ...model, provider: "openai", api: "openai-responses" }, cwd).requestProfile.responsesMode, "standard");
 		assert.equal(loadModelSettings({ ...model, id: `${id}-unknown` }, cwd).modelProfile?.effective.enabled ?? false, false);
 	}));
 

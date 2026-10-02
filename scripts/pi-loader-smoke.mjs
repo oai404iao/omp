@@ -22,7 +22,9 @@ try {
 assert.deepEqual(loaded.errors, []);
 const commands = loaded.extensions.flatMap(extension => [...extension.commands.keys()]);
 assert.equal(typeof before, "function");
-assert.deepEqual(commands, ["continue"]);
-assert.notEqual(sdk.AgentSession.prototype._bindExtensionCore, before, "audited hook must patch the target prototype");
-assert.deepEqual(warnings, []);
+assert.deepEqual(commands, [], "unaudited Pi versions must not register the private continuation command");
+assert.equal(sdk.AgentSession.prototype._bindExtensionCore, before, "unaudited hook must not patch the prototype");
+assert.equal(warnings.length, 1);
+assert.match(warnings[0], /pi-tree-continue.*disabled/i);
+assert.ok(warnings[0].includes(sdk.VERSION));
 loaded.runtime.invalidate();

@@ -5,7 +5,31 @@ The design independently adapts the
 [DeepSeek Harness subagent seam](https://github.com/deepseek-ai/deepseek-harness/tree/4d03472cd098dc48a630e526ca620f4f37f18a0e/docs/subsystems)
 to Pi's extension and SDK APIs.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
+
+All delegation and control tools, including child-only `report`, are
+`model-only`: they remain independent model tools and cannot be called from
+native codemode. In particular, `wait_agent` requires a separately persisted
+tool result to acknowledge completion delivery.
+
+With `inheritExtensions: true`, child SDK sessions can load Pi's built-in
+`codemode` and `tool-search`, respecting `-builtin:codemode` and
+`-builtin:tool-search` extension settings. They remain inactive unless the
+agent's `tools` or Pi's `defaultTools` selects them. With inheritance disabled
+they do not load, even if requested explicitly; enable inheritance or remove
+those names from the agent definition. Built-in MCP is not injected.
+The supplied child codemode factory has classifier/model calls disabled; it is
+for tool orchestration only. Fork/context inheritance copies conversation
+projection, not a parent's `codemode-store` custom entries.
+
+An agent's `tools` remains a hard registry ceiling, not just a prompt filter.
+Requested `codemode`/`deferred` exposure tools are permitted without declaring
+them directly at startup; scripts may call them, or `tool_search` may declare
+them later. Excluded and unlisted tools remain unreachable even if an inherited
+extension registers them later. Nested trace items retain `toolCallId` and
+`parentToolCallId`; nested usage is counted once via the outer tool result.
+Declarations discovered on a child's canonical branch survive cold resume;
+they are not reset to callable-only on each activation.
 
 > npm identity: `@oai404iao/pi-subagent`. Once the selected version is
 > available on npm, install it from npm; use a local checkout before its
@@ -67,7 +91,7 @@ For a temporary test:
 pi -e /absolute/path/to/pi-extensions/pi-subagent
 ```
 
-The supported compatibility floor is Pi `0.87.0`; development targets `0.87.1`.
+The supported compatibility floor and development target are Pi `0.99.1`.
 Inherited context uses the parent's canonical projection, including omissions and
 content replacements, before selecting completed turns. Parent system authority
 is not inherited. Completion comes from finalized events, not context-array offsets.

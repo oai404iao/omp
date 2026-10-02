@@ -6,6 +6,37 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "codexRequestExtensions": {
+      "type": "boolean",
+      "default": true,
+      "description": "Allow plugin-generated Codex wire identity, metadata, Lite and native compaction. False preserves Standard tools and Pi authentication; Lite requests and opaque checkpoint mode changes are blocked."
+    },
+    "endpoint_config": {
+      "type": "array",
+      "default": [],
+      "description": "Capability allowlists matched by exact provider and Pi-resolved baseUrl (ignoring trailing slashes). Omitted lists inherit the model profile; an empty list disables that capability. Lists never select a different implementation.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "baseUrl"],
+        "properties": {
+          "provider": { "type": "string", "minLength": 1 },
+          "baseUrl": { "type": "string", "format": "uri", "pattern": "^https?://" },
+          "webSearch": {
+            "type": "array", "uniqueItems": true,
+            "items": { "enum": ["hosted", "standalone"] }
+          },
+          "imageGeneration": {
+            "type": "array", "uniqueItems": true,
+            "items": { "enum": ["hosted", "standalone"] }
+          },
+          "compaction": {
+            "type": "array", "uniqueItems": true,
+            "items": { "enum": ["responses", "responses-compact"] }
+          }
+        }
+      }
+    },
     "$schema": {
       "type": "string",
       "description": "JSON Schema URL used by editors for validation and completion.",

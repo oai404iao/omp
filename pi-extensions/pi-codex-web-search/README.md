@@ -2,7 +2,26 @@
 
 See the package guide below for release status; source edits do not publish artifacts.
 
-Peer floor: Pi 0.87.0; development target: 0.87.1.
+Peer floor and development target: Pi 0.99.1.
+
+Global `endpoint_config.webSearch` allowlists are matched against Pi's resolved
+provider/base URL. A denied or explicitly rejected mode is disabled, never
+changed to hosted/standalone automatically. Runtime rejections are session-local;
+`/reload` clears them. `codexRequestExtensions:false` omits generated standalone
+search turn metadata while preserving authentication and search results.
+
+Hosted search is model-only, including with native codemode in `only` mode.
+Standalone search remains directly callable and is also available to codemode
+while active. Exposure follows the selected model profile; this does not
+enable codemode itself.
+
+Codemode scripts receive `{ output, results }` instead of the model-facing text
+alone. `output` retains citation references; `results` contains backend metadata
+and may be empty. Authentication, HTTP and backend error sentinels reject the
+call rather than resolving as successful structured data.
+Pi intentionally resolves retained structured data if a `tool_result` hook
+only sets `isError: true`. Such a hook must also replace `content` without
+supplying `structuredContent` when it intends rejection or redaction.
 
 Installs `web_search` and search activity rendering. Depends only on
 `pi-codex-runtime`, not core, imagegen or the old bundle.

@@ -1,6 +1,6 @@
 import { join, relative, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { type Model, uuidv7 } from "@earendil-works/pi-ai";
+import { getCurrentTools, type Model, uuidv7 } from "@earendil-works/pi-ai";
 import {
 	type AgentSessionEvent,
 	type AgentToolResult,
@@ -15,6 +15,8 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
+	createCodemodeExtension,
+	createToolSearchExtension,
 	defineTool,
 	getAgentDir,
 	ModelRuntime,
@@ -1682,6 +1684,7 @@ export class SubagentCoordinator {
 
 		const spawn = defineTool({
 			name: "subagent",
+			exposure: "model-only",
 			label: "Subagent",
 			description:
 				"Delegate a standalone task to a named child path, with optional completed-turn context inheritance. " +
@@ -1706,6 +1709,7 @@ export class SubagentCoordinator {
 
 		const fork = defineTool({
 			name: "subagent_fork",
+			exposure: "model-only",
 			label: "Subagent Fork",
 			description:
 				"Delegate a task to a child seeded with all completed turns from this conversation. " +
@@ -1730,6 +1734,7 @@ export class SubagentCoordinator {
 
 		const send = defineTool({
 			name: "send_message",
+			exposure: "model-only",
 			label: "Send Message",
 			description:
 				"Durably append a message to a direct continuable child's FIFO mailbox without starting or resuming it. Use followup_task to start the queued batch. This returns acceptance, not the child's answer.",
@@ -1771,6 +1776,7 @@ export class SubagentCoordinator {
 
 		const followup = defineTool({
 			name: "followup_task",
+			exposure: "model-only",
 			label: "Follow-up Task",
 			description:
 				"Start exactly one scheduled turn for a direct child, atomically claiming its current pending FIFO mailbox batch.",
@@ -1804,6 +1810,7 @@ export class SubagentCoordinator {
 
 		const wait = defineTool({
 			name: "wait_agent",
+			exposure: "model-only",
 			label: "Wait Agent",
 			description:
 				"Wait event-driven for unread completion updates from direct children. This does not start a child or occupy a background scheduler slot.",
@@ -1839,6 +1846,7 @@ export class SubagentCoordinator {
 
 		const interrupt = defineTool({
 			name: "interrupt_agent",
+			exposure: "model-only",
 			label: "Interrupt Agent",
 			description:
 				"Request cancellation of a live descendant's current turn. Its durable session remains available.",
@@ -1864,6 +1872,7 @@ export class SubagentCoordinator {
 
 		const list = defineTool({
 			name: "list_agents",
+			exposure: "model-only",
 			label: "List Agents",
 			description:
 				"List direct continuable children or all descendants as running, idle, or ready, with separate mailbox task and completion counts.",
@@ -1884,6 +1893,7 @@ export class SubagentCoordinator {
 
 		const report = defineTool({
 			name: "report",
+			exposure: "model-only",
 			label: "Report",
 			description:
 				"Send a self-contained update to the agent that started you. This does not end the current turn.",
@@ -2044,6 +2054,10 @@ export class SubagentCoordinator {
 						),
 					]
 				: [];
+		extensionFactories.push(
+			{ name: "codemode", factory: createCodemodeExtension({ models: false }), builtin: true, replaceable: true },
+			{ name: "tool-search", factory: createToolSearchExtension(), builtin: true, replaceable: true },
+		);
 
 		const appendSystemPrompt = [
 			descriptor.agent.systemPrompt,
@@ -2085,6 +2099,7 @@ export class SubagentCoordinator {
 						extensions: base.extensions.filter(
 							(extension) =>
 								extension.resolvedPath.startsWith("<inline:")
+								|| extension.resolvedPath.startsWith("builtin:")
 								|| !isPathInside(this.packageRoot, extension.resolvedPath),
 						),
 					}),
@@ -2125,12 +2140,20 @@ export class SubagentCoordinator {
 			}
 			await runtime.session.bindExtensions({ mode: "print" });
 			try {
+				const registered = runtime.session.getAllTools();
+				// Keep discoveries on this child's canonical branch, not declarations inherited by a new fork.
+				const restoredDeclarations = new Set(options.isNew ? [] : getCurrentTools(
+					runtime.session.sessionManager.buildSessionContext().messages,
+				).map(tool => tool.name));
 				const policy = resolveToolPolicy({
 					requested: descriptor.agent.tools,
 					mandatory: mandatoryTools,
 					denied: deniedTools,
-					registered: runtime.session.getAllTools().map((tool) => tool.name),
+					registered: registered.map((tool) => tool.name),
 					active: runtime.session.getActiveToolNames(),
+					callable: runtime.session.getCallableToolNames(),
+					callableOnly: registered.filter(tool => (tool.exposure === "codemode" || tool.exposure === "deferred")
+						&& !restoredDeclarations.has(tool.name)).map(tool => tool.name),
 				});
 				const activeTools = policy.activeTools.filter((tool) => {
 					if (
@@ -2269,7 +2292,7 @@ export class SubagentCoordinator {
 			void activation.runtime.session.abort().catch(() => {});
 		};
 		if (signal) signal.addEventListener("abort", abort, { once: true });
-		let preflightSucceeded = false;
+		let promptDisposition: "started" | "queued" | "handled" | undefined;
 		const acceptPrompt = () => {
 			if (acceptedSettled) return;
 			if (turnAbortController.signal.aborted) {
@@ -2331,33 +2354,25 @@ export class SubagentCoordinator {
 								source: "extension" as const,
 							}
 						: {}),
-					preflightResult: (success) => {
+					preflightResult: (disposition) => {
+						promptDisposition = disposition;
 						if (acceptedSettled) return;
-						if (success) {
-							preflightSucceeded = true;
+						if (disposition === "started") {
 							if (options.acceptAfterUserMessage) {
 								return;
 							}
 							options.onPromptAccepted?.(turnId);
 							acceptPrompt();
 						} else {
-							rejectPrompt(
-								new Error("subagent prompt was rejected before acceptance"),
-							);
+							throw new Error(`subagent ${options.acceptAfterUserMessage ? "mailbox " : ""}prompt was ${disposition} before a user turn started`);
 						}
 					},
 				});
 				if (!acceptedSettled) {
-					if (options.acceptAfterUserMessage && preflightSucceeded) {
-						throw new Error(
-							"subagent mailbox prompt was handled before a user turn started",
-						);
-					}
 					if (turnAbortController.signal.aborted) {
 						throw abortReason(turnAbortController.signal);
 					}
-					options.onPromptAccepted?.(turnId);
-					acceptPrompt();
+					throw new Error(`subagent ${options.acceptAfterUserMessage ? "mailbox " : ""}prompt was ${promptDisposition ?? "not started"} before a user turn started`);
 				}
 				return this.collectResult(activation, turnId, "completed");
 			} catch (error) {
@@ -2588,6 +2603,8 @@ export class SubagentCoordinator {
 		if (event.type === "tool_execution_start") {
 			this.pushTrace(activation, {
 				type: "tool",
+				toolCallId: event.toolCallId,
+				...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
 				name: event.toolName,
 				text: formatToolArguments(event.toolName, event.args as Record<string, unknown>),
 			});

@@ -72,6 +72,7 @@ function identityForRequestMetadata(
  * Lite flag) stay out: SSE carries the Lite header and turn-state header.
  */
 export function withSseRequestMetadata(body: ResponsesBody, metadata: WebSocketRequestMetadata): ResponsesBody {
+	if (metadata.codexRequestExtensions === false) return body;
 	const identity = identityForRequestMetadata(metadata);
 	if (!identity) return body;
 	const turnMetadata = buildCodexTurnMetadataJson(identity);
@@ -102,6 +103,7 @@ export function withSseRequestMetadata(body: ResponsesBody, metadata: WebSocketR
 }
 
 export function withWebSocketRequestMetadata(body: ResponsesBody, metadata: WebSocketRequestMetadata): ResponsesBody {
+	if (metadata.codexRequestExtensions === false) return body;
 	const identity = identityForRequestMetadata(metadata);
 	const turnMetadata = identity ? buildCodexTurnMetadataJson(identity) : "";
 	return {

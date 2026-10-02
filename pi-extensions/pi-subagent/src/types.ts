@@ -117,6 +117,8 @@ export interface SubagentRunResult {
 }
 
 export interface TraceItem {
+	toolCallId?: string;
+	parentToolCallId?: string;
 	type: "tool" | "text";
 	name?: string;
 	text: string;
