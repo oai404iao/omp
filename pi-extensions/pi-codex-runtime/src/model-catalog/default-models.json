@@ -2,6 +2,38 @@
   "version": 1,
   "models": [
     {
+      "id": "openai/gpt-6.1-sol",
+      "enabled": true,
+      "responses": {
+        "providerShim": true,
+        "mode": "standard",
+        "systemPromptPlacement": "instructions",
+        "transport": "sse",
+        "websocketPrewarm": false
+      },
+      "tools": {
+        "parallelCalls": true,
+        "applyPatch": "custom",
+        "webSearch": false,
+        "imageGeneration": false,
+        "viewImage": true
+      },
+      "compaction": "pi",
+      "fast": false
+    },
+    {
+      "id": "openai/gpt-6-astra",
+      "extends": "openai/gpt-6.1-sol"
+    },
+    {
+      "id": "openai/gpt-6-sol",
+      "extends": "openai/gpt-6.1-sol"
+    },
+    {
+      "id": "openai/gpt-6-luna",
+      "extends": "openai/gpt-6.1-sol"
+    },
+    {
       "id": "openai/gpt-5.6-sol",
       "enabled": true,
       "responses": {

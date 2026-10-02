@@ -100,7 +100,7 @@ openai-codex-responses
 The extension registers its stream handler for the selected provider without
 supplying URL, auth, headers, or models. Supported Pi versions therefore
 compose the handler over the user's provider while dispatching it by the
-Responses API type. Pi 0.86.1, the peer floor, supplies Astra's model
+Responses API type. Pi 0.99.1, the peer floor, supplies Astra's model
 descriptor; this extension supplies only its exact Codex request profile.
 
 If the API does not match, hosted tools, custom `apply_patch`, native
@@ -194,18 +194,23 @@ current Codex defaults:
 ```
 
 Edit images are sent as data URLs. Sources can be explicit local paths or the
-latest one through five conversation images. Requests carry
+latest one through five conversation images. With `codexRequestExtensions:true`, requests carry
 `x-codex-image-turn-id` with the active agent turn ID; out-of-band `/image-gen`
 requests use a fresh UUID.
 
 ## Endpoint and authentication shape
 
-`responses.endpoint` controls URL/auth semantics:
+`responses.endpoint` is deprecated compatibility for `openai-codex` only:
 
-- `openai`: API-key style `/responses`, `/alpha/search`, and `/images/...`.
+- `openai`: `/responses`, `/alpha/search`, and `/images/...`.
 - `codex`: ChatGPT/Codex `/codex/responses`, `/codex/alpha/search`, and
   `/codex/images/...`, with account headers when needed.
-- `auto`: `codex` for `openai-codex`, otherwise `openai`.
+- `auto`: follow the Pi API. Other providers ignore this plugin override and
+  use Pi's API and authenticated base URL.
+
+Modern `openai` API-key and ChatGPT OAuth requests both default to
+`https://api.openai.com/v1/responses`. OAuth does not select the old Codex URL.
+See the [migration and capability configuration](configuration.md).
 
 Authentication is always resolved by Pi. The extension accepts an API key,
 resolved Authorization/API-key headers, or actor authorization. Explicit
@@ -238,3 +243,9 @@ The implementation was checked against local Codex commit
 The `openai-codex/gpt-6-astra` delta was checked separately against
 `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`; see
 `source-map.md` and `provenance/openai-codex-ddea03ad-astra.json`.
+
+Exact modern `openai` GPT-6 profiles are independently based on Pi 0.99.1 at
+`d86654abb8862e201933517d6f1fce9f88dd117f`, not copied from these legacy
+Codex profiles. See `provenance/pi-openai-0991-gpt6.json`. Standard SSE,
+grammar-based local patch and local image input have descriptor evidence;
+remote tools, Lite, native compaction, prewarm and Fast are not inferred.

@@ -29,8 +29,13 @@ according to the current declaration, preserving legacy custom patch behavior.
 
 Configuration paths remain
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json`.
-This package ships the canonical schemas and default catalog, including the
-`openai-codex/gpt-6-astra` Responses Lite profile. The global
+This package ships the canonical schemas and default catalog, including exact
+Standard profiles for `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and
+`gpt-6-luna`, independently of the frozen legacy Lite profiles. Their default
+tools are local custom `apply_patch` and `view_image`; remote tool/compaction
+capabilities are not inferred from model names.
+See `provenance/pi-openai-0991-gpt6.json` for the pinned Pi metadata and limits.
+The global
 `config.json.imageGeneration:false` setting gates image capability derivation
 without replacing the selected model profile. Likewise,
 `config.json.webSocketEnabled:false` forces SSE and disables WebSocket prewarm

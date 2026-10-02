@@ -59,6 +59,18 @@ test("legacy apiKeyMode omitted, false and true preserve their prior profile sem
 	}
 }));
 
+test("persisted legacy globals remain explicit overrides of new OpenAI profiles", () => withAgentDir(agentDir => {
+	mkdirSync(join(configPath(agentDir), ".."), { recursive: true });
+	writeFileSync(configPath(agentDir), JSON.stringify({ webSearchEnabled: false }));
+	const settings = loadModelSettings({ provider: "openai", api: "openai-responses", id: "gpt-6.1-sol" });
+	assert(settings.modelProfile?.sources.includes("legacy"));
+	assert.equal(settings.applyPatchEnabled, false);
+	assert.equal(settings.viewImage, false);
+	assert.equal(settings.openaiTransport, "sse");
+	assert.equal(settings.compactionMode, "pi");
+	assert.equal(settings.webSearchImplementation, undefined);
+}));
+
 test("bundled profiles expose independent Standard and Lite Codex capabilities", () => withAgentDir(() => {
 	const standard = resolveModelProfile(
 		{ provider: "openai", id: "gpt-5.5" },
@@ -119,8 +131,8 @@ test("bundled profiles expose independent Standard and Lite Codex capabilities",
 		resolveModelProfile(
 			{ provider: "openai", id: "gpt-6-astra" },
 			{ settings: DEFAULT_SETTINGS },
-		),
-		undefined,
+		)?.effective.responses.mode,
+		"standard",
 	);
 }));
 

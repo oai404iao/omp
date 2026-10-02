@@ -17,6 +17,12 @@ selection or session history are migrated automatically. New requests follow
 Pi's API/base URL rather than plugin `apiKeyMode` or `responses.endpoint`
 overrides outside the legacy provider.
 
+Exact profiles for `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and
+`gpt-6-luna` use Standard SSE with local custom patch and image viewing.
+Remote search/image generation, native compaction, prewarm and Fast default
+off. Enable only the implementations you intend to use in the model profile,
+and declare endpoint support separately; allowlists do not enable tools.
+
 Native codemode may call active `apply_patch` and standalone web/image tools.
 Hosted web/image tools and `view_image` remain model-only. The bundle does not
 activate codemode or load MCP servers.

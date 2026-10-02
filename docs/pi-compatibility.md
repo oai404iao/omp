@@ -56,24 +56,35 @@ Both roles now use the same version but retain these distinct lock checks.
   without discarding opaque state; disable both tools and retry on the original
   model, or navigate before the checkpoint. This guard recognizes the built-in
   tool names, not arbitrary third-party `prepareLoadout` hooks.
-- The packages do not globally enable codemode, inject MCP into children, or add
-  model profiles.
+- The packages do not globally enable codemode or inject MCP into children.
 
-Follow-up work still needs to review OpenAI ChatGPT OAuth request compatibility
-and validate the new `gpt-6.1-sol` exact profile. Unknown models continue using
-Pi's native implementation. This is not a blanket claim that all new Pi model,
-authentication, or orchestration features are supported.
+OpenAI ChatGPT OAuth and API-key requests now follow Pi's native authentication
+and resolved endpoint. Request enhancements and exact endpoint capability
+allowlists are configurable; explicit unsupported responses disable only the
+affected session/endpoint mode. Neither changes credentials or selects fallback
+implementations. See the [configuration guide](../pi-extensions/pi-codex-runtime/reference/configuration.md).
+
+Pi 0.99.1 supplies the descriptors for the exact `openai/gpt-6.1-sol`,
+`openai/gpt-6-astra`, `openai/gpt-6-sol` and `openai/gpt-6-luna` profiles.
+These use Standard SSE, local custom `apply_patch` (verified grammar capability)
+and `view_image` (verified image input). Search, image generation, native
+compaction, prewarm and Fast are not enabled by default. Standard Responses
+reasoning clamps delegate to Pi; descriptors, limits and prices are not replaced.
+The [pinned evidence](../pi-extensions/pi-codex-runtime/provenance/pi-openai-0991-gpt6.json)
+does not establish real account access or Codex Lite entitlement.
+Unknown IDs remain native; legacy `openai-codex` profiles are frozen and no
+`openai-codex/gpt-6.1-sol` profile is added.
 
 ## Preserved transcript contracts
 
-Only the verified `openai-codex/gpt-6-sol` and `openai-codex/gpt-6-luna`
-profiles from the prior migration are retained. Pi supplies their descriptors;
+The verified `openai-codex/gpt-6-sol` and `openai-codex/gpt-6-luna` Lite
+profiles from the prior migration remain unchanged. Pi supplies their descriptors;
 this extension does not register them. No family-wide match, fast
 billing multiplier or public-API cache TTL is inferred. Package release
 eligibility is unchanged. The provider boundary replays
 Pi's system sections and tool deltas into the complete prompt/loadout required
-by the existing Standard/Lite encoders; native fallback receives the original
-transcript. This does not implement in-place delta transport or promise cached
+by the existing Standard/Lite encoders; the registered shim's native fallback
+also receives checkpoint projection. This does not implement in-place delta transport or promise cached
 prefix retention when prompts/tools change.
 
 Native compaction v4 stores a retain-none checkpoint: its opaque payload already

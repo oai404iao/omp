@@ -12,6 +12,7 @@ import { stripResponsesLiteImageDetails } from "./lite.js";
 import { clampCodexThinkingLevel, clampReasoningEffort } from "./reasoning.js";
 import { type ResponsesBody, type NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import type { ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+import { clampThinkingLevel } from "@earendil-works/pi-ai";
 
 export function requestBodyToolOptions(settings: ResolvedCodexModelSettings) {
 	return {
@@ -157,7 +158,9 @@ export function buildRequestBody<TApi extends Api>(
 	}
 
 	const clampedReasoning = options?.reasoning
-		? clampCodexThinkingLevel(model as Model<Api>, options.reasoning)
+		? profile.responsesMode === "standard" && model.api === "openai-responses"
+			? clampThinkingLevel(model, options.reasoning)
+			: clampCodexThinkingLevel(model as Model<Api>, options.reasoning)
 		: undefined;
 	const reasoningEffort = clampedReasoning === undefined || clampedReasoning === "off"
 		? model.thinkingLevelMap?.off ?? undefined

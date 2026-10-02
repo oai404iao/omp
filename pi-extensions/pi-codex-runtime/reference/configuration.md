@@ -408,7 +408,8 @@ Astra profile updated from `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`.
 
 | Models | Responses | Web | Image | Patch | Compaction |
 | --- | --- | --- | --- | --- | --- |
-| `openai-codex/gpt-6-astra` | Lite, auto WS/SSE | standalone text+image | standalone | custom | responses |
+| `openai/gpt-6.1-sol`, `openai/gpt-6-astra`, `openai/gpt-6-sol`, `openai/gpt-6-luna` | Standard SSE | off | off | custom | Pi |
+| `openai-codex/gpt-6-astra` (deprecated) | Lite, auto WS/SSE | standalone text+image | standalone | custom | responses |
 | `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | Lite, auto WS/SSE | standalone text+image | standalone | custom | responses |
 | `gpt-5.5`, `gpt-5.4` | Standard, auto WS/SSE | hosted text+image | standalone | custom | responses |
 | `gpt-5.4-mini`, `codex-auto-review` | Standard, auto WS/SSE | hosted text+image | standalone | custom | responses |
@@ -419,9 +420,34 @@ Astra profile updated from `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`.
 
 The pre-Astra entries include equivalent `openai/...` and
 `openai-codex/...` IDs; the latter switch only the endpoint/auth shape to
-`codex`. Astra is bundled only for `openai-codex`, matching the analyzed
-ChatGPT subscription route. A public-API or proxy Astra deployment requires an
-explicit user profile for that endpoint.
+`codex`. The newer OpenAI GPT-6 Standard profiles are independent of legacy
+Lite profiles. They enable local `view_image` based on Pi's image-input metadata
+and custom `apply_patch` based on its explicit grammar-tool capability. They
+do not enable hosted/standalone endpoints, WebSocket, native compaction or Fast.
+See `provenance/pi-openai-0991-gpt6.json`; Pi owns the descriptors and pricing.
+
+### Migrating from legacy Codex profiles
+
+1. Use Pi's `/login openai` to choose ChatGPT OAuth or an API key. Do not copy
+   legacy tokens or rename provider keys in `auth.json`.
+2. Select the exact `openai` model in `/model`; save the default through Pi if
+   desired. The extension does not change your saved model or existing sessions.
+3. Keep Pi's API/base URL/authentication in Pi's own `models.json` and credentials
+   configuration. Plugin `apiKeyMode`/`responses.endpoint` overrides are legacy
+   compatibility only; remove obsolete global request-profile keys if they
+   unintentionally override the new profile.
+4. Choose remote tool/compaction implementations explicitly in the plugin's
+   `models.json` and declare their allowed modes in global `endpoint_config`.
+   For example, opting into hosted search for `openai/gpt-6.1-sol` requires a
+   model override with `tools.webSearch: { "implementation": "hosted" }` plus an
+   endpoint declaration that permits `"hosted"`. The declaration alone does
+   not turn the default-off tool on.
+5. Existing opaque checkpoints are bound to their original provider/model/API.
+   Continue with the original settings, start a new session, or navigate before
+   the checkpoint. Do not edit session JSON to relabel an old checkpoint.
+6. Use `/reload`, then `/codex-minimal-tools doctor`. Endpoint projection is
+   pending until Pi resolves the request authentication. No real service
+   acceptance is implied by successful offline tests.
 
 Pi supplies the Astra model descriptor. The extension composes its stream shim over that provider and does not
 replace authentication, streams, or the model catalog.

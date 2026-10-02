@@ -13,6 +13,17 @@ reserved-tool or grammar fingerprints.
 
 ## GPT-6 Astra delta
 
+This section describes the frozen legacy Codex profile. The independent
+modern OpenAI profiles are recorded in
+`provenance/pi-openai-0991-gpt6.json`: Pi 0.99.1's shipped
+`dist/providers/data/openai.json` (SHA-256
+`ca5ec1028efc512502591bf2562a2a6dc330f26a5f4c4a08c8a149a43c5bd7da`)
+and its generator at `d86654abb8862e201933517d6f1fce9f88dd117f`.
+The generated data is not tracked in the upstream Git tree; the installed,
+locked Pi package supplies the audited bytes. It verifies exact chat model
+IDs, Standard Responses, grammar compatibility and image input, not Codex
+Lite or hosted/standalone service entitlements.
+
 | Source | Evidence |
 | --- | --- |
 | `codex-rs/models-manager/models.json` | Declares the Astra context limits, reasoning levels/defaults, modalities, Responses Lite mode, WebSocket preference, freeform patch support, service tier, and experimental-context capability. |

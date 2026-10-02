@@ -30,8 +30,11 @@ on the original model, or navigate before the checkpoint. Other third-party
 Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
 `apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,
 including `/codex-minimal-tools` and `/fast`. Unknown models remain native.
-It supplies the Astra descriptor only when the Pi floor catalog lacks it; newer
-Pi catalogs retain their native provider model list.
+Pi supplies all descriptors; the extension does not register replacement models.
+The exact `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna`
+profiles use Standard SSE with local custom patch and image viewing. Remote
+search/image generation, native compaction, prewarm and Fast stay off unless
+explicitly configured. Their legacy `openai-codex` counterparts remain separate.
 
 Depends only on the shared runtime and its transport libraries; it does not
 install web-search or image-generation clients/presentation. Protocol replay of

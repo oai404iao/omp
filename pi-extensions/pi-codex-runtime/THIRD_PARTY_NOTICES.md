@@ -1,5 +1,11 @@
 # Source and license notices
 
+The four modern `openai` GPT-6 profiles use independently checked metadata
+from MIT-licensed Pi 0.99.1 (`d86654abb8862e201933517d6f1fce9f88dd117f`).
+`provenance/pi-openai-0991-gpt6.json` pins the generator and shipped catalog.
+The profiles select Standard/local capabilities; they do not copy model
+instructions, replace Pi descriptors or infer remote endpoint entitlement.
+
 Sol/Luna profile metadata was independently checked against Apache-2.0 Codex
 revision `40eac3ce8a0c10cbcb9db910d529355eb2f8fc09` and the MIT Pi 0.87.1
 catalog. See `provenance/openai-codex-40eac3ce-sol-luna.json` for exact source

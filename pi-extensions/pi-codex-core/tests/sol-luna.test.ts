@@ -43,7 +43,7 @@ for (const id of ["gpt-6-sol", "gpt-6-luna"]) {
 			assert.equal(declarations.tools[0].tools[0].type, "custom");
 			assert.equal((body.input[1] as any).role, "developer");
 		}
-		assert.equal(loadModelSettings({ ...model, provider: "openai" }, cwd).modelProfile?.effective.enabled ?? false, false);
+		assert.equal(loadModelSettings({ ...model, provider: "openai", api: "openai-responses" }, cwd).requestProfile.responsesMode, "standard");
 		assert.equal(loadModelSettings({ ...model, id: `${id}-unknown` }, cwd).modelProfile?.effective.enabled ?? false, false);
 	}));
 

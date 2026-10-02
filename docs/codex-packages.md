@@ -40,6 +40,13 @@ Lite profiles. Pi 0.99.1 is the package floor; 0.87.1 first supplied the Sol/Lun
 descriptors. Core composes a stream
 shim without replacing provider authentication, streams, or models.
 
+The separate `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and
+`gpt-6-luna` profiles follow Pi 0.99.1 Standard Responses descriptors. They
+default to SSE, local custom patch and image viewing; remote tools, native
+compaction, prewarm and Fast remain off. Their inheritance stays entirely
+within `openai`; no legacy Lite behavior, account entitlement or billing
+multiplier is inferred from similar names.
+
 All combinations read the same existing configuration:
 
 ```text
