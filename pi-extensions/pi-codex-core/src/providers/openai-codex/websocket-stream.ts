@@ -106,7 +106,7 @@ export async function processWebSocketStream<TApi extends Api>(
 				stream,
 				model,
 				options,
-				options?.sessionId,
+				requestMetadata.codexRequestExtensions === false ? undefined : options?.sessionId,
 				deps,
 				cwd,
 				requestPrompt,

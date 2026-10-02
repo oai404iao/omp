@@ -10,8 +10,10 @@ import {
 	buildCodexJsonHeaders,
 	hasCodexRequestAuth,
 	resolveCodexApiEndpoint,
+	withResolvedAuthBaseUrl,
 } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { loadModelSettings, type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+import { checkEndpointResponse, rememberResolvedEndpoint, requireEndpointCapability } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 
 export interface ImageGenerationInput {
 	prompt?: string;
@@ -61,6 +63,10 @@ export async function directImageGeneration(input: ImageGenerationInput, ctx: Im
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	signal?.throwIfAborted();
 	if (!auth.ok) throw new Error(auth.error);
+	const requestModel = withResolvedAuthBaseUrl(model, auth);
+	const sessionId = ctx.sessionManager?.getSessionId?.();
+	rememberResolvedEndpoint(model, requestModel, sessionId);
+	requireEndpointCapability(settings.endpoint_config, requestModel, sessionId, "imageGeneration.standalone");
 	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
 		throw new Error(`No request authentication for provider: ${model.provider}`);
 	}
@@ -75,11 +81,11 @@ export async function directImageGeneration(input: ImageGenerationInput, ctx: Im
 	if (input.output_format) body.output_format = input.output_format;
 	const response = await fetch(resolveCodexApiEndpoint(auth.baseUrl ?? model.baseUrl, endpoint, "images/generations"), {
 		method: "POST",
-		headers: buildCodexJsonHeaders({ modelHeaders: model.headers, auth, endpoint }),
+		headers: buildCodexJsonHeaders({ modelHeaders: model.headers, auth, endpoint, codexRequestExtensions: settings.codexRequestExtensions }),
 		body: JSON.stringify(body),
 		signal,
 	});
-	if (!response.ok) throw new Error(`OpenAI Images API failed: ${response.status} ${await response.text()}`);
+	await checkEndpointResponse(response, requestModel, sessionId, ["imageGeneration.standalone"], signal);
 	const json = await response.json() as { data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }> };
 	const first = json.data?.[0];
 	const base64 = first?.b64_json ?? (first?.url ? await urlToBase64(first.url, signal) : undefined);
@@ -194,6 +200,10 @@ export async function standaloneImageGeneration(
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	signal?.throwIfAborted();
 	if (!auth.ok) throw new Error(auth.error);
+	const requestModel = withResolvedAuthBaseUrl(model, auth);
+	const sessionId = ctx.sessionManager?.getSessionId?.();
+	rememberResolvedEndpoint(model, requestModel, sessionId);
+	requireEndpointCapability(settings.endpoint_config, requestModel, sessionId, "imageGeneration.standalone");
 	if (!hasCodexRequestAuth({
 		modelHeaders: model.headers,
 		auth: { apiKey: auth.apiKey, headers: auth.headers },
@@ -214,12 +224,13 @@ export async function standaloneImageGeneration(
 		{
 			method: "POST",
 			headers: buildCodexJsonHeaders({
+				codexRequestExtensions: settings.codexRequestExtensions,
 				modelHeaders: model.headers,
 				auth: { apiKey: auth.apiKey, headers: auth.headers },
 				endpoint: settings.responsesEndpoint,
-				extraHeaders: {
+				extraHeaders: settings.codexRequestExtensions ? {
 					"x-codex-image-turn-id": turnId,
-				},
+				} : undefined,
 			}),
 			body: JSON.stringify({
 				model: settings.imageModel,
@@ -233,9 +244,7 @@ export async function standaloneImageGeneration(
 		},
 	);
 	signal?.throwIfAborted();
-	if (!response.ok) {
-		throw new Error(`Standalone image generation failed: HTTP ${response.status}: ${await response.text()}`);
-	}
+	await checkEndpointResponse(response, requestModel, sessionId, ["imageGeneration.standalone"], signal);
 	const result = await response.json() as {
 		data?: Array<{ b64_json?: string }>;
 	};
@@ -275,10 +284,11 @@ export function createImageGenerationToolDefinition(options: {
 		outputSchema: imageGenerationOutputSchema,
 		async execute(toolCallId: string, params: ImageGenerationInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ImageGenerationToolContext) {
 			const cwd = ctx?.cwd ?? process.cwd();
-			const settings = options.loadSettings?.(cwd, ctx.model) ?? loadModelSettings(ctx.model, cwd);
+			const profileModel = ctx.model ? { ...ctx.model, baseUrl: "" } : undefined;
+			const settings = options.loadSettings?.(cwd, profileModel) ?? loadModelSettings(profileModel, cwd);
 			const resolvedSettings = "modelProfile" in settings
 				? settings as ResolvedCodexModelSettings
-				: loadModelSettings(ctx.model, cwd, settings);
+				: loadModelSettings(profileModel, cwd, settings);
 			if (!resolvedSettings.imageGeneration) {
 				throw new Error("Image generation is disabled by the global setting or current model profile.");
 			}

@@ -42,6 +42,20 @@ Schemas belong only to runtime:
 - [config.schema.json](https://unpkg.com/@oai404iao/pi-codex-runtime/config.schema.json)
 - [models.schema.json](https://unpkg.com/@oai404iao/pi-codex-runtime/models.schema.json)
 
+Global `codexRequestExtensions` defaults to `true`. Set it to `false` to stop
+plugin-generated Codex wire metadata and enhancements while keeping Standard
+tools and hosted result handling; Lite requests and incompatible opaque
+checkpoint transitions are blocked rather than silently downgraded.
+
+`endpoint_config` accepts exact `{ provider, baseUrl, webSearch?, imageGeneration?,
+compaction? }` entries. Tool lists contain `"hosted"`/`"standalone"`; compaction
+lists contain `"responses"`/`"responses-compact"`. Omitted lists inherit the
+model profile, `[]` denies the capability, and lists never select a fallback.
+Matching uses Pi's authenticated endpoint. Explicit unsupported responses warn
+and disable that mode only for the current session/endpoint, without changing
+credentials or writing config. See the configuration guide for an example and
+error-classification limits; `/reload` clears transient rejections.
+
 Old version-pinned `pi-codex-minimal-tools@1` schema URLs still refer to their
 unchanged published artifacts. This checkout no longer duplicates schemas or
 private `src/*` forwards in the bundle.

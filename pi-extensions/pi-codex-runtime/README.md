@@ -16,6 +16,14 @@ its existing profiles remain, with a once-per-session migration warning.
 Credentials, refresh and effective base URLs come from Pi. Legacy `apiKeyMode`
 and `responses.endpoint` overrides do not route nonlegacy providers.
 
+Global `codexRequestExtensions:true` preserves the existing request enhancements;
+`false` gates wire metadata, Lite and native compaction without disabling
+Standard tools. `endpoint_config` is a per-provider/auth-resolved-base-URL
+capability allowlist, not a mode selector. Explicit unsupported responses are
+tracked only for the live session and endpoint; no config or credentials are
+rewritten. Tool projection waits for the first resolved request endpoint, while
+execution always enforces the declaration. See the configuration guide.
+
 Responses helpers encode/decode generic grammar tools and replay calls/results
 according to the current declaration, preserving legacy custom patch behavior.
 

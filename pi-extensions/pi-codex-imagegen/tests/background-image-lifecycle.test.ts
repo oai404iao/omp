@@ -6,7 +6,8 @@ import { createBackgroundImageJobs } from "@oai404iao/pi-codex-imagegen/internal
 import { registerBackgroundImageGenerationCommand } from "@oai404iao/pi-codex-imagegen/internal/background-image-generation";
 import { standaloneImageGeneration } from "@oai404iao/pi-codex-imagegen/internal/tools/image-generation";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
-import { compositionModel, createCompositionHost, withCompositionDirectory } from "../../../tests/codex/support/composition-host.js";
+import { compositionModel, createCompositionHost, withCompositionDirectory, writeCompositionConfig } from "../../../tests/codex/support/composition-host.js";
+import { clearEndpointFailures, watchEndpointFailures } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 
 function gate<T>() {
 	let resolve!: (value: T) => void;
@@ -17,6 +18,39 @@ function gate<T>() {
 const auth = { ok: true, apiKey: "fixture", headers: {} };
 const drain = () => new Promise<void>(done => setImmediate(done));
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6pAAAAABJRU5ErkJggg==";
+
+for (const denyByConfig of [false, true]) test(`background standalone denial never falls through to hosted (config=${denyByConfig})`, t =>
+	withCompositionDirectory(async directory => {
+		const host = createCompositionHost(directory);
+		const sessionId = host.ctx.sessionManager.getSessionId();
+		const notices: string[] = [];
+		const stop = watchEndpointFailures(sessionId, message => { if (message) notices.push(message); });
+		let finished = gate<void>();
+		host.ctx.ui = { ...ui([]), setStatus(_key: string, value?: string) { if (value === undefined) finished.resolve(); } };
+		host.ctx.modelRegistry.getApiKeyAndHeaders = async () => auth;
+		if (denyByConfig) writeCompositionConfig(directory, { endpoint_config: [{
+			provider: host.ctx.model.provider, baseUrl: host.ctx.model.baseUrl, imageGeneration: ["hosted"],
+		}] });
+		let requests = 0;
+		t.mock.method(globalThis, "fetch", async (...[url]: Parameters<typeof fetch>) => {
+			requests++;
+			assert.match(String(url), /images\/generations$/);
+			return Response.json({ error: { code: "unsupported_endpoint", message: "images/generations is unsupported" } }, { status: 400 });
+		});
+		registerBackgroundImageGenerationCommand(host.api());
+		try {
+			for (let index = 0; index < 2; index++) {
+				finished = gate<void>();
+				await host.commands.get("image-gen").handler("fixture", host.ctx);
+				await finished.promise;
+			}
+			assert.equal(requests, denyByConfig ? 0 : 1);
+			assert.equal(notices.length, denyByConfig ? 0 : 1);
+		} finally {
+			stop(); clearEndpointFailures(sessionId);
+			await host.emit("session_shutdown"); host.dispose();
+		}
+	}));
 
 function ui(calls: unknown[]) {
 	return {

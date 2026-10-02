@@ -130,8 +130,8 @@ test("speculative auth failures settle the task rather than leaking a rejection 
 	});
 });
 
-test("ready prewarm remains one-shot and lifecycle instances do not share task ownership", async () => {
-	await withCodexSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true }, async () => {
+for (const codexRequestExtensions of [true, false]) test(`ready prewarm remains one-shot with isolated ownership (wire=${codexRequestExtensions})`, async () => {
+	await withCodexSettings({ codexRequestExtensions, openaiTransport: "websocket", openaiWebSocketPrewarm: true }, async () => {
 		const server = await startWebSocketServer([() => successEvents("resp_prewarm")]);
 		const first = createStartupPrewarmLifecycle(pi);
 		const second = createStartupPrewarmLifecycle(pi);
@@ -152,6 +152,11 @@ test("ready prewarm remains one-shot and lifecycle instances do not share task o
 			assert.equal(server.requests.length, 1);
 			assert.equal(server.requests[0].generate, false);
 			assert.deepEqual(server.requests[0].input, []);
+			if (!codexRequestExtensions) {
+				assert.equal(server.requests[0].client_metadata, undefined);
+				assert.equal(server.handshakes[0].headers["x-codex-turn-metadata"], undefined);
+				assert.equal(server.handshakes[0].headers.originator, undefined);
+			}
 			assert.equal(ctx.model!.baseUrl, "https://unused.invalid/v1");
 		} finally {
 			first.reset();

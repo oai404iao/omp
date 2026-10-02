@@ -4,6 +4,12 @@ See the package guide below for release status; source edits do not publish arti
 
 Peer floor and development target: Pi 0.99.1.
 
+Global `endpoint_config.webSearch` allowlists are matched against Pi's resolved
+provider/base URL. A denied or explicitly rejected mode is disabled, never
+changed to hosted/standalone automatically. Runtime rejections are session-local;
+`/reload` clears them. `codexRequestExtensions:false` omits generated standalone
+search turn metadata while preserving authentication and search results.
+
 Hosted search is model-only, including with native codemode in `only` mode.
 Standalone search remains directly callable and is also available to codemode
 while active. Exposure follows the selected model profile; this does not

@@ -8,6 +8,8 @@ export interface NativeToolRewriteResult<T = unknown> {
 }
 
 export interface NativeToolRewriteOptions {
+	codexRequestExtensions?: boolean;
+	removeWebSearch?: boolean;
 	ownsNativeTool?: NativeToolOwnership;
 	imageModel?: string;
 	imageGeneration?: boolean | "hosted" | "standalone";
@@ -55,9 +57,14 @@ export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewri
 			removed.push(name);
 			return [];
 		}
+		if (name === "web_search" && options.ownsNativeTool?.(name) === true && options.removeWebSearch) {
+			removed.push(name);
+			return [];
+		}
 		if (name === "image_generation" && options.imageGeneration !== false) {
 			rewritten.push(name);
 			if (options.imageGeneration === "standalone") {
+				if (options.codexRequestExtensions === false) return [candidate];
 				return [createCodexReservedNamespaceTool("image_generation")];
 			}
 			return [imageToolConfig(candidate, options)];
@@ -65,6 +72,7 @@ export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewri
 		if (name === "web_search" && options.webSearch) {
 			rewritten.push(name);
 			if (typeof options.webSearch === "object" && options.webSearch.implementation === "standalone") {
+				if (options.codexRequestExtensions === false) return [candidate];
 				return [createCodexReservedNamespaceTool("web_search")];
 			}
 			const contentTypes = typeof options.webSearch === "object"

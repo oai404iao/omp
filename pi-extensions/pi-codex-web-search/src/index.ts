@@ -4,6 +4,7 @@ import { currentCodexTurn, resolveCodexRequestIdentity } from "@oai404iao/pi-cod
 import { createWebSearchToolDefinition } from "./tools/web-search.js";
 import { createWebSearchCapture } from "./tools/web-search/capture.js";
 import { registerWebSearchActivityRenderer } from "./tools/web-search/render.js";
+import { loadSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 export default function codexWebSearch(pi: ExtensionAPI): void {
 	const broker = ensureCodexServices(pi);
@@ -15,7 +16,7 @@ export default function codexWebSearch(pi: ExtensionAPI): void {
 	});
 	const definition = createWebSearchToolDefinition({
 		getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
-		getRequestIdentity: sessionId => resolveCodexRequestIdentity(sessionId, undefined, "turn"),
+		getRequestIdentity: sessionId => loadSettings().codexRequestExtensions ? resolveCodexRequestIdentity(sessionId, undefined, "turn") : undefined,
 		hasProviderRuntime: () => broker.coreEnabled,
 	});
 	const parameters = { ...definition.parameters };

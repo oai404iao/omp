@@ -21,6 +21,7 @@ import type { ModelLike } from "@oai404iao/pi-codex-runtime/internal/capabilitie
 import { hasCodexRequestAuth } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveModelProfile } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+import { knownEndpointModel } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 import type { OpenAIResponsesProviderController } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import {
 	type CodexMinimalToolsSettings,
@@ -296,11 +297,13 @@ export function registerNativeCompaction(
 ): void {
 	const forcedPrompt = trackCompactionPrompt(pi);
 	pi.on("context", (event, ctx) => {
-		const settings = loadModelSettings(ctx.model as ModelLike | undefined, ctx.cwd);
+		const settings = loadModelSettings(knownEndpointModel(ctx.model ?? {}, ctx.sessionManager.getSessionId()), ctx.cwd, undefined, ctx.sessionManager.getSessionId());
 		const branch = ctx.sessionManager.getBranch();
-		const retainNone = latestNativeCompactionEntry(branch)?.entry.details?.version === 4;
-		if (!retainNone && (!settings.enabled || settings.compactionMode === "pi")) return undefined;
+		const checkpoint = latestNativeCompactionEntry(branch);
+		const retainNone = checkpoint?.entry.details?.version === 4;
 		try {
+			if (checkpoint && (!settings.codexRequestExtensions || !settings.enabled || settings.compactionMode === "pi")) throw new Error("Opaque checkpoint preserved. Restore its native compaction profile/endpoint and codexRequestExtensions, or navigate before compaction.");
+			if (!retainNone && (!settings.enabled || settings.compactionMode === "pi")) return undefined;
 			if (retainNone && !settings.enabled) throw new Error("Native checkpoint replay is disabled. Re-enable its original model/profile or navigate before compaction.");
 			const messages = applyNativeCompactionContext(
 				event.messages as PiMessages, branch, ctx.model as Model<Api> | undefined, true,
@@ -317,7 +320,7 @@ export function registerNativeCompaction(
 
 	pi.on("session_before_compact", async (event, ctx) => {
 		const model = ctx.model as Model<Api> | undefined;
-		const settings = loadModelSettings(model as ModelLike | undefined, ctx.cwd);
+		const settings = loadModelSettings(knownEndpointModel(model ?? {}, ctx.sessionManager?.getSessionId?.()), ctx.cwd, undefined, ctx.sessionManager?.getSessionId?.());
 		const mode = settings.compactionMode;
 		const nativeCheckpoint = latestNativeCompactionEntry(event.branchEntries);
 		if (!settings.enabled || mode === "pi" || !model || !settings.modelProfile?.effective.enabled) {

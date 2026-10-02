@@ -127,6 +127,7 @@ export function buildCodexJsonHeaders(options: {
 	auth: CodexRequestAuth;
 	endpoint: ResponsesProtocol;
 	extraHeaders?: Record<string, string>;
+	codexRequestExtensions?: boolean;
 }): Headers {
 	const headers = authHeaders(options);
 	for (const [name, value] of Object.entries(options.extraHeaders ?? {})) {
@@ -144,7 +145,7 @@ export function buildCodexJsonHeaders(options: {
 		const accountId = resolveCodexRequestAccountId(options);
 		if (accountId) setProviderDefaultHeader(headers, "chatgpt-account-id", accountId);
 	}
-	setProviderDefaultHeader(headers, "originator", "pi");
+	if (options.codexRequestExtensions !== false || options.endpoint === "codex") setProviderDefaultHeader(headers, "originator", "pi");
 	setProviderDefaultHeader(headers, "accept", "application/json");
 	setProviderDefaultHeader(headers, "content-type", "application/json");
 	return headers;

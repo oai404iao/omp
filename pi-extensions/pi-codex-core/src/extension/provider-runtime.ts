@@ -12,6 +12,7 @@ import type { OpenAIResponsesProviderController } from "@oai404iao/pi-codex-runt
 import { closeProviderWebSocketSessions } from "../providers/openai-codex/websocket-session.js";
 import type { ProviderPresentation } from "@oai404iao/pi-codex-runtime/internal/extension/provider-presentation";
 import { createStartupPrewarmLifecycle } from "./startup-prewarm.js";
+import { loadSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 export function registerResponsesProviderRuntime(
 	pi: ExtensionAPI,
@@ -20,6 +21,7 @@ export function registerResponsesProviderRuntime(
 ): OpenAIResponsesProviderController {
 	installCodexIdentityLifecycle(pi);
 	const prewarm = createStartupPrewarmLifecycle(pi, options.ownsNativeTool);
+	let selectedModel: Model<Api> | undefined;
 	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: TranscriptContext, streamOptions?: SimpleStreamOptions) => {
 		const settings = loadModelSettings(model, options.getCurrentCwd());
 		if (
@@ -35,6 +37,7 @@ export function registerResponsesProviderRuntime(
 				: streamSimpleOpenAIResponses(model as Model<"openai-responses">, checkpoint, streamOptions);
 		}
 		return createCodexStream(model, projectCodexTranscript(context), streamOptions, {
+			configuredModel: selectedModel?.provider === model.provider && selectedModel?.id === model.id ? selectedModel : model,
 			ownsNativeTool: options.ownsNativeTool,
 			...presentation?.streamEffects(),
 			getCurrentCwd: options.getCurrentCwd,
@@ -51,6 +54,7 @@ export function registerResponsesProviderRuntime(
 	};
 	const ensureProviderShimForModel = (model: Model<Api> | undefined, cwd?: string): void => {
 		if (!model) return;
+		selectedModel = model;
 		const settings = loadModelSettings(model, cwd);
 		if (
 			!settings.enabled
@@ -98,6 +102,7 @@ export function registerResponsesProviderRuntime(
 			return currentCodexTurn(sessionId)?.turnId;
 		},
 		getRequestIdentity(sessionId, requestKind = "turn") {
+			if (!loadSettings().codexRequestExtensions) return undefined;
 			return resolveCodexRequestIdentity(sessionId, undefined, requestKind);
 		},
 	};

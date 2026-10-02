@@ -9,6 +9,7 @@ import {
 	hasCodexRequestAuth,
 	resolveResponsesUrl,
 	type ResponsesProtocol,
+	withResolvedAuthBaseUrl,
 } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { createBackgroundImageJobs, panelBranch } from "./background-image-jobs.js";
 import { listResolvedModelProfiles } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
@@ -22,6 +23,7 @@ import {
 } from "./tools/image-generation/storage.js";
 import { IMAGE_SAVE_DISPLAY_MESSAGE_TYPE, type SavedGeneratedImage } from "./tools/image-generation/types.js";
 import { projectRoot } from "./utils/images.js";
+import { checkEndpointResponse, rememberResolvedEndpoint, reportEndpointFailure, requireEndpointCapability } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 
 const BACKGROUND_IMAGE_INSTRUCTIONS = "Generate or edit images with the hosted image_generation tool. Use the user's prompt and any provided reference images. Return the image_generation_call result.";
 const IMAGE_GEN_ERROR_MESSAGE_TYPE = "codex-image-generation-error";
@@ -82,15 +84,13 @@ function registryModels(registry: ModelRegistryLike | undefined): ModelLike[] {
 
 function isConfiguredImageModel(model: ModelLike | undefined): boolean {
 	if (!model || !supportsImageInput(model)) return false;
-	const settings = loadModelSettings(model);
-	return Boolean(
-		settings.modelProfile?.effective.enabled
-		&& settings.imageGenerationImplementation,
-	);
+	const settings = loadModelSettings({ ...model, baseUrl: undefined });
+	return Boolean(settings.modelProfile?.effective.enabled && settings.imageGenerationImplementation);
 }
 
 export function selectCodexImageModel(currentModel: ModelLike | undefined, registry: ModelRegistryLike | undefined): ModelLike | undefined {
-	if (isConfiguredImageModel(currentModel)) return currentModel;
+	const currentSettings = currentModel && loadModelSettings({ ...currentModel, baseUrl: undefined });
+	if (currentModel && supportsImageInput(currentModel) && currentSettings?.imageGenerationImplementation) return currentModel;
 	const discovered = registryModels(registry).find(isConfiguredImageModel);
 	if (discovered) return discovered;
 	for (const profile of listResolvedModelProfiles()) {
@@ -175,13 +175,15 @@ function buildHeaders(
 	model: Model<Api>,
 	auth: { apiKey?: string; headers?: ProviderHeaders },
 	endpoint: ResponsesProtocol,
+	codexRequestExtensions: boolean,
 ): Headers {
 	const headers = buildCodexJsonHeaders({
 		modelHeaders: model.headers,
 		auth,
 		endpoint,
+		codexRequestExtensions,
 	});
-	setProviderGeneratedHeader(headers, "OpenAI-Beta", "responses=experimental");
+	if (codexRequestExtensions || endpoint === "codex") setProviderGeneratedHeader(headers, "OpenAI-Beta", "responses=experimental");
 	setProviderGeneratedHeader(headers, "accept", "text/event-stream");
 	return headers;
 }
@@ -312,7 +314,8 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 	signal.throwIfAborted();
 	const model = selectCodexImageModel(ctx.model as ModelLike | undefined, ctx.modelRegistry as ModelRegistryLike | undefined) as Model<Api> | undefined;
 	if (!model) throw new Error("No image-capable model with an enabled model catalog profile is available.");
-	const settings = loadModelSettings(model as ModelLike, ctx.cwd);
+	const settings = loadModelSettings({ ...model, baseUrl: undefined }, ctx.cwd);
+	if (!settings.imageGenerationImplementation) throw new Error("Image generation is disabled for the selected model.");
 	if (!settings.enabled) throw new Error("pi-codex-minimal-tools is disabled.");
 	if (settings.imageGenerationImplementation === "standalone") {
 		const result = await standaloneImageGeneration({
@@ -322,6 +325,7 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 			cwd: ctx.cwd,
 			model,
 			modelRegistry: ctx.modelRegistry,
+			sessionManager: ctx.sessionManager,
 		}, settings, signal, { callId: "standalone" });
 		signal.throwIfAborted();
 		const saved = result.details.saved;
@@ -353,6 +357,10 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	signal.throwIfAborted();
 	if (!auth.ok) throw new Error(auth.error);
+	const requestModel = withResolvedAuthBaseUrl(model, auth);
+	const sessionId = ctx.sessionManager.getSessionId();
+	rememberResolvedEndpoint(model, requestModel, sessionId);
+	requireEndpointCapability(settings.endpoint_config, requestModel, sessionId, "imageGeneration.hosted");
 	if (!hasCodexRequestAuth({
 		modelHeaders: model.headers,
 		auth: { apiKey: auth.apiKey, headers: auth.headers },
@@ -373,15 +381,18 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 		headers: buildHeaders(model, {
 			apiKey: auth.apiKey,
 			headers: auth.headers,
-		}, settings.responsesEndpoint),
+		}, settings.responsesEndpoint, settings.codexRequestExtensions),
 		body: JSON.stringify(body),
 	});
 	signal.throwIfAborted();
-	if (!response.ok) throw new Error(`Codex image generation failed: ${response.status} ${await response.text()}`);
+	await checkEndpointResponse(response, requestModel, sessionId, ["imageGeneration.hosted"], signal);
 	const results: CodexImageResult[] = [];
 	let responseId: string | undefined;
 	let lastResponse: Record<string, unknown> | undefined;
 	for await (const event of parseSseEvents(response, signal)) {
+		if (event.type === "error" || event.type === "response.failed") {
+			reportEndpointFailure(requestModel, sessionId, ["imageGeneration.hosted"], event.error ?? (event.response as { error?: unknown } | undefined)?.error);
+		}
 		if (event.type === "response.created" && event.response && typeof event.response === "object") {
 			lastResponse = event.response as Record<string, unknown>;
 			const id = (event.response as { id?: unknown }).id;

@@ -8,6 +8,7 @@ export type WebSearchContentType = "text" | "image";
 export type NativeCompactionMode = "pi" | "responses" | "responses-compact";
 
 export interface ModelIdentityLike {
+	baseUrl?: string;
 	provider?: string;
 	id?: string;
 	name?: string;

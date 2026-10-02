@@ -2,11 +2,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { CodexRequestProfileOverride } from "./codex-request-profile.js";
+import { parseEndpointConfig, type EndpointConfig } from "./endpoint-config.js";
 
 export const PACKAGE_NAME = "pi-codex-minimal-tools";
 export const CONFIG_FILE_NAME = "config.json";
 
 export interface CodexGlobalSettings {
+	codexRequestExtensions: boolean;
+	endpoint_config: EndpointConfig[];
 	enabled: boolean;
 	glyphStyle: "unicode" | "ascii";
 	autoEnable: boolean;
@@ -34,6 +37,8 @@ export interface CodexMinimalToolsSettings extends CodexGlobalSettings {
 }
 
 export const DEFAULT_GLOBAL_SETTINGS: Readonly<CodexGlobalSettings> = {
+	codexRequestExtensions: true,
+	endpoint_config: [],
 	enabled: true,
 	glyphStyle: "unicode",
 	autoEnable: true,
@@ -110,10 +115,10 @@ export function readRawConfig(): SettingsRecord {
 }
 
 export function settingsDiagnostics(): string[] {
-	readRawConfig();
+	const raw = readRawConfig();
 	const path = configPath();
 	const warning = settingsParseWarnings.get(path);
-	return warning ? [`${path}: ${warning}`] : [];
+	return [...(warning ? [`${path}: ${warning}`] : []), ...parseEndpointConfig(raw.endpoint_config).diagnostics];
 }
 
 function boolSetting(raw: SettingsRecord, key: keyof CodexMinimalToolsSettings): boolean {
@@ -194,6 +199,8 @@ function requestProfileSetting(raw: SettingsRecord): CodexRequestProfileOverride
 export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 	const raw = readRawConfig();
 	const settings: CodexMinimalToolsSettings = {
+		codexRequestExtensions: boolSetting(raw, "codexRequestExtensions"),
+		endpoint_config: parseEndpointConfig(raw.endpoint_config).entries,
 		enabled: boolSetting(raw, "enabled"),
 		glyphStyle: glyphStyleSetting(raw),
 		autoEnable: boolSetting(raw, "autoEnable"),

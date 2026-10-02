@@ -61,6 +61,7 @@ export async function* mapCodexEvents(
 				sequenceNumber?: number;
 			};
 			if (code) error.code = code;
+			if (typeof (nestedError as { param?: unknown })?.param === "string") Object.assign(error, { param: (nestedError as { param: string }).param });
 			if (typeof nestedError?.type === "string") error.errorType = nestedError.type;
 			if (status !== undefined) error.status = status;
 			error.retryAfterMs = retryAfterMsFromHeaders(eventHeaders);
@@ -74,6 +75,7 @@ export async function* mapCodexEvents(
 				typeof responseError?.message === "string" ? responseError.message : "OpenAI Responses request failed",
 			);
 			if (typeof responseError?.code === "string") error.code = responseError.code;
+			if (typeof (responseError as { param?: unknown })?.param === "string") Object.assign(error, { param: (responseError as { param: string }).param });
 			throw error;
 		}
 

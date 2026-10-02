@@ -16,7 +16,7 @@ import { applyConfiguredResponsesFeatureHeaders, buildSSEHeaders, buildWebSocket
 import { withResponsesLiteWebSocketMetadata } from "./lite.js";
 import { assertSuccessfulOutput, createErrorMessage, createInitialAssistantMessage } from "./message.js";
 import { proxyDispatcherForUrl } from "./proxy.js";
-import { buildRequestBody, ensureWebSearchDetailsIncluded } from "./request-body.js";
+import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOptions } from "./request-body.js";
 import { getLatestUserText } from "./request-context.js";
 import { createCodexRequestId, createPiTurnId, withSseRequestMetadata } from "./request-metadata.js";
 import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, isWebSocketUpgradeRejectedError, sleep, sseMaxRetries, sseRetryDelayMs, webSocketRetryDelayMs, webSocketStreamMaxRetries } from "./retry.js";
@@ -27,6 +27,8 @@ import { finalizeUsage, withRequestServiceTier } from "./usage.js";
 import { websocketHttpFallbackSessions } from "./websocket-session.js";
 import { processWebSocketStream } from "./websocket-stream.js";
 import { prepareSseBody } from "./request-compression.js";
+import { assertOpaqueReplayAllowed, reportHostedFailure } from "./endpoint-policy.js";
+import { rememberResolvedEndpoint } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 
 export function createCodexStream<TApi extends Api>(
 	model: Model<TApi>,
@@ -34,6 +36,7 @@ export function createCodexStream<TApi extends Api>(
 	options: SimpleStreamOptions | undefined,
 	deps: ProviderStreamEffects & Pick<NativeToolRewriteOptions, "ownsNativeTool"> & {
 		getCurrentCwd: () => string;
+		configuredModel?: Model<Api>;
 		getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
 		getStartupPrewarm?: (sessionId: string, model: Model<Api>) => Promise<void> | undefined;
 	},
@@ -46,6 +49,7 @@ export function createCodexStream<TApi extends Api>(
 		const requestPrompt = getLatestUserText(context);
 		const webSearchCitationSources = collectWebSearchCitationSources(model, context);
 		const historicalCitationSources = collectHistoricalCitationSources(model, context);
+		let sentBody: ResponsesBody | undefined;
 
 		try {
 			const apiKey = options?.apiKey ?? "";
@@ -55,7 +59,9 @@ export function createCodexStream<TApi extends Api>(
 				throw new Error(`No request authentication for provider: ${model.provider}`);
 			}
 
-			const settings = loadModelSettings(model, requestCwd);
+			rememberResolvedEndpoint(deps.configuredModel ?? model, model, options?.sessionId);
+			const settings = loadModelSettings(model, requestCwd, undefined, options?.sessionId);
+			if (settings.requestBlockedReason) throw new Error(settings.requestBlockedReason);
 			const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
 			if (
 				!settings.enabled
@@ -70,7 +76,7 @@ export function createCodexStream<TApi extends Api>(
 				auth,
 				endpoint,
 			});
-			const requestIdentity = resolveCodexRequestIdentity(
+			const requestIdentity = !settings.codexRequestExtensions ? undefined : resolveCodexRequestIdentity(
 				options?.sessionId,
 				options?.metadata as Record<string, unknown> | undefined,
 				"turn",
@@ -78,17 +84,17 @@ export function createCodexStream<TApi extends Api>(
 			let body = applyFastModeServiceTier(
 				buildRequestBody(model, context, requestProfile, {
 					...options,
+					...requestBodyToolOptions(settings),
 					ownsNativeTool: deps.ownsNativeTool,
-					imageGeneration: settings.imageGenerationImplementation ?? false,
 				}),
 				settings,
 				model,
 			);
 			const webSearch = settings.modelProfile.effective.tools.webSearch;
 			body = rewriteNativeOpenAiTools(body, {
+				...requestBodyToolOptions(settings),
 				ownsNativeTool: deps.ownsNativeTool,
 				imageModel: settings.imageModel,
-				imageGeneration: settings.imageGenerationImplementation ?? false,
 				webSearch: settings.webSearchEnabled && webSearch
 					? {
 							implementation: webSearch.implementation,
@@ -102,6 +108,8 @@ export function createCodexStream<TApi extends Api>(
 			}
 			options = withRequestServiceTier(options, body.service_tier);
 			ensureWebSearchDetailsIncluded(body);
+			assertOpaqueReplayAllowed(body, settings);
+			sentBody = body;
 			const grammarToolInputProperties = responseGrammarProperties(body, context.tools);
 
 			const websocketSessionId = requestIdentity?.sessionId ?? options?.sessionId;
@@ -113,6 +121,7 @@ export function createCodexStream<TApi extends Api>(
 				|| websocketSessionId
 				|| createCodexRequestId();
 			const websocketRequestMetadata: WebSocketRequestMetadata = {
+				codexRequestExtensions: settings.codexRequestExtensions,
 				...(options?.sessionId ? { sessionId: options.sessionId } : {}),
 				...(websocketThreadId ? { threadId: websocketThreadId } : {}),
 				turnId: websocketTurnId,
@@ -128,6 +137,8 @@ export function createCodexStream<TApi extends Api>(
 					requestProfile,
 					websocketThreadId,
 					requestIdentity,
+					settings.codexRequestExtensions,
+					endpoint,
 				),
 				settings,
 				model as Model<Api>,
@@ -140,6 +151,8 @@ export function createCodexStream<TApi extends Api>(
 				options?.sessionId ?? websocketRequestId,
 				websocketThreadId ?? websocketRequestId,
 				requestIdentity,
+				settings.codexRequestExtensions,
+				endpoint,
 			), settings, model as Model<Api>);
 			const transformHeaders = (
 				options as
@@ -297,7 +310,7 @@ export function createCodexStream<TApi extends Api>(
 					await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 
 					if (response.ok) {
-						if (options?.sessionId) {
+						if (options?.sessionId && settings.codexRequestExtensions) {
 							captureCodexTurnState(
 								options.sessionId,
 								response.headers.get("x-codex-turn-state") ?? undefined,
@@ -307,7 +320,8 @@ export function createCodexStream<TApi extends Api>(
 					}
 
 					const errorText = await response.text();
-					if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
+					const rejected = !options?.signal?.aborted && reportHostedFailure(model, options?.sessionId, body, { status: response.status, responseBody: errorText }, deps.ownsNativeTool);
+					if (!rejected && attempt < maxRetries && isRetryableError(response.status, errorText)) {
 						await sleep(sseRetryDelayMs(attempt, options, headersToRecord(response.headers)), options?.signal);
 						continue;
 					}
@@ -317,7 +331,9 @@ export function createCodexStream<TApi extends Api>(
 						statusText: response.statusText,
 					});
 					const info = await parseErrorResponse(fakeResponse);
-					throw new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message));
+					throw Object.assign(new NonRetryableProviderError(withHttpStatusPrefix(response.status, info.friendlyMessage || info.message)), {
+						status: response.status, responseBody: errorText,
+					});
 				} catch (error) {
 					if (error instanceof NonRetryableProviderError) {
 						throw error;
@@ -350,7 +366,7 @@ export function createCodexStream<TApi extends Api>(
 				stream,
 				model,
 				options,
-				options?.sessionId,
+				settings.codexRequestExtensions ? options?.sessionId : undefined,
 				deps,
 				requestCwd,
 				requestPrompt,
@@ -368,6 +384,7 @@ export function createCodexStream<TApi extends Api>(
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
+			if (!options?.signal?.aborted) reportHostedFailure(model, options?.sessionId, sentBody, error, deps.ownsNativeTool);
 			stream.push({
 				type: "error",
 				reason: (options?.signal?.aborted ? "aborted" : "error") as "aborted" | "error",

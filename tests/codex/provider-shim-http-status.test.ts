@@ -1090,6 +1090,8 @@ test("native compaction supports Codex Responses compaction and legacy /response
 		tools: [],
 	} as any;
 	const settings = {
+		codexRequestExtensions: true,
+		endpoint_config: [],
 		enabled: true,
 		glyphStyle: "unicode",
 		autoEnable: true,

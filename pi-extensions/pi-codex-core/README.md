@@ -4,6 +4,13 @@ See the package guide below for release status; source edits do not publish arti
 
 Peer floor and development target: Pi 0.99.1.
 
+`codexRequestExtensions` defaults to `true`. Turning it off preserves Standard
+tool/replay handling but stops generated Codex metadata, separates WS caches,
+blocks Lite requests and disables native compaction. Existing opaque checkpoints
+are preserved and cannot silently become text summaries. Endpoint capability
+allowlists and explicit session-local rejections are shared through runtime;
+neither selects alternate implementations nor changes Pi authentication.
+
 `apply_patch` remains callable through native codemode while active.
 `view_image` is model-only so image content reaches the model directly.
 Scripts receive patch data as `{ summary, files }`; failures reject rather than

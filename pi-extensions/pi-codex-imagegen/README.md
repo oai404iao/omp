@@ -35,6 +35,11 @@ All image paths, including this explicit fallback and background jobs, use
 the selected provider's Pi-resolved credentials, headers and base URL. The
 fallback no longer reads a separate `OPENAI_API_KEY` or forces the public
 OpenAI endpoint. Authentication failure never switches accounts or providers.
+`endpoint_config.imageGeneration` limits allowed modes at the authenticated
+endpoint. Rejected/denied standalone jobs do not fall through to hosted jobs.
+Explicit protocol rejection temporarily disables that mode for the session,
+including background jobs. With `codexRequestExtensions:false`, standalone
+requests omit generated Codex image-turn headers.
 
 Uses the existing
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json` settings and

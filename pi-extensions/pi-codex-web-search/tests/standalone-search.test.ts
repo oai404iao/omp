@@ -181,6 +181,10 @@ test("standalone web search uses Pi's resolved endpoint and header-only auth for
 		extends: "openai/gpt-5.6-sol",
 		responses: { endpoint: "codex" },
 	}]);
+	writeFileSync(join(agentDir, "extensions/pi-codex-minimal-tools/config.json"), JSON.stringify({
+		codexRequestExtensions: false,
+		endpoint_config: [{ provider: "custom", baseUrl: "https://api.example/v1", webSearch: [] }],
+	}));
 	const model = {
 		provider: "custom",
 		api: "openai-responses",
@@ -196,12 +200,15 @@ test("standalone web search uses Pi's resolved endpoint and header-only auth for
 		accountHeader = new Headers(init?.headers as HeadersInit).get("chatgpt-account-id");
 		assert.equal(new Headers(init?.headers).get("authorization"), null);
 		assert.equal(new Headers(init?.headers).get("x-api-key"), "resolved");
+		assert.equal(new Headers(init?.headers).get("x-codex-turn-metadata"), null);
+		assert.equal(new Headers(init?.headers).get("originator"), null);
 		return Response.json({ output: "search result", results: [] });
 	}) as typeof fetch;
 
 	await standaloneWebSearch({ search_query: [{ q: "query" }] }, {
 		cwd: process.cwd(),
 		model,
+		sessionManager: { getSessionId: () => "wire-off-search" },
 		modelRegistry: {
 			async getApiKeyAndHeaders() {
 				return { ok: true as const, headers: { "x-api-key": "resolved" }, baseUrl: "https://resolved.example/v2" };

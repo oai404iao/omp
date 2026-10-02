@@ -11,6 +11,15 @@ import { CODEX_TOOL_CALL_PROVIDERS, WEB_SEARCH_RESULTS_INCLUDE, WEB_SEARCH_SOURC
 import { stripResponsesLiteImageDetails } from "./lite.js";
 import { clampCodexThinkingLevel, clampReasoningEffort } from "./reasoning.js";
 import { type ResponsesBody, type NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
+import type { ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+
+export function requestBodyToolOptions(settings: ResolvedCodexModelSettings) {
+	return {
+		codexRequestExtensions: settings.codexRequestExtensions,
+		imageGeneration: settings.imageGenerationImplementation ?? false,
+		removeWebSearch: settings.endpointDisabledWebSearch,
+	} as const;
+}
 
 function hasNativeWebSearchTool(body: ResponsesBody): boolean {
 	return Array.isArray(body.tools) && body.tools.some((tool) => Boolean(tool) && typeof tool === "object" && (tool as { type?: unknown }).type === "web_search");
@@ -30,9 +39,14 @@ export function buildRequestBody<TApi extends Api>(
 	options?: SimpleStreamOptions & {
 		ownsNativeTool?: NativeToolOwnership;
 		imageGeneration?: false | "hosted" | "standalone";
+		codexRequestExtensions?: boolean;
+		removeWebSearch?: boolean;
 	},
 ): ResponsesBody {
-	const requestIdentity = resolveCodexRequestIdentity(
+	if (options?.codexRequestExtensions === false && profile.responsesMode === "lite") {
+		throw new Error("Responses Lite requires codexRequestExtensions:true.");
+	}
+	const requestIdentity = options?.codexRequestExtensions === false ? undefined : resolveCodexRequestIdentity(
 		options?.sessionId,
 		options?.metadata as Record<string, unknown> | undefined,
 		// Only the session-scoped prompt cache key is needed here. Do not
@@ -56,6 +70,7 @@ export function buildRequestBody<TApi extends Api>(
 		}>();
 		for (const tool of tools as Array<Record<string, unknown>>) {
 			if (typeof tool.name !== "string") continue;
+			if (tool.name === "web_search" && options?.ownsNativeTool?.("web_search") === true && options.removeWebSearch) continue;
 			if (tool.name === "image_generation"
 				&& options?.ownsNativeTool?.("image_generation") === true
 				&& options.imageGeneration === false) {

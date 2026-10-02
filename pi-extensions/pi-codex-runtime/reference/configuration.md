@@ -292,6 +292,107 @@ Important constraints:
   SSE/WebSocket transport. `"responses-compact"` uses the legacy unary
   endpoint. `"pi"` keeps Pi summaries.
 
+## Request enhancements and endpoint capabilities
+
+These are global keys in
+`<agentDir>/extensions/pi-codex-minimal-tools/config.json`:
+
+```json
+{
+  "codexRequestExtensions": true,
+  "endpoint_config": [
+    {
+      "provider": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "webSearch": ["hosted"],
+      "imageGeneration": ["hosted", "standalone"],
+      "compaction": ["responses-compact"]
+    }
+  ]
+}
+```
+
+This example is a **user declaration**, not a claim that every account or
+endpoint supports these capabilities. There are no automatic capability probes.
+
+### Codex request extensions
+
+`codexRequestExtensions` defaults to `true` for upgrade compatibility. With
+`false`, Standard requests keep authentication, custom/function tools, hosted
+tool parsing/persistence and standalone execution, but stop generating:
+
+- Codex thread/window/turn/subagent headers and `client_metadata`;
+- installation/turn metadata and Codex UUID replacements for the prompt-cache
+  key (requests use Pi's session ID instead);
+- Lite headers, namespace envelopes and remote-compaction enhancements;
+- Codex `originator` and experimental SSE beta defaults on the modern
+  `openai-responses` route. Legacy protocol-required headers and WebSocket
+  negotiation headers remain.
+
+Standard standalone tools retain their ordinary function declarations rather
+than being rewritten to Codex reserved namespaces. Explicit user headers and
+payload metadata are not removed. Internal session/subagent identity records
+are retained; the switch controls request emission, not historical data deletion.
+Switching the flag separates WebSocket/prewarm cache identities.
+
+This is **not** a switch to Pi's entire native stream implementation. The
+plugin still handles its tools, replay, display and storage. A Lite profile
+cannot silently become Standard: requests fail with a configuration explanation
+until you select a Standard profile or re-enable the flag. Native compaction is
+disabled while the flag is off. Without a native checkpoint Pi can use text
+compaction; existing opaque checkpoints (all supported versions) are preserved
+and blocked from incompatible replay or recompaction. Restore the original
+profile/endpoint settings or navigate before the checkpoint.
+
+### Endpoint declarations
+
+`endpoint_config` defaults to `[]`. Entries match the exact provider and
+**Pi-auth-resolved base URL**, ignoring trailing slashes. Use the API root as
+configured in Pi, not a guessed alternate service URL. URLs must not contain
+credentials, query strings or fragments. Declarations never change authentication
+or routing, and OAuth/API-key requests to the same provider/base URL share the
+declaration.
+
+Each optional capability list is an allowlist:
+
+| Key | Allowed values |
+| --- | --- |
+| `webSearch` | `"hosted"`, `"standalone"` |
+| `imageGeneration` | `"hosted"`, `"standalone"` |
+| `compaction` | `"responses"`, `"responses-compact"` |
+
+An omitted list inherits the model profile; `[]` disables that capability.
+Missing endpoint entries preserve existing profiles. Invalid capability lists
+disable only that capability and produce diagnostics. Duplicate endpoint entries
+use the first declaration and report a diagnostic.
+
+Lists do **not** select implementations or enable unknown models. Continue
+choosing the implementation in the model profile. For example, allowing only
+standalone search while the profile selects hosted disables search; it does
+not switch to standalone. Denying native compaction never converts an existing
+opaque checkpoint to a text placeholder.
+
+Authentication is resolved lazily, with no extra login/refresh probes just to
+draw the tool list. Until a request supplies its actual endpoint, tool projection
+uses the model profile. Requests enforce the allowlist before sending; after
+resolution the tool list reflects that endpoint. `/codex-minimal-tools doctor`
+shows whether resolution is pending. Use `/reload` after editing configuration
+to refresh declarations and clear transient rejections.
+
+### Explicit unsupported responses
+
+A recognized, explicit protocol rejection disables only the attempted
+capability/mode at that provider+endpoint in the current session and emits a
+warning. Hosted search rejection does not disable standalone search or images.
+The failed operation remains an error; there is no automatic resend with another
+mode, model, provider or credential.
+
+Authentication failures, rate limits, transport failures, generic 404/5xx errors
+and unsupported subparameters do not prove the capability is unavailable and
+do not disable it. Unknown error formats remain ordinary errors. No config file
+is rewritten. Transient rejection state is cleared on the next session lifecycle
+or reload, so correcting the server/configuration can be retried.
+
 ## Built-In Profiles
 
 `openai` is the actively maintained OpenAI provider. Pi's ChatGPT OAuth and
