@@ -1,5 +1,30 @@
 # @oai404iao/pi-subagent
 
+## 0.7.0
+
+### Minor Changes
+
+- 2632cb0: Provide structured script results for patching, standalone search and image
+  generation while keeping hosted and subagent tools model-only. Child sessions
+  load native codemode/tool-search through the inherited builtin policy, preserve
+  hard registry ceilings and deferred discoveries across cold resumes, and report
+  nested trace IDs without double-counting usage. Child codemode does not expose
+  classifier/model calls; built-in MCP is not injected.
+  
+  Skip speculative prewarm with native codemode/tool-search active. In that state,
+  use Pi text compaction only without an opaque native checkpoint; otherwise
+  preserve the checkpoint and refuse recompaction rather than guessing the
+  request tool projection. Disable both tools and retry on the original model,
+  or navigate before the checkpoint.
+- 2632cb0: Require Pi 0.99.1. Keep hosted Codex tools, image viewing, and all subagent
+  delegation/control tools model-only; allow active standalone Codex tools through
+  native codemode. Follow model changes without reactivating manually disabled
+  tools, and reject hosted placeholder execution as an error. Handle Pi's explicit
+  prompt dispositions without accepting a handled input as a child task.
+  
+  The private tree-continue hook remains disabled on this unaudited Pi version.
+  This does not enable codemode/MCP, add model profiles, or change authentication.
+
 ## 0.6.0
 
 ### Minor Changes
