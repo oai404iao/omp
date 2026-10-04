@@ -33,7 +33,7 @@ test("the compatibility bundle cannot exclude its activated dependencies", () =>
   assert.throws(() => assertReleaseDependencies([bundle]), /outside this artifact batch.*pi-codex-runtime/);
 });
 
-test("the four verified Codex packages enter guarded batches without admitting the private hook", () => {
+test("the four verified Codex packages enter guarded batches", () => {
   const names = ["runtime", "core", "web-search", "imagegen"].map(name => `@oai404iao/pi-codex-${name}`);
   assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap"), []);
   for (const name of names) {
@@ -43,11 +43,7 @@ test("the four verified Codex packages enter guarded batches without admitting t
     assert.ok(artifactWorkspaces().some(e => e.name === name));
     assert.ok(artifactWorkspaces(true).some(e => e.name === name));
   }
-  const tree = workspaces.find(e => e.name === "@oai404iao/pi-tree-continue");
-  assert.equal(tree.releaseStatus, "blocked");
-  assert.equal(readManifest(tree.directory).private, true);
-  assert.ok(!artifactWorkspaces(true).includes(tree));
-  assert.equal(artifactWorkspaces().length, 8);
+  assert.equal(artifactWorkspaces().length, 7);
   assert.deepEqual(artifactWorkspaces(), artifactWorkspaces(true));
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces()));
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces(true)));

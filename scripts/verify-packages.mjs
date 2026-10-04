@@ -11,7 +11,6 @@ const errors = [];
 const seenNames = new Set();
 const testedPiVersion = piFloor;
 const requiredRuntimeFiles = {
-  "@oai404iao/pi-external-thinking": ["THIRD_PARTY_NOTICES.md"],
   "@oai404iao/pi-codex-minimal-tools": ["subagent-inline.ts", "THIRD_PARTY_NOTICES.md"],
   "@oai404iao/pi-codex-runtime": [
     "LICENSES/Apache-2.0.txt",
@@ -52,7 +51,6 @@ const requiredRuntimeFiles = {
     "config.schema.json",
   ],
   "@oai404iao/pi-telegram-notify": ["config.example.json", "config.schema.json"],
-  "@oai404iao/pi-tree-continue": [],
 };
 
 function report(message) {

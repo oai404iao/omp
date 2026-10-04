@@ -6,7 +6,6 @@
 | --- | --- | --- |
 | Supported-package floor | 0.99.1 | Every public Pi peer is `>=0.99.1` |
 | Development / target | 0.99.1 | Exact root and workspace dev dependencies |
-| Private tree-continue hook | 0.87.0, 0.87.1 only | Disabled on 0.99.1; blocked/private and excluded from public support |
 
 Pi versions before 0.99.1 are no longer supported by public packages. There is
 no older-SDK fallback. SessionManager remains canonical, including append-only
@@ -101,14 +100,6 @@ Child sessions apply the complete canonical projection before selecting complete
 turns. Omissions and content replacements are not undone; parent system authority
 is excluded. Child completion is collected from finalized events, not offsets
 in a mutable context array. Grammar eligibility likewise uses effective context.
-External Thinking
-recognizes OpenAI in-conversation tool additions as well as top-level tools.
-On its historical audited versions only, the private `/continue` hook prepares transcript state and delegates run/retry/
-abort cleanup to Pi's audited run lifecycle without adding a user message. It
-retains recorded prompt sections rather than rebuilding an interrupted turn
-from base options, and restores normal preparation before settlement callbacks
-and deferred runs. Navigation previews must preserve the effective prefix,
-including edits; `--force` cannot restore omitted or replaced content.
 Notifications and cleanup remain on `agent_settled`. Real SDK regressions
 exercise bounded `agent_before_settle` continuation without adding automatic
 parent wakeups or an idle-command replacement.
@@ -155,16 +146,11 @@ have already passed.
 
 ## Checks that prevent false positives
 
-- Root SDK anchors keep every workspace, including the private tree-continue
-  hook, on the selected baseline's exact SDK.
+- Root SDK anchors keep every workspace on the selected baseline's exact SDK.
 - `check:pi-baseline` checks both declared and actually resolved SDK versions for
   every workspace.
 - Loader probes use each installed consumer's SDK and check its package version
   and exported VERSION. Ordinary, reversed and duplicate package loading all run.
-- The private hook is loaded by each baseline's real Pi loader. On 0.99.1 it
-  must warn once, register no `/continue`, and leave the `AgentSession` prototype
-  unchanged. Historical continuation execution tests are explicitly skipped;
-  version guards and pure target-selection tests still run.
 - A credential-free offline CLI probe explicitly loads the compatibility bundle.
 - Consumer probes run in separate processes to avoid cross-case module globals
   and release temporary installations promptly to bound disk/memory use.

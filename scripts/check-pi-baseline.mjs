@@ -29,10 +29,6 @@ try {
     PI_CODING_AGENT_DIR: join(temporary, "agent"), PI_OFFLINE: "1", PI_TELEMETRY: "0",
     OMP_PI_BASELINE: process.env.OMP_PI_BASELINE ?? "target",
   };
-  const probe = spawnSync(process.execPath, [join(root, "scripts/pi-loader-smoke.mjs")], {
-    cwd: root, encoding: "utf8", env, timeout: 60000,
-  });
-  assert.equal(probe.status, 0, probe.stdout + probe.stderr);
   const cli = spawnSync(process.execPath, [
     join(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
     "--offline", "--no-extensions", "--no-skills", "--no-prompt-templates",
@@ -41,5 +37,5 @@ try {
   ], { cwd: temporary, encoding: "utf8", env, timeout: 60000 });
   assert.equal(cli.status, 0, cli.stdout + cli.stderr);
   assert.doesNotMatch(cli.stdout + cli.stderr, /Failed to load extension|ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED/);
-  console.log(`✓ Pi ${piVersion()}: resolved workspace peers, private-hook loader probe and offline CLI smoke`);
+  console.log(`✓ Pi ${piVersion()}: resolved workspace peers and offline CLI smoke`);
 } finally { rmSync(temporary, { recursive: true, force: true }); }

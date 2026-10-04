@@ -19,15 +19,13 @@
     "npm": ">=11.5.1"
   },
   "workspaces": [
-    "pi-extensions/external-thinking",
     "pi-extensions/pi-codex-minimal-tools",
     "pi-extensions/pi-codex-runtime",
     "pi-extensions/pi-codex-core",
     "pi-extensions/pi-codex-web-search",
     "pi-extensions/pi-codex-imagegen",
     "pi-extensions/pi-subagent",
-    "pi-extensions/pi-telegram-notify",
-    "pi-extensions/pi-tree-continue"
+    "pi-extensions/pi-telegram-notify"
   ],
   "scripts": {
     "audit:history": "bash scripts/audit-public-history.sh",
