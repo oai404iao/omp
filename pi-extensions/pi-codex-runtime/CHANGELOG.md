@@ -1,5 +1,80 @@
 # @oai404iao/pi-codex-runtime
 
+## 0.5.0
+
+Final model defaults: `openai/gpt-6.1-sol` uses the GPT-5.6 Sol Lite profile
+described below, superseding its initial Standard profile in this release.
+The other modern GPT-6 profiles remain Standard.
+
+### Minor Changes
+
+- 2632cb0: Add the default-on codexRequestExtensions wire-enhancement gate and exact
+  provider/auth-resolved-base-URL endpoint_config capability allowlists.
+  Preserve Standard hosted/standalone tools while blocking incompatible Lite and
+  opaque-checkpoint transitions. Explicit unsupported protocol responses warn and
+  disable only the affected mode for the current session/endpoint, with no automatic
+  provider/implementation fallback or persistent configuration changes.
+- 2632cb0: Add exact Standard Responses profiles for openai/gpt-6.1-sol, gpt-6-astra,
+  gpt-6-sol and gpt-6-luna from pinned Pi 0.99.1 metadata. Enable local custom
+  patch and image viewing without inferring remote tool, compaction, WebSocket
+  or Fast support. Standard OpenAI reasoning clamps use Pi's public implementation.
+  Keep legacy Codex profiles frozen and document explicit authentication, model,
+  endpoint-capability and opaque-checkpoint migration boundaries.
+- 2632cb0: Require Pi 0.99.1. Keep hosted Codex tools, image viewing, and all subagent
+  delegation/control tools model-only; allow active standalone Codex tools through
+  native codemode. Follow model changes without reactivating manually disabled
+  tools, and reject hosted placeholder execution as an error. Handle Pi's explicit
+  prompt dispositions without accepting a handled input as a child task.
+
+  This does not enable codemode/MCP, add model profiles, or change authentication.
+- 2632cb0: Follow Pi's native OpenAI authentication and API routing, including ChatGPT OAuth
+  request-field compatibility and resolved base URLs for auxiliary requests.
+  Treat openai-codex as deprecated compatibility without migrating credentials or
+  history. Outside that legacy provider, apiKeyMode and responses.endpoint no longer
+  override Pi's API/base URL. Explicit direct image fallback now uses the selected
+  provider's Pi authentication instead of a separate environment key/account.
+- 719c607: Forward raw provider events before Codex SSE/WebSocket normalization and prepare
+  subagent Codex identity for virtual model selections, preserving identity across
+  routing changes and cold resumes without adding identity to model context.
+
+  Align the default `openai/gpt-6.1-sol` profile with `openai/gpt-5.6-sol`: Lite,
+  auto transport, prewarm, standalone web/image, custom patch, native compaction
+  and priority Fast availability with a 2x cost multiplier. Keep other GPT-6 and
+  legacy Codex profiles unchanged. These defaults do not establish real-account
+  endpoint access or verified Fast pricing.
+
+### Patch Changes
+
+- 92c0a63: Make the Codex bundle composition-only while preserving its default and
+  subagent-inline exports and existing configuration paths. Remove private source
+  forwards and duplicate schemas/assets; runtime owns canonical schemas and
+  catalog, and core owns the grammar. Move behavioral tests, protocol references,
+  preview assets and source/license documentation to their owners, with
+  cross-package regression tests at repository root. Retain upstream fingerprints
+  and enforce the thin bundle through architecture, license and tarball checks.
+- 92c0a63: Fix Codex SSE cancellation after response headers, flush residual EOF frames,
+  and preserve CRLF/Unicode across chunk boundaries. Reject unsuccessful terminal
+  responses before emitting done or retaining WebSocket continuation state, and
+  distinguish output-token limits from other incomplete responses.
+
+  Honor explicit SSE maxRetries, Retry-After and maxRetryDelayMs while retaining
+  the default three retries and non-retryable HTTP error handling. Release retry
+  sleep abort listeners after settlement.
+
+  Account for cache-write tokens and clamp fresh input usage. Backfill late
+  encrypted reasoning signatures without replacing existing replay data.
+  Honor injected fetch, provider-scoped proxy environments, cacheRetention none,
+  and WebSocket connect/idle timeout options. Separate socket reuse by effective
+  proxy route and keep shared-connection waits independently cancellable.
+
+  Fail closed on malformed SSE JSON and stop retrying explicit quota exhaustion,
+  including streaming compaction errors. Use zstd only when it reduces request
+  bytes on the exact built-in Codex SSE endpoint; preserve custom endpoint and
+  WebSocket request encoding.
+- 5e57992: Remove integration with the retired private Code Mode extension. Keep Codex
+  apply_patch and web_search registered as direct Pi tools, and retain native
+  edit/write restoration and foreign-tool ownership checks.
+
 ## 0.4.0
 
 ### Minor Changes

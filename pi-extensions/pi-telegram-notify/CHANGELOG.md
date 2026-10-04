@@ -1,5 +1,17 @@
 # @oai404iao/pi-telegram-notify
 
+## 0.6.0
+
+### Minor Changes
+
+- 2632cb0: Require Pi 0.99.1. Keep hosted Codex tools, image viewing, and all subagent
+  delegation/control tools model-only; allow active standalone Codex tools through
+  native codemode. Follow model changes without reactivating manually disabled
+  tools, and reject hosted placeholder execution as an error. Handle Pi's explicit
+  prompt dispositions without accepting a handled input as a child task.
+
+  This does not enable codemode/MCP, add model profiles, or change authentication.
+
 ## 0.5.0
 
 ### Minor Changes
