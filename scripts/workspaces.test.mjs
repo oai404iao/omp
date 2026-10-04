@@ -2,12 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { artifactWorkspaces, publishableWorkspaces, readManifest, workspaces } from "./workspaces.mjs";
 
-test("retired keep-defaults is absent from workspaces and every artifact selection", () => {
-  assert(!readManifest(".").workspaces.includes("pi-extensions/pi-keep-defaults"));
-  for (const entries of [workspaces, publishableWorkspaces, artifactWorkspaces(), artifactWorkspaces(true)]) {
-    assert(!entries.some(({ name }) => name === "@oai404iao/pi-keep-defaults"));
-  }
-});
+for (const [directory, name] of [
+  ["external-thinking", "pi-external-thinking"],
+  ["pi-keep-defaults", "pi-keep-defaults"],
+  ["pi-tree-continue", "pi-tree-continue"],
+  ["pi-code-mode", "pi-code-mode"],
+]) {
+  test(`removed ${name} is absent from workspaces and every artifact selection`, () => {
+    assert(!readManifest(".").workspaces.includes(`pi-extensions/${directory}`));
+    for (const entries of [workspaces, publishableWorkspaces, artifactWorkspaces(), artifactWorkspaces(true)]) {
+      assert(!entries.some(entry => entry.name === `@oai404iao/${name}`));
+    }
+  });
+}
 
 test("all workspaces, including private packages, satisfy release metadata gates", () => {
   for (const { name, directory } of workspaces) {
@@ -56,11 +63,4 @@ test("Codex minimal tools enters guarded artifacts after bootstrap activation", 
   assert(publishableWorkspaces.some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
   assert(artifactWorkspaces().some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
   assert(artifactWorkspaces(true).some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
-});
-
-test("retired pi-code-mode is absent from workspaces and artifacts", () => {
-  assert(!readManifest(".").workspaces.includes("pi-extensions/pi-code-mode"));
-  for (const entries of [workspaces, publishableWorkspaces, artifactWorkspaces(), artifactWorkspaces(true)]) {
-    assert(!entries.some(({ name }) => name === "@oai404iao/pi-code-mode"));
-  }
 });

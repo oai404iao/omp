@@ -172,11 +172,11 @@ paths, exact declared dependencies and forbidden optional/peer package edges.
 
 The four new packages are non-private on the guarded `publishable` track.
 Their already-published versions are recovery nodes, pinned by source and SHA-512
-in the release lock. Ordinary preparation includes them with the other five
-alpha candidates; dependency closure may not be bypassed. A locked version
+in the release lock. Ordinary preparation includes all seven current
+workspaces; dependency closure may not be bypassed. A locked version
 temporarily missing from registry metadata stops preparation, not triggers a
-new publish. The tree-continue package stays private/blocked, and previous lock
-entries remain unchanged.
+new publish. Removed extensions cannot enter new artifact batches; previous
+lock entries remain unchanged.
 
 S4 supplies `changeset:sync`, CI coverage checking and the guarded
 `changeset:version` wrapper. Generated consumer changesets recurse through hard
@@ -185,15 +185,14 @@ The publication pipeline independently validates dependency order, artifacts,
 eligibility and dependency visibility, stopping downstream publication on failure.
 
 Initial bootstrap is complete and this dedicated activation change was authorized
-for review. Its merge and protected publication of the remaining five alpha
-versions still need separate approval. The first four packages have both `next`
+for review. Protected publication of new versions still needs separate
+approval. The first four packages have both `next`
 and `latest` pointing to their sole initial alpha; that bounded exception is not
 stable-release acceptance. Trusted-publisher configuration is not proof of a
 successful OIDC publish. See [activation evidence](audits/codex-bootstrap-activation.md)
 and [RELEASING.md](../RELEASING.md).
 The public package floor and development target are Pi 0.99.1.
-The private tree-continue hook still accepts only 0.87.0/0.87.1 and is disabled
-on the current baseline; it remains private/blocked. See
+See
 [Pi compatibility](pi-compatibility.md) for verification commands and limits.
 
 The [integration review](audits/codex-integration.md) additionally checks cached

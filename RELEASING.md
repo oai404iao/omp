@@ -29,9 +29,9 @@ Its tests version temporary fixtures; actual alpha versions belong in a reviewed
 version PR, never in an unreviewed direct main update.
 
 The original preparation cohort was nine alpha packages. The current artifact
-selection contains eight publishable workspaces: keep-defaults and the unpublished
-Code Mode experiment are retired; tree-continue remains private/blocked.
-Historical keep-defaults release locks are retained, but it must not enter
+selection contains seven publishable workspaces: external-thinking, keep-defaults,
+tree-continue, and the unpublished Code Mode experiment have been removed.
+Historical release locks are retained, but removed packages must not enter
 new artifact batches.
 Prerelease artifacts use the `next` dist-tag when prerelease mode is active.
 Limited real smoke on the immutable bootstrap
@@ -178,8 +178,9 @@ Release eligibility is explicit in two places:
      artifacts.
 2. only `blocked` packages may set `"private": true`.
 
-CI rejects mismatches. The guarded release scripts select the eight publishable
-workspaces, excluding private tree-continue and retired keep-defaults/Code Mode.
+CI rejects mismatches. The guarded release scripts select the seven publishable
+workspaces, excluding removed external-thinking, keep-defaults, tree-continue,
+and Code Mode.
 The historical manual releases below remain locked; they are not a live registry
 inventory. See the root README and activation audit for this alpha cohort.
 All future releases require a maintainer to manually dispatch and approve the
@@ -191,8 +192,7 @@ guarded workflow. Their trusted-publisher configuration and
 recorded in `pi-extensions/pi-codex-runtime/provenance/`; its internal
 Responses Lite compatibility boundary remains documented in the package README
 and notice. Its trusted publisher is configured, so it now enters guarded
-GitHub Actions release artifacts. `@oai404iao/pi-tree-continue` remains
-private. A prerelease package must also use prerelease SemVer so the workflow
+GitHub Actions release artifacts. A prerelease package must also use prerelease SemVer so the workflow
 selects the `next` dist-tag.
 
 The recovery guard compares the registry `gitHead` and SHA-512 integrity with
@@ -239,9 +239,7 @@ lockfile, compatibility notes, and tests together. Do not lower the minimum
 below the tested baseline.
 The open-ended upper range is an intentional forward-compatibility policy;
 evaluate each new Pi baseline in CI and tighten the range if an incompatibility
-is found. `@oai404iao/pi-tree-continue` is audited against exactly 0.87.0 and 0.87.1
-while it remains a private unsupported hook into Pi internals. It is disabled
-on the 0.99.1 baseline and stays blocked from publication.
+is found.
 See [Pi compatibility](docs/pi-compatibility.md) for the verified scope and
 the transcript-context migration.
 
@@ -261,8 +259,9 @@ batches. Existing users must remove their installed copy and fully restart Pi;
 `/reload` cannot reliably remove its old process-global patches. Pi 0.86.1 keeps
 ordinary model/thinking changes session-local, but the retired settings-file
 watcher's stronger protection against explicit saves and external edits is
-intentionally **not** retained. See the
-[migration instructions](pi-extensions/pi-keep-defaults/README.md).
+intentionally **not** retained. For npm installations, run
+`pi remove npm:@oai404iao/pi-keep-defaults` (add `-l` for a project-local install).
+For local-path installations, remove the configured source instead.
 
 The last recorded stable release is `0.1.3`; there is no new retirement package
 version or changeset for the removed workspace. This change does not run

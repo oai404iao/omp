@@ -179,7 +179,6 @@ for (const name of [
   "pi-codex-minimal-tools",
   "pi-subagent",
   "pi-telegram-notify",
-  "pi-tree-continue",
 ]) {
   check(
     projectLicense.equals(read(`pi-extensions/${name}/LICENSE`)),
@@ -324,24 +323,6 @@ check(
   subagentNotice.includes("No DeepSeek Harness source file is included"),
   "pi-subagent notice must distinguish the design reference from copied source",
 );
-
-const externalLicense = text("pi-extensions/external-thinking/LICENSE");
-const externalNotice = text("pi-extensions/external-thinking/THIRD_PARTY_NOTICES.md");
-const externalManifest = readManifest("pi-extensions/external-thinking");
-check(externalManifest.license === "MIT", "external-thinking manifest license must be MIT");
-for (const copyright of [
-  "Copyright (c) 2025 Mario Zechner",
-  "Copyright (c) 2025-2026 Can Bölük",
-  "Copyright (c) 2026 oai404iao",
-]) {
-  check(externalLicense.includes(copyright), `external-thinking LICENSE lacks: ${copyright}`);
-}
-for (const revision of [
-  "10fd42289c3a7dab9db803175e4e4db8321b93a2",
-  "848f7fb0fd45b6f7a01a66e4b26ab568251a13a0",
-]) {
-  check(externalNotice.includes(revision), `external-thinking notice lacks revision ${revision}`);
-}
 
 if (errors.length > 0) {
   console.error("License verification failed:");

@@ -50,9 +50,9 @@ configured and guarded manual releases are enabled. Its Responses Lite path is
 an internal Codex compatibility layer, not an OpenAI-supported public API
 contract.
 
-## oh-my-pi
+## oh-my-pi (historical)
 
-`pi-extensions/external-thinking` is a modified port of the
+The removed `pi-extensions/external-thinking` package was a modified port of the
 `externalThinking` feature from
 [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi).
 
@@ -69,8 +69,8 @@ Copyright (c) 2025-2026 Can Bölük
 ```
 
 The verified upstream license is preserved in
-`LICENSES/oh-my-pi-MIT.txt`. The port's package-level `LICENSE` retains those
-notices and adds the local modification copyright.
+`LICENSES/oh-my-pi-MIT.txt` for historical attribution. Published artifacts and
+Git history retain the port's package-level license and modification notices.
 
 ## DeepSeek Harness design reference
 
