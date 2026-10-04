@@ -435,6 +435,59 @@ async function waitForChildStatus(
 	});
 }
 
+function codexIdentityEntries(session: Pick<SessionManager, "getEntries">) {
+	return session.getEntries().filter(
+		(entry) =>
+			entry.type === "custom"
+			&& entry.customType === CODEX_IDENTITY_CUSTOM_TYPE,
+	);
+}
+
+function registerNeutralProvider(
+	modelRuntime: ModelRuntime,
+	onRequestContext?: (context: Context) => void,
+): Model<any> {
+	modelRuntime.registerProvider("neutral", {
+		baseUrl: "http://neutral.invalid",
+		apiKey: "test",
+		api: "anthropic-messages",
+		models: [
+			{
+				id: "claude",
+				name: "Claude",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 10_000,
+				maxTokens: 1000,
+			},
+		],
+		streamSimple: (model, context, streamOptions) => {
+			onRequestContext?.(context);
+			return scriptedStream(model, "neutral answer", streamOptions?.signal);
+		},
+	});
+	const neutral = modelRuntime.getModel("neutral", "claude");
+	assert.ok(neutral);
+	return neutral;
+}
+
+function registerScriptedVirtualModel(
+	modelRuntime: ModelRuntime,
+	route: () => Model<any>,
+): Model<any> {
+	modelRuntime.registerVirtualModel({
+		provider: "scripted",
+		id: "auto",
+		name: "Auto",
+		thinkingLevels: ["off"],
+		route: () => ({ model: route(), thinkingLevel: "off" as const }),
+	});
+	const virtual = modelRuntime.getModel("scripted", "auto");
+	assert.ok(virtual);
+	return virtual;
+}
+
 function parentCompletions(
 	parent: Parameters<SubagentCoordinator["list"]>[0],
 ): CompletionUpdate[] {
@@ -1777,6 +1830,237 @@ test("OpenAI identity config off does not inject the inline lifecycle", async ()
 				),
 			false,
 		);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("virtual model routing to OpenAI injects Codex identity", async () => {
+	const { coordinator, parent, modelRuntime } = await fixture();
+	try {
+		const echo = modelRuntime.getModel("scripted", "echo");
+		assert.ok(echo);
+		const virtual = registerScriptedVirtualModel(modelRuntime, () => echo);
+		parent.model = virtual;
+		parent.thinkingLevel = "off";
+
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "virtual openai identity",
+				prompt: "Inspect it.",
+			},
+			{
+				...DEFAULT_SETTINGS,
+				runtimeMode: "foreground" as const,
+				openAIIdentity: true,
+			},
+		);
+		assert.equal(outcome.kind, "foreground");
+		if (outcome.kind !== "foreground" || !outcome.details.sessionFile) return;
+		const child = SessionManager.open(
+			outcome.details.sessionFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		const childEntries = codexIdentityEntries(child);
+		assert.equal(childEntries.length, 1);
+		const childEntry = childEntries[0];
+		if (childEntry?.type !== "custom") return;
+		const childIdentity = childEntry.data as {
+			sessionId: string;
+			threadId: string;
+			parentThreadId?: string;
+			subagentKind?: string;
+		};
+
+		const parentEntries = codexIdentityEntries(parent.sessionManager);
+		assert.equal(parentEntries.length, 1);
+		const parentEntry = parentEntries[0];
+		if (parentEntry?.type !== "custom") return;
+		const parentIdentity = parentEntry.data as {
+			sessionId: string;
+			threadId: string;
+		};
+		assert.equal(parentIdentity.sessionId, parentIdentity.threadId);
+		assert.equal(childIdentity.sessionId, parentIdentity.sessionId);
+		assert.notEqual(childIdentity.threadId, parentIdentity.threadId);
+		assert.equal(childIdentity.parentThreadId, parentIdentity.threadId);
+		assert.equal(childIdentity.subagentKind, "collab_spawn");
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("virtual model with OpenAI identity config off does not inject the inline lifecycle", async () => {
+	const { coordinator, parent, modelRuntime } = await fixture();
+	try {
+		const echo = modelRuntime.getModel("scripted", "echo");
+		assert.ok(echo);
+		const virtual = registerScriptedVirtualModel(modelRuntime, () => echo);
+		parent.model = virtual;
+		parent.thinkingLevel = "off";
+
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "virtual identity disabled",
+				prompt: "Inspect it.",
+			},
+			{
+				...DEFAULT_SETTINGS,
+				runtimeMode: "foreground" as const,
+				openAIIdentity: false,
+			},
+		);
+		assert.equal(outcome.kind, "foreground");
+		if (outcome.kind !== "foreground" || !outcome.details.sessionFile) return;
+		const child = SessionManager.open(
+			outcome.details.sessionFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		assert.equal(codexIdentityEntries(child).length, 0);
+		assert.equal(codexIdentityEntries(parent.sessionManager).length, 0);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("virtual model routing to non-OpenAI keeps identity out of the request transcript", async () => {
+	const requestContexts: Context[] = [];
+	const { coordinator, parent, modelRuntime } = await fixture();
+	try {
+		const neutral = registerNeutralProvider(modelRuntime, (context) => {
+			requestContexts.push(context);
+		});
+		const virtual = registerScriptedVirtualModel(modelRuntime, () => neutral);
+		parent.model = virtual;
+		parent.thinkingLevel = "off";
+
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "virtual neutral identity",
+				prompt: "Inspect it.",
+			},
+			{
+				...DEFAULT_SETTINGS,
+				runtimeMode: "foreground" as const,
+				openAIIdentity: true,
+			},
+		);
+		assert.equal(outcome.kind, "foreground");
+		if (outcome.kind !== "foreground" || !outcome.details.sessionFile) return;
+		const child = SessionManager.open(
+			outcome.details.sessionFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		// The router is unknown before the request, so a virtual child may carry
+		// the identity as custom session metadata even on a non-OpenAI route.
+		const childEntries = codexIdentityEntries(child);
+		assert.equal(childEntries.length, 1);
+		const childEntry = childEntries[0];
+		if (childEntry?.type !== "custom") return;
+		const childIdentity = childEntry.data as {
+			sessionId: string;
+			threadId: string;
+			parentThreadId?: string;
+		};
+
+		assert.ok(requestContexts.length >= 1);
+		const serialized = JSON.stringify(requestContexts);
+		assert.equal(serialized.includes(CODEX_IDENTITY_CUSTOM_TYPE), false);
+		assert.equal(serialized.includes(childIdentity.threadId), false);
+		assert.equal(serialized.includes(childIdentity.sessionId), false);
+		if (childIdentity.parentThreadId) {
+			assert.equal(serialized.includes(childIdentity.parentThreadId), false);
+		}
+		assert.equal(codexIdentityEntries(parent.sessionManager).length, 1);
+	} finally {
+		await coordinator.shutdown();
+	}
+});
+
+test("virtual model that switches OpenAI then non-OpenAI keeps one identity across cold resume", async () => {
+	const { coordinator, parent, modelRuntime } = await fixture({
+		reportFirst: true,
+	});
+	try {
+		const echo = modelRuntime.getModel("scripted", "echo");
+		assert.ok(echo);
+		const neutral = registerNeutralProvider(modelRuntime);
+		let calls = 0;
+		const virtual = registerScriptedVirtualModel(
+			modelRuntime,
+			() => (calls++ === 0 ? echo : neutral),
+		);
+		parent.model = virtual;
+		parent.thinkingLevel = "off";
+
+		const outcome = await coordinator.delegate(
+			parent,
+			"spawn",
+			{
+				agent: "scout",
+				description: "virtual mixed identity",
+				prompt: "Inspect it.",
+			},
+			{
+				...DEFAULT_SETTINGS,
+				runtimeMode: "background" as const,
+				openAIIdentity: true,
+			},
+		);
+		assert.equal(outcome.kind, "continuable");
+		if (outcome.kind !== "continuable" || !outcome.details.sessionFile) return;
+		await waitForCompletions(parent, 1);
+		await waitForChildStatus(
+			coordinator,
+			parent,
+			outcome.details.agentId,
+			"ready",
+		);
+		const firstRun = SessionManager.open(
+			outcome.details.sessionFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		const firstEntries = codexIdentityEntries(firstRun);
+		assert.equal(firstEntries.length, 1);
+		const firstEntry = firstEntries[0];
+		if (firstEntry?.type !== "custom") return;
+		const firstThreadId = (firstEntry.data as { threadId: string }).threadId;
+		assert.equal(codexIdentityEntries(parent.sessionManager).length, 1);
+
+		await coordinator.sendMessage(
+			parent,
+			outcome.details.agentId,
+			"Continue on the neutral route.",
+		);
+		await coordinator.followupTask(parent, outcome.details.agentId);
+		await waitForCompletions(parent, 2);
+		const resumed = SessionManager.open(
+			outcome.details.sessionFile,
+			parent.sessionManager.getSessionDir(),
+			parent.cwd,
+		);
+		const resumedEntries = codexIdentityEntries(resumed);
+		assert.equal(resumedEntries.length, 1);
+		const resumedEntry = resumedEntries[0];
+		assert(resumedEntry?.type === "custom");
+		assert.equal(
+			(resumedEntry.data as { threadId: string }).threadId,
+			firstThreadId,
+		);
+		assert.equal(codexIdentityEntries(parent.sessionManager).length, 1);
 	} finally {
 		await coordinator.shutdown();
 	}

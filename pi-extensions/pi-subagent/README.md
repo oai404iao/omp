@@ -385,7 +385,7 @@ See [`config.example.json`](config.example.json) and [`config.schema.json`](conf
 | `maxConcurrentBackgroundRuns` | `4` | Maximum continuable subagent turns executing at once in one extension runtime. Additional top-level runs wait in FIFO order; nested work fails at capacity instead of deadlocking its parent turn. |
 | `maxIdleRuntimes` | `0` | Process-wide LRU capacity for settled continuable runtimes. `0` preserves immediate unload; a positive value keeps the most recently used idle runtimes and transparently cold-resumes evicted paths. |
 | `inheritExtensions` | `false` | Load other Pi extensions in child runtimes. This package filters itself out; explicit agent tool ceilings still apply. |
-| `openAIIdentity` | `false` | For OpenAI Responses child models, inject only the named `pi-codex-minimal-tools` identity lifecycle inline. Codex Session/Thread/Turn/Window ids remain owned and serialized by that package. |
+| `openAIIdentity` | `false` | For OpenAI Responses or virtual child models, inject only the named `pi-codex-minimal-tools` identity lifecycle inline. Codex Session/Thread/Turn/Window ids remain owned and serialized by that package. |
 | `maxOutputBytes` | `51200` | Cap for parent-visible foreground output, reports, and completion updates. Full output remains in the child session. |
 
 Invalid configuration and unknown child tool names fail loud before the child's first model request.
@@ -410,6 +410,11 @@ an unknown setting, and the extension never rewrites a configuration file:
 `report` is appended to the parent session (so the parent model sees it on its
 next turn) and displayed in the TUI, but it never starts or queues a parent
 turn. Durable completion updates are read with `wait_agent`.
+
+Virtual children prepare identity before routing because the physical model is
+chosen per request. The identity survives route changes and cold resumes as
+custom session metadata, not model-context messages. Non-OpenAI routes do not
+receive it in their prompts; `openAIIdentity: false` skips this inline lifecycle.
 
 `openAIIdentity` and `inheritExtensions` are independent. The former adds only
 the lightweight Codex identity lifecycle even when normal extension inheritance

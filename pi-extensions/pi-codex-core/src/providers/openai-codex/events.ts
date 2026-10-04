@@ -1,12 +1,13 @@
 import { captureCodexTurnState } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { CODEX_RESPONSE_STATUSES } from "./constants.js";
-import { ProviderResponseError, friendlyUsageLimitMessage } from "./errors.js";
+import { ProviderResponseError, ProviderStreamEventCallbackError, friendlyUsageLimitMessage } from "./errors.js";
 import { retryAfterMsFromHeaders } from "./retry.js";
 import { type StreamEventShape } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 
 export async function* mapCodexEvents(
 	events: AsyncIterable<StreamEventShape>,
 	sessionKey?: string,
+	onEvent?: (event: StreamEventShape) => void | Promise<void>,
 ): AsyncIterable<StreamEventShape> {
 	let sawTerminalResponse = false;
 	const completedOutputItems = new Set<string>();
@@ -17,6 +18,12 @@ export async function* mapCodexEvents(
 		return typeof candidate.type === "string" && typeof index === "number" ? `${candidate.type}:index:${index}` : undefined;
 	};
 	for await (const event of events) {
+		try {
+			await onEvent?.(event);
+		} catch (error) {
+			// Observer failures must not enter transport retry or fallback paths.
+			throw new ProviderStreamEventCallbackError(error);
+		}
 		const type = typeof event.type === "string" ? event.type : undefined;
 		if (!type) continue;
 

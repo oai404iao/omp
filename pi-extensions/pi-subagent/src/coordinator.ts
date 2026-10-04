@@ -567,9 +567,12 @@ function isPathInside(parent: string, child: string): boolean {
 	return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
 }
 
-function isOpenAIResponsesModel(model: Model<any>): boolean {
+function needsOpenAIIdentity(model: Model<any>): boolean {
+	// Virtual dispatch is unknown at startup; prepare identity before its first
+	// OpenAI request. Custom identity entries are not part of model context.
 	return model.api === "openai-responses"
-		|| model.api === "openai-codex-responses";
+		|| model.api === "openai-codex-responses"
+		|| model.api === "pi-virtual";
 }
 
 async function loadCodexIdentityInlineExtension(
@@ -789,7 +792,7 @@ export class SubagentCoordinator {
 				throw new Error("pi-subagent is shutting down; no new delegation was accepted");
 			}
 			const openAIIdentityEnabled =
-				settings.openAIIdentity && isOpenAIResponsesModel(model);
+				settings.openAIIdentity && needsOpenAIIdentity(model);
 			const descriptor: SubagentDescriptor = {
 				version: DESCRIPTOR_VERSION,
 				mode,
@@ -2047,7 +2050,7 @@ export class SubagentCoordinator {
 			);
 		}
 		const extensionFactories: InlineExtension[] =
-			descriptor.runtime.openAIIdentity && isOpenAIResponsesModel(model)
+			descriptor.runtime.openAIIdentity && needsOpenAIIdentity(model)
 				? [
 						await loadCodexIdentityInlineExtension(
 							options.parent.sessionManager,

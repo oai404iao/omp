@@ -63,8 +63,13 @@ allowlists are configurable; explicit unsupported responses disable only the
 affected session/endpoint mode. Neither changes credentials or selects fallback
 implementations. See the [configuration guide](../pi-extensions/pi-codex-runtime/reference/configuration.md).
 
-Pi 0.99.1 supplies the descriptors for the exact `openai/gpt-6.1-sol`,
-`openai/gpt-6-astra`, `openai/gpt-6-sol` and `openai/gpt-6-luna` profiles.
+Pi 0.99.1 supplies the descriptors for the exact OpenAI GPT-6 profiles.
+`openai/gpt-6.1-sol` inherits `openai/gpt-5.6-sol` defaults: Lite, auto WS/SSE,
+prewarm, standalone web/image, custom patch, native Responses compaction and
+Fast availability (priority, 2x cost multiplier), with `view_image` off. This
+compatibility policy is not evidence of endpoint access or verified Fast pricing.
+The other profiles remain `openai/gpt-6-astra`, `openai/gpt-6-sol` and
+`openai/gpt-6-luna`.
 These use Standard SSE, local custom `apply_patch` (verified grammar capability)
 and `view_image` (verified image input). Search, image generation, native
 compaction, prewarm and Fast are not enabled by default. Standard Responses
@@ -73,6 +78,12 @@ The [pinned evidence](../pi-extensions/pi-codex-runtime/provenance/pi-openai-099
 does not establish real account access or Codex Lite entitlement.
 Unknown IDs remain native; legacy `openai-codex` profiles are frozen and no
 `openai-codex/gpt-6.1-sol` profile is added.
+
+Codex SSE/WS forwards Pi's raw provider-event callback before normalization,
+including terminal errors; synthetic replay items are not raw provider events.
+Subagent `openAIIdentity` also covers virtual selections, preparing identity
+before physical routing and retaining it across cold resumes. Identity remains
+custom session metadata, excluded from non-OpenAI model context.
 
 ## Preserved transcript contracts
 
