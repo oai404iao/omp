@@ -249,3 +249,9 @@ Exact modern `openai` GPT-6 profiles are independently based on Pi 0.99.1 at
 Codex profiles. See `provenance/pi-openai-0991-gpt6.json`. Standard SSE,
 grammar-based local patch and local image input have descriptor evidence;
 remote tools, Lite, native compaction, prewarm and Fast are not inferred.
+
+The current `openai/gpt-6.1-sol` default is an explicit compatibility-policy
+exception: it inherits `openai/gpt-5.6-sol`, including Lite, standalone tools,
+native compaction, prewarm and Fast's priority/2x configuration. The pinned Pi
+metadata remains descriptor evidence only, not verification of these endpoints,
+account entitlement or Fast pricing. Other modern GPT-6 defaults stay Standard.

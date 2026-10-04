@@ -11,6 +11,7 @@ import { type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi
 import { countWebSocketEvents, parseWebSocket, sendWebSocketRequest, startWebSocketOutputOnFirstEvent } from "./websocket-events.js";
 import { acquireWebSocket } from "./websocket-session.js";
 import { assertSuccessfulOutput } from "./message.js";
+import { ProviderStreamEventCallbackError } from "./errors.js";
 import { timeoutFromOption } from "./timeouts.js";
 
 export async function processWebSocketStream<TApi extends Api>(
@@ -134,6 +135,7 @@ export async function processWebSocketStream<TApi extends Api>(
 			}
 			keepConnection = false;
 			releaseOnce({ keep: false });
+			if (error instanceof ProviderStreamEventCallbackError) throw error;
 			// Pi's stock provider reuses session WebSockets. In practice the Codex
 			// backend sometimes cleanly closes an idle cached socket between turns;
 			// if that stale socket fails before any response event, retry once on a

@@ -25,8 +25,11 @@ export async function processCapturedResponsesStream<TApi extends Api>(
 	const observe = effects.createEventObserver?.({
 		cwd, requestPrompt, signal: options?.signal, output, stream,
 	});
+	const onProviderStreamEvent = options?.onProviderStreamEvent;
 	const captureContinuation = async function* (): AsyncIterable<StreamEventShape> {
-		for await (const event of mapCodexEvents(events, sessionKey)) {
+		for await (const event of mapCodexEvents(
+			events, sessionKey, onProviderStreamEvent ? (event) => onProviderStreamEvent(event, model) : undefined,
+		)) {
 			if (event.type === "response.created" && event.response?.id) responseId = event.response.id;
 			if (event.type === "response.output_item.done" && event.item) responseItems.push(event.item);
 			if (

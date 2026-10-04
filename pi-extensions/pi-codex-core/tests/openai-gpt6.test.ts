@@ -11,7 +11,7 @@ import { withCodexSettings } from "../../../tests/codex/support/provider-lifecyc
 import { createProviderHarness } from "./support/openai-codex-test-support.js";
 import { DEFAULT_SETTINGS } from "@oai404iao/pi-codex-runtime/internal/settings";
 
-for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
+for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 	test(`${id}: Pi-evidenced Standard profile with only local patch/image-view capabilities`, () =>
 		withCodexSettings({}, async cwd => {
 			const model: Model<"openai-responses"> | undefined = getBuiltinModels("openai").find(model => model.id === id);
@@ -22,7 +22,7 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 			assert.deepEqual(model.input, ["text", "image"]);
 			assert.equal(model.contextWindow, 272000);
 			assert.equal(model.maxTokens, 128000);
-			const off = id === "gpt-6.1-sol" || id === "gpt-6-astra" ? null : "none";
+			const off = id === "gpt-6-astra" ? null : "none";
 			assert.deepEqual(model.thinkingLevelMap, { off, minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" });
 			assert.equal(clampThinkingLevel(model, "off"), off === null ? "low" : "off");
 			assert.equal(model.compat?.supportsOpenAIGrammarTools, true);
@@ -94,7 +94,36 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 		}));
 }
 
-test("GPT-6.1 Sol Standard custom patch calls decode and replay on the default enhanced wire", () =>
+test("GPT-6.1 Sol defaults match the GPT-5.6 Sol Lite capabilities without replacing Pi metadata", () =>
+	withCodexSettings({}, async cwd => {
+		const model = getBuiltinModels("openai").find(model => model.id === "gpt-6.1-sol");
+		assert(model);
+		assert.equal(model.api, "openai-responses");
+		assert.equal(model.baseUrl, "https://api.openai.com/v1");
+		assert.equal(model.contextWindow, 272000);
+		assert.equal(model.maxTokens, 128000);
+		assert.deepEqual(model.input, ["text", "image"]);
+		const settings = loadModelSettings(model, cwd);
+		const previous = loadModelSettings({ ...model, id: "gpt-5.6-sol" }, cwd);
+		assert.deepEqual(settings.modelProfile?.effective, previous.modelProfile?.effective);
+		assert.equal(settings.requestProfile.responsesMode, "lite");
+		assert.equal(settings.openaiTransport, "auto");
+		assert.equal(settings.openaiWebSocketPrewarm, true);
+		assert.equal(settings.compactionMode, "responses");
+		assert.equal(settings.fastServiceTier, "priority");
+		assert.equal(settings.modelProfile?.effective.fast && settings.modelProfile.effective.fast.costMultiplier, 2);
+		const capabilities = computeToolCapabilities(model, DEFAULT_SETTINGS);
+		assert.equal(capabilities.apply_patch.enabled, true);
+		assert.equal(capabilities.view_image.enabled, false);
+		assert.equal(capabilities.web_search.enabled, true);
+		assert.equal(capabilities.image_generation.enabled, true);
+		assert.equal(settings.webSearchImplementation, "standalone");
+		assert.equal(settings.imageGenerationImplementation, "standalone");
+		assert.equal(loadModelSettings({ ...model, id: "gpt-6.1-sol-unknown" }, cwd).providerShimActive, false);
+		assert.equal(loadModelSettings({ ...model, provider: "openai-codex" }, cwd).providerShimActive, false);
+	}));
+
+test("GPT-6.1 Sol Lite custom patch calls decode and replay on the default enhanced wire", () =>
 	withCodexSettings({}, async cwd => {
 		const model: Model<"openai-responses"> | undefined = getBuiltinModels("openai").find(model => model.id === "gpt-6.1-sol");
 		assert(model);
@@ -103,12 +132,17 @@ test("GPT-6.1 Sol Standard custom patch calls decode and replay on the default e
 		const patch = "*** Begin Patch\n*** Add File: fixture.txt\n+fixture\n*** End Patch";
 		const item = { type: "custom_tool_call", id: "ct_fixture", call_id: "call_fixture", name: "apply_patch", input: patch };
 		let requests = 0;
-		const fetch = async (_url: unknown, init?: RequestInit) => {
+		const fetch = async (url: unknown, init?: RequestInit) => {
 			requests++;
+			assert.equal(String(url), "https://api.openai.com/v1/responses");
+			assert.equal(new Headers(init?.headers).get("x-openai-internal-codex-responses-lite"), "true");
 			const body = JSON.parse(String(init?.body));
 			assert(body.client_metadata);
-			assert.equal(body.tools[0].type, "custom");
-			assert(!body.input.some((entry: any) => entry.type === "additional_tools"));
+			assert.equal(body.tools, undefined);
+			assert.equal(body.input[0].type, "additional_tools");
+			assert.equal(body.input[0].tools[0].tools[0].type, "custom");
+			assert.equal(body.parallel_tool_calls, false);
+			assert.equal(body.reasoning.context, "all_turns");
 			if (requests === 2) {
 				assert(body.input.some((entry: any) => entry.type === "custom_tool_call" && entry.input === patch));
 				assert(body.input.some((entry: any) => entry.type === "custom_tool_call_output" && entry.output === "fixture result"));
@@ -124,7 +158,7 @@ test("GPT-6.1 Sol Standard custom patch calls decode and replay on the default e
 			} } as any);
 			return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(""));
 		};
-		const options = { apiKey: "sk-fixture", sessionId: "new-openai-roundtrip", fetch, maxRetries: 0 };
+		const options = { apiKey: "sk-fixture", sessionId: "new-openai-roundtrip", transport: "sse", fetch, maxRetries: 0 };
 		const user = { role: "user", content: "fixture", timestamp: 1 };
 		const first: AssistantMessage = await harness.providers.openai.streamSimple(model, { messages: [user], tools }, options).result();
 		assert.equal(first.stopReason, "toolUse", first.errorMessage ?? "");

@@ -17,8 +17,12 @@ selection or session history are migrated automatically. New requests follow
 Pi's API/base URL rather than plugin `apiKeyMode` or `responses.endpoint`
 overrides outside the legacy provider.
 
-Exact profiles for `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and
-`gpt-6-luna` use Standard SSE with local custom patch and image viewing.
+`openai/gpt-6.1-sol` defaults to the same profile as `openai/gpt-5.6-sol`:
+Lite, auto WS/SSE, prewarm, standalone web/image, custom patch, native compaction
+and Fast availability (priority, 2x cost multiplier). `view_image` is off.
+These defaults do not establish real-account endpoint access or Fast pricing.
+Exact profiles for `openai/gpt-6-astra`, `gpt-6-sol` and
+`gpt-6-luna` retain Standard SSE with local custom patch and image viewing.
 Remote search/image generation, native compaction, prewarm and Fast default
 off. Enable only the implementations you intend to use in the model profile,
 and declare endpoint support separately; allowlists do not enable tools.

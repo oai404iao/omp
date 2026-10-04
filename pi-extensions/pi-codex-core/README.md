@@ -31,10 +31,18 @@ Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
 `apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,
 including `/codex-minimal-tools` and `/fast`. Unknown models remain native.
 Pi supplies all descriptors; the extension does not register replacement models.
-The exact `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna`
-profiles use Standard SSE with local custom patch and image viewing. Remote
+`openai/gpt-6.1-sol` inherits the `openai/gpt-5.6-sol` default profile:
+Lite, auto WS/SSE, prewarm, native Responses compaction, custom patch and Fast
+availability (priority, 2x cost multiplier). Standalone web/image tools require
+their capability packages; `view_image` is off, matching GPT-5.6 Sol.
+This is a compatibility configuration, not verified endpoint access or pricing.
+The exact `openai/gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna`
+profiles retain Standard SSE with local custom patch and image viewing. Remote
 search/image generation, native compaction, prewarm and Fast stay off unless
 explicitly configured. Their legacy `openai-codex` counterparts remain separate.
+
+Both SSE and WebSocket forward parsed provider events through Pi's
+`provider_stream_event` hook before normalization, in stream order.
 
 Depends only on the shared runtime and its transport libraries; it does not
 install web-search or image-generation clients/presentation. Protocol replay of

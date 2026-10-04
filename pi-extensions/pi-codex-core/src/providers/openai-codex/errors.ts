@@ -11,6 +11,13 @@ export class ProviderResponseError extends Error {
 
 export class ProviderProtocolError extends Error {}
 
+export class ProviderStreamEventCallbackError extends Error {
+	constructor(cause: unknown) {
+		super(`Provider stream event callback failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+		this.name = "ProviderStreamEventCallbackError";
+	}
+}
+
 export class WebSocketHandshakeError extends Error {
 	constructor(
 		public readonly status: number,

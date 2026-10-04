@@ -29,8 +29,12 @@ according to the current declaration, preserving legacy custom patch behavior.
 
 Configuration paths remain
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json`.
-This package ships the canonical schemas and default catalog, including exact
-Standard profiles for `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and
+This package ships the canonical schemas and default catalog.
+`openai/gpt-6.1-sol` inherits `openai/gpt-5.6-sol`: Lite, auto WS/SSE, prewarm,
+standalone web/image, custom patch, native compaction and Fast availability
+(priority, 2x cost multiplier), with `view_image` off. This compatibility
+configuration is not evidence of endpoint access or verified Fast pricing.
+Exact Standard profiles remain for `openai/gpt-6-astra`, `gpt-6-sol` and
 `gpt-6-luna`, independently of the frozen legacy Lite profiles. Their default
 tools are local custom `apply_patch` and `view_image`; remote tool/compaction
 capabilities are not inferred from model names.

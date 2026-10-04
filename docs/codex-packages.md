@@ -40,7 +40,13 @@ Lite profiles. Pi 0.99.1 is the package floor; 0.87.1 first supplied the Sol/Lun
 descriptors. Core composes a stream
 shim without replacing provider authentication, streams, or models.
 
-The separate `openai/gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol` and
+`openai/gpt-6.1-sol` explicitly inherits `openai/gpt-5.6-sol` defaults: Lite,
+auto WS/SSE, prewarm, standalone web/image, custom patch, native Responses
+compaction and Fast availability (priority, 2x cost multiplier); `view_image`
+is off. This is a compatibility policy, not verified endpoint access or pricing.
+Pi still owns the model's descriptor, authentication and resolved endpoint.
+
+The separate `openai/gpt-6-astra`, `gpt-6-sol` and
 `gpt-6-luna` profiles follow Pi 0.99.1 Standard Responses descriptors. They
 default to SSE, local custom patch and image viewing; remote tools, native
 compaction, prewarm and Fast remain off. Their inheritance stays entirely

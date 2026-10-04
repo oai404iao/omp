@@ -408,7 +408,8 @@ Astra profile updated from `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`.
 
 | Models | Responses | Web | Image | Patch | Compaction |
 | --- | --- | --- | --- | --- | --- |
-| `openai/gpt-6.1-sol`, `openai/gpt-6-astra`, `openai/gpt-6-sol`, `openai/gpt-6-luna` | Standard SSE | off | off | custom | Pi |
+| `openai/gpt-6.1-sol` | Lite, auto WS/SSE | standalone text+image | standalone | custom | responses |
+| `openai/gpt-6-astra`, `openai/gpt-6-sol`, `openai/gpt-6-luna` | Standard SSE | off | off | custom | Pi |
 | `openai-codex/gpt-6-astra` (deprecated) | Lite, auto WS/SSE | standalone text+image | standalone | custom | responses |
 | `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | Lite, auto WS/SSE | standalone text+image | standalone | custom | responses |
 | `gpt-5.5`, `gpt-5.4` | Standard, auto WS/SSE | hosted text+image | standalone | custom | responses |
@@ -417,6 +418,13 @@ Astra profile updated from `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`.
 | legacy GPT-5/Codex entries | inherited Standard profile | profile-specific | standalone | custom | responses |
 | `gpt-4.1` | Standard SSE | off | hosted | off | Pi |
 | `o4-mini` | Standard SSE | off | off | off | Pi |
+
+`openai/gpt-6.1-sol` explicitly inherits `openai/gpt-5.6-sol`, including prewarm,
+disabled parallel calls, `view_image: false` and Fast availability with priority
+service tier and a 2x cost multiplier. This is a configured compatibility
+default, not upstream evidence of Lite entitlement, endpoint access or pricing.
+Pi still supplies its descriptor and authentication. Other GPT-6 profiles and
+legacy `openai-codex` profiles are unchanged.
 
 The pre-Astra entries include equivalent `openai/...` and
 `openai-codex/...` IDs; the latter switch only the endpoint/auth shape to
@@ -438,7 +446,7 @@ See `provenance/pi-openai-0991-gpt6.json`; Pi owns the descriptors and pricing.
    unintentionally override the new profile.
 4. Choose remote tool/compaction implementations explicitly in the plugin's
    `models.json` and declare their allowed modes in global `endpoint_config`.
-   For example, opting into hosted search for `openai/gpt-6.1-sol` requires a
+   For example, opting into hosted search for `openai/gpt-6-astra` requires a
    model override with `tools.webSearch: { "implementation": "hosted" }` plus an
    endpoint declaration that permits `"hosted"`. The declaration alone does
    not turn the default-off tool on.

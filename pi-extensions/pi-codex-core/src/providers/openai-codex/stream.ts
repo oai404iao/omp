@@ -11,7 +11,7 @@ import { responseGrammarProperties } from "@oai404iao/pi-codex-runtime/internal/
 import { webSocketFallbackKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";
 import type { ProviderStreamEffects } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/stream-effects";
-import { NonRetryableProviderError, isRetryableError, isTerminalQuotaError, parseErrorResponse, withHttpStatusPrefix } from "./errors.js";
+import { NonRetryableProviderError, ProviderStreamEventCallbackError, isRetryableError, isTerminalQuotaError, parseErrorResponse, withHttpStatusPrefix } from "./errors.js";
 import { applyConfiguredResponsesFeatureHeaders, buildSSEHeaders, buildWebSocketHeaders, headersToRecord, providerHeadersToHeaders } from "./headers.js";
 import { withResponsesLiteWebSocketMetadata } from "./lite.js";
 import { assertSuccessfulOutput, createErrorMessage, createInitialAssistantMessage } from "./message.js";
@@ -235,6 +235,7 @@ export function createCodexStream<TApi extends Api>(
 						stream.end();
 						return;
 					} catch (error) {
+						if (error instanceof ProviderStreamEventCallbackError) throw error;
 						const aborted = options?.signal?.aborted;
 						const upgradeRejected = isWebSocketUpgradeRejectedError(error);
 						if (
@@ -384,7 +385,7 @@ export function createCodexStream<TApi extends Api>(
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			if (!options?.signal?.aborted) reportHostedFailure(model, options?.sessionId, sentBody, error, deps.ownsNativeTool);
+			if (!options?.signal?.aborted && !(error instanceof ProviderStreamEventCallbackError)) reportHostedFailure(model, options?.sessionId, sentBody, error, deps.ownsNativeTool);
 			stream.push({
 				type: "error",
 				reason: (options?.signal?.aborted ? "aborted" : "error") as "aborted" | "error",
