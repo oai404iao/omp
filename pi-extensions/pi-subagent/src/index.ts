@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_SETTINGS, loadSettings } from "./config.ts";
@@ -9,9 +9,9 @@ import {
 } from "./coordinator.ts";
 import {
 	formatAgentCatalog,
+	formatAgentToolCatalog,
 	type AgentDiscoveryResult,
 } from "./agents.ts";
-import type { AgentSyncResult } from "./agent-sync.ts";
 import {
 	FollowupTaskParameters,
 	InterruptParameters,
@@ -31,7 +31,6 @@ import type {
 
 const SOURCE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = dirname(SOURCE_DIR);
-const BUNDLED_AGENTS_DIR = join(PACKAGE_ROOT, "agents");
 
 function textContent(content: Array<{ type: string; text?: string }>): string {
 	return content.find((item) => item.type === "text")?.text ?? "";
@@ -103,7 +102,7 @@ function registerDelegationTool(
 		name: "subagent",
 		exposure: "model-only",
 		label: "Subagent",
-		description: modeDescription(settings),
+		description: modeDescription(settings) + formatAgentToolCatalog(agentDiscovery?.agents ?? []),
 		promptSnippet: foregroundOnly
 			? "Run focused independent work in foreground child agents"
 			: "Delegate focused work to named child agents",
@@ -159,7 +158,8 @@ function registerForkDelegationTool(
 			"The current in-flight tool-calling turn is excluded. " +
 			(settings.runtimeMode === "foreground"
 				? "This foreground-only tool waits for the child's final answer."
-				: "The fork is continuable and returns a readable path plus durable id."),
+				: "The fork is continuable and returns a readable path plus durable id.") +
+			formatAgentToolCatalog(agentDiscovery?.agents ?? []),
 		promptSnippet: "Delegate context-dependent work to a child seeded with completed turns",
 		promptGuidelines: [
 			"Use subagent_fork only when completed conversation history materially helps the delegated task.",
@@ -199,9 +199,7 @@ function registerForkDelegationTool(
 }
 
 export default function subagentExtension(pi: ExtensionAPI): void {
-	const coordinator = new SubagentCoordinator(pi, BUNDLED_AGENTS_DIR, PACKAGE_ROOT);
-	let agentSyncNotified = false;
-	let agentSync: AgentSyncResult | undefined;
+	const coordinator = new SubagentCoordinator(pi, PACKAGE_ROOT);
 	let sessionSettings: SubagentSettings = DEFAULT_SETTINGS;
 	let sessionDiscovery: AgentDiscoveryResult | undefined;
 
@@ -408,13 +406,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				`Idle runtime LRU: ${sessionSettings.maxIdleRuntimes}`,
 				"Background protocol: durable mailbox",
 				`OpenAI identity inline: ${sessionSettings.openAIIdentity ? "enabled" : "disabled"}`,
-				agentSync?.diagnostics.length
-					? "Bundled templates: initialization skipped (see diagnostics)"
-					: `Bundled templates: initialization only (${agentSync?.packageVersion ?? "not initialized"})`,
-				`User agent dir: ${agentSync?.userAgentsDir ?? coordinator.getUserAgentsDir()}`,
-				agentSync && agentSync.retired.length > 0
-					? `Deleted presets (never restored): ${agentSync.retired.join(", ")}`
-					: null,
+				`User agent dir: ${coordinator.getUserAgentsDir()}`,
 				`Agents:\n${formatAgentCatalog(discovery.agents)}`,
 				`Children:\n${coordinator.formatCatalog(entries, "descendants")}`,
 			];
@@ -434,7 +426,6 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			loaded.settings.maxIdleRuntimes,
 		);
 		sessionSettings = loaded.settings;
-		agentSync = coordinator.synchronizeBundledAgents();
 		sessionDiscovery = coordinator.discoverAvailableAgents(
 			ctx.cwd,
 			sessionSettings,
@@ -452,46 +443,19 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		]);
 		if (sessionDiscovery.agents.length === 0) {
 			disableOwnedTools(pi, registeredParameters);
+			ctx.ui.notify(
+				`pi-subagent: no available agent definitions (scope: ${sessionSettings.agentScope}). ` +
+				`Add your own Markdown definitions in ${coordinator.getUserAgentsDir()} ` +
+				"or the trusted project .pi/agents directory selected by agentScope, then run /reload. " +
+				"Use /subagents to inspect the catalog.",
+				"warning",
+			);
 		}
 		if (sessionSettings.runtimeMode === "foreground") {
 			disableOwnedTools(pi, backgroundControlParameters);
 		}
-		if (!agentSyncNotified && agentSync) {
-			agentSyncNotified = true;
-			const lines = [`pi-subagent agent config: ${agentSync.userAgentsDir}`];
-			if (agentSync.installed.length > 0) {
-				lines.push(`installed: ${agentSync.installed.join(", ")}`);
-			}
-			if (agentSync.updated.length > 0) {
-				lines.push(`updated: ${agentSync.updated.join(", ")}`);
-			}
-			if (agentSync.removed.length > 0) {
-				lines.push(`retired: ${agentSync.removed.join(", ")}`);
-			}
-			if (agentSync.retirementChanged && agentSync.retired.length > 0) {
-				lines.push(
-					`deleted by you (not restored): ${agentSync.retired.join(", ")}`,
-				);
-			}
-			if (agentSync.restored.length > 0) {
-				lines.push(`restored as managed presets: ${agentSync.restored.join(", ")}`);
-			}
-			if (agentSync.backups.length > 0) {
-				lines.push("backups:", ...agentSync.backups.map((backup) => `- ${backup.name}: ${backup.path}`));
-			}
-			if (
-				agentSync.installed.length > 0 ||
-				agentSync.updated.length > 0 ||
-				agentSync.removed.length > 0 ||
-				(agentSync.retirementChanged && agentSync.retired.length > 0) ||
-				agentSync.restored.length > 0 ||
-				agentSync.backups.length > 0
-			) {
-				ctx.ui.notify(lines.join("\n"), "info");
-			}
-			if (agentSync.diagnostics.length > 0) {
-				ctx.ui.notify(agentSync.diagnostics.join("\n"), "warning");
-			}
+		if (sessionDiscovery.diagnostics.length > 0) {
+			ctx.ui.notify(sessionDiscovery.diagnostics.join("\n"), "warning");
 		}
 	});
 

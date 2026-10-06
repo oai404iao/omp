@@ -290,6 +290,16 @@ async function fixture(
 ) {
 	const root = tempRoot();
 	const agentDir = join(root, "agent");
+	mkdirSync(join(agentDir, "agents"), { recursive: true });
+	for (const [name, tools] of [
+		["scout", "read, grep, find, ls, bash"],
+		["worker", "read, grep, find, ls, bash, $mutation, subagent, subagent_fork, send_message, followup_task, wait_agent, interrupt_agent, list_agents"],
+	]) {
+		writeFileSync(
+			join(agentDir, "agents", `${name}.md`),
+			`---\nname: ${name}\ndescription: Test ${name}\ntools: ${tools}\n---\nFollow the test task.\n`,
+		);
+	}
 	if (options.childExtension) {
 		const extensionsDir = join(agentDir, "extensions");
 		mkdirSync(extensionsDir, { recursive: true });
@@ -363,7 +373,6 @@ async function fixture(
 	} as unknown as ExtensionAPI;
 	const coordinator = new SubagentCoordinator(
 		pi,
-		resolve(import.meta.dirname, "..", "agents"),
 		resolve(import.meta.dirname, ".."),
 		agentDir,
 	);
@@ -2066,22 +2075,23 @@ test("virtual model that switches OpenAI then non-OpenAI keeps one identity acro
 	}
 });
 
-test("delegation initializes user templates before runtime discovery", async () => {
+test("delegation never restores missing user definitions", async () => {
 	const { coordinator, parent, agentDir } = await fixture();
 	try {
+		rmSync(join(agentDir, "agents"), { recursive: true });
 		assert.equal(existsSync(join(agentDir, "agents")), false);
-		const outcome = await coordinator.delegate(
+		await assert.rejects(() => coordinator.delegate(
 			parent,
 			"spawn",
 			{
 				agent: "scout",
-				description: "synchronized scout",
+				description: "missing scout",
 				prompt: "Inspect it.",
 			},
 			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
-		);
-		assert.equal(outcome.kind, "foreground");
-		assert.equal(existsSync(join(agentDir, "agents", "scout.md")), true);
+		), /unknown subagent "scout"/);
+		assert.equal(existsSync(join(agentDir, "agents")), false);
+		assert.equal(existsSync(join(agentDir, ".pi-subagent")), false);
 	} finally {
 		await coordinator.shutdown();
 	}
@@ -2256,7 +2266,6 @@ async function assertMailboxFifo(
 		await coordinator.shutdown();
 		restarted = new SubagentCoordinator(
 			pi,
-			resolve(import.meta.dirname, "..", "agents"),
 			resolve(import.meta.dirname, ".."),
 			agentDir,
 		);
@@ -2820,7 +2829,6 @@ test("unread mailbox completion survives coordinator and session reload", async 
 		} as unknown as ExtensionContext;
 		restarted = new SubagentCoordinator(
 			pi,
-			resolve(import.meta.dirname, "..", "agents"),
 			resolve(import.meta.dirname, ".."),
 			agentDir,
 		);
@@ -4296,12 +4304,14 @@ test("foreground children hide background lifecycle controls", async () => {
 	}
 });
 
-test("nested delegation tools enumerate the available agent definitions", async () => {
+test("nested delegation tools enumerate and describe the available agent definitions", async () => {
 	const observed = new Map<string, unknown>();
+	const descriptions = new Map<string, string>();
 	const { coordinator, parent } = await fixture({
 		onRequestContext: (context) => {
 			for (const name of ["subagent", "subagent_fork"]) {
 				const tool = getCurrentTools(context.messages).find((candidate) => candidate.name === name);
+				if (tool) descriptions.set(name, tool.description);
 				const properties = (
 					tool?.parameters as { properties?: Record<string, unknown> } | undefined
 				)?.properties;
@@ -4324,12 +4334,64 @@ test("nested delegation tools enumerate the available agent definitions", async 
 			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
 		);
 		for (const name of ["subagent", "subagent_fork"]) {
-			assert.deepEqual(observed.get(name), ["planner", "reviewer", "scout", "worker"]);
+			assert.deepEqual(observed.get(name), ["scout", "worker"]);
+			assert.match(descriptions.get(name)!, /Available agents:\n- scout: Test scout\n- worker: Test worker/);
+			assert.doesNotMatch(descriptions.get(name)!, /Follow the test task/);
 		}
 	} finally {
 		await coordinator.shutdown();
 	}
 });
+
+for (const toolName of ["subagent", "subagent_fork"]) {
+	test(`nested ${toolName} executes its activation-scoped catalog snapshot`, async () => {
+		let scoutPath = "";
+		let edited = false;
+		let expectedPrompt = "Follow the test task";
+		let childRequests = 0;
+		const { coordinator, parent, agentDir } = await fixture({
+			streamSimple(model, context) {
+				const tools = getCurrentTools(context.messages);
+				const delegation = tools.find((tool) => tool.name === toolName);
+				if (delegation) {
+					if (!edited) {
+						assert.match(delegation.description, /scout: Test scout/);
+						writeFileSync(scoutPath,
+							"---\nname: scout\ndescription: Edited scout\ntools: none\n---\nEdited child prompt.\n");
+						edited = true;
+					}
+					if (!context.messages.some((message) => message.role === "toolResult")) {
+						return toolCallStream(model, {
+							type: "toolCall", id: "nested-snapshot", name: toolName,
+							arguments: { agent: "scout", description: "inspect snapshot", prompt: "Inspect." },
+						});
+					}
+				} else {
+					childRequests++;
+					assert.match(
+						JSON.stringify(context.messages.filter((message) => message.role === "system")),
+						new RegExp(expectedPrompt),
+					);
+					assert.deepEqual(tools.map((tool) => tool.name).sort(),
+						expectedPrompt === "Edited child prompt" ? [] : ["bash", "find", "grep", "ls", "read"]);
+				}
+				return scriptedStream(model, "done");
+			},
+		});
+		scoutPath = join(agentDir, "agents", "scout.md");
+		try {
+			for (const prompt of ["Follow the test task", "Edited child prompt"]) {
+				expectedPrompt = prompt;
+				await coordinator.delegate(parent, "spawn", {
+					agent: "worker", description: "snapshot parent", prompt: "Delegate to scout.",
+				}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground" });
+			}
+			assert.equal(childRequests, 2);
+		} finally {
+			await coordinator.shutdown();
+		}
+	});
+}
 
 test("worker mutation policy falls back to Pi edit and write tools", async () => {
 	const observedTools: string[][] = [];
