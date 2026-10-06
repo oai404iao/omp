@@ -1,11 +1,7 @@
-import { rm } from "node:fs/promises";
+import { closeSync, existsSync, fsyncSync, openSync, writeFileSync } from "node:fs";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { buildSessionProjection, SessionManager } from "@earendil-works/pi-coding-agent";
-import type {
-	ContextInheritance,
-	SubagentMode,
-	SubagentProviderName,
-} from "./types.ts";
+import type { ForkTurns } from "./types.ts";
 
 const INHERITED_COMPACTION_CUSTOM_TYPE =
 	"pi-subagent/inherited-compaction-summary";
@@ -27,65 +23,6 @@ export interface SessionView {
 	getEntries(): SessionEntry[];
 	buildContextEntries(): SessionEntry[];
 	appendCustomEntry(customType: string, data?: unknown): string;
-}
-
-export interface ProviderParent {
-	sessionManager: SessionView;
-}
-
-export interface PreparedChildSession {
-	sessionManager: SessionManager;
-	seedMessageCount: number;
-	rollback(): Promise<void>;
-}
-
-export interface ChildProvider {
-	name: SubagentProviderName;
-	inheritsParentContext: boolean;
-	supportsContinuable: boolean;
-	prepare(
-		parent: ProviderParent,
-		mode: SubagentMode,
-		context?: ContextInheritance,
-	): Promise<PreparedChildSession>;
-}
-
-async function removeOwnedSession(path: string | undefined): Promise<void> {
-	if (!path) return;
-	await rm(path, { force: true });
-}
-
-function freshSession(parent: ProviderParent): PreparedChildSession {
-	const parentFile = parent.sessionManager.getSessionFile();
-	const options = parentFile ? { parentSession: parentFile } : undefined;
-	const sessionManager = parentFile
-		? SessionManager.create(
-				parent.sessionManager.getCwd(),
-				parent.sessionManager.getSessionDir(),
-				options,
-			)
-		: SessionManager.inMemory(parent.sessionManager.getCwd(), options);
-	const childFile = sessionManager.getSessionFile();
-	return {
-		sessionManager,
-		seedMessageCount: 0,
-		rollback: () => removeOwnedSession(childFile),
-	};
-}
-
-/**
- * Return the latest assistant entry that closed a completed turn.
- *
- * A tool-calling assistant message has stopReason "toolUse" and is not a safe
- * fork boundary. The current parent turn is therefore excluded.
- */
-export function completedTurnBoundaryId(entries: readonly SessionEntry[]): string | undefined {
-	for (let index = entries.length - 1; index >= 0; index--) {
-		const entry = entries[index];
-		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-		if (entry.message.stopReason !== "toolUse") return entry.id;
-	}
-	return undefined;
 }
 
 interface CompletedTurnSpan {
@@ -177,7 +114,6 @@ function completedTurnSpans(
 
 export function completedContextEntries(
 	entries: readonly SessionEntry[],
-	context: Exclude<ContextInheritance, { mode: "fresh" }>,
 ): SessionEntry[] {
 	const { turns, latestSummary } = completedTurnSpans(entries);
 	const end = Math.max(
@@ -185,14 +121,8 @@ export function completedContextEntries(
 		latestSummary ?? -1,
 	);
 	if (end < 0) return [];
-	let start = 0;
-	if (context.mode === "last_n_completed") {
-		if (turns.length >= context.completedTurns) {
-			start = turns[turns.length - context.completedTurns]!.start;
-		}
-	}
 	return entries
-		.slice(start, end + 1)
+		.slice(0, end + 1)
 		.map((entry) => structuredClone(entry));
 }
 
@@ -256,13 +186,17 @@ function appendInheritedEntry(
 	}
 }
 
-function forkedSession(
-	parent: ProviderParent,
-	context: Exclude<ContextInheritance, { mode: "fresh" }>,
-): PreparedChildSession {
-	const parentFile = parent.sessionManager.getSessionFile();
+export function prepareChildSession(
+	parent: SessionView,
+	sessionDir: string,
+	forkTurns: ForkTurns,
+): SessionManager {
+	const parentFile = parent.getSessionFile();
+	if (!parentFile) throw new Error("spawn_agent requires a persisted parent session");
+	const session = SessionManager.create(parent.getCwd(), sessionDir, { parentSession: parentFile });
+	if (forkTurns === "none") return session;
 	const inherited = completedContextEntries(
-		buildSessionProjection(parent.sessionManager.getBranch()).entries.flatMap(
+		buildSessionProjection(parent.getBranch()).entries.flatMap(
 			({ sourceEntry, messages }) => messages.map((message): SessionEntry => ({
 				type: "message",
 				id: sourceEntry.id,
@@ -271,74 +205,30 @@ function forkedSession(
 				message,
 			})),
 		),
-		context,
 	);
-	if (inherited.length === 0) return freshSession(parent);
-	if (!parentFile) {
-		throw new Error(
-			"fork provider cannot copy completed history from an ephemeral parent session; use spawn instead",
-		);
-	}
-	const prepared = freshSession(parent);
 	for (const entry of inherited) {
-		appendInheritedEntry(prepared.sessionManager, entry);
+		appendInheritedEntry(session, entry);
 	}
-	return {
-		...prepared,
-		seedMessageCount:
-			prepared.sessionManager.buildSessionContext().messages.length,
-	};
+	return session;
 }
 
-export class SpawnProvider implements ChildProvider {
-	readonly name = "spawn";
-	readonly inheritsParentContext = false;
-	readonly supportsContinuable = true;
-
-	prepare(
-		parent: ProviderParent,
-		_mode: SubagentMode,
-		context: ContextInheritance = { mode: "fresh" },
-	): Promise<PreparedChildSession> {
-		if (context.mode !== "fresh") {
-			throw new Error("spawn provider requires fresh context");
-		}
-		return Promise.resolve(freshSession(parent));
+/**
+ * Pi normally defers setup-only JSONL writes. Materialize the documented file
+ * format before publishing an agent, then reopen it so Pi owns future writes.
+ * No SDK private fields or fabricated conversation messages are used.
+ */
+export function persistPreparedSession(session: SessionManager): SessionManager {
+	const path = session.getSessionFile();
+	if (!path) throw new Error("child session must be persistent");
+	if (!existsSync(path)) {
+		const fd = openSync(path, "wx", 0o600);
+		try {
+			writeFileSync(fd, [session.getHeader(), ...session.getEntries()].map(e => JSON.stringify(e)).join("\n") + "\n");
+			fsyncSync(fd);
+		} finally { closeSync(fd); }
+	} else {
+		const fd = openSync(path, "r");
+		try { fsyncSync(fd); } finally { closeSync(fd); }
 	}
-}
-
-export class ForkProvider implements ChildProvider {
-	readonly name = "fork";
-	readonly inheritsParentContext = true;
-	readonly supportsContinuable = true;
-
-	async prepare(
-		parent: ProviderParent,
-		_mode: SubagentMode,
-		context: ContextInheritance = { mode: "all_completed" },
-	): Promise<PreparedChildSession> {
-		if (context.mode === "fresh") {
-			throw new Error("fork provider requires inherited context");
-		}
-		return forkedSession(parent, context);
-	}
-}
-
-export class ProviderRegistry {
-	private readonly providers = new Map<SubagentProviderName, ChildProvider>();
-
-	register(provider: ChildProvider): void {
-		if (this.providers.has(provider.name)) throw new Error(`duplicate subagent provider: ${provider.name}`);
-		this.providers.set(provider.name, provider);
-	}
-
-	get(name: SubagentProviderName): ChildProvider {
-		const provider = this.providers.get(name);
-		if (!provider) throw new Error(`subagent provider is not registered: ${name}`);
-		return provider;
-	}
-
-	list(): ChildProvider[] {
-		return [...this.providers.values()];
-	}
+	return SessionManager.open(path);
 }

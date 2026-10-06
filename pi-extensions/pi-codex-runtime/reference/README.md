@@ -9,15 +9,21 @@ live with their respective capability owners. User configuration is described in
 ## Snapshot and scope
 
 - Codex checkout: `openai/codex`
-- Primary analyzed commit:
+- Current tracking baseline (remote main verified October 6, 2026):
+  `551bd409ebf03fc6ea0dcad0915368d8a493f012`
+- Historical Responses protocol implementation baseline:
   `eb9dceba1a2e658142a456c5898836774835616b`
 - Astra model delta:
   `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`
-- Local analysis date: August 12, 2026
+- Historical protocol analysis date: August 12, 2026
 - Primary implementation: `codex-rs/`
 
-Source paths are relative to that checkout unless noted. Model availability
-and internal fields can change after the snapshot.
+The current tracking baseline is used by the independent
+[pi-subagent multi-agent v2 implementation](../../pi-subagent/README.md).
+Updating this reference does not claim that every Responses protocol feature has
+been reimplemented or reverified at the new revision. Protocol sections retain
+their stated historical baselines; immutable provenance hashes are not rewritten.
+Model availability and internal fields can change after each snapshot.
 
 The Astra delta supplies model metadata and confirms the current Lite request
 behavior. It does not repin the reserved-tool fingerprints or apply-patch

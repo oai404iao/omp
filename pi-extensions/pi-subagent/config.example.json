@@ -2,9 +2,7 @@
   "$schema": "./config.schema.json",
   "agentScope": "user",
   "maxDepth": 3,
-  "runtimeMode": "background",
-  "maxConcurrentBackgroundRuns": 4,
-  "maxIdleRuntimes": 0,
+  "maxConcurrentAgents": 4,
   "inheritExtensions": false,
   "openAIIdentity": false,
   "maxOutputBytes": 51200

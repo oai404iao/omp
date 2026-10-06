@@ -1,36 +1,17 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 
-/** Current on-disk subagent descriptor version. */
-export const DESCRIPTOR_VERSION = 4;
-
+export const DESCRIPTOR_VERSION = 5;
 export type AgentScope = "user" | "project" | "both";
-/** Sources that runtime discovery is allowed to activate. */
 export type AgentSource = "user" | "project";
-/**
- * Single execution mode. `foreground` waits for every child's final answer;
- * `background` starts durable mailbox children.
- */
-export type RuntimeMode = "foreground" | "background";
-export type SubagentMode = "one-shot" | "continuable";
-export type SubagentProviderName = "spawn" | "fork";
+export type ForkTurns = "all" | "none";
+export type AgentStatus = "pending_init" | "running" | "completed" | "interrupted" | "errored";
 export type SubagentStopReason = "completed" | "aborted" | "error" | "max-tokens";
-export type ContextInheritance =
-	| { mode: "fresh" }
-	| { mode: "all_completed" }
-	| { mode: "last_n_completed"; completedTurns: number };
-
-export interface SubagentTask {
-	name: string;
-	path: string;
-}
 
 export interface SubagentSettings {
 	agentScope: AgentScope;
 	maxDepth: number;
-	runtimeMode: RuntimeMode;
-	maxConcurrentBackgroundRuns: number;
-	maxIdleRuntimes: number;
+	maxConcurrentAgents: number;
 	inheritExtensions: boolean;
 	openAIIdentity: boolean;
 	maxOutputBytes: number;
@@ -47,158 +28,65 @@ export interface AgentDefinition {
 	filePath: string;
 }
 
-export interface AgentSnapshot {
-	name: string;
-	description: string;
-	tools?: string[];
-	model?: string;
-	thinking?: ThinkingLevel;
-	systemPrompt: string;
-	source: AgentSource;
+export type AgentSnapshot = Omit<AgentDefinition, "filePath">;
+export interface SubagentUsage extends Usage { turns: number }
+
+export interface SpawnInput {
+	task_name: string;
+	message: string;
+	fork_turns?: ForkTurns;
+	agent_type?: string;
 }
 
-export interface ResolvedModel {
-	provider: string;
+export interface AgentDescriptor {
+	version: typeof DESCRIPTOR_VERSION;
 	id: string;
-}
-
-export interface SubagentRuntimeSnapshot {
-	agentScope: AgentScope;
-	maxDepth: number;
-	runtimeMode: RuntimeMode;
-	maxConcurrentBackgroundRuns: number;
-	maxIdleRuntimes: number;
-	inheritExtensions: boolean;
-	openAIIdentity: boolean;
-	maxOutputBytes: number;
-}
-
-interface SubagentDescriptorBase {
-	mode: SubagentMode;
-	provider: SubagentProviderName;
-	label: string;
-	/** Durable pi-subagent control identity, independent of provider wire ids. */
-	agentId: string;
-	/** Durable control identity of the delegating pi-subagent. */
-	parentAgentId: string;
-	/** Pi session lookup key of the delegating agent; never used as a wire id. */
-	parentPiSessionId: string;
-	/** Path of the parent's session file at delegation time (attribute, not identity). */
-	parentSessionFile?: string;
+	path: string;
+	parentPath: string;
 	depth: number;
 	cwd: string;
 	createdAt: string;
 	agent: AgentSnapshot;
-	model: ResolvedModel;
+	model: { provider: string; id: string };
 	thinkingLevel: ThinkingLevel;
-	runtime: SubagentRuntimeSnapshot;
+	forkTurns: ForkTurns;
+	settings: SubagentSettings;
+	/** Registration on the parent's canonical branch. */
+	anchorId: string;
 }
 
-export interface SubagentDescriptor extends SubagentDescriptorBase {
-	version: typeof DESCRIPTOR_VERSION;
-	task: SubagentTask;
-	context: ContextInheritance;
-}
-
-export interface SubagentUsage extends Usage {
-	turns: number;
-}
-
-export interface SubagentRunResult {
-	agentId: string;
-	turnId: string;
-	piSessionId?: string;
-	sessionFile?: string;
-	output: string;
-	outputTruncated?: boolean;
-	omittedBytes?: number;
-	stopReason: SubagentStopReason;
-	usage: SubagentUsage;
-}
-
-export interface TraceItem {
-	toolCallId?: string;
-	parentToolCallId?: string;
-	type: "tool" | "text";
-	name?: string;
+export interface MailMessage {
+	id: string;
+	from: string;
+	to: string;
+	kind: "message" | "task" | "completion";
 	text: string;
+	createdAt: string;
+	runId?: string;
 }
 
-export interface DelegationDetails {
-	kind: "delegation";
-	agentId: string;
-	taskPath: string;
-	turnId?: string;
-	piSessionId?: string;
-	provider: SubagentProviderName;
-	mode: SubagentMode;
-	context: ContextInheritance;
-	agent: string;
-	label: string;
-	depth: number;
-	status: "starting" | "running" | "waiting" | "completed" | "failed" | "ready";
-	sessionFile?: string;
-	stopReason?: SubagentStopReason;
-	output?: string;
-	trace: TraceItem[];
-	usage?: SubagentUsage;
+export interface AgentRecord {
+	descriptor: AgentDescriptor;
+	sessionFile: string;
+	status: AgentStatus;
+	runId?: string;
+	error?: string;
+	mailbox: MailMessage[];
+	/** Completion retained here if the parent's bounded mailbox is full. */
+	outbox?: MailMessage[];
 }
 
-export interface ControlDetails {
-	kind: "control";
-	action: "send" | "followup" | "wait" | "interrupt" | "list" | "report";
-	agentId?: string;
-	taskPath?: string;
-	messageId?: string;
-	turnId?: string;
-	pendingMessages?: number;
-	claimedMessages?: number;
-	completionIds?: string[];
-	timedOut?: boolean;
-	unreadUpdates?: number;
+export interface AgentListItem {
+	agent_name: string;
+	agent_status: AgentStatus;
 }
 
-export interface CatalogChild {
-	kind: "child";
-	agentId: string;
-	parentAgentId: string;
-	taskPath: string;
-	parentTaskPath: string;
-	depth: number;
-	descriptor: SubagentDescriptor;
-	sessionFile?: string;
-	status: "running" | "idle" | "ready";
-	pendingMessages: number;
-	unreadUpdates: number;
-}
-
-export interface CatalogDiagnostic {
-	kind: "diagnostic";
-	piSessionId: string;
-	reason: "corrupt" | "unavailable";
-	sessionFile?: string;
-	parentSessionFile?: string;
+export interface WaitResult {
 	message: string;
-}
-
-export type CatalogEntry = CatalogChild | CatalogDiagnostic;
-
-export interface ParentMessageDetails {
-	kind: "report";
-	childAgentId: string;
-	taskPath?: string;
-	label: string;
-	truncated?: boolean;
+	timed_out: boolean;
 }
 
 export function snapshotAgent(agent: AgentDefinition): AgentSnapshot {
-	return {
-		name: agent.name,
-		description: agent.description,
-		...(agent.tools ? { tools: [...agent.tools] } : {}),
-		...(agent.model ? { model: agent.model } : {}),
-		...(agent.thinking ? { thinking: agent.thinking } : {}),
-		systemPrompt: agent.systemPrompt,
-		source: agent.source,
-	};
+	const { filePath: _, ...snapshot } = agent;
+	return structuredClone(snapshot);
 }

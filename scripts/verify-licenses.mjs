@@ -8,6 +8,9 @@ const expectedHashes = new Map([
   ["LICENSES/OpenAI-Codex-NOTICE.txt", "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"],
   ["LICENSES/DeepSeek-Harness-MIT.txt", "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"],
   ["LICENSES/oh-my-pi-MIT.txt", "545636e19386d3d4e0ae6d77354527499999c3ebfbca61b9fa5aa4ead7c0b308"],
+  ["pi-extensions/pi-subagent/LICENSES/Apache-2.0.txt", "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"],
+  ["pi-extensions/pi-subagent/LICENSES/OpenAI-Codex-NOTICE.txt", "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"],
+  ["pi-extensions/pi-subagent/provenance/openai-codex-551bd409-multi-agent-v2.json", "cf39a64e9838143c5faa526bfb606b3168bde9207ae8960b64dc2ec4e4638db0"],
   [
     "pi-extensions/pi-codex-core/src/providers/codex-apply-patch.lark",
     "d6367f4826ed608c424b0a308f3d6163527df63c22513d089b91863552f8bfeb",
@@ -322,6 +325,11 @@ check(
 check(
   subagentNotice.includes("No DeepSeek Harness source file is included"),
   "pi-subagent notice must distinguish the design reference from copied source",
+);
+check(
+  subagentNotice.includes("551bd409ebf03fc6ea0dcad0915368d8a493f012")
+    && subagentNotice.includes("no Rust source"),
+  "pi-subagent notice must identify its Codex v2 reference and independent implementation",
 );
 
 if (errors.length > 0) {
