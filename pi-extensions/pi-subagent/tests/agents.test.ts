@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { discoverAgents } from "../src/agents.ts";
+import { discoverAgents, formatAgentToolCatalog } from "../src/agents.ts";
 
 const roots: string[] = [];
 
@@ -94,10 +94,10 @@ test("unsupported logical tool groups are rejected during discovery", () => {
 	assert.match(result.diagnostics.join("\n"), /unsupported logical tool "\$unknown"/);
 });
 
-test("runtime discovery uses materialized user agents", () => {
+test("runtime discovery uses user-maintained agents", () => {
 	const root = tempRoot();
 	const agentDir = join(root, "agent");
-	writeAgent(join(agentDir, "agents"), "scout", "materialized user scout");
+	writeAgent(join(agentDir, "agents"), "scout", "user-maintained scout");
 
 	const result = discoverAgents({
 		cwd: root,
@@ -107,7 +107,7 @@ test("runtime discovery uses materialized user agents", () => {
 	});
 	assert.equal(result.agents.length, 1);
 	assert.equal(result.agents[0].source, "user");
-	assert.equal(result.agents[0].description, "materialized user scout");
+	assert.equal(result.agents[0].description, "user-maintained scout");
 });
 
 test("an empty user directory has no package fallback", () => {
@@ -142,4 +142,15 @@ test("deleting every user definition leaves no available agents", () => {
 		agentDir,
 	});
 	assert.deepEqual(result.agents, []);
+});
+
+test("tool catalog describes only effective agents without exposing their prompts", () => {
+	const root = tempRoot();
+	const agentDir = join(root, "agent");
+	const project = join(root, "repo");
+	writeAgent(join(agentDir, "agents"), "worker", "User description");
+	writeAgent(join(project, ".pi", "agents"), "worker", '"Project\\n  description"');
+	const discovery = discoverAgents({ cwd: project, agentDir, scope: "both", projectTrusted: true });
+	assert.equal(formatAgentToolCatalog(discovery.agents), "\n\nAvailable agents:\n- worker: Project description");
+	assert.equal(formatAgentToolCatalog([]), "\n\nAvailable agents:\n(no agents)");
 });

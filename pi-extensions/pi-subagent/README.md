@@ -50,8 +50,7 @@ they are not reset to callable-only on each activation.
 - **Foreground-only policy** that removes background scheduling and lifecycle
   controls when `runtimeMode` is `foreground`
 - **Independent context and session** for every child
-- **User-owned agent catalog** with bundled templates used only for
-  first-install and package-version initialization
+- **User-maintained Markdown agent catalog** with no bundled presets or automatic writes
 - **Durable descriptors and lineage** stored in child JSONL sessions
 - **Durable mailbox protocol**: enqueue-only `send_message` plus explicit
   `followup_task` turn starts
@@ -60,7 +59,7 @@ they are not reset to callable-only on each activation.
 - **Child-to-parent `report` channel** for continuable children (quiet: it never
   starts a parent turn)
 - **Nested delegation** with an absolute persisted depth limit
-- **Dynamic agent-name enums** generated from the effective user/project catalog
+- **Dynamic tool descriptions and agent-name enums** generated from the effective user/project catalog
 - **Parallel-safe delegation**: multiple `subagent` calls in one assistant message may overlap
 - **Bounded background execution** with per-agent cold-resume serialization
 - **Optional idle runtime LRU** with transparent cold resume
@@ -83,7 +82,8 @@ Before its npm bootstrap, or for an unreleased local checkout:
 pi install /absolute/path/to/pi-extensions/pi-subagent
 ```
 
-Restart Pi or run `/reload`.
+Create at least one [agent definition](#agent-definitions), then restart Pi or run
+`/reload`. The package does not install agent presets.
 
 For a temporary test:
 
@@ -112,12 +112,23 @@ is not inherited. Completion comes from finalized events, not context-array offs
 The `/subagents` command shows the effective scheduling mode, available agent definitions,
 and the current descendant catalog.
 
-At session startup, the `agent` parameter on `subagent` and `subagent_fork` is registered
-as an enum of the effective catalog. Nested delegation tools receive an activation-scoped
-enum. If the effective catalog is empty, both delegation tools are inactive. Run `/reload`
-after adding, removing, or renaming an agent definition so the session schema is refreshed.
+At session startup, `subagent` and `subagent_fork` include every available agent's
+name and description in their tool descriptions. The `agent` parameter is an enum
+of those same names, and execution uses the same discovery snapshot. Markdown
+bodies remain child system prompts, not part of the tool descriptions. Nested
+delegation tools receive an activation-scoped catalog in both descriptions and enums.
+
+If the effective catalog is empty, both delegation tools are inactive and startup
+reports where to add definitions. Invalid files are skipped with diagnostics.
+Run `/reload` after adding, editing, removing, or renaming a definition. Reload
+rebuilds the tool descriptions, schemas, and execution snapshot; tool-definition
+changes may invalidate the model's prompt cache. This is Pi's full extension
+reload, including shutdown of running children, not uninterrupted hot reload.
 
 ### Typical prompts
+
+These examples assume you have created definitions with the referenced names;
+`scout`, `reviewer`, and `planner` are not built in.
 
 ```text
 Start scout and reviewer as independent background subagents, then continue inspecting the failing tests.
@@ -213,16 +224,15 @@ diagnostic in `list_agents` and cannot be addressed by path or id.
 
 ## Agent definitions
 
-The package ships `scout`, `planner`, `reviewer`, and `worker` as initialization
-templates. On the first extension startup after installation, and whenever the
-detected package version changes, those templates are materialized into:
+Create and maintain your own Markdown definitions in:
 
 ```text
 <Pi agent dir>/agents/*.md
 ```
 
-The package copies are **never runtime agent definitions or fallbacks**.
-Runtime discovery reads only:
+The package ships no presets and never creates, replaces, restores, or deletes
+agent configuration files, on either first startup or upgrades. Runtime discovery
+reads only:
 
 1. `<Pi agent dir>/agents/*.md`
 2. nearest trusted `.pi/agents/*.md`
@@ -232,65 +242,17 @@ scope is enabled. Project agents are disabled by the default
 `agentScope: "user"`. Setting the scope to `project` selects only project
 definitions; `both` loads user definitions followed by project overrides.
 
-After the current package version has been initialized, the user directory is
-authoritative. Same-version startups do not restore missing files or refresh
-changed templates. If the user deletes every agent definition, the effective
-catalog is empty and delegation tools are inactive after restart or `/reload`.
+There is no package fallback. If no valid definitions exist in the selected
+scope, delegation tools are inactive after restart or `/reload`; `/subagents`
+shows the effective catalog and diagnostics.
 
-### Deleting a bundled preset
+Existing user definitions, including presets installed by older releases,
+continue to work as ordinary user-owned files. Legacy
+`<Pi agent dir>/.pi-subagent/agents-manifest.json` and backups are ignored and
+left untouched. There is no automatic migration or cleanup.
 
-Deleting a managed preset file is a durable decision, not a transient one:
-
-- every startup compares the manifest with the user agent directory; a managed
-  preset that is missing is recorded in `agents-manifest.json` as `retired`;
-- later package-version changes install **new** bundled presets but never
-  restore a preset you deleted;
-- presets that were never previously managed are still installed, and a preset
-  the user deleted before this version was first run is detected on the next
-  startup;
-- recreating the file (for example by copying a backup) makes it a managed
-  preset again; from then on an ordinary package-version change refreshes it
-  with a backup like any other existing preset;
-- deleting every preset leaves delegation tools inactive after restart or
-  `/reload`; run `/subagents` to see the effective catalog.
-
-Retirement is reported at startup (`deleted by you (not restored): ...`) and a
-name is dropped from the retirement list once it is no longer bundled.
-
-Initialization behavior:
-
-1. **First startup:** missing presets are installed. A different pre-existing same-name file
-   is backed up before the bundled version replaces it.
-2. **Ordinary restart of the same release:** user edits are preserved.
-3. **Plugin update:** differing user presets are backed up, then replaced with the new
-   bundled versions. Presets deleted by the user stay deleted. A bundled prompt
-   change without a package-version change does not trigger a refresh.
-4. **Retired preset:** a formerly bundled name is backed up and removed so an obsolete
-   prompt does not remain silently active.
-5. Files whose names were never managed bundled presets are left untouched.
-
-Synchronization holds a cross-process lock, then preflights and stages the whole update
-before changing agent files. If a commit fails, it rolls back already-applied changes and
-fails extension startup rather than falling back to package prompts. Same-name symbolic
-links are preserved as symbolic links inside the backup directory before the user path is
-replaced. An invalid synchronization manifest is copied to a content-addressed
-`.corrupt-*` file and skips template initialization; user and project agent discovery
-continues with a warning. Repair the manifest, or deliberately remove it to request a new
-first-install initialization pass.
-
-Synchronization state and backups live at:
-
-```text
-<Pi agent dir>/.pi-subagent/agents-manifest.json
-<Pi agent dir>/.pi-subagent/backups/<timestamp>-to-<version>/*.md
-```
-
-The startup notification reports installed/updated files and exact backup
-paths. To restore a customization after an update, copy its backup over the
-corresponding user agent file; later startups of that same plugin release
-preserve the restored edit.
-
-Add or edit user agents as Markdown files with YAML frontmatter:
+For example, manually create `<Pi agent dir>/agents/security-reviewer.md` with
+YAML frontmatter and a Markdown system prompt:
 
 ```markdown
 ---
@@ -338,8 +300,8 @@ model-specific tool extensions:
 - otherwise it resolves to the active built-in `edit` and/or `write` tools;
 - if no mutation implementation is active, child creation fails before the first model request.
 
-The bundled `worker` uses `$mutation`. For example, to use
-`@oai404iao/pi-codex-minimal-tools` inside workers:
+For an implementation agent, add `$mutation` to its `tools` list. To use
+`@oai404iao/pi-codex-minimal-tools` inside that agent, enable extension inheritance:
 
 ```json
 {
@@ -403,7 +365,7 @@ an unknown setting, and the extension never rewrites a configuration file:
 | `enableRunInBackground: true` (or absent) | `runtimeMode: "background"` |
 | `defaultBackground` | nothing; background children are always continuable |
 | `backgroundProtocol` | nothing; the durable mailbox is the only background protocol |
-| `syncBundledAgents` | nothing; template initialization is automatic |
+| `syncBundledAgents` | nothing; create and maintain agent Markdown files yourself |
 | `reportDelivery` | nothing; `report` never starts a parent turn |
 
 `reportDelivery` was removed together with the parent-wakeup path. A child
@@ -563,9 +525,8 @@ becoming child descriptors or mailbox ownership.
 ## Security
 
 - Extensions and subagents run with the user's OS permissions.
-- First-install and package-version initialization writes bundled templates
-  into the user agent directory and may create backups under
-  `<Pi agent dir>/.pi-subagent/backups`.
+- Agent configuration discovery is read-only; users are responsible for
+  creating and maintaining agent Markdown files.
 - Project-local agents are repository-controlled prompts. They are loaded only when the project is trusted and configuration enables project scope.
 - `inheritExtensions` is disabled by default because loading an extension in a child executes its code and may duplicate external side effects.
 - Explicit agent tool lists are enforced as registry ceilings, but this controls model visibility and execution composition rather than providing an OS sandbox.
@@ -608,5 +569,5 @@ The test suite includes provider-boundary, descriptor, configuration, discovery,
 MIT © 2026 oai404iao. See [LICENSE](LICENSE) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Bundled presets are initialization templates only. Runtime agent discovery is
-limited to user and trusted project configuration.
+No agent presets are bundled. Runtime agent discovery is limited to user and
+trusted project configuration.

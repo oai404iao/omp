@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, test } from "node:test";
 import {
+	createAssistantMessageEventStream,
+	getCurrentTools,
+	type AssistantMessage,
+	type Context,
+} from "@earendil-works/pi-ai";
+import {
 	createAgentSession,
 	DefaultResourceLoader,
+	type ExtensionToolContext,
+	ModelRegistry,
 	ModelRuntime,
 	SessionManager,
 	SettingsManager,
@@ -17,7 +25,6 @@ import {
 	SendMessageParameters,
 	WaitAgentParameters,
 } from "../src/schemas.ts";
-import { syncBundledAgents } from "../src/agent-sync.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pi-subagent-smoke-"));
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -35,7 +42,16 @@ function agentEnum(tool: { parameters: unknown } | undefined): unknown {
 	return (properties?.agent as { enum?: unknown } | undefined)?.enum;
 }
 
-async function bindExtensionSession(cwd: string, agentDir: string) {
+function writeAgent(agentDir: string, name: string, description: string): void {
+	mkdirSync(join(agentDir, "agents"), { recursive: true });
+	writeFileSync(
+		join(agentDir, "agents", `${name}.md`),
+		`---\nname: ${name}\ndescription: ${description}\ntools: read\n---\nPrivate child instructions.\n`,
+	);
+}
+
+async function bindExtensionSession(cwd: string, agentDir: string, runtime?: ModelRuntime) {
+	process.env.PI_CODING_AGENT_DIR = agentDir;
 	const settingsManager = SettingsManager.inMemory({});
 	const loader = new DefaultResourceLoader({
 		cwd,
@@ -50,7 +66,7 @@ async function bindExtensionSession(cwd: string, agentDir: string) {
 	});
 	await loader.reload();
 	assert.deepEqual(loader.getExtensions().errors, []);
-	const modelRuntime = await ModelRuntime.create({
+	const modelRuntime = runtime ?? await ModelRuntime.create({
 		authPath: join(agentDir, "auth.json"),
 		modelsPath: null,
 	});
@@ -61,13 +77,18 @@ async function bindExtensionSession(cwd: string, agentDir: string) {
 		settingsManager,
 		sessionManager: SessionManager.inMemory(cwd),
 	});
-	await session.bindExtensions({ mode: "print" });
+	await session.bindExtensions({
+		mode: "print",
+		onError: (error) => assert.fail(JSON.stringify(error)),
+	});
 	return session;
 }
 
 test("extension loads and registers its model-facing surface", async () => {
 	const cwd = resolve(import.meta.dirname, "..");
 	const agentDir = join(root, "agent");
+	writeAgent(agentDir, "inspector", "Inspect user-selected files");
+	writeAgent(agentDir, "reviewer", "Review user changes");
 	const settingsManager = SettingsManager.inMemory({});
 	const loader = new DefaultResourceLoader({
 		cwd,
@@ -123,12 +144,12 @@ test("extension loads and registers its model-facing surface", async () => {
 		}
 		for (const toolName of ["subagent", "subagent_fork"]) {
 			const tool = session.getAllTools().find((candidate) => candidate.name === toolName);
-			assert.deepEqual(agentEnum(tool), ["planner", "reviewer", "scout", "worker"]);
+			assert.deepEqual(agentEnum(tool), ["inspector", "reviewer"]);
+			assert.match(tool!.description, /Available agents:\n- inspector: Inspect user-selected files\n- reviewer: Review user changes/);
+			assert.doesNotMatch(tool!.description, /Private child instructions/);
 		}
-		for (const name of ["planner", "reviewer", "scout", "worker"]) {
-			assert.equal(existsSync(join(agentDir, "agents", `${name}.md`)), true);
-		}
-		assert.equal(existsSync(join(agentDir, ".pi-subagent", "agents-manifest.json")), true);
+		assert.deepEqual(readdirSync(join(agentDir, "agents")).sort(), ["inspector.md", "reviewer.md"]);
+		assert.equal(existsSync(join(agentDir, ".pi-subagent")), false);
 	} finally {
 		session.dispose();
 	}
@@ -278,6 +299,8 @@ test("trusted foreground-only configuration hides background controls", async ()
 	const extensionRoot = resolve(import.meta.dirname, "..");
 	const cwd = join(root, "foreground-project");
 	const agentDir = join(root, "foreground-agent");
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	writeAgent(agentDir, "inspector", "Inspect files");
 	mkdirSync(join(cwd, ".pi"), { recursive: true });
 	writeFileSync(
 		join(cwd, ".pi", "subagent.json"),
@@ -393,42 +416,100 @@ test("the default background mode activates the durable mailbox controls", async
 	}
 });
 
-test("a corrupt initialization manifest does not block user roles", async () => {
+test("startup and reload leave old manifests, backups, and user definitions untouched", async () => {
 	const cwd = resolve(import.meta.dirname, "..");
-	const agentDir = join(root, "agent");
-	rmSync(agentDir, { recursive: true, force: true });
-	syncBundledAgents({
-		bundledDir: join(cwd, "agents"),
-		agentDir,
-		packageRoot: cwd,
-	});
-	const manifestPath = join(agentDir, ".pi-subagent", "agents-manifest.json");
-	const originalManifest = readFileSync(manifestPath);
-	writeFileSync(manifestPath, "{broken");
-
-	const session = await bindExtensionSession(cwd, agentDir);
-	try {
-		const active = new Set(session.getActiveToolNames());
-		assert.equal(active.has("subagent"), true);
-		assert.deepEqual(
-			agentEnum(session.getAllTools().find((tool) => tool.name === "subagent")),
-			["planner", "reviewer", "scout", "worker"],
-		);
-	} finally {
-		session.dispose();
-		writeFileSync(manifestPath, originalManifest);
+	const agentDir = join(root, "legacy-agent");
+	writeAgent(agentDir, "scout", "User customization");
+	const legacyDir = join(agentDir, ".pi-subagent");
+	mkdirSync(join(legacyDir, "backups"), { recursive: true });
+	const manifestPath = join(legacyDir, "agents-manifest.json");
+	const backupPath = join(legacyDir, "backups", "scout.md");
+	writeFileSync(backupPath, "Legacy backup");
+	const agentPath = join(agentDir, "agents", "scout.md");
+	const originalAgent = readFileSync(agentPath, "utf8");
+	// Both a broken manifest and an old release's valid manifest are ignored.
+	for (const manifest of [
+		"{broken",
+		JSON.stringify({ version: 1, packageVersion: "0.0.1", files: {}, retired: [] }),
+	]) {
+		writeFileSync(manifestPath, manifest);
+		const session = await bindExtensionSession(cwd, agentDir);
+		try {
+			await session.reload();
+			assert.equal(session.getActiveToolNames().includes("subagent"), true);
+			assert.deepEqual(agentEnum(session.getToolDefinition("subagent")), ["scout"]);
+			assert.equal(readFileSync(agentPath, "utf8"), originalAgent);
+			assert.equal(readFileSync(manifestPath, "utf8"), manifest);
+			assert.equal(readFileSync(backupPath, "utf8"), "Legacy backup");
+			assert.deepEqual(readdirSync(legacyDir).sort(), ["agents-manifest.json", "backups"]);
+			assert.deepEqual(readdirSync(join(agentDir, "agents")), ["scout.md"]);
+		} finally {
+			session.dispose();
+		}
 	}
 });
 
-test("same-version deletion of every user role disables delegation", async () => {
+test("reload refreshes catalog descriptions, enums, and empty-catalog activation", async () => {
 	const cwd = resolve(import.meta.dirname, "..");
-	const agentDir = join(root, "agent");
-	rmSync(agentDir, { recursive: true, force: true });
-	syncBundledAgents({
-		bundledDir: join(cwd, "agents"),
-		agentDir,
-		packageRoot: cwd,
-	});
+	const agentDir = join(root, "reload-agent");
+	const session = await bindExtensionSession(cwd, agentDir);
+	const assertCatalog = (names: string[], entries: string[]) => {
+		for (const toolName of ["subagent", "subagent_fork"]) {
+			const tool = session.getToolDefinition(toolName);
+			assert.ok(tool);
+			assert.deepEqual(agentEnum(tool), names);
+			assert.equal(session.getActiveToolNames().includes(toolName), names.length > 0);
+			assert.equal(
+				tool.description.split("\n\nAvailable agents:\n")[1],
+				entries.length ? entries.join("\n") : "(no agents)",
+			);
+		}
+	};
+	try {
+		assertCatalog([], []);
+		assert.equal(existsSync(join(agentDir, "agents")), false);
+		assert.equal(existsSync(join(agentDir, ".pi-subagent")), false);
+		writeAgent(agentDir, "scout", "First description");
+		assertCatalog([], []);
+		await session.reload();
+		assertCatalog(["scout"], ["- scout: First description"]);
+
+		writeAgent(agentDir, "scout", "Updated description");
+		assertCatalog(["scout"], ["- scout: First description"]);
+		await session.reload();
+		assertCatalog(["scout"], ["- scout: Updated description"]);
+
+		writeAgent(agentDir, "reviewer", "Review changes");
+		rmSync(join(agentDir, "agents", "scout.md"));
+		await session.reload();
+		assertCatalog(["reviewer"], ["- reviewer: Review changes"]);
+
+		writeFileSync(
+			join(agentDir, "agents", "invalid.md"),
+			"---\nname: invalid\n---\nMissing description.\n",
+		);
+		await session.reload();
+		assertCatalog(["reviewer"], ["- reviewer: Review changes"]);
+
+		rmSync(join(agentDir, "agents"), { recursive: true });
+		await session.reload();
+		assertCatalog([], []);
+		assert.equal(existsSync(join(agentDir, "agents")), false);
+
+		writeAgent(agentDir, "restored", "User restored role");
+		await session.reload();
+		assertCatalog(["restored"], ["- restored: User restored role"]);
+	} finally {
+		session.dispose();
+	}
+});
+
+test("deleting every user role disables delegation across restarts", async () => {
+	const cwd = resolve(import.meta.dirname, "..");
+	const agentDir = join(root, "deleted-agent");
+	writeAgent(agentDir, "scout", "User scout");
+	const firstSession = await bindExtensionSession(cwd, agentDir);
+	firstSession.dispose();
 	rmSync(join(agentDir, "agents"), { recursive: true, force: true });
 
 	const session = await bindExtensionSession(cwd, agentDir);
@@ -439,9 +520,72 @@ test("same-version deletion of every user role disables delegation", async () =>
 			assert.deepEqual(agentEnum(tool), []);
 			assert.equal(active.has(toolName), false);
 		}
-		for (const name of ["planner", "reviewer", "scout", "worker"]) {
-			assert.equal(existsSync(join(agentDir, "agents", `${name}.md`)), false);
+		assert.equal(existsSync(join(agentDir, "agents")), false);
+		assert.equal(existsSync(join(agentDir, ".pi-subagent")), false);
+	} finally {
+		session.dispose();
+	}
+});
+
+test("both delegation tools execute their published snapshot until reload", async () => {
+	const cwd = resolve(import.meta.dirname, "..");
+	const agentDir = join(root, "snapshot-agent");
+	writeAgent(agentDir, "inspector", "Original definition");
+	writeFileSync(join(agentDir, "subagent.json"), JSON.stringify({ runtimeMode: "foreground" }));
+	const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null });
+	const requests: Context[] = [];
+	const registerProvider = () => runtime.registerProvider("snapshot-test", {
+		baseUrl: "http://snapshot.invalid",
+		apiKey: "test",
+		api: "openai-responses",
+		models: [{
+			id: "echo", name: "Echo", reasoning: false, input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 10_000, maxTokens: 1000,
+		}],
+		streamSimple: (model, context) => {
+			requests.push(structuredClone(context));
+			const stream = createAssistantMessageEventStream();
+			const message: AssistantMessage = {
+				role: "assistant", content: [{ type: "text", text: "done" }],
+				api: model.api, provider: model.provider, model: model.id,
+				stopReason: "stop", timestamp: Date.now(),
+				usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			};
+			stream.push({ type: "done", reason: "stop", message });
+			stream.end();
+			return stream;
+		},
+	});
+	registerProvider();
+	const session = await bindExtensionSession(cwd, agentDir, runtime);
+	const executeBoth = async (prompt: string, tools: string[]) => {
+		for (const name of ["subagent", "subagent_fork"]) {
+			const tool = session.getToolDefinition(name)!;
+			await tool.execute(name, { agent: "inspector", description: "test snapshot", prompt: "Inspect." },
+				undefined, undefined, {
+					cwd,
+					sessionManager: session.sessionManager,
+					modelRegistry: new ModelRegistry(runtime),
+					model: runtime.getModel("snapshot-test", "echo"),
+					thinkingLevel: "off",
+					isProjectTrusted: () => false,
+				} as unknown as ExtensionToolContext);
+			const request = requests.at(-1)!;
+			assert.match(JSON.stringify(request.messages.filter((message) => message.role === "system")), new RegExp(prompt));
+			assert.deepEqual(getCurrentTools(request.messages).map((tool) => tool.name), tools);
 		}
+	};
+	try {
+		// Description, policy and prompt edits are all invisible until reload.
+		writeFileSync(join(agentDir, "agents", "inspector.md"),
+			"---\nname: inspector\ndescription: Updated definition\ntools: none\n---\nUpdated private instructions.\n");
+		await executeBoth("Private child instructions", ["read"]);
+		await session.reload();
+		registerProvider();
+		await executeBoth("Updated private instructions", []);
+		assert.equal(requests.length, 4);
 	} finally {
 		session.dispose();
 	}

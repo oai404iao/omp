@@ -22,7 +22,6 @@ import {
 	ModelRuntime,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { syncBundledAgents, type AgentSyncResult } from "./agent-sync.ts";
 import {
 	catalogStatus,
 	closeAgent,
@@ -39,6 +38,7 @@ import {
 import {
 	discoverAgents,
 	formatAgentCatalog,
+	formatAgentToolCatalog,
 	type AgentDiscoveryResult,
 } from "./agents.ts";
 import { readPersistedCatalog } from "./catalog.ts";
@@ -606,27 +606,16 @@ export class SubagentCoordinator {
 	private readonly runtimeId = uuidv7();
 	private idleRuntimeLimit = 0;
 	private activationSequence = 0;
-	private agentSyncResult: AgentSyncResult | undefined;
 	private draining = false;
 	private shutdownPromise: Promise<void> | undefined;
 
 	constructor(
 		private readonly pi: ExtensionAPI,
-		private readonly bundledAgentsDir: string,
 		private readonly packageRoot: string,
 		private readonly agentDir: string = getAgentDir(),
 	) {
 		this.providers.register(new SpawnProvider());
 		this.providers.register(new ForkProvider());
-	}
-
-	synchronizeBundledAgents(): AgentSyncResult {
-		this.agentSyncResult = syncBundledAgents({
-			bundledDir: this.bundledAgentsDir,
-			agentDir: this.agentDir,
-			packageRoot: this.packageRoot,
-		});
-		return this.agentSyncResult;
 	}
 
 	getUserAgentsDir(): string {
@@ -650,22 +639,12 @@ export class SubagentCoordinator {
 		settings: SubagentSettings,
 		projectTrusted: boolean,
 	): AgentDiscoveryResult {
-		if (!this.agentSyncResult) {
-			this.synchronizeBundledAgents();
-		}
-		const discovery = discoverAgents({
+		return discoverAgents({
 			cwd,
 			scope: settings.agentScope,
 			projectTrusted,
 			agentDir: this.agentDir,
 		});
-		return {
-			...discovery,
-			diagnostics: [
-				...(this.agentSyncResult?.diagnostics ?? []),
-				...discovery.diagnostics,
-			],
-		};
 	}
 
 	async parentFromContext(ctx: ExtensionContext): Promise<ParentRef> {
@@ -1693,7 +1672,8 @@ export class SubagentCoordinator {
 				"Delegate a standalone task to a named child path, with optional completed-turn context inheritance. " +
 				(runtimeMode === "foreground"
 					? "This foreground-only instance always waits for the result."
-					: "It returns a readable path plus durable id; use send_message, followup_task, and wait_agent to continue it."),
+					: "It returns a readable path plus durable id; use send_message, followup_task, and wait_agent to continue it.") +
+				formatAgentToolCatalog(agentDiscovery?.agents ?? []),
 			parameters: delegationParameters(agentNames),
 			execute: async (_id, params, signal, onUpdate) => {
 				const activation = getActivation();
@@ -1718,7 +1698,8 @@ export class SubagentCoordinator {
 				"Delegate a task to a child seeded with all completed turns from this conversation. " +
 				(runtimeMode === "foreground"
 					? "This foreground-only instance always waits for the result."
-					: "It returns a readable path plus durable id and can be continued through its mailbox."),
+					: "It returns a readable path plus durable id and can be continued through its mailbox.") +
+				formatAgentToolCatalog(agentDiscovery?.agents ?? []),
 			parameters: forkDelegationParameters(agentNames),
 			execute: async (_id, params, signal, onUpdate) => {
 				const activation = getActivation();
