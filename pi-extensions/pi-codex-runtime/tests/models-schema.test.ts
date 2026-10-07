@@ -38,7 +38,7 @@ test("model schema avoids oneOf so JSON LSPs can offer every value completion", 
 	);
 	assert.deepEqual(
 		propertySchema([...tools, "imageGeneration"]).enum,
-		[false, "hosted", "standalone"],
+		[false, "standalone"],
 	);
 	assert.deepEqual(
 		propertySchema(["$defs", "model", "properties", "responses", "properties", "reasoningSummary"]).enum,

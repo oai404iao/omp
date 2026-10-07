@@ -1,28 +1,21 @@
-import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { extname, isAbsolute, resolve } from "node:path";
-import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import { isAbsolute, resolve } from "node:path";
+import { buildSessionContext, detectSupportedImageMimeTypeFromFile, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { saveBase64Image } from "../utils/images.js";
 import { imageGenerationOutput, imageGenerationOutputSchema } from "./image-generation/output.js";
 import type { CodexMinimalToolsSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
 import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
-import {
-	buildCodexJsonHeaders,
-	hasCodexRequestAuth,
-	resolveCodexApiEndpoint,
-	withResolvedAuthBaseUrl,
-} from "@oai404iao/pi-codex-runtime/internal/codex-http";
+import { buildCodexJsonHeaders, hasCodexRequestAuth, resolveCodexApiEndpoint, withResolvedAuthBaseUrl } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { loadModelSettings, type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { checkEndpointResponse, rememberResolvedEndpoint, requireEndpointCapability } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
+import { currentCodexTurn, uuidV7 } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
+import { fetchCodexJson } from "@oai404iao/pi-codex-runtime/internal/json-request";
 
 export interface ImageGenerationInput {
 	prompt?: string;
-	referenced_image_paths?: string[];
-	num_last_images_to_include?: number;
-	size?: "1024x1024" | "1024x1536" | "1536x1024" | "auto";
-	quality?: "low" | "medium" | "high" | "auto";
-	background?: "transparent" | "opaque" | "auto";
-	output_format?: "png" | "webp" | "jpeg";
+	referenced_image_paths?: string[] | null;
+	num_last_images_to_include?: number | null;
+	transparent_background?: boolean;
 }
 
 export const imageGenerationToolSchema = {
@@ -31,73 +24,21 @@ export const imageGenerationToolSchema = {
 	properties: {
 		prompt: { type: "string", description: "Image generation or editing prompt." },
 		referenced_image_paths: {
-			type: "array",
-			maxItems: 5,
+			type: ["array", "null"], maxItems: 5,
 			items: { type: "string", minLength: 1 },
-			description: "Local PNG, JPEG, or WebP paths to edit.",
+			description: "Local image paths to edit. PNG, JPEG, WebP, GIF and BMP are supported.",
 		},
 		num_last_images_to_include: {
-			type: "integer",
-			minimum: 1,
-			maximum: 5,
+			type: ["integer", "null"], minimum: 1, maximum: 5,
 			description: "Use the newest conversation images when one or more targets have no local path.",
+		},
+		transparent_background: {
+			type: "boolean",
+			description: "Whether the output should have a transparent background. Defaults to false.",
 		},
 	},
 	required: ["prompt"],
 };
-
-async function urlToBase64(url: string, signal?: AbortSignal): Promise<string> {
-	const response = await fetch(url, { signal });
-	if (!response.ok) throw new Error(`Failed to download generated image: ${response.status} ${await response.text()}`);
-	const buffer = Buffer.from(await response.arrayBuffer());
-	return buffer.toString("base64");
-}
-
-export async function directImageGeneration(input: ImageGenerationInput, ctx: ImageGenerationToolContext, settings: CodexMinimalToolsSettings, signal?: AbortSignal) {
-	if (!settings.imageGeneration) throw new Error("Image generation is disabled by the global imageGeneration setting.");
-	if (!settings.directImageApiFallback) throw new Error("Direct Images API fallback is disabled. Use the configured image implementation, or enable directImageApiFallback.");
-	if (!input.prompt?.trim()) throw new Error("A prompt is required for direct image_generation fallback.");
-	signal?.throwIfAborted();
-	const model = ctx.model;
-	if (!model || !ctx.modelRegistry) throw new Error("No active model is available for direct image generation.");
-	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-	signal?.throwIfAborted();
-	if (!auth.ok) throw new Error(auth.error);
-	const requestModel = withResolvedAuthBaseUrl(model, auth);
-	const sessionId = ctx.sessionManager?.getSessionId?.();
-	rememberResolvedEndpoint(model, requestModel, sessionId);
-	requireEndpointCapability(settings.endpoint_config, requestModel, sessionId, "imageGeneration.standalone");
-	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
-		throw new Error(`No request authentication for provider: ${model.provider}`);
-	}
-	const endpoint = loadModelSettings(model, ctx.cwd, settings).responsesEndpoint;
-	const body: Record<string, unknown> = {
-		model: settings.imageModel,
-		prompt: input.prompt,
-	};
-	if (input.size && input.size !== "auto") body.size = input.size;
-	if (input.quality && input.quality !== "auto") body.quality = input.quality;
-	if (input.background && input.background !== "auto") body.background = input.background;
-	if (input.output_format) body.output_format = input.output_format;
-	const response = await fetch(resolveCodexApiEndpoint(auth.baseUrl ?? model.baseUrl, endpoint, "images/generations"), {
-		method: "POST",
-		headers: buildCodexJsonHeaders({ modelHeaders: model.headers, auth, endpoint, codexRequestExtensions: settings.codexRequestExtensions }),
-		body: JSON.stringify(body),
-		signal,
-	});
-	await checkEndpointResponse(response, requestModel, sessionId, ["imageGeneration.standalone"], signal);
-	const json = await response.json() as { data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }> };
-	const first = json.data?.[0];
-	const base64 = first?.b64_json ?? (first?.url ? await urlToBase64(first.url, signal) : undefined);
-	if (!base64) throw new Error("OpenAI Images API returned no image data.");
-	signal?.throwIfAborted();
-	const saved = await saveBase64Image({ base64, callId: "direct", cwd: ctx.cwd, format: input.output_format, responseId: settings.imageModel, settings });
-	return {
-		content: [{ type: "text", text: `Generated image with ${settings.imageModel}; saved to ${saved.path}${saved.latestPath ? ` (latest: ${saved.latestPath})` : ""}.` }],
-		details: { saved, revisedPrompt: first?.revised_prompt, mode: "direct-images-api" },
-		structuredContent: imageGenerationOutput(saved, base64),
-	};
-}
 
 interface ImageGenerationToolContext {
 	cwd: string;
@@ -124,26 +65,27 @@ async function referencedImageUrls(cwd: string, paths: readonly string[]): Promi
 	return Promise.all(paths.map(async (rawPath) => {
 		const normalized = rawPath.replace(/^@/, "");
 		const path = isAbsolute(normalized) ? normalized : resolve(cwd, normalized);
-		const extension = extname(path).toLowerCase();
-		const mimeType = extension === ".png"
-			? "image/png"
-			: extension === ".jpg" || extension === ".jpeg"
-				? "image/jpeg"
-				: extension === ".webp"
-					? "image/webp"
-					: undefined;
-		if (!mimeType) throw new Error(`Unsupported reference image type: ${rawPath}. Use PNG, JPEG, or WebP.`);
+		const mimeType = await detectSupportedImageMimeTypeFromFile(path);
+		if (!mimeType) throw new Error(`Unsupported reference image type: ${rawPath}. Use PNG, JPEG, WebP, GIF, or BMP.`);
 		const data = await readFile(path);
+		if (mimeType === "image/gif" || mimeType === "image/bmp") {
+			// Codex Original mode normalizes unsupported source formats to PNG without resizing.
+			const { PhotonImage } = await import("@silvia-odwyer/photon-node");
+			const decoded = PhotonImage.new_from_byteslice(data);
+			try {
+				return { image_url: `data:image/png;base64,${Buffer.from(decoded.get_bytes()).toString("base64")}` };
+			} finally {
+				decoded.free();
+			}
+		}
 		return { image_url: `data:${mimeType};base64,${data.toString("base64")}` };
 	}));
 }
 
-function recentConversationImageUrls(
-	ctx: ImageGenerationToolContext,
-	count: number,
-): Array<{ image_url: string }> {
-	if (!ctx.sessionManager) {
-		throw new Error("Conversation images are unavailable in this tool context; use referenced_image_paths.");
+function recentConversationImageUrls(ctx: ImageGenerationToolContext, count: number): Array<{ image_url: string }> {
+	if (!ctx.sessionManager) throw new Error("Conversation images are unavailable in this tool context; use referenced_image_paths.");
+	if (!Number.isSafeInteger(count) || count < 1 || count > 5) {
+		throw new Error("num_last_images_to_include must be an integer between 1 and 5.");
 	}
 	const messages = buildSessionContext(ctx.sessionManager.getBranch()).messages;
 	const images: string[] = [];
@@ -151,31 +93,20 @@ function recentConversationImageUrls(
 		if (message.role === "user" || message.role === "toolResult") {
 			if (!Array.isArray(message.content)) continue;
 			for (const item of message.content) {
-				if (item.type === "image") {
-					images.push(`data:${item.mimeType};base64,${item.data}`);
-				}
+				if (item.type === "image") images.push(`data:${item.mimeType};base64,${item.data}`);
 			}
 			continue;
 		}
 		if (message.role !== "assistant") continue;
 		for (const block of message.content as unknown[]) {
 			if (!block || typeof block !== "object") continue;
-			const candidate = block as {
-				type?: unknown;
-				item?: { result?: unknown };
-			};
-			if (
-				candidate.type === "image_generation_call"
-				&& typeof candidate.item?.result === "string"
-				&& candidate.item.result
-			) {
+			const candidate = block as { type?: unknown; item?: { result?: unknown } };
+			if (candidate.type === "image_generation_call" && typeof candidate.item?.result === "string" && candidate.item.result) {
 				images.push(`data:image/png;base64,${candidate.item.result}`);
 			}
 		}
 	}
-	if (images.length < count) {
-		throw new Error(`Requested the last ${count} conversation images, but only ${images.length} were available.`);
-	}
+	if (images.length < count) throw new Error(`Requested the last ${count} conversation images, but only ${images.length} were available.`);
 	return images.slice(-count).map((image_url) => ({ image_url }));
 }
 
@@ -188,84 +119,69 @@ export async function standaloneImageGeneration(
 ) {
 	signal?.throwIfAborted();
 	const callId = invocation.callId ?? "standalone";
-	const turnId = invocation.turnId ?? randomUUID();
+	const sessionId = ctx.sessionManager?.getSessionId?.();
+	const turnId = invocation.turnId ?? currentCodexTurn(sessionId)?.turnId ?? uuidV7();
 	const model = ctx.model;
 	if (!model || !ctx.modelRegistry) throw new Error("No active model is available for standalone image generation.");
 	if (!settings.enabled) throw new Error("pi-codex-minimal-tools is disabled.");
 	if (!settings.imageGeneration) throw new Error("Image generation is disabled by the global setting or current model profile.");
+	if (settings.imageGenerationImplementation !== "standalone") throw new Error("Image generation requires a standalone model profile.");
 	if (!input.prompt?.trim()) throw new Error("A prompt is required for standalone image generation.");
-	if (input.num_last_images_to_include !== undefined && input.referenced_image_paths?.length) {
+	if (input.transparent_background !== undefined && typeof input.transparent_background !== "boolean") {
+		throw new Error("transparent_background must be a boolean.");
+	}
+	if (input.num_last_images_to_include != null && input.referenced_image_paths?.length) {
 		throw new Error("Provide only one of referenced_image_paths or num_last_images_to_include.");
 	}
+	// Capture the invocation's images and turn before auth can yield to another turn.
+	const images = input.num_last_images_to_include != null
+		? recentConversationImageUrls(ctx, input.num_last_images_to_include)
+		: await referencedImageUrls(ctx.cwd, input.referenced_image_paths ?? []);
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	signal?.throwIfAborted();
 	if (!auth.ok) throw new Error(auth.error);
 	const requestModel = withResolvedAuthBaseUrl(model, auth);
-	const sessionId = ctx.sessionManager?.getSessionId?.();
 	rememberResolvedEndpoint(model, requestModel, sessionId);
 	requireEndpointCapability(settings.endpoint_config, requestModel, sessionId, "imageGeneration.standalone");
-	if (!hasCodexRequestAuth({
-		modelHeaders: model.headers,
-		auth: { apiKey: auth.apiKey, headers: auth.headers },
-	})) {
+	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
 		throw new Error(`No request authentication for provider: ${model.provider}`);
 	}
-	const images = input.num_last_images_to_include !== undefined
-		? recentConversationImageUrls(ctx, input.num_last_images_to_include)
-		: await referencedImageUrls(ctx.cwd, input.referenced_image_paths ?? []);
-	const edit = images.length > 0;
-	signal?.throwIfAborted();
-	const response = await fetch(
-		resolveCodexApiEndpoint(
-			auth.baseUrl ?? model.baseUrl,
-			settings.responsesEndpoint,
-			edit ? "images/edits" : "images/generations",
-		),
+	const response = await fetchCodexJson(
+		resolveCodexApiEndpoint(auth.baseUrl ?? model.baseUrl, settings.responsesEndpoint, images.length ? "images/edits" : "images/generations"),
 		{
-			method: "POST",
 			headers: buildCodexJsonHeaders({
 				codexRequestExtensions: settings.codexRequestExtensions,
-				modelHeaders: model.headers,
-				auth: { apiKey: auth.apiKey, headers: auth.headers },
-				endpoint: settings.responsesEndpoint,
-				extraHeaders: settings.codexRequestExtensions ? {
-					"x-codex-image-turn-id": turnId,
-				} : undefined,
+				modelHeaders: model.headers, auth, endpoint: settings.responsesEndpoint,
+				extraHeaders: settings.codexRequestExtensions ? { "x-codex-image-turn-id": turnId } : undefined,
 			}),
 			body: JSON.stringify({
-				model: settings.imageModel,
-				prompt: input.prompt.trim(),
-				...(edit ? { images } : {}),
-				background: "auto",
-				quality: "auto",
-				size: "auto",
+				model: settings.imageModel, prompt: input.prompt,
+				...(images.length ? { images } : {}),
+				background: input.transparent_background === true ? "transparent" : "opaque",
+				quality: "auto", size: "auto",
 			}),
 			signal,
 		},
+		["imageGeneration.standalone"],
 	);
 	signal?.throwIfAborted();
 	await checkEndpointResponse(response, requestModel, sessionId, ["imageGeneration.standalone"], signal);
-	const result = await response.json() as {
-		data?: Array<{ b64_json?: string }>;
-	};
+	const result = await response.json() as { data?: Array<{ b64_json?: string; generation_id?: string }> };
 	signal?.throwIfAborted();
 	const base64 = result.data?.[0]?.b64_json;
 	if (!base64) throw new Error("Standalone image generation returned no image data.");
-	const saved = await saveBase64Image({
-		base64,
-		callId,
-		cwd: ctx.cwd,
-		format: "png",
-		responseId: settings.imageModel,
-		settings,
-	});
+	const saved = await saveBase64Image({ base64, callId, cwd: ctx.cwd, format: "png", responseId: settings.imageModel, settings });
 	signal?.throwIfAborted();
 	return {
 		content: [
 			{ type: "image", data: base64, mimeType: "image/png" },
 			{ type: "text", text: `Generated image with ${settings.imageModel}; saved to ${saved.path}${saved.latestPath ? ` (latest: ${saved.latestPath})` : ""}.` },
 		],
-		details: { saved, mode: "standalone-images-api" },
+		details: {
+			saved, mode: "standalone-images-api",
+			requestId: response.headers.get("x-codex-imagegen-request-id") ?? undefined,
+			generationId: result.data?.[0]?.generation_id,
+		},
 		structuredContent: imageGenerationOutput(saved, base64),
 	};
 }
@@ -273,12 +189,11 @@ export async function standaloneImageGeneration(
 export function createImageGenerationToolDefinition(options: {
 	loadSettings?: (cwd: string, model?: Model<Api>) => CodexMinimalToolsSettings | ResolvedCodexModelSettings;
 	getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
-	hasProviderRuntime?: () => boolean;
 } = {}) {
 	return {
 		name: "image_generation",
 		label: "Image Generation",
-		description: "Generate or edit images using the hosted or standalone implementation selected by the current model profile. Results are saved under imageOutputDir and mirrored to latest.<ext>.",
+		description: "Generate or edit images using the standalone Images API selected by the current model profile. Results are saved under imageOutputDir and mirrored to latest.png.",
 		promptSnippet: "Generate or edit images with the implementation selected by the current model profile.",
 		parameters: imageGenerationToolSchema,
 		outputSchema: imageGenerationOutputSchema,
@@ -286,28 +201,10 @@ export function createImageGenerationToolDefinition(options: {
 			const cwd = ctx?.cwd ?? process.cwd();
 			const profileModel = ctx.model ? { ...ctx.model, baseUrl: "" } : undefined;
 			const settings = options.loadSettings?.(cwd, profileModel) ?? loadModelSettings(profileModel, cwd);
-			const resolvedSettings = "modelProfile" in settings
-				? settings as ResolvedCodexModelSettings
-				: loadModelSettings(profileModel, cwd, settings);
-			if (!resolvedSettings.imageGeneration) {
-				throw new Error("Image generation is disabled by the global setting or current model profile.");
-			}
-			if (resolvedSettings.imageGenerationImplementation === "standalone") {
-				const sessionId = ctx.sessionManager?.getSessionId?.();
-				return standaloneImageGeneration(params, ctx, resolvedSettings, signal, {
-					callId: toolCallId,
-					turnId: options.getCurrentTurnId?.(sessionId),
-				});
-			}
-			if (settings?.directImageApiFallback) return directImageGeneration(params, { ...ctx, cwd }, settings, signal);
-			if (options.hasProviderRuntime?.() === false) {
-				throw new Error("Hosted image_generation requires pi-codex-core. Use a catalog-supported standalone profile or explicitly enable directImageApiFallback.");
-			}
-			return {
-				isError: true,
-				content: [{ type: "text", text: "image_generation should be handled by the current model profile. If no hosted or standalone implementation is configured, explicitly enable directImageApiFallback using the current provider's Pi authentication." }],
-				details: { phase: "native-provider", nativeTool: "image_generation" },
-			};
+			const resolved = "modelProfile" in settings ? settings as ResolvedCodexModelSettings : loadModelSettings(profileModel, cwd, settings);
+			return standaloneImageGeneration(params, { ...ctx, cwd }, resolved, signal, {
+				callId: toolCallId, turnId: options.getCurrentTurnId?.(ctx.sessionManager?.getSessionId?.()),
+			});
 		},
 	};
 }

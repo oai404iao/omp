@@ -255,14 +255,10 @@ export default function codexCore(pi: ExtensionAPI): void {
 			removeWebSearch: modelSettings.endpointDisabledWebSearch,
 			codexRequestExtensions: modelSettings.codexRequestExtensions,
 			ownsNativeTool,
-			imageModel: settings.imageModel,
 			imageGeneration: modelSettings.imageGenerationImplementation ?? false,
 			webSearch: modelSettings.webSearchEnabled
 				&& webSearch
-				? {
-						implementation: webSearch.implementation,
-						contentTypes: webSearch.contentTypes,
-					}
+				? webSearch
 				: false,
 		});
 		return result.rewritten.length > 0 || result.removed.length > 0

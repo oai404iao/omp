@@ -55,8 +55,9 @@ test("custom patch transport is opt-in while function remains the default", () =
 	assert.equal(resolveCodexRequestProfile({ patchTransport: "custom" }).patchTransport, "custom");
 });
 
-test("system prompt placement defaults to instructions and accepts developer", () => {
-	assert.equal(resolveCodexRequestProfile().systemPromptPlacement, "instructions");
+test("system prompt placement is developer in both Responses envelopes", () => {
+	assert.equal(resolveCodexRequestProfile().systemPromptPlacement, "developer");
 	assert.equal(resolveCodexRequestProfile({ systemPromptPlacement: "developer" }).systemPromptPlacement, "developer");
+	assert.equal(resolveCodexRequestProfile({ systemPromptPlacement: "instructions" }).systemPromptPlacement, "developer");
 	assert.equal(resolveCodexRequestProfile({ responsesMode: "lite", systemPromptPlacement: "instructions" }).systemPromptPlacement, "developer");
 });

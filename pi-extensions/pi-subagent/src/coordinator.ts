@@ -22,6 +22,7 @@ import {
 import { pathMatches, resolveTaskPath, ROOT_TASK_PATH, taskPath } from "./task-path.ts";
 import { buildToolCeiling } from "./tool-policy.ts";
 import { createAgentTools } from "./tools.ts";
+import { inboxEnvelope, persistTaskAttribution, taskMessage } from "./task-attribution.ts";
 import { addUsage, emptyUsage, finalAssistantText, finalStopReason, truncateUtf8 } from "./result.ts";
 import {
 	DESCRIPTOR_VERSION, snapshotAgent, type AgentDefinition, type AgentDescriptor, type AgentListItem,
@@ -181,6 +182,7 @@ export class SubagentCoordinator {
 		}
 		if (caller.depth >= this.settings.maxDepth) throw new Error(`delegation depth limit reached (${this.settings.maxDepth})`);
 		const path = taskPath(caller.path, input.task_name);
+		const task = taskMessage(this.pi, caller.path, path, input.message, caller.sessionManager.getSessionId());
 		return this.operations.run(path, async () => {
 			this.assertOpen();
 			checkSignal(signal);
@@ -219,7 +221,7 @@ export class SubagentCoordinator {
 				this.treeStore.update(state => {
 					state.agents[path] = {
 						descriptor, sessionFile: persisted.getSessionFile()!, status: "pending_init",
-						mailbox: [this.message(caller.path, path, "task", input.message)],
+						mailbox: [task],
 					};
 				});
 				transferred = true;
@@ -244,6 +246,7 @@ export class SubagentCoordinator {
 		validateMessage(text);
 		const path = this.resolve(caller, target);
 		if (path === ROOT_TASK_PATH) throw new Error("followup_task cannot start /root");
+		const task = taskMessage(this.pi, caller.path, path, text, caller.sessionManager.getSessionId());
 		return this.operations.run(path, async () => {
 			this.assertOpen();
 			checkSignal(signal);
@@ -259,7 +262,7 @@ export class SubagentCoordinator {
 				current = undefined;
 			}
 			if (current) {
-				this.treeStore.enqueue(this.message(caller.path, path, "task", text));
+				this.treeStore.enqueue(task);
 				if (current.abort.signal.aborted) current.restartAfterInterrupt = true;
 				if (!current.accepting) current.restartAfterBoundary = true;
 				this.wake(path, "mailbox");
@@ -272,7 +275,7 @@ export class SubagentCoordinator {
 			try {
 				const session = this.session(path);
 				this.reconcile(path, session);
-				this.treeStore.enqueue(this.message(caller.path, path, "task", text));
+				this.treeStore.enqueue(task);
 				transferred = true;
 				await this.start(path, caller, session, release, signal);
 				return { accepted: true as const };
@@ -392,17 +395,7 @@ export class SubagentCoordinator {
 		this.reconcile(path, session);
 		const messages = this.pendingMessages(path);
 		if (!messages.length) return undefined;
-		return {
-			customType: MESSAGE_CUSTOM_TYPE,
-			content: messages.map(message =>
-				`[Agent ${message.kind}: ${message.from} → ${message.to}]\n${message.text}`,
-			).join("\n\n"),
-			display: true,
-			details: {
-				treeId: this.store.snapshot.id, messageIds: messages.map(message => message.id),
-				senders: [...new Set(messages.map(message => message.from))],
-			},
-		};
+		return inboxEnvelope(this.store.snapshot.id, messages);
 	}
 
 	boundary(path: string, session: SessionManager, outcome: string, beforeSettle: boolean): BoundaryResult | undefined {
@@ -503,6 +496,7 @@ export class SubagentCoordinator {
 						accept();
 					});
 					try {
+						persistTaskAttribution(session.sessionManager, this.pendingMessages(path));
 						await session.prompt("Process the assigned agent tasks and messages below.", {
 							expandPromptTemplates: false, source: "extension",
 							preflightResult: disposition => {

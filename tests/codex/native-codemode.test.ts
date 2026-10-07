@@ -96,7 +96,7 @@ for (const mode of ["on", "only"] as const) for (const autoEnable of [true, fals
 			for (const [id, webExposure, imageExposure] of [
 				["gpt-5.6-sol", "direct", "direct"],
 				["gpt-5.5", "model-only", "direct"],
-				["gpt-4.1", "model-only", "model-only"],
+				["gpt-4.1", "model-only", "direct"],
 				["gpt-5.6-sol", "direct", "direct"],
 			] as const) {
 				await session.setModel(modelRuntime.getModel("openai", id)!);

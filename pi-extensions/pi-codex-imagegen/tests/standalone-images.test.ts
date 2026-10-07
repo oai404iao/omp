@@ -78,7 +78,6 @@ test("standalone image generation uses the active provider Images endpoint and s
 		const settings = loadModelSettings(model, cwd);
 		const result = await standaloneImageGeneration({
 			prompt: "A tiny diagram",
-			output_format: "webp",
 		}, {
 			cwd,
 			model,
@@ -97,7 +96,7 @@ test("standalone image generation uses the active provider Images endpoint and s
 		assert.deepEqual(requestBody, {
 			model: "gpt-image-2",
 			prompt: "A tiny diagram",
-			background: "auto",
+			background: "opaque",
 			quality: "auto",
 			size: "auto",
 		});

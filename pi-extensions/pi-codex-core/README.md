@@ -50,6 +50,24 @@ explicitly configured. Their legacy `openai-codex` counterparts remain separate.
 Both SSE and WebSocket forward parsed provider events through Pi's
 `provider_stream_event` hook before normalization, in stream order.
 
+The request envelope follows Codex `5a314017`: Standard and Lite use developer
+prefix messages with thread-scoped deterministic IDs; Lite emits
+`additional_tools` only when needed. Reasoning and verbosity defaults come from
+the exact model profile. SSE and WS project the same captured identity and
+execution metadata, while WS retains its transport-specific metadata fields.
+Base prewarm accepts only the stable developer/tool prefix, never restored
+conversation history. Pi authentication and explicit header suppression remain
+authoritative; zstd is limited to verified official routes with prepared OAuth
+credentials.
+
+Native compaction now uses only Responses `compaction_trigger`; the unary
+`/responses/compact` client has been removed. Historical opaque checkpoints
+remain readable and guarded by their original model/profile; an unsupported
+checkpoint is preserved rather than replaced with a placeholder text summary.
+Exact bundled profile hashes from the preceding release have a reviewed
+old-to-new migration allowlist. Custom, legacy-overridden, unknown, or subsequently
+changed profiles still fail closed rather than bypassing the profile guard.
+
 Depends only on the shared runtime and its transport libraries; it does not
 install web-search or image-generation clients/presentation. Protocol replay of
 old web/image items does not enable their endpoints.

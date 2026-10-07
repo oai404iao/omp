@@ -120,7 +120,10 @@ for (const id of ["gpt-5.5", "gpt-6-astra"]) for (const enabled of [true, false]
 						assert.match(wire, /FIRST_QUESTION/);
 					}
 					if (enabled && id === "gpt-6-astra") assert.equal(body.input[0].type, "additional_tools", JSON.stringify(body));
-					else if (enabled) assert.equal(typeof body.instructions, "string");
+					else if (enabled) {
+						assert.equal(body.instructions, undefined);
+						assert.equal(body.input[0].role, "developer");
+					}
 				}
 				force = true;
 				await session.prompt("FORCED_QUESTION");

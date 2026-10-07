@@ -1,9 +1,10 @@
 import { webSearchToolSchema, type WebSearchInput } from "./web-search/schema.js";
 import { webSearchOutputSchema } from "./web-search/output.js";
+import { recentSearchInput } from "./web-search/history.js";
 export { webSearchToolSchema } from "./web-search/schema.js";
 export type { SearchQuery, WebSearchInput } from "./web-search/schema.js";
-import { buildSessionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { clampThinkingLevel, type Api, type Model, type ProviderHeaders, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import {
 	buildCodexJsonHeaders,
@@ -14,6 +15,8 @@ import {
 import { glyphs, truncateText } from "@oai404iao/pi-codex-runtime/internal/glyphs";
 import { applyEndpointPolicy, loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { checkEndpointResponse, rememberResolvedEndpoint } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
+import { buildCodexExternalToolMetadataJson } from "@oai404iao/pi-codex-runtime/internal/codex-metadata";
+import { fetchCodexJson } from "@oai404iao/pi-codex-runtime/internal/json-request";
 import {
 	resolveCodexRequestIdentity,
 	type CodexRequestIdentity,
@@ -22,6 +25,7 @@ import {
 interface WebSearchToolContext {
 	cwd: string;
 	model?: Model<Api>;
+	thinkingLevel?: ThinkingLevel;
 	modelRegistry?: {
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
 			| { ok: true; apiKey?: string; headers?: ProviderHeaders; baseUrl?: string }
@@ -59,7 +63,6 @@ export interface StandaloneWebSearchInvocation {
 	identity?: CodexRequestIdentity;
 }
 
-const CODEX_STANDALONE_SEARCH_OUTPUT_TOKEN_LIMIT = 10_000;
 const SEARCH_OPERATION_KEYS = [
 	"search_query",
 	"image_query",
@@ -72,61 +75,6 @@ const SEARCH_OPERATION_KEYS = [
 	"sports",
 	"time",
 ] as const;
-
-function visibleMessageText(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter((item): item is { type: "text"; text: string } =>
-			Boolean(item)
-			&& typeof item === "object"
-			&& (item as { type?: unknown }).type === "text"
-			&& typeof (item as { text?: unknown }).text === "string")
-		.map((item) => item.text)
-		.join("\n")
-		.trim();
-}
-
-function recentSearchInput(ctx: WebSearchToolContext, turnId?: string): unknown[] | undefined {
-	if (!ctx.sessionManager?.getBranch) return undefined;
-	const visible: Array<{ role: "user" | "assistant"; text: string }> = [];
-	for (const message of buildSessionContext(ctx.sessionManager.getBranch()).messages) {
-		if (message.role !== "user" && message.role !== "assistant") continue;
-		const text = visibleMessageText(message.content);
-		if (!text || (message.role === "user" && /^<environment_context>[\s\S]*<\/environment_context>$/i.test(text))) {
-			continue;
-		}
-		visible.push({ role: message.role, text });
-	}
-	const userIndexes = visible
-		.map((message, index) => message.role === "user" ? index : -1)
-		.filter((index) => index >= 0);
-	const start = userIndexes.length > 1 ? userIndexes[userIndexes.length - 2]! : userIndexes[0] ?? 0;
-	const tail = visible.slice(start);
-	let currentUserIndex = -1;
-	for (let index = 0; index < tail.length; index++) {
-		if (tail[index]?.role === "user") currentUserIndex = index;
-	}
-	let assistantBudget = 4_000;
-	return tail.map((message, index) => {
-		let text = message.text;
-		if (message.role === "assistant") {
-			text = text.slice(0, Math.max(0, assistantBudget));
-			assistantBudget -= text.length;
-		}
-		return {
-			type: "message",
-			role: message.role,
-			content: [{
-				type: message.role === "assistant" ? "output_text" : "input_text",
-				text,
-			}],
-			...(turnId && index === currentUserIndex
-				? { internal_chat_message_metadata_passthrough: { turn_id: turnId } }
-				: {}),
-		};
-	}).filter((message) => message.content[0]!.text.length > 0);
-}
 
 function searchOperationLabel(input: WebSearchInput): string {
 	const operations = SEARCH_OPERATION_KEYS.filter((key) => (input[key]?.length ?? 0) > 0);
@@ -269,24 +217,30 @@ export async function standaloneWebSearch(
 			"turn",
 		);
 	const turnId = identity?.turnId || invocation.turnId;
-	const searchInput = recentSearchInput(ctx, turnId);
+	const searchInput = ctx.sessionManager?.getBranch
+		? recentSearchInput(ctx.sessionManager.getBranch(), turnId) : undefined;
+	const thinkingLevel = ctx.thinkingLevel === undefined ? undefined : clampThinkingLevel(model, ctx.thinkingLevel);
+	const mappedEffort = thinkingLevel === undefined ? undefined : model.thinkingLevelMap?.[thinkingLevel];
+	const reasoningEffort = mappedEffort === null ? undefined
+		: mappedEffort ?? (thinkingLevel === "off" ? undefined : thinkingLevel);
 	const turnMetadata = identity && turnId
-		? JSON.stringify({
-				session_id: identity.sessionId,
-				thread_id: identity.threadId,
-				turn_id: turnId,
-				...(identity.forkedFromThreadId
-					? {
-							forked_from_thread_id:
-								identity.forkedFromThreadId,
-						}
-					: {}),
-				...(identity.parentThreadId
-					? { parent_thread_id: identity.parentThreadId }
-					: {}),
-				model: model.id,
-			})
+		? buildCodexExternalToolMetadataJson({ ...identity, model: model.id, ...(reasoningEffort ? { reasoningEffort } : {}) })
 		: undefined;
+	const searchProfile = settings.modelProfile?.effective.tools.webSearch || undefined;
+	const requestBody = JSON.stringify({
+		id: identity?.sessionId ?? piSessionId ?? `pi-search-${Date.now()}`,
+		model: model.id,
+		...(searchInput ? { input: searchInput } : {}),
+		commands: input,
+		settings: {
+			allowed_callers: ["direct"],
+			external_web_access: searchProfile?.mode === "cached" ? false : searchProfile?.mode === "indexed" ? "indexed" : true,
+			...(searchProfile?.searchContextSize ? { search_context_size: searchProfile.searchContextSize } : {}),
+			...(searchProfile?.userLocation ? { user_location: searchProfile.userLocation } : {}),
+			...(searchProfile?.filters?.allowedDomains ? { filters: { allowed_domains: searchProfile.filters.allowedDomains } } : {}),
+		},
+		max_output_tokens: searchProfile?.maxOutputTokens ?? 10_000,
+	});
 	// A nested cell may survive a user-turn rollover while auth is pending.
 	// Identity and visible history must describe this invocation, not that later turn.
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -300,8 +254,7 @@ export async function standaloneWebSearch(
 	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth: { apiKey: auth.apiKey, headers: auth.headers } })) {
 		throw new Error(`No request authentication for provider: ${model.provider}`);
 	}
-	const response = await fetch(url, {
-		method: "POST",
+	const response = await fetchCodexJson(url, {
 		headers: buildCodexJsonHeaders({
 			codexRequestExtensions: settings.codexRequestExtensions,
 			modelHeaders: model.headers,
@@ -311,21 +264,9 @@ export async function standaloneWebSearch(
 				? { extraHeaders: { "x-codex-turn-metadata": turnMetadata } }
 				: {}),
 		}),
-		body: JSON.stringify({
-			id: identity?.sessionId
-				?? piSessionId
-				?? `pi-search-${Date.now()}`,
-			model: model.id,
-			...(searchInput ? { input: searchInput } : {}),
-			commands: input,
-			settings: {
-				allowed_callers: ["direct"],
-				external_web_access: true,
-			},
-			max_output_tokens: CODEX_STANDALONE_SEARCH_OUTPUT_TOKEN_LIMIT,
-		}),
+		body: requestBody,
 		signal,
-	});
+	}, ["webSearch.standalone"]);
 	await checkEndpointResponse(response, requestModel, piSessionId, ["webSearch.standalone"], signal);
 	const result = await response.json() as StandaloneSearchResponse;
 	signal?.throwIfAborted();

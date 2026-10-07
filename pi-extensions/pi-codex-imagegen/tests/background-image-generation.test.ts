@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { buildBackgroundImageRequest, parseImageGenCommandArgs, selectCodexImageModel, summarizeNonImageResponse } from "@oai404iao/pi-codex-imagegen/internal/background-image-generation";
+import { parseImageGenCommandArgs, selectCodexImageModel } from "@oai404iao/pi-codex-imagegen/internal/background-image-generation";
 
 function withAgentDir<T>(fn: () => T): T {
 	const previous = process.env.PI_CODING_AGENT_DIR;
@@ -36,25 +36,10 @@ test("parseImageGenCommandArgs treats pasted image paths as references", () => {
 	});
 });
 
-test("buildBackgroundImageRequest requests generate without reference images", () => {
-	const body = buildBackgroundImageRequest({ prompt: "draw a red apple", referenceImages: [], responsesModel: "gpt-5.5", imageModel: "gpt-image-2" });
-	assert.equal(body.model, "gpt-5.5");
-	assert.deepEqual(body.tools, [{ type: "image_generation", model: "gpt-image-2", output_format: "png", action: "generate" }]);
-	assert.deepEqual(body.tool_choice, { type: "image_generation" });
-});
-
-test("buildBackgroundImageRequest requests edit with reference images", () => {
-	const body = buildBackgroundImageRequest({
-		prompt: "change icon to green",
-		referenceImages: [{ path: "/tmp/icon.png", mimeType: "image/png", base64: "abc" }],
-		responsesModel: "gpt-5.5",
-		imageModel: "gpt-image-2",
+test("parseImageGenCommandArgs recognizes GIF and BMP references", () => {
+	assert.deepEqual(parseImageGenCommandArgs("edit first.gif second.bmp"), {
+		prompt: "edit", imagePaths: ["first.gif", "second.bmp"],
 	});
-	assert.deepEqual(body.tools, [{ type: "image_generation", model: "gpt-image-2", output_format: "png", action: "edit" }]);
-	const input = body.input as Array<{ content: Array<{ type: string; text?: string; image_url?: string }> }>;
-	assert.equal(input[0].content[0].text, "Edit the provided image(s): change icon to green");
-	assert.equal(input[0].content[1].type, "input_image");
-	assert.equal(input[0].content[1].image_url, "data:image/png;base64,abc");
 });
 
 test("selectCodexImageModel prefers current catalog-capable model and registry fallback", () => withAgentDir(() => {
@@ -67,11 +52,26 @@ test("selectCodexImageModel prefers current catalog-capable model and registry f
 	assert.equal(selectCodexImageModel({ provider: "openai-codex", id: "text-only", input: ["text"] }, { getAll: () => [{ provider: "openai-codex", id: "also-text-only", input: ["text"] }] }), undefined);
 }));
 
-test("summarizeNonImageResponse includes status, error, and text output", () => {
-	const summary = summarizeNonImageResponse({
-		status: "failed",
-		error: { message: "image tool failed" },
-		output: [{ type: "message", content: [{ type: "output_text", text: "Could not generate that image." }] }],
-	});
-	assert.equal(summary, "No image was returned by Codex: status failed · image tool failed · Could not generate that image.");
-});
+test("removed hosted configuration fails rather than silently selecting a different model", () => withAgentDir(() => {
+	const directory = join(process.env.PI_CODING_AGENT_DIR!, "extensions", "pi-codex-minimal-tools");
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(join(directory, "models.json"), JSON.stringify({
+		version: 1, models: [
+			{ id: "openai/gpt-5.6-sol", tools: { imageGeneration: "hosted" } },
+			{ id: "custom/child", extends: "openai/gpt-5.6-sol" },
+			{ id: "custom/grandchild", extends: "custom/child" },
+			{ id: "custom/fixed", extends: "custom/grandchild", tools: { imageGeneration: "standalone" } },
+		],
+	}));
+	const fallback = { provider: "openai-codex", id: "gpt-5.5", input: ["text", "image"] };
+	assert.throws(() => selectCodexImageModel({
+		provider: "openai", id: "gpt-5.6-sol", input: ["text", "image"],
+	}, { getAll: () => [fallback] }), /Hosted image generation was removed.*no alternate model/);
+	for (const id of ["child", "grandchild"]) {
+		assert.throws(() => selectCodexImageModel({ provider: "custom", id, input: ["text", "image"] },
+			{ getAll: () => [fallback] }), /Hosted image generation was removed.*no alternate model/);
+	}
+	const fixed = { provider: "custom", id: "fixed", input: ["text", "image"] };
+	assert.equal(selectCodexImageModel(fixed, { getAll: () => [fallback] }), fixed);
+	assert.equal(selectCodexImageModel(fallback, { getAll: () => [] }), fallback);
+}));

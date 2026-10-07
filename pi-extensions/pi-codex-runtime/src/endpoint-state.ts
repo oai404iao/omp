@@ -73,10 +73,8 @@ export function unsupportedEndpointCapabilities(candidates: readonly EndpointCap
 	const aliases: Record<EndpointCapability, RegExp> = {
 		"webSearch.hosted": /\bweb_search\b/,
 		"webSearch.standalone": /alpha\/search|\bweb\.run\b/,
-		"imageGeneration.hosted": /\bimage_generation\b/,
 		"imageGeneration.standalone": /images\/(generations|edits)|\bimage_gen\b/,
 		"compaction.responses": /\bcompaction_trigger\b|\bremote_compaction_v2\b/,
-		"compaction.responses-compact": /responses\/compact/,
 	};
 	return candidates.filter(capability => aliases[capability].test(text));
 }

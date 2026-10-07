@@ -5,7 +5,7 @@ export type ResponsesTransport = "sse" | "websocket" | "websocket-cached" | "aut
 export type SystemPromptPlacement = "instructions" | "developer";
 export type PatchTransport = "function" | "custom";
 export type WebSearchContentType = "text" | "image";
-export type NativeCompactionMode = "pi" | "responses" | "responses-compact";
+export type NativeCompactionMode = "pi" | "responses";
 
 export interface ModelIdentityLike {
 	baseUrl?: string;
@@ -23,18 +23,27 @@ export interface ResponsesProfilePatch {
 	systemPromptPlacement?: SystemPromptPlacement;
 	transport?: ResponsesTransport;
 	websocketPrewarm?: boolean;
+	supportsVerbosity?: boolean;
+	defaultVerbosity?: "low" | "medium" | "high";
+	defaultReasoningEffort?: string;
+	supportsReasoningSummary?: boolean;
 }
 
 export interface WebSearchProfile {
 	implementation: "hosted" | "standalone";
 	contentTypes?: WebSearchContentType[];
+	mode?: "cached" | "indexed" | "live";
+	searchContextSize?: "low" | "medium" | "high";
+	userLocation?: { type: "approximate"; country?: string; region?: string; city?: string; timezone?: string };
+	filters?: { allowedDomains?: string[] };
+	maxOutputTokens?: number;
 }
 
 export interface ModelToolsProfilePatch {
 	parallelCalls?: boolean;
 	applyPatch?: false | PatchTransport;
 	webSearch?: false | WebSearchProfile;
-	imageGeneration?: false | "hosted" | "standalone";
+	imageGeneration?: false | "standalone";
 	viewImage?: boolean;
 }
 
@@ -67,13 +76,17 @@ export interface EffectiveResponsesProfile {
 	systemPromptPlacement: SystemPromptPlacement;
 	transport: ResponsesTransport;
 	websocketPrewarm: boolean;
+	supportsVerbosity: boolean;
+	defaultVerbosity?: "low" | "medium" | "high";
+	defaultReasoningEffort?: string;
+	supportsReasoningSummary: boolean;
 }
 
 export interface EffectiveModelToolsProfile {
 	parallelCalls: boolean;
 	applyPatch: false | PatchTransport;
 	webSearch: false | WebSearchProfile;
-	imageGeneration: false | "hosted" | "standalone";
+	imageGeneration: false | "standalone";
 	viewImage: boolean;
 }
 
@@ -93,4 +106,6 @@ export interface ResolvedModelProfile {
 	profileHash: string;
 	effective: EffectiveModelProfile;
 	diagnostics: string[];
+	/** Invalid removed image configuration, including inherited settings. Not part of the profile hash. */
+	removedHostedImageGeneration?: boolean;
 }

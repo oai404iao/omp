@@ -560,7 +560,7 @@ test("Responses Lite carries custom apply_patch and replays custom history in in
 	assert.equal("instructions" in requestBody, false);
 	assert.equal("tools" in requestBody, false);
 	assert.equal(requestBody.parallel_tool_calls, false);
-	assert.deepEqual(requestBody.reasoning, { effort: "low", context: "all_turns" });
+	assert.deepEqual(requestBody.reasoning, { context: "all_turns" });
 	assert.equal(requestBody.client_metadata?.ws_request_header_x_openai_internal_codex_responses_lite, undefined);
 	assert.ok(
 		typeof requestBody.client_metadata?.session_id === "string"
@@ -588,8 +588,10 @@ test("Responses Lite carries custom apply_patch and replays custom history in in
 	assert.equal(requestBody.input[0].tools[0].tools[0].type, "custom");
 	assert.equal(requestBody.input[0].tools[0].tools[0].name, "apply_patch");
 	assert.equal(requestBody.input[0].tools[0].tools[0].format.syntax, "lark");
+	assert.match(requestBody.input[1].id, /^msg_[0-9a-f-]{14}5[0-9a-f-]+$/);
 	assert.deepEqual(requestBody.input[1], {
 		type: "message",
+		id: requestBody.input[1].id,
 		role: "developer",
 		content: [{ type: "input_text", text: "stable instructions" }],
 	});
@@ -662,11 +664,11 @@ test("Responses Lite emits the reviewed Codex namespace compatibility serializat
 	);
 	assert.equal(
 		sha256(reservedNamespaces[1]),
-		"ccc508cff0a216bbdf368be8c98be94134a1aed0479cddd28c77d8e004f5b73e",
+		"d9a89f293ef83431230fb34e047a24c63329be0b5150d59c5d7b3047aeec3a7f",
 	);
 });
 
-test("Responses Lite native compaction preserves the Lite envelope on both compaction endpoints", async () => {
+test("Responses Lite native compaction preserves the envelope and refuses the removed unary route", async () => {
 	writeSettings({});
 	writeModels({
 		version: 1,
@@ -710,11 +712,6 @@ test("Responses Lite native compaction preserves the Lite envelope on both compa
 	globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
 		const body = JSON.parse(String(init?.body));
 		requests.push({ url: String(url), body, headers: new Headers(init?.headers as HeadersInit) });
-		if (String(url).endsWith("/responses/compact")) {
-			return Response.json({
-				output: [{ type: "compaction", encrypted_content: "legacy-lite-state" }],
-			});
-		}
 		return successSseResponse([{ type: "compaction", encrypted_content: "lite-state" }]);
 	}) as typeof fetch;
 
@@ -724,30 +721,27 @@ test("Responses Lite native compaction preserves the Lite envelope on both compa
 		sessionId: "lite-session",
 		settings,
 	});
-	const legacy = await requestOpenAINativeCompaction(model, context, {
-		mode: "responses-compact",
+	await assert.rejects(requestOpenAINativeCompaction(model, context, {
+		mode: "responses-compact" as any,
 		apiKey: "plain-api-key",
 		headers: { "x-openai-internal-codex-responses-lite": null },
 		settings: {
 			...settings,
-			compactionMode: "responses-compact",
+			compactionMode: "responses-compact" as any,
 		},
-	});
+	}), /Only Responses compaction_trigger/);
 
 	assert.deepEqual(responses, [
 		{ type: "message", role: "user", content: [{ type: "input_text", text: "compact this" }] },
 		{ type: "compaction", encrypted_content: "lite-state" },
 	]);
-	assert.deepEqual(legacy, [
-		{ type: "compaction", encrypted_content: "legacy-lite-state" },
-	]);
+	assert.equal(requests.length, 1);
 	assert.equal(requests[0]?.headers.get("x-openai-internal-codex-responses-lite"), "true");
-	assert.equal(requests[1]?.headers.get("x-openai-internal-codex-responses-lite"), null);
 	for (const request of requests) {
 		assert.equal("instructions" in request.body, false);
 		assert.equal("tools" in request.body, false);
 		assert.equal(request.body.parallel_tool_calls, false);
-		assert.deepEqual(request.body.reasoning, { effort: "low", context: "all_turns" });
+		assert.deepEqual(request.body.reasoning, { context: "all_turns" });
 		assert.equal(request.body.input[0]?.type, "additional_tools");
 		assert.equal(request.body.input[0]?.role, "developer");
 		assert.equal(request.body.input[0]?.tools[0]?.type, "namespace");
@@ -1071,7 +1065,7 @@ test("Codex Responses compaction checkpoints retain user and delegated-task mess
 	assert.deepEqual(result, [user, delegatedTask, compaction]);
 });
 
-test("native compaction supports Codex Responses compaction and legacy /responses/compact", async () => {
+test("native compaction supports Responses compaction only", async () => {
 	const model = {
 		provider: "openai",
 		api: "openai-responses",
@@ -1105,7 +1099,6 @@ test("native compaction supports Codex Responses compaction and legacy /response
 		webSearchEnabled: false,
 		imageOutputDir: ".pi/openai-codex-images",
 		imageModel: "gpt-image-2",
-		directImageApiFallback: false,
 		viewImage: false,
 		viewImageWorkspaceOnly: false,
 		applyPatchEnabled: true,
@@ -1115,18 +1108,6 @@ test("native compaction supports Codex Responses compaction and legacy /response
 	globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
 		const body = JSON.parse(String(init?.body));
 		requests.push({ url: String(url), body, headers: new Headers(init?.headers as HeadersInit) });
-		if (String(url).endsWith("/responses/compact")) {
-			return Response.json({
-				output: [
-					{ type: "message", role: "developer", content: [{ type: "input_text", text: "stale instructions" }] },
-					{ type: "message", role: "user", content: [{ type: "input_text", text: "retained" }] },
-					{ type: "reasoning", id: "rs_old", encrypted_content: "stale-reasoning" },
-					{ type: "function_call", id: "fc_old", call_id: "call_old", name: "read", arguments: "{\"path\":\"old\"}" },
-					{ type: "function_call_output", call_id: "call_old", output: "old result" },
-					{ type: "compaction", encrypted_content: "legacy-encrypted" },
-				],
-			});
-		}
 		return successSseResponse([{ type: "compaction", encrypted_content: "managed-encrypted" }]);
 	}) as typeof fetch;
 
@@ -1136,15 +1117,15 @@ test("native compaction supports Codex Responses compaction and legacy /response
 		sessionId: "session-1",
 		settings: settings as any,
 	});
-	const legacy = await requestOpenAINativeCompaction(model, context, {
-		mode: "responses-compact",
+	await assert.rejects(requestOpenAINativeCompaction(model, context, {
+		mode: "responses-compact" as any,
 		apiKey: "key",
 		settings: {
 			...settings,
 			openaiTransport: "websocket",
 			compactionMode: "responses-compact",
 		} as any,
-	});
+	}), /Only Responses compaction_trigger/);
 
 	assert.deepEqual(responses, [
 		{ type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] },
@@ -1160,15 +1141,7 @@ test("native compaction supports Codex Responses compaction and legacy /response
 	assert.deepEqual(requests[0]?.body.input.at(-1), { type: "compaction_trigger" });
 	assert.equal(requests[0]?.body.service_tier, "priority");
 	assert.equal(JSON.stringify(requests[0]?.body).includes("compact_threshold"), false);
-	assert.equal(requests[1]?.url, "https://example.test/v1/responses/compact");
-	assert.equal(requests[1]?.body.service_tier, "priority");
-	assert.equal("stream" in requests[1]!.body, false);
-	assert.equal("store" in requests[1]!.body, false);
-	assert.equal("include" in requests[1]!.body, false);
-	assert.deepEqual(legacy, [
-		{ type: "message", role: "user", content: [{ type: "input_text", text: "retained" }] },
-		{ type: "compaction", encrypted_content: "legacy-encrypted" },
-	]);
+	assert.equal(requests.length, 1);
 });
 
 test("apiKeyMode accepts plain API keys without account-id extraction", async () => {

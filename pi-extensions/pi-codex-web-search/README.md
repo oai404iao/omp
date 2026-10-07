@@ -29,6 +29,25 @@ Catalog-supported standalone profiles call `alpha/search` using Pi's model
 registry authentication. Hosted profiles require core; without it the tool stays
 inactive and explicit execution reports the missing provider capability.
 
+Standalone requests follow the pinned Codex `5a314017` search projection:
+history ends at the latest visible user message and includes the preceding user
+turn with a shared 1,000 approximate-token assistant budget (UTF-8 bytes, preserving
+both ends when truncated). Available message metadata and phases are retained.
+Empty history is omitted. Turn, model, reasoning, commands and history are
+snapshotted before authentication; external-tool metadata excludes internal
+Responses window/installation fields and does not invent Codex version or sandbox
+telemetry.
+
+Per-model `tools.webSearch` supports `mode` (`cached`, `indexed`, `live`),
+`searchContextSize`, `userLocation`, `filters.allowedDomains`, and
+`maxOutputTokens`. The output budget defaults to the pinned catalog's 10,000
+tokens; `mode` defaults to `live` for compatibility. Search sends the selected
+settings rather than overriding them with global live-access defaults.
+Standalone HTTP requests retry network/5xx failures up to four times, matching
+Codex's default policy; 429, explicit endpoint rejection and successful-response
+backend error sentinels are not retried. Retry-After is honored, with advice over
+60 seconds surfaced as a failure rather than retried prematurely.
+
 When core is present, the broker contributes response-local search capture and
 citation signatures without a second provider registration.
 Uses the existing

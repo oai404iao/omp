@@ -47,6 +47,12 @@ function validateState(value: unknown, id: string, rootSessionId: string): asser
 			if (!message || typeof message.id !== "string" || typeof message.text !== "string" ||
 				message.to !== path || !["message", "task", "completion"].includes(message.kind) ||
 				typeof message.from !== "string") throw new Error("corrupt subagent mailbox");
+			const attribution = message.codexTurnAttribution;
+			if (attribution !== undefined && (!attribution || typeof attribution !== "object" || Array.isArray(attribution) ||
+				(attribution.parentTurnId !== undefined && typeof attribution.parentTurnId !== "string") ||
+				(attribution.rootTurnId !== undefined && typeof attribution.rootTurnId !== "string"))) {
+				throw new Error("corrupt subagent turn attribution");
+			}
 		}
 	}
 }

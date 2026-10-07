@@ -18,7 +18,6 @@ export interface CodexGlobalSettings {
 	imageGeneration: boolean;
 	imageOutputDir: string;
 	imageModel: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1";
-	directImageApiFallback: boolean;
 	viewImageWorkspaceOnly: boolean;
 	deferApplyPatchRendering: boolean;
 }
@@ -27,7 +26,7 @@ export interface CodexMinimalToolsSettings extends CodexGlobalSettings {
 	nativeProviderTools: boolean;
 	openaiTransport: "sse" | "websocket" | "websocket-cached" | "auto";
 	openaiWebSocketPrewarm: boolean;
-	compactionMode: "pi" | "responses" | "responses-compact";
+	compactionMode: "pi" | "responses";
 	requestProfile: CodexRequestProfileOverride;
 	apiKeyMode: boolean;
 	webSearchEnabled: boolean;
@@ -47,7 +46,6 @@ export const DEFAULT_GLOBAL_SETTINGS: Readonly<CodexGlobalSettings> = {
 	imageGeneration: true,
 	imageOutputDir: ".pi/openai-codex-images",
 	imageModel: "gpt-image-2",
-	directImageApiFallback: false,
 	viewImageWorkspaceOnly: false,
 	deferApplyPatchRendering: false,
 };
@@ -118,7 +116,10 @@ export function settingsDiagnostics(): string[] {
 	const raw = readRawConfig();
 	const path = configPath();
 	const warning = settingsParseWarnings.get(path);
-	return [...(warning ? [`${path}: ${warning}`] : []), ...parseEndpointConfig(raw.endpoint_config).diagnostics];
+	return [...(warning ? [`${path}: ${warning}`] : []),
+		...(raw.directImageApiFallback === true ? ["directImageApiFallback was removed; image execution is disabled until this setting is removed. Configure tools.imageGeneration: standalone in models.json."] : []),
+		...(raw.compactionMode === "responses-compact" ? ["compactionMode responses-compact was removed; select responses or pi explicitly. Requests are blocked until migrated; checkpoint protection remains active."] : []),
+		...parseEndpointConfig(raw.endpoint_config).diagnostics];
 }
 
 function boolSetting(raw: SettingsRecord, key: keyof CodexMinimalToolsSettings): boolean {
@@ -171,7 +172,7 @@ function openaiTransportSetting(raw: SettingsRecord): CodexMinimalToolsSettings[
 function compactionModeSetting(raw: SettingsRecord): CodexMinimalToolsSettings["compactionMode"] {
 	const value = raw.compactionMode;
 	if (value === "responses-context-management") return "responses";
-	return value === "pi" || value === "responses" || value === "responses-compact"
+	return value === "pi" || value === "responses"
 		? value
 		: DEFAULT_SETTINGS.compactionMode;
 }
@@ -212,11 +213,10 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		compactionMode: compactionModeSetting(raw),
 		requestProfile: requestProfileSetting(raw),
 		apiKeyMode: boolSetting(raw, "apiKeyMode"),
-		imageGeneration: boolSetting(raw, "imageGeneration"),
+		imageGeneration: raw.directImageApiFallback !== true && boolSetting(raw, "imageGeneration"),
 		webSearchEnabled: boolSetting(raw, "webSearchEnabled"),
 		imageOutputDir: stringSetting(raw, "imageOutputDir"),
 		imageModel: imageModelSetting(raw),
-		directImageApiFallback: boolSetting(raw, "directImageApiFallback"),
 		viewImage: boolSetting(raw, "viewImage"),
 		viewImageWorkspaceOnly: boolSetting(raw, "viewImageWorkspaceOnly"),
 		applyPatchEnabled: boolSetting(raw, "applyPatchEnabled"),

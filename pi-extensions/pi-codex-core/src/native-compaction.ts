@@ -22,6 +22,8 @@ import { hasCodexRequestAuth } from "@oai404iao/pi-codex-runtime/internal/codex-
 import { resolveModelProfile } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { knownEndpointModel } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
+import { compactionMetadata } from "./adapter/compaction/metadata.js";
+import { matchesCheckpointProfile } from "./adapter/compaction/profile-migration.js";
 import type { OpenAIResponsesProviderController } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import {
 	type CodexMinimalToolsSettings,
@@ -31,7 +33,7 @@ export const NATIVE_COMPACTION_DETAILS_KIND = "openai-native-compaction";
 export const NATIVE_COMPACTION_DETAILS_VERSION = 4;
 
 export type NativeCompactionMode = Exclude<CodexMinimalToolsSettings["compactionMode"], "pi">;
-type StoredNativeCompactionMode = NativeCompactionMode | "responses-context-management";
+type StoredNativeCompactionMode = NativeCompactionMode | "responses-compact" | "responses-context-management";
 
 export interface NativeCompactionDetails {
 	kind: typeof NATIVE_COMPACTION_DETAILS_KIND;
@@ -79,7 +81,7 @@ export function isNativeCompactionDetails(value: unknown): value is NativeCompac
 		&& Array.isArray(details.output);
 }
 
-function normalizedNativeCompactionMode(details: NativeCompactionDetails): NativeCompactionMode {
+function normalizedNativeCompactionMode(details: NativeCompactionDetails): StoredNativeCompactionMode {
 	return details.mode === "responses-context-management" ? "responses" : details.mode;
 }
 
@@ -129,7 +131,7 @@ function matchesModelIdentity(
 ): boolean {
 	if (value.provider !== model.provider || value.model !== model.id || value.api !== model.api) return false;
 	if (!value.profileHash) return true;
-	return resolveModelProfile(model as ModelLike)?.profileHash === value.profileHash;
+	return matchesCheckpointProfile(resolveModelProfile(model as ModelLike), value.profileHash);
 }
 
 function syntheticNativeAssistant(
@@ -206,7 +208,7 @@ function messagesAfterEntry(entries: readonly SessionEntry[], entryIndex: number
 /**
  * Replace Pi's textual compaction summary with the opaque native Responses
  * items saved in CompactionEntry.details. The opaque payload is replayed only
- * to the same provider, model, API, and current model-profile hash.
+ * to the same provider/model/API and current or reviewed historical profile.
  */
 export function applyNativeCompactionContext(
 	messages: PiMessages,
@@ -266,10 +268,8 @@ export function applyNativeCompactionContext(
 	return messages;
 }
 
-function compactionSummary(mode: NativeCompactionMode): string {
-	return mode === "responses"
-		? "OpenAI Responses compaction replaced the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools."
-		: "OpenAI Responses /responses/compact replaced the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools.";
+function compactionSummary(): string {
+	return "OpenAI Responses compaction replaced the earlier conversation. The opaque encrypted compaction state is preserved in this session by pi-codex-minimal-tools.";
 }
 
 async function buildNativeCompactionContext(
@@ -359,6 +359,7 @@ export function registerNativeCompaction(
 				reasoning: pi.getThinkingLevel() as ThinkingLevel,
 				sessionId,
 				turnId: providerController?.getCurrentTurnId(sessionId),
+				compaction: compactionMetadata(event),
 				settings,
 			});
 			if (ctx.sessionManager.getLeafId() !== leafId || hasProjectedToolLoadout(pi)) {
@@ -368,7 +369,7 @@ export function registerNativeCompaction(
 			const checkpointId = randomUUID();
 			return {
 				compaction: {
-					summary: `${compactionSummary(mode)}\n[native-checkpoint:${checkpointId}]`,
+					summary: `${compactionSummary()}\n[native-checkpoint:${checkpointId}]`,
 					// Pi 0.87 appendCompaction supports null (retain-none); the
 					// CompactionResult declaration still incorrectly requires string.
 					firstKeptEntryId: null as unknown as string,

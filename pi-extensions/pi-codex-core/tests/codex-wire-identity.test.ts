@@ -61,7 +61,8 @@ test("wire identity is stable per (session, thread) and distinct across pairs", 
 	assert.deepEqual(first, second);
 	assert.match(first.sessionId, UUID_V7_PATTERN);
 	assert.match(first.threadId, UUID_V7_PATTERN);
-	assert.match(first.windowId, UUID_V7_PATTERN);
+	assert.equal(first.windowId, `${first.threadId}:0`);
+	assert.match(first.contextWindowId, UUID_V7_PATTERN);
 	assert.equal(first.sessionId, first.threadId);
 
 	const otherSession = resolveCodexWireIdentity("sess-2");
@@ -75,14 +76,17 @@ test("wire identity is stable per (session, thread) and distinct across pairs", 
 	assert.deepEqual(resolveCodexWireIdentity("sess-1", "thread-9"), otherThread);
 });
 
-test("rotateCodexWindowId changes only the window id", () => {
+test("rotateCodexWindowId advances the window number and context UUID without changing the thread", () => {
 	const before = resolveCodexWireIdentity("sess-1");
 	rotateCodexWindowId("sess-1");
 	const after = resolveCodexWireIdentity("sess-1");
 	assert.equal(after.sessionId, before.sessionId);
 	assert.equal(after.threadId, before.threadId);
 	assert.notEqual(after.windowId, before.windowId);
-	assert.match(after.windowId, UUID_V7_PATTERN);
+	assert.equal(after.windowId, `${after.threadId}:1`);
+	assert.equal(after.windowNumber, 1);
+	assert.match(after.contextWindowId, UUID_V7_PATTERN);
+	assert.notEqual(after.contextWindowId, before.contextWindowId);
 });
 
 test("codexInstallationIdFor is one stable installation UUID v4", () => {
@@ -140,13 +144,13 @@ function contextFixture(): any {
 	};
 }
 
-test("buildSSEHeaders emits Codex-compatible UUID v7 identity headers", () => {
+test("buildSSEHeaders emits Codex-compatible thread UUID and thread:number window headers", () => {
 	const headers = buildSSEHeaders(undefined, undefined, undefined, "token", "sess-1", liteProfile);
 	const sessionId = headers.get("session-id");
 	const threadId = headers.get("thread-id");
 	assert.ok(sessionId && UUID_V7_PATTERN.test(sessionId));
 	assert.ok(threadId && UUID_V7_PATTERN.test(threadId));
-	assert.ok(headers.get("x-codex-window-id") && UUID_V7_PATTERN.test(headers.get("x-codex-window-id")!));
+	assert.equal(headers.get("x-codex-window-id"), `${threadId}:0`);
 	assert.equal(headers.get("x-client-request-id"), threadId);
 	// The legacy underscore variant is gone; Codex uses hyphenated names.
 	assert.equal(headers.get("session_id"), null);
@@ -212,13 +216,13 @@ test("buildSSEHeaders replays the captured turn-state token", () => {
 	assert.equal(headers.get("x-codex-turn-state"), "sticky-token-abc");
 });
 
-test("buildWebSocketHeaders emits the same UUID v7 identity", () => {
+test("buildWebSocketHeaders emits the same thread:number window identity", () => {
 	const headers = buildWebSocketHeaders(undefined, undefined, undefined, "token", "sess-1", "thread-9");
 	const sessionId = headers.get("session-id");
 	const threadId = headers.get("thread-id");
 	assert.ok(sessionId && UUID_V7_PATTERN.test(sessionId));
 	assert.ok(threadId && UUID_V7_PATTERN.test(threadId));
-	assert.ok(headers.get("x-codex-window-id") && UUID_V7_PATTERN.test(headers.get("x-codex-window-id")!));
+	assert.equal(headers.get("x-codex-window-id"), `${threadId}:0`);
 	assert.equal(headers.get("x-client-request-id"), threadId);
 	assert.equal(headers.get("OpenAI-Beta"), "responses_websockets=2026-02-06");
 

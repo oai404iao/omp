@@ -128,8 +128,11 @@ test("standalone web search uses the Codex alpha/search endpoint and auth", asyn
 		/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
 	);
 	assert.equal(requestBody.model, "gpt-5.6-sol");
+	const metadata = JSON.parse(requestHeaders?.get("x-codex-turn-metadata") ?? "");
+	assert.equal(typeof metadata.turn_started_at_unix_ms, "number");
+	const { turn_started_at_unix_ms: _startedAt, ...stableMetadata } = metadata;
 	assert.deepEqual(
-		JSON.parse(requestHeaders?.get("x-codex-turn-metadata") ?? ""),
+		stableMetadata,
 		{
 			session_id: requestBody.id,
 			thread_id: requestBody.id,

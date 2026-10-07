@@ -2,18 +2,15 @@ import { type ProviderHeaders } from "@earendil-works/pi-ai";
 import { type Api, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
 import { hasCodexRequestAuth, resolveCodexRequestAccountId, withResolvedAuthBaseUrl } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
-import { resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
+import { resolveCodexRequestIdentity, type CodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { applyFastModeServiceTier } from "../../fast-mode.js";
 import { applyEndpointPolicy, loadModelSettings, type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
-import { setProviderGeneratedHeader } from "@oai404iao/pi-codex-runtime/internal/provider-headers";
 import { rewriteNativeOpenAiTools } from "../../provider-native-tools.js";
-import { CODEX_COMPACTION_TRIGGER_TYPE, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE } from "../../providers/openai-codex/constants.js";
-import { applyConfiguredResponsesFeatureHeaders, buildJsonHeaders, buildSSEHeaders, buildWebSocketHeaders } from "../../providers/openai-codex/headers.js";
+import { CODEX_COMPACTION_TRIGGER_TYPE } from "../../providers/openai-codex/constants.js";
+import { applyConfiguredResponsesFeatureHeaders, buildSSEHeaders, buildWebSocketHeaders } from "../../providers/openai-codex/headers.js";
 import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOptions } from "../../providers/openai-codex/request-body.js";
 import { createCodexRequestId } from "../../providers/openai-codex/request-metadata.js";
-import { compactUrl } from "../../providers/openai-codex/urls.js";
-import { buildCodexCompactionCheckpoint, compactionItems, sanitizeNativeCompactionOutput } from "./checkpoint.js";
-import { postJsonWithRetries } from "./http.js";
+import { buildCodexCompactionCheckpoint } from "./checkpoint.js";
 import { requestCodexCompactionTriggerWithTransport } from "./transport.js";
 import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import type { CodexMinimalToolsSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
@@ -24,7 +21,7 @@ async function requestNativeCompaction(
 	context: Context,
 	options: {
 		ownsNativeTool?: NativeToolOwnership;
-		mode: "responses" | "responses-compact";
+		mode: "responses";
 		apiKey: string;
 		headers?: ProviderHeaders;
 		baseUrl?: string;
@@ -32,11 +29,13 @@ async function requestNativeCompaction(
 		reasoning?: SimpleStreamOptions["reasoning"];
 		sessionId?: string;
 		turnId?: string;
+		compaction?: CodexRequestIdentity["compaction"];
 		maxRetries?: number;
 		maxRetryDelayMs?: number;
 		settings: ResolvedCodexModelSettings | CodexMinimalToolsSettings;
 	},
 ): Promise<unknown[]> {
+	if (options.mode !== "responses") throw new Error("Only Responses compaction_trigger execution is supported.");
 	rememberResolvedEndpoint(model, withResolvedAuthBaseUrl(model, options), options.sessionId);
 	model = withResolvedAuthBaseUrl(model, options);
 	const settings = "responsesEndpoint" in options.settings && options.settings.modelProfile
@@ -55,7 +54,7 @@ async function requestNativeCompaction(
 		auth,
 		endpoint: settings.responsesEndpoint,
 	});
-	const requestIdentity = resolveCodexRequestIdentity(
+	let requestIdentity = resolveCodexRequestIdentity(
 		options.sessionId,
 		options.turnId ? { turn_id: options.turnId } : undefined,
 		"compaction",
@@ -68,98 +67,39 @@ async function requestNativeCompaction(
 		signal: options.signal,
 		reasoning: options.reasoning,
 		sessionId: options.sessionId,
+		requestIdentity,
 	}), settings, model);
+	if (requestIdentity) requestIdentity = {
+		...requestIdentity, model: model.id, reasoningEffort: body.reasoning?.effort, compaction: options.compaction,
+	};
 	const webSearch = settings.modelProfile?.effective.tools.webSearch;
 	body = rewriteNativeOpenAiTools(body, {
 		...requestBodyToolOptions(settings),
 		ownsNativeTool: options.ownsNativeTool,
-		imageModel: settings.imageModel,
-		webSearch: settings.webSearchEnabled
-			&& webSearch
-			? {
-					implementation: webSearch.implementation,
-					contentTypes: webSearch.contentTypes,
-				}
-			: false,
+		webSearch: settings.webSearchEnabled && webSearch ? webSearch : false,
 	}).payload;
 	ensureWebSearchDetailsIncluded(body);
 
-	if (options.mode === "responses") {
-		const retainedInput = [...body.input];
-		body.input = [...retainedInput, { type: CODEX_COMPACTION_TRIGGER_TYPE }];
-		const sseHeaders = applyConfiguredResponsesFeatureHeaders(buildSSEHeaders(
-			model.headers,
-			options.headers,
-			accountId,
-			options.apiKey,
-			options.sessionId,
-			profile,
-			requestIdentity?.threadId,
-			requestIdentity,
-		), settings, model);
-		const requestId = requestIdentity?.threadId
-			?? options.sessionId
-			?? createCodexRequestId();
-		const websocketHeaders = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
-			model.headers,
-			options.headers,
-			accountId,
-			options.apiKey,
-			requestId,
-			requestId,
-			requestIdentity,
-		), settings, model);
-		const item = await requestCodexCompactionTriggerWithTransport(
-			model,
-			{ sse: sseHeaders, websocket: websocketHeaders },
-			body,
-			{
-				sessionId: options.sessionId,
-				turnId: options.turnId,
-				requestIdentity,
-				signal: options.signal,
-				settings,
-				maxRetries: options.maxRetries,
-				maxRetryDelayMs: options.maxRetryDelayMs,
-			},
-		);
-		return buildCodexCompactionCheckpoint(retainedInput, item);
-	}
-
-	const headers = buildJsonHeaders(
-		model.headers,
-		options.headers,
-		accountId,
-		options.apiKey,
-		options.sessionId,
-		requestIdentity,
+	const retainedInput = [...body.input];
+	body.input = [...retainedInput, { type: CODEX_COMPACTION_TRIGGER_TYPE }];
+	const sseHeaders = applyConfiguredResponsesFeatureHeaders(buildSSEHeaders(
+		model.headers, options.headers, accountId, options.apiKey, options.sessionId,
+		profile, requestIdentity?.threadId, requestIdentity, settings.codexRequestExtensions, settings.responsesEndpoint,
+	), settings, model);
+	const requestId = requestIdentity?.threadId ?? options.sessionId ?? createCodexRequestId();
+	const websocketHeaders = applyConfiguredResponsesFeatureHeaders(buildWebSocketHeaders(
+		model.headers, options.headers, accountId, options.apiKey, requestId,
+		requestId, requestIdentity, settings.codexRequestExtensions, settings.responsesEndpoint,
+	), settings, model);
+	const item = await requestCodexCompactionTriggerWithTransport(
+		model, { sse: sseHeaders, websocket: websocketHeaders }, body,
+		{
+			sessionId: options.sessionId, turnId: options.turnId, requestIdentity,
+			signal: options.signal, settings,
+			maxRetries: options.maxRetries, maxRetryDelayMs: options.maxRetryDelayMs,
+		},
 	);
-	if (profile.responsesMode === "lite") {
-		setProviderGeneratedHeader(headers, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
-	}
-	const compactBody: Record<string, unknown> = {
-		model: body.model,
-		input: body.input,
-		parallel_tool_calls: body.parallel_tool_calls,
-	};
-	for (const key of ["instructions", "tools", "reasoning", "service_tier", "prompt_cache_key", "text"] as const) {
-		if (body[key] !== undefined) compactBody[key] = body[key];
-	}
-	const response = await postJsonWithRetries(
-		compactUrl(model.baseUrl, settings.responsesEndpoint),
-		headers,
-		compactBody,
-		options.signal,
-	);
-	const output = response.output;
-	if (!Array.isArray(output) || output.length === 0) {
-		throw new Error("OpenAI /responses/compact returned no replacement output");
-	}
-	const sanitizedOutput = sanitizeNativeCompactionOutput(output);
-	if (compactionItems(sanitizedOutput).length === 0) {
-		throw new Error("OpenAI /responses/compact output did not contain a compaction item");
-	}
-	return sanitizedOutput;
+	return buildCodexCompactionCheckpoint(retainedInput, item);
 }
 
 export async function requestOpenAINativeCompaction(...args: Parameters<typeof requestNativeCompaction>): Promise<unknown[]> {

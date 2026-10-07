@@ -25,7 +25,7 @@ export interface CodexRequestProfileOverride {
 export const DEFAULT_CODEX_REQUEST_PROFILE: CodexRequestProfile = {
 	responsesMode: "standard",
 	reasoningSummary: "auto",
-	systemPromptPlacement: "instructions",
+	systemPromptPlacement: "developer",
 	patchTransport: "function",
 	supportsHostedTools: true,
 	supportsParallelTools: true,
@@ -37,7 +37,7 @@ export function resolveCodexRequestProfile(override: CodexRequestProfileOverride
 		responsesMode,
 		reasoningSummary: override.reasoningSummary
 			?? (responsesMode === "lite" ? "none" : DEFAULT_CODEX_REQUEST_PROFILE.reasoningSummary),
-		systemPromptPlacement: responsesMode === "lite" ? "developer" : override.systemPromptPlacement ?? DEFAULT_CODEX_REQUEST_PROFILE.systemPromptPlacement,
+		systemPromptPlacement: "developer",
 		patchTransport: override.patchTransport ?? DEFAULT_CODEX_REQUEST_PROFILE.patchTransport,
 		supportsHostedTools: responsesMode === "lite" ? false : override.supportsHostedTools ?? DEFAULT_CODEX_REQUEST_PROFILE.supportsHostedTools,
 		supportsParallelTools: responsesMode === "lite" ? false : override.supportsParallelTools ?? DEFAULT_CODEX_REQUEST_PROFILE.supportsParallelTools,

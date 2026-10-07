@@ -29,7 +29,7 @@ for (const denyByConfig of [false, true]) test(`background standalone denial nev
 		host.ctx.ui = { ...ui([]), setStatus(_key: string, value?: string) { if (value === undefined) finished.resolve(); } };
 		host.ctx.modelRegistry.getApiKeyAndHeaders = async () => auth;
 		if (denyByConfig) writeCompositionConfig(directory, { endpoint_config: [{
-			provider: host.ctx.model.provider, baseUrl: host.ctx.model.baseUrl, imageGeneration: ["hosted"],
+			provider: host.ctx.model.provider, baseUrl: host.ctx.model.baseUrl, imageGeneration: [],
 		}] });
 		let requests = 0;
 		t.mock.method(globalThis, "fetch", async (...[url]: Parameters<typeof fetch>) => {
@@ -127,6 +127,8 @@ test("standalone ignores a late JSON image result after cancellation", (t) =>
 		host.ctx.modelRegistry.getApiKeyAndHeaders = async () => auth;
 		t.mock.method(globalThis, "fetch", async () => ({
 			ok: true,
+			status: 200,
+			headers: new Headers(),
 			json() { jsonStarted.resolve(); return result.promise; },
 		}) as Response);
 		const pending = standaloneImageGeneration(
@@ -145,7 +147,7 @@ test("standalone ignores a late JSON image result after cancellation", (t) =>
 		}
 	}));
 
-test("hosted shutdown cancels a pending SSE reader and suppresses late errors", (t) =>
+test("standalone background shutdown aborts its request and suppresses late errors", (t) =>
 	withCompositionDirectory(async directory => {
 		const host = createCompositionHost(directory);
 		const calls: unknown[] = [];
@@ -153,14 +155,12 @@ test("hosted shutdown cancels a pending SSE reader and suppresses late errors", 
 		host.ctx.model = compositionModel("gpt-4.1");
 		host.ctx.modelRegistry.getApiKeyAndHeaders = async () => auth;
 		const reading = gate<void>();
-		let cancelled = 0;
+		const result = gate<Response>();
 		let signal: AbortSignal | undefined;
-		const body = new ReadableStream({ cancel() { cancelled++; } });
-		const original = body.getReader.bind(body);
-		t.mock.method(body, "getReader", () => { reading.resolve(); return original(); });
 		t.mock.method(globalThis, "fetch", async (...[_url, init]: Parameters<typeof fetch>) => {
 			signal = init?.signal as AbortSignal;
-			return new Response(body);
+			reading.resolve();
+			return result.promise;
 		});
 		const api = host.api() as any;
 		api.sendMessage = (...args: unknown[]) => { calls.push(args); };
@@ -170,11 +170,12 @@ test("hosted shutdown cancels a pending SSE reader and suppresses late errors", 
 			await reading.promise;
 			await host.emit("session_shutdown");
 			assert.equal(signal?.aborted, true);
-			assert.equal(cancelled, 1);
 			const count = calls.length;
+			result.resolve(Response.json({ data: [{ b64_json: png }] }));
 			await drain();
 			assert.equal(calls.length, count);
 		} finally {
+			result.resolve(Response.json({ data: [{ b64_json: png }] }));
 			await host.emit("session_shutdown");
 			host.dispose();
 		}
@@ -194,14 +195,10 @@ for (const id of ["gpt-4.1", "gpt-5.6-sol"]) test(`background ${id} uses resolve
 			headers: { authorization: null, "x-api-key": "resolved" },
 		});
 		t.mock.method(globalThis, "fetch", async (...[url, init]: Parameters<typeof fetch>) => {
-			assert.equal(String(url), `https://resolved.invalid/v2/${id === "gpt-4.1" ? "responses" : "images/generations"}`);
+			assert.equal(String(url), "https://resolved.invalid/v2/images/generations");
 			assert.equal(new Headers(init?.headers).get("authorization"), null);
 			assert.equal(new Headers(init?.headers).get("x-api-key"), "resolved");
-			return id === "gpt-4.1" ? new Response(`data: ${JSON.stringify({
-				type: "response.completed", response: { id: "fixture", status: "completed", output: [
-					{ type: "image_generation_call", id: "fixture-image", status: "completed", result: png },
-				] },
-			})}\n\n`) : Response.json({ data: [{ b64_json: png }] });
+			return Response.json({ data: [{ b64_json: png }] });
 		});
 		registerBackgroundImageGenerationCommand(host.api());
 		try {

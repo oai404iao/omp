@@ -68,12 +68,8 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	return {
 		image_generation: !settings.imageGeneration
 			? { enabled: false, reason: "image generation disabled by global setting" }
-			: imageGeneration === "hosted" && providerShimActive && imageInput
-			? { enabled: true, reason: "model profile enables hosted image_generation" }
 			: imageGeneration === "standalone" && imageInput
 				? { enabled: true, reason: "model profile enables standalone image generation" }
-				: profile.tools.imageGeneration !== false && settings.directImageApiFallback
-				? { enabled: true, reason: "direct Images API fallback enabled" }
 				: { enabled: false, reason: imageGeneration === false ? "image_generation disabled by model profile" : "model does not advertise image input" },
 		view_image: profile.tools.viewImage && imageInput
 			? { enabled: true, reason: "model profile enables view_image and model accepts image input" }

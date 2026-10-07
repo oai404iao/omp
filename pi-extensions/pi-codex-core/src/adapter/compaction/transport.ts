@@ -53,6 +53,7 @@ export async function requestCodexCompactionTriggerWithTransport(
 			withSseRequestMetadata(body, requestMetadata),
 			options.signal,
 			options.sessionId,
+			model.provider,
 		);
 	}
 
@@ -74,6 +75,7 @@ export async function requestCodexCompactionTriggerWithTransport(
 			withSseRequestMetadata(body, requestMetadata),
 			options.signal,
 			options.sessionId,
+			model.provider,
 		);
 	}
 
@@ -121,5 +123,6 @@ export async function requestCodexCompactionTriggerWithTransport(
 		withSseRequestMetadata(body, requestMetadata),
 		options.signal,
 		options.sessionId,
+		model.provider,
 	);
 }

@@ -36,7 +36,9 @@ export function applyFastModeServiceTier<T extends Record<string, unknown>>(
 	body: T,
 	settings: Pick<CodexMinimalToolsSettings, "enabled" | "fastMode"> & Partial<ResolvedCodexModelSettings>,
 	model: ModelLike | undefined,
+	explicitServiceTier?: unknown,
 ): T {
+	if (explicitServiceTier !== undefined) return body;
 	const serviceTier = resolveFastModeServiceTier(settings, model);
 	if (!serviceTier || body.service_tier !== undefined) return body;
 	return { ...body, service_tier: serviceTier };
