@@ -1,5 +1,17 @@
 # @oai404iao/pi-codex-minimal-tools
 
+## 4.1.1
+
+### Patch Changes
+
+- 7edbf75: Update exact workspace dependency pins for the pending dependency releases.
+- Updated dependencies [3b07cbf]
+- Updated dependencies [7edbf75]
+  - @oai404iao/pi-codex-runtime@1.0.0
+  - @oai404iao/pi-codex-core@1.0.0
+  - @oai404iao/pi-codex-imagegen@1.0.0
+  - @oai404iao/pi-codex-web-search@0.5.0
+
 ## 4.1.0
 
 Final model defaults: `openai/gpt-6.1-sol` uses the GPT-5.6 Sol Lite profile
