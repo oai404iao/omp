@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-subagent",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "description": "Asynchronous agent trees for Pi, adapting Codex multi-agent v2 with plaintext tools and durable mailboxes.",
   "repository": {
     "type": "git",
