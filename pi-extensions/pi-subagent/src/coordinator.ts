@@ -322,7 +322,8 @@ export class SubagentCoordinator {
 		const suffix = timeout < MIN_WAIT_AGENT_TIMEOUT_MS ? " Timeout raised to 10000 ms." : "";
 		const result = (reason: "mailbox" | "input" | "timeout"): WaitResult => ({
 			message: (reason === "mailbox" ? "Mailbox activity available." :
-				reason === "input" ? "Wait interrupted by new input." : "Wait timed out.") + suffix,
+				reason === "input" ? "Wait interrupted by new input." :
+					"No new mailbox activity before the wait deadline. This timeout does not cancel agents or indicate task failure.") + suffix,
 			timed_out: reason === "timeout",
 		});
 		this.reconcile(caller.path, caller.sessionManager);

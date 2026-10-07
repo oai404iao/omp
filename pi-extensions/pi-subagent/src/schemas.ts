@@ -5,7 +5,7 @@ import { formatAgentToolCatalog } from "./agents.ts";
 export const TOOL_NAMES = [
 	"spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents",
 ] as const;
-export const DEFAULT_WAIT_AGENT_TIMEOUT_MS = 30_000;
+export const DEFAULT_WAIT_AGENT_TIMEOUT_MS = 120_000;
 export const MIN_WAIT_AGENT_TIMEOUT_MS = 10_000;
 export const MAX_WAIT_AGENT_TIMEOUT_MS = 3_600_000;
 export const MAX_MESSAGE_CHARS = 131_072;
@@ -28,7 +28,9 @@ A task arriving after the current run stops accepting input is retained for a su
 
 This tool does not wait for a selected agent, return message contents, consume messages, or start another agent. Message contents are delivered separately into your conversation at a safe boundary.
 
-The default timeout is 30000 ms. Values below 10000 ms are raised to 10000 ms; the maximum is 3600000 ms. Wait only when further progress depends on incoming work.`,
+Wait only when no independent work remains and further progress depends on incoming work. Implementation, review, and test runs may take several minutes. The default timeout is ${DEFAULT_WAIT_AGENT_TIMEOUT_MS} ms; use 300000 ms for longer tasks. Avoid repeated 10-30 second polling. This is an upper bound: messages or new user input end the wait early.
+
+Values below ${MIN_WAIT_AGENT_TIMEOUT_MS} ms are raised to ${MIN_WAIT_AGENT_TIMEOUT_MS} ms; the maximum is ${MAX_WAIT_AGENT_TIMEOUT_MS} ms. A wait timeout does not cancel agents or indicate task failure. Do not restart or interrupt agents solely because a wait timed out.`,
 	interrupt_agent: `Request interruption of an agent's current run and return its previously observed status. The agent keeps its identity, conversation, and undelivered messages and remains available for follow-up tasks.
 
 An idle agent is not started. This tool does not delete the agent, recursively interrupt descendants, or guarantee that cancellation has finished when it returns. You cannot interrupt yourself or /root.`,
@@ -78,7 +80,7 @@ export const FollowupTaskParameters = Type.Object({
 export const WaitAgentParameters = Type.Object({
 	timeout_ms: Type.Optional(Type.Integer({
 		minimum: 0, maximum: MAX_WAIT_AGENT_TIMEOUT_MS, default: DEFAULT_WAIT_AGENT_TIMEOUT_MS,
-		description: "Wait duration in milliseconds; values below 10000 are raised to 10000.",
+		description: `Maximum wait in milliseconds, not a task deadline. Defaults to ${DEFAULT_WAIT_AGENT_TIMEOUT_MS}; use 300000 for longer tasks. Activity ends the wait early. Values below ${MIN_WAIT_AGENT_TIMEOUT_MS} are raised to ${MIN_WAIT_AGENT_TIMEOUT_MS}.`,
 	})),
 }, objectOptions);
 export const InterruptParameters = Type.Object({ target: target() }, objectOptions);

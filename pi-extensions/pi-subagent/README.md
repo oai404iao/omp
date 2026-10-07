@@ -80,9 +80,16 @@ notifications do not start idle agents.
 `wait_agent` waits for **activity in its own inbox**, not a selected child's
 terminal status. It does not consume messages. Bodies enter the conversation as
 separate attributed custom messages; durable context receipts acknowledge them.
-The default timeout is 30 seconds; values below 10 seconds are raised to 10
+The default timeout is 120 seconds; values below 10 seconds are raised to 10
 seconds; values above 1 hour are rejected. User input and cancellation can end
 the wait earlier. There is no persistent sleep/background wakeup service.
+
+Wait only when no independent work remains. Implementation, review, and test
+runs may take several minutes; use `timeout_ms:300000` for longer tasks rather
+than repeatedly polling every 10–30 seconds. The timeout is an upper bound, not
+a task deadline: mailbox activity or steered user input returns immediately.
+A wait timeout neither cancels agents nor indicates task failure, and is not
+by itself a reason to restart or interrupt a child.
 
 Final success/error output is automatically queued to the direct parent.
 Interruption does not emit a successful completion. An idle parent stays idle;
