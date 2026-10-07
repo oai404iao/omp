@@ -11,6 +11,7 @@ import {
 	settingsDiagnostics,
 	updateConfig,
 } from "@oai404iao/pi-codex-runtime/internal/settings";
+import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 
 function tempDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-codex-minimal-tools-"));
@@ -89,7 +90,6 @@ test("loadSettings reads package config and nested request profile", () => {
 			fastMode: true,
 			imageOutputDir: "custom-images",
 			imageModel: "gpt-image-1",
-			directImageApiFallback: true,
 			webSearchEnabled: true,
 			additionalModelIds: [
 				" openai/deepseek-v4-flash ",
@@ -115,7 +115,6 @@ test("loadSettings reads package config and nested request profile", () => {
 		assert.equal(settings.fastMode, true);
 		assert.equal(settings.imageOutputDir, "custom-images");
 		assert.equal(settings.imageModel, "gpt-image-1");
-		assert.equal(settings.directImageApiFallback, true);
 		assert.equal(settings.webSearchEnabled, true);
 		assert.deepEqual(settings.additionalModelIds, ["openai/deepseek-v4-flash"]);
 		assert.equal(settings.compactionMode, "responses");
@@ -130,6 +129,16 @@ test("loadSettings reads package config and nested request profile", () => {
 		assert.equal(settings.applyPatchEnabled, true);
 	});
 });
+
+test("removed execution paths require migration without unloading checkpoint protection", () => withAgentDir(agentDir => {
+	writeConfig(agentDir, { directImageApiFallback: true });
+	assert.equal(loadSettings().imageGeneration, false);
+	assert.ok(settingsDiagnostics().some(line => line.includes("directImageApiFallback was removed")));
+	writeConfig(agentDir, { compactionMode: "responses-compact" });
+	assert.equal(loadSettings().compactionMode, "pi");
+	assert.ok(settingsDiagnostics().some(line => line.includes("responses-compact was removed")));
+	assert.match(loadModelSettings({ provider: "openai", id: "gpt-5.5" }).requestBlockedReason ?? "", /responses-compact was removed/);
+}));
 
 test("updateConfig preserves existing keys and writes persistent Fast mode settings", () => {
 	withAgentDir((agentDir) => {

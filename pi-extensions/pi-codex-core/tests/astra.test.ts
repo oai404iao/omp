@@ -128,7 +128,6 @@ test("image gate removes the package-owned Lite namespace", () => withAgentDir((
 			imageGeneration: settings.imageGenerationImplementation ?? false,
 		},
 	);
-	const additionalTools = body.input[0] as { tools: Array<{ name: string }> };
-	assert.deepEqual(additionalTools.tools, []);
+	assert.deepEqual(body.input, []);
 	assert.doesNotMatch(JSON.stringify(body), /image_gen|image_generation/);
 }));

@@ -30,6 +30,37 @@ function writeModels(agentDir: string, value: unknown): void {
 	writeFileSync(path, typeof value === "string" ? value : JSON.stringify(value));
 }
 
+test("removed model execution choices fail closed instead of inheriting a different route", () => withAgentDir(agentDir => {
+	writeModels(agentDir, { version: 1, models: [{
+		id: "openai/gpt-5.5", tools: { imageGeneration: "hosted" }, compaction: "responses-compact",
+	}] });
+	const settings = loadModelSettings({ provider: "openai", id: "gpt-5.5" });
+	assert.equal(settings.imageGeneration, false);
+	assert.equal(settings.compactionMode, "pi");
+	assert.match(settings.modelProfile!.diagnostics.join("\n"), /hosted image generation was removed/);
+	assert.match(settings.modelProfile!.diagnostics.join("\n"), /responses-compact was removed/);
+}));
+
+test("verified execution defaults and search policy are resolved without guessing unknown models", () => withAgentDir(agentDir => {
+	const standard = loadModelSettings({ provider: "openai", id: "gpt-5.5" });
+	assert.equal(standard.modelProfile!.effective.responses.defaultReasoningEffort, "medium");
+	assert.equal(standard.modelProfile!.effective.responses.defaultVerbosity, "low");
+	assert.equal(standard.modelProfile!.effective.responses.systemPromptPlacement, "developer");
+	const webSearch = {
+		implementation: "standalone", mode: "indexed", contentTypes: ["text"], searchContextSize: "high",
+		maxOutputTokens: 2500, filters: { allowedDomains: ["example.com"] },
+		userLocation: { type: "approximate", country: "US" },
+	};
+	writeModels(agentDir, { version: 1, models: [{
+		id: "openai/gpt-5.5", tools: { webSearch },
+	}, { id: "custom/unknown", responses: { providerShim: true } }] });
+	assert.deepEqual(loadModelSettings({ provider: "openai", id: "gpt-5.5" }).modelProfile!.effective.tools.webSearch, webSearch);
+	const unknown = loadModelSettings({ provider: "custom", id: "unknown" }).modelProfile!.effective.responses;
+	assert.equal(unknown.supportsVerbosity, false);
+	assert.equal(unknown.defaultReasoningEffort, undefined);
+	assert.equal(unknown.supportsReasoningSummary, false);
+}));
+
 test("deprecated routing config cannot change modern API or activate the legacy profile", () => withAgentDir(agentDir => {
 	writeModels(agentDir, { version: 1, models: [{
 		id: "openai/gpt-5.6-sol", responses: { endpoint: "codex" },
@@ -359,6 +390,27 @@ test("invalid versions, missing parents, and cycles are diagnosed without enabli
 	writeModels(agentDir, { version: 2, models: [{ id: "custom/version-two" }] });
 	assert.equal(resolveModelProfile({ provider: "custom", id: "version-two" }, { settings: DEFAULT_SETTINGS }), undefined);
 	assert.ok(modelCatalogDiagnostics().some((line) => line.includes("version must be 1")));
+}));
+
+test("removed hosted image provenance follows inheritance and resets on valid overrides without changing hashes", () => withAgentDir(agentDir => {
+	const models = [
+		{ id: "custom/parent", tools: { imageGeneration: "hosted" as string | false } },
+		{ id: "custom/child", extends: "custom/parent" },
+		{ id: "custom/grandchild", extends: "custom/child" },
+		{ id: "custom/disabled", extends: "custom/grandchild", tools: { imageGeneration: false } },
+		{ id: "custom/fixed", extends: "custom/grandchild", tools: { imageGeneration: "standalone" } },
+	];
+	writeModels(agentDir, { version: 1, models });
+	const resolve = (id: string) => resolveModelProfile({ provider: "custom", id }, { settings: DEFAULT_SETTINGS })!;
+	for (const id of ["parent", "child", "grandchild"]) assert.equal(resolve(id).removedHostedImageGeneration, true);
+	for (const id of ["disabled", "fixed"]) assert.equal(resolve(id).removedHostedImageGeneration, undefined);
+	const before = resolve("grandchild");
+	models[0]!.tools!.imageGeneration = false;
+	writeModels(agentDir, { version: 1, models });
+	const after = resolve("grandchild");
+	assert.equal(after.removedHostedImageGeneration, undefined);
+	assert.deepEqual(after.effective, before.effective);
+	assert.equal(after.profileHash, before.profileHash);
 }));
 
 test("modelsPath points to the extension models.json", () => withAgentDir((agentDir) => {

@@ -5,7 +5,7 @@ import { codexTurnStateFor, resolveCodexWireIdentity, type CodexRequestIdentity 
 import { type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { isProviderHeaderSuppressed, mergeProviderHeaders, providerHeaderDirective, setProviderDefaultHeader, setProviderGeneratedHeader } from "@oai404iao/pi-codex-runtime/internal/provider-headers";
 import { CODEX_REMOTE_COMPACTION_V2_FEATURE, OPENAI_BETA_RESPONSES_WEBSOCKETS, X_CODEX_BETA_FEATURES, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE } from "./constants.js";
-import { buildCodexTurnMetadataJson } from "./request-metadata.js";
+import { buildCodexCompatibilityMetadataJson } from "@oai404iao/pi-codex-runtime/internal/codex-metadata";
 import { dynamicImport } from "./runtime.js";
 import type { ResponsesProtocol } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 
@@ -101,18 +101,18 @@ function applyWireIdentityHeaders(
 			requestIdentity.parentThreadId,
 		);
 	}
-	if (requestIdentity?.subagentKind) {
+	if (requestIdentity?.subagentHeader) {
 		setProviderGeneratedHeader(
 			headers,
 			"x-openai-subagent",
-			requestIdentity.subagentKind,
+			requestIdentity.subagentHeader,
 		);
 	}
 	if (requestIdentity) {
 		setProviderGeneratedHeader(
 			headers,
 			"x-codex-turn-metadata",
-			buildCodexTurnMetadataJson(requestIdentity),
+			buildCodexCompatibilityMetadataJson(requestIdentity),
 		);
 	}
 }
@@ -132,7 +132,6 @@ export function buildSSEHeaders(
 ): Headers {
 	const codexHeaders = codexRequestExtensions || endpoint === "codex";
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token, codexHeaders);
-	if (codexHeaders) setProviderDefaultHeader(headers, "OpenAI-Beta", "responses=experimental");
 	setProviderDefaultHeader(headers, "accept", "text/event-stream");
 	setProviderDefaultHeader(headers, "content-type", "application/json");
 	if (codexRequestExtensions && profile.responsesMode === "lite") {
@@ -208,43 +207,19 @@ export function buildWebSocketHeaders(
 			requestIdentity.parentThreadId,
 		);
 	}
-	if (requestIdentity?.subagentKind) {
+	if (requestIdentity?.subagentHeader) {
 		setProviderGeneratedHeader(
 			headers,
 			"x-openai-subagent",
-			requestIdentity.subagentKind,
+			requestIdentity.subagentHeader,
 		);
 	}
 	if (requestIdentity) {
 		setProviderGeneratedHeader(
 			headers,
 			"x-codex-turn-metadata",
-			buildCodexTurnMetadataJson(requestIdentity),
+			buildCodexCompatibilityMetadataJson(requestIdentity),
 		);
 	}
-	return headers;
-}
-
-export function buildJsonHeaders(
-	modelHeaders: ProviderHeaders | undefined,
-	additionalHeaders: ProviderHeaders | undefined,
-	accountId: string | undefined,
-	apiKey: string,
-	sessionId?: string,
-	requestIdentity?: CodexRequestIdentity,
-	codexRequestExtensions = true,
-	endpoint: ResponsesProtocol = "codex",
-): Headers {
-	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, apiKey, codexRequestExtensions || endpoint === "codex");
-	setProviderDefaultHeader(headers, "accept", "application/json");
-	setProviderDefaultHeader(headers, "content-type", "application/json");
-	applyWireIdentityHeaders(
-		headers,
-		sessionId,
-		requestIdentity?.threadId ?? sessionId,
-		requestIdentity,
-		codexRequestExtensions,
-		endpoint,
-	);
 	return headers;
 }

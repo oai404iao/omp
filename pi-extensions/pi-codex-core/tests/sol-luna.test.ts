@@ -31,7 +31,7 @@ for (const id of ["gpt-6-sol", "gpt-6-luna"]) {
 			}, resolveCodexRequestProfile(settings.requestProfile), {
 				reasoning, ownsNativeTool: () => true, imageGeneration: settings.imageGenerationImplementation ?? false,
 			});
-			assert.deepEqual(body.reasoning, { context: "all_turns", effort: reasoning === undefined ? "none" : reasoning === "minimal" ? "low" : "max" });
+			assert.deepEqual(body.reasoning, { context: "all_turns", effort: reasoning === undefined ? "medium" : reasoning === "minimal" ? "low" : "max" });
 			assert.equal(body.parallel_tool_calls, false);
 			assert.equal(body.tools, undefined);
 			assert.equal(body.instructions, undefined);

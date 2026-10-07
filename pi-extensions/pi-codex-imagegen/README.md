@@ -4,11 +4,11 @@ See the package guide below for release status; source edits do not publish arti
 
 Peer floor and development target: Pi 0.99.1.
 
-Hosted generation is model-only, including with native codemode in `only` mode.
-Standalone generation remains directly callable and is also available to
-codemode while active. Exposure follows the selected model profile; this does
-not enable codemode itself. A hosted profile with explicit direct fallback
-remains model-only.
+Image generation uses standalone Images endpoints and is directly callable,
+including through codemode while active. This does not enable codemode itself.
+Hosted Responses image generation and `directImageApiFallback` have been removed.
+Legacy hosted profiles are disabled with a diagnostic rather than silently routed
+to a different implementation. Historical image outputs still replay and display.
 
 Codemode scripts receive `{ path, latestPath?, image: { type, data, mimeType } }`.
 The image data is base64; use `image(result.image)` to forward it to the model.
@@ -24,17 +24,19 @@ new image writes. Already-started server generation or disk writes cannot be
 rolled back; cancellation is not a guarantee of avoiding provider charges.
 
 Installs `image_generation`, background image commands, image persistence and
-presentation. Depends only on `pi-codex-runtime`, not core, web-search or the bundle.
+presentation. Its only workspace dependency is `pi-codex-runtime`, not core,
+web-search or the bundle. Photon supplies image decoding and PNG encoding.
 When global `config.json.imageGeneration` is `false`, none of those generation
-surfaces are registered. The gate also blocks late/manual standalone and direct
-fallback execution before authentication or network I/O.
+surfaces are registered. The gate also blocks late/manual standalone execution
+before authentication or network I/O.
 Catalog-supported standalone profiles call Images generation/edit endpoints with
-Pi authentication. Hosted profiles need core unless the existing
-`directImageApiFallback` option was explicitly enabled.
-All image paths, including this explicit fallback and background jobs, use
+Pi authentication. `transparent_background:true` requests transparency;
+omitted or false requests an opaque background. References are sniffed by content,
+including extensionless PNG/JPEG/WebP; GIF/BMP normalize to PNG without resizing.
+All image paths, including background jobs, use
 the selected provider's Pi-resolved credentials, headers and base URL. The
-fallback no longer reads a separate `OPENAI_API_KEY` or forces the public
-OpenAI endpoint. Authentication failure never switches accounts or providers.
+client never reads a separate `OPENAI_API_KEY` or forces the public OpenAI endpoint.
+Authentication failure never switches accounts or providers.
 `endpoint_config.imageGeneration` limits allowed modes at the authenticated
 endpoint. Rejected/denied standalone jobs do not fall through to hosted jobs.
 Explicit protocol rejection temporarily disables that mode for the session,
@@ -58,8 +60,8 @@ npm run test:codex-composition
 npm run test:codex-packages
 ```
 
-Client/capture/display/background-job regressions are in `tests/`; hosted
-transport integration is in root `tests/codex/`. See the
+Client/capture/display/background-job regressions are in `tests/`; cross-package
+integration is in root `tests/codex/`. See the
 [shared configuration guide](../pi-codex-runtime/reference/configuration.md) and
 [image-generation example](assets/image-generation.gif). The example is a
 repository asset, not part of the runtime tarball.

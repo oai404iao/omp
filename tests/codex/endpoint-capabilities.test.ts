@@ -120,7 +120,7 @@ test("endpoint allowlists block declarations once auth resolves without selectin
 		const model = compositionModel("gpt-5.5");
 		writeCompositionConfig(cwd, { webSocketEnabled: false, endpoint_config: [{
 			provider: model.provider, baseUrl: model.baseUrl,
-			webSearch: ["standalone"], imageGeneration: ["hosted"], compaction: [],
+			webSearch: ["standalone"], imageGeneration: [], compaction: [],
 		}] });
 		const host = createCompositionHost(cwd);
 		host.ctx.model = model;

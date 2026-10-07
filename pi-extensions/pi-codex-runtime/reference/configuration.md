@@ -108,7 +108,6 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
   "imageGeneration": true,
   "imageOutputDir": ".pi/openai-codex-images",
   "imageModel": "gpt-image-2",
-  "directImageApiFallback": false,
   "viewImageWorkspaceOnly": false,
   "deferApplyPatchRendering": false
 }
@@ -121,10 +120,9 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `autoEnable` | Add supported package tools automatically. |
 | `webSocketEnabled` | Global Responses WebSocket master switch. Set `false` to force SSE and disable WebSocket prewarm for every model profile. |
 | `fastMode` | Default for new sessions; `/fast` saves a session-only selection. Subagents follow the main agent on subsequent requests. Only profiles with `fast` are affected. |
-| `imageGeneration` | Global master switch. Set `false` to omit image tools, `/image-gen`, presentation, hosted injection, standalone requests, and direct fallback without changing other model behavior. |
+| `imageGeneration` | Global master switch. Set `false` to omit image tools, `/image-gen`, presentation and standalone requests without changing other model behavior. |
 | `imageOutputDir` | Generated-image output directory. Relative paths resolve from the workspace root. |
-| `imageModel` | Image model used by standalone/hosted image requests and direct fallback. |
-| `directImageApiFallback` | Explicitly permit the direct Images API fallback using the selected provider's Pi-resolved authentication and base URL. |
+| `imageModel` | Image model used by standalone generation and edits. |
 | `viewImageWorkspaceOnly` | Restrict `view_image` to the workspace. |
 | `deferApplyPatchRendering` | Use Pi's fallback renderer instead of the streaming patch preview. |
 
@@ -230,7 +228,7 @@ headers, or model definitions.
 If a profile requests the provider shim but the Pi model uses another API
 type, wire-only features are disabled:
 
-- hosted web/image tools;
+- hosted web tools and standalone image tools;
 - custom/freeform `apply_patch`;
 - native Responses compaction;
 - Fast service tiers.
@@ -250,7 +248,7 @@ the profile enables them.
     "endpoint": "auto",
     "mode": "standard",
     "reasoningSummary": "auto",
-    "systemPromptPlacement": "instructions",
+    "systemPromptPlacement": "developer",
     "transport": "auto",
     "websocketPrewarm": true
   },
@@ -280,8 +278,8 @@ Important constraints:
 - `responses.mode:"lite"` always uses a developer message, namespace tools in
   `additional_tools`, `parallel_tool_calls:false`,
   `reasoning.context:"all_turns"`, and strips input-image `detail`.
-- Lite cannot use hosted `web_search` or hosted `image_generation`; choose
-  `standalone` instead.
+- Lite cannot use hosted `web_search`; choose `standalone` instead.
+  Image generation is standalone only in both modes.
 - `tools.applyPatch:"custom"` uses the Codex freeform grammar and requires the
   provider shim. `"function"` works as a normal Pi tool.
 - `responses.endpoint` is deprecated compatibility for `openai-codex` only:
@@ -289,8 +287,9 @@ Important constraints:
   follows the Pi API. Other providers ignore this override and follow their
   Pi-configured `api` and resolved `baseUrl`. This setting never selects credentials.
 - `compaction:"responses"` uses `compaction_trigger` through the selected
-  SSE/WebSocket transport. `"responses-compact"` uses the legacy unary
-  endpoint. `"pi"` keeps Pi summaries.
+  SSE/WebSocket transport. `"pi"` keeps Pi summaries. The legacy
+  `"responses-compact"` execution mode was removed; old opaque checkpoints
+  are preserved, never silently converted to text.
 
 ## Request enhancements and endpoint capabilities
 
@@ -305,8 +304,8 @@ These are global keys in
       "provider": "openai",
       "baseUrl": "https://api.openai.com/v1",
       "webSearch": ["hosted"],
-      "imageGeneration": ["hosted", "standalone"],
-      "compaction": ["responses-compact"]
+      "imageGeneration": ["standalone"],
+      "compaction": ["responses"]
     }
   ]
 }
@@ -325,7 +324,7 @@ tool parsing/persistence and standalone execution, but stop generating:
 - installation/turn metadata and Codex UUID replacements for the prompt-cache
   key (requests use Pi's session ID instead);
 - Lite headers, namespace envelopes and remote-compaction enhancements;
-- Codex `originator` and experimental SSE beta defaults on the modern
+- Codex `originator` defaults on the modern
   `openai-responses` route. Legacy protocol-required headers and WebSocket
   negotiation headers remain.
 
@@ -358,8 +357,8 @@ Each optional capability list is an allowlist:
 | Key | Allowed values |
 | --- | --- |
 | `webSearch` | `"hosted"`, `"standalone"` |
-| `imageGeneration` | `"hosted"`, `"standalone"` |
-| `compaction` | `"responses"`, `"responses-compact"` |
+| `imageGeneration` | `"standalone"` |
+| `compaction` | `"responses"` |
 
 An omitted list inherits the model profile; `[]` disables that capability.
 Missing endpoint entries preserve existing profiles. Invalid capability lists
@@ -416,7 +415,7 @@ Astra profile updated from `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`.
 | `gpt-5.4-mini`, `codex-auto-review` | Standard, auto WS/SSE | hosted text+image | standalone | custom | responses |
 | `gpt-5.2` | Standard, auto WS/SSE | hosted text | standalone | custom | responses |
 | legacy GPT-5/Codex entries | inherited Standard profile | profile-specific | standalone | custom | responses |
-| `gpt-4.1` | Standard SSE | off | hosted | off | Pi |
+| `gpt-4.1` | Standard SSE | off | standalone | off | Pi |
 | `o4-mini` | Standard SSE | off | off | off | Pi |
 
 `openai/gpt-6.1-sol` explicitly inherits `openai/gpt-5.6-sol`, including prewarm,
@@ -487,9 +486,12 @@ does not establish that a particular account can access these endpoints.
   the provider's `alpha/search` endpoint. It supports search/image queries,
   open/click/find, PDF screenshots, finance, weather, sports, and time.
 
-Standalone search sends a bounded recent visible conversation tail, resolved
-Pi authentication, direct-caller/live-web settings, the active turn metadata,
-and the model's 10,000-token truncation budget. Search rows stay compact by
+Standalone search sends a bounded recent visible conversation tail ending at
+the latest user message, resolved Pi authentication, direct-caller settings,
+and a filtered active-turn metadata projection. Model profiles accept `mode`
+(`cached`, `indexed`, or default `live`), `searchContextSize`, `userLocation`,
+`filters.allowedDomains`, and `maxOutputTokens` (default 10,000). These settings
+also project onto hosted search where supported. Search rows stay compact by
 default and show deduplicated source hosts; expand the tool row to inspect the
 raw result text.
 
@@ -501,15 +503,18 @@ that profile. Neither setting disables image input or historical image replay.
 
 `tools.imageGeneration` supports:
 
-- `hosted`: Responses `image_generation`.
 - `standalone`: `image_gen.imagegen`, backed by the provider's
   `images/generations` and `images/edits` endpoints.
 
 Standalone input follows current Codex:
 
 - required `prompt`;
+- optional `transparent_background` (default false, producing an opaque background);
 - up to five `referenced_image_paths`; or
 - `num_last_images_to_include` from 1 through 5.
+
+Hosted image generation and `directImageApiFallback` were removed. Remove the
+fallback setting and explicitly select `standalone` in old user profiles.
 
 Generated PNGs are saved under `imageOutputDir`, mirrored to `latest.png`, and
 returned to the model before the saved-path text. `/image-gen` selects any

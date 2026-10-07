@@ -45,7 +45,8 @@
     }
   },
   "dependencies": {
-    "@oai404iao/pi-codex-runtime": "0.5.0"
+    "@oai404iao/pi-codex-runtime": "0.5.0",
+    "@silvia-odwyer/photon-node": "0.3.4"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.99.1",

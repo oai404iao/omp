@@ -8,7 +8,3 @@ export function resolveResponsesWebSocketUrl(baseUrl: string | undefined, endpoi
 	if (url.protocol === "http:") url.protocol = "ws:";
 	return url.toString();
 }
-
-export function compactUrl(baseUrl: string | undefined, endpoint: ResponsesProtocol): string {
-	return `${resolveResponsesUrl(baseUrl, endpoint)}/compact`;
-}

@@ -47,11 +47,12 @@ for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 				}, resolveCodexRequestProfile(settings.requestProfile), {
 					...requestBodyToolOptions(settings), reasoning, ownsNativeTool: () => true,
 				});
-				const effort: string | undefined = reasoning === undefined ? off ?? undefined
+				const effort: string | undefined = reasoning === undefined ? settings.modelProfile?.effective.responses.defaultReasoningEffort
 					: model.thinkingLevelMap?.[clampThinkingLevel(model, reasoning)] ?? undefined;
 				assert.equal(body.reasoning?.effort, effort);
 				assert.equal(body.reasoning?.context, undefined);
-				assert.equal(body.instructions, "RULE");
+				assert.equal(body.instructions, undefined);
+				assert.equal((body.input[0] as any).content[0].text, "RULE");
 				assert.equal(body.parallel_tool_calls, true);
 				assert.equal((body.tools?.[0] as { type?: string })?.type, "custom");
 				assert(!body.input.some(item => (item as { type?: string }).type === "additional_tools"));

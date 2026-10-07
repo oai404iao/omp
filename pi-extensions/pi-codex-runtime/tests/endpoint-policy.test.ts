@@ -24,7 +24,7 @@ afterEach(() => {
 test("endpoint declarations are exact allowlists, not implementation selectors", () => {
 	const endpoint_config = [{
 		provider: model.provider, baseUrl: `${model.baseUrl}/`,
-		webSearch: ["standalone" as const], imageGeneration: ["hosted" as const], compaction: ["responses-compact" as const],
+		webSearch: ["standalone" as const], imageGeneration: [], compaction: [],
 	}];
 	const resolved = loadModelSettings(model, undefined, { ...DEFAULT_SETTINGS, endpoint_config });
 	assert.equal(resolved.webSearchImplementation, undefined);
@@ -47,6 +47,16 @@ test("malformed capability lists fail closed locally and invalid URLs are diagno
 	assert.equal(result.diagnostics.length, 3);
 	assert.doesNotMatch(result.diagnostics.join("\n"), /secret/);
 	assert.match(parseEndpointConfig({}).diagnostics[0]!, /array/);
+});
+
+test("removed hosted image and unary compaction declarations fail closed", () => {
+	const parsed = parseEndpointConfig([{ provider: "openai", baseUrl: model.baseUrl,
+		imageGeneration: ["hosted"], compaction: ["responses-compact"],
+	}]);
+	assert.deepEqual(parsed.entries[0], { provider: "openai", baseUrl: model.baseUrl,
+		imageGeneration: [], compaction: [],
+	});
+	assert.equal(parsed.diagnostics.length, 2);
 });
 
 test("wire-off preserves standard hosted tools, blocks Lite and changes the cache discriminator", () => {

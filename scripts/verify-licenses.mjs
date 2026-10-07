@@ -11,6 +11,8 @@ const expectedHashes = new Map([
   ["pi-extensions/pi-subagent/LICENSES/Apache-2.0.txt", "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"],
   ["pi-extensions/pi-subagent/LICENSES/OpenAI-Codex-NOTICE.txt", "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"],
   ["pi-extensions/pi-subagent/provenance/openai-codex-551bd409-multi-agent-v2.json", "cf39a64e9838143c5faa526bfb606b3168bde9207ae8960b64dc2ec4e4638db0"],
+  ["pi-extensions/pi-codex-runtime/provenance/openai-codex-5a314017-image-generation.json", "4185e6e1b4bcd9b70a5020ce78ee10ebcf8aba3b5ffffe8005130d5981cdf89c"],
+  ["pi-extensions/pi-codex-runtime/provenance/openai-codex-5a314017-wire-alignment.json", "a39869f67c80910e34582b3ad76e40de3a2f6d2665ce262ac81f9c2a53391b83"],
   [
     "pi-extensions/pi-codex-core/src/providers/codex-apply-patch.lark",
     "d6367f4826ed608c424b0a308f3d6163527df63c22513d089b91863552f8bfeb",
@@ -253,7 +255,9 @@ check(
 );
 for (const file of ["web-search.ts", "image-generation.ts", "types.ts"]) {
   const source = text(`pi-extensions/pi-codex-runtime/src/reserved-tools/${file}`);
-  check(source.includes("SPDX-License-Identifier: Apache-2.0") && source.includes(codexRevision)
+  const revision = file === "image-generation.ts"
+    ? "5a3140176e668a2f72f3c098490eb7f7052d9d85" : codexRevision;
+  check(source.includes("SPDX-License-Identifier: Apache-2.0") && source.includes(revision)
     && source.includes("Modified TypeScript compatibility serialization"),
   `reserved-tools/${file}: missing Apache/provenance modification notice`);
 }
@@ -293,6 +297,19 @@ for (const [name, expected] of Object.entries(expectedCodexReservedToolFingerpri
     `pi-codex-runtime provenance must retain the ${name} compatibility fingerprint`,
   );
 }
+
+const imageRevision = "5a3140176e668a2f72f3c098490eb7f7052d9d85";
+const imageProvenance = JSON.parse(text(
+  `${codexDirectory}/provenance/openai-codex-5a314017-image-generation.json`,
+));
+check(imageProvenance.upstream?.revision === imageRevision
+  && imageProvenance.upstream?.license === "Apache-2.0"
+  && codexNotice.includes(imageRevision), "image namespace must identify its current Apache source");
+const imageFingerprint = imageProvenance.localCompatibilitySerialization?.namespaces?.image_generation;
+check(imageFingerprint?.canonicalJsonSha256 === "d9a89f293ef83431230fb34e047a24c63329be0b5150d59c5d7b3047aeec3a7f"
+  && imageFingerprint?.parameters?.canonicalJsonSha256 === "8fb5fafe0933c00b7c0e3c1ab0b39fbecec0c71260eff733d438169344f7d23b"
+  && imageFingerprint?.description?.sha256 === "ee89dd3b9df94cc8b42b14e48714c68d11d4cd66113853b42ccf9cbd7858af61",
+  "image namespace must retain its current compatibility fingerprint");
 
 const subagentNotice = text("pi-extensions/pi-subagent/THIRD_PARTY_NOTICES.md");
 const subagentProvenance = JSON.parse(

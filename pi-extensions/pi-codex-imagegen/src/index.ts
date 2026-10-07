@@ -27,7 +27,6 @@ export default function codexImagegen(pi: ExtensionAPI): void {
 	const definition = createImageGenerationToolDefinition({
 		loadSettings: (cwd, model) => loadModelSettings(model, cwd),
 		getCurrentTurnId: sessionId => currentCodexTurn(sessionId)?.turnId,
-		hasProviderRuntime: () => broker.coreEnabled,
 	});
 	const parameters = { ...definition.parameters };
 	broker.ownedTools.set("image_generation", { parameters, description: definition.description });

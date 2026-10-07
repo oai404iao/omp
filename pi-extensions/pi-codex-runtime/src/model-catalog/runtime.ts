@@ -2,6 +2,7 @@ import type { CodexRequestProfileOverride } from "../codex-request-profile.js";
 import { responsesProtocol, type ResponsesProtocol } from "../codex-http.js";
 import {
 	loadSettings,
+	getSettingsSource,
 	type CodexMinimalToolsSettings,
 } from "../settings.js";
 import { resolveModelProfile } from "./catalog.js";
@@ -23,7 +24,7 @@ export interface ResolvedCodexModelSettings extends CodexMinimalToolsSettings {
 	modelProfileHash?: string;
 	providerShimActive?: boolean;
 	webSearchImplementation?: "hosted" | "standalone";
-	imageGenerationImplementation?: "hosted" | "standalone";
+	imageGenerationImplementation?: "standalone";
 	fastServiceTier?: string;
 	fastCostMultiplier?: number;
 }
@@ -51,7 +52,7 @@ function resolveModelSettings(
 			requestProfile: {
 				responsesMode: "standard",
 				reasoningSummary: "auto",
-				systemPromptPlacement: "instructions",
+			systemPromptPlacement: "developer",
 				patchTransport: "function",
 				supportsHostedTools: false,
 				supportsParallelTools: true,
@@ -80,12 +81,8 @@ function resolveModelSettings(
 		|| (configuredWebSearchImplementation === "hosted" && !providerShimActive)
 		? undefined
 		: configuredWebSearchImplementation;
-	const imageGenerationImplementation = !packageEnabled
-		|| (configuredImageGenerationImplementation === "hosted" && !providerShimActive)
-		? undefined
-		: configuredImageGenerationImplementation;
-	const supportsHostedTools = webSearchImplementation === "hosted"
-		|| imageGenerationImplementation === "hosted";
+	const imageGenerationImplementation = packageEnabled ? configuredImageGenerationImplementation : undefined;
+	const supportsHostedTools = webSearchImplementation === "hosted";
 	const usesProviderToolRewrite = Boolean(webSearchImplementation || imageGenerationImplementation);
 	const requestProfile: CodexRequestProfileOverride = {
 		responsesMode: effective.responses.mode,
@@ -128,7 +125,14 @@ export function loadModelSettings(
 	baseSettings = loadSettings(cwd),
 	sessionId?: string,
 ): ResolvedCodexModelSettings {
-	return applyEndpointPolicy(resolveModelSettings(model, cwd, baseSettings), model, sessionId);
+	const resolved = resolveModelSettings(model, cwd, baseSettings);
+	if (getSettingsSource(baseSettings)?.compactionMode === "responses-compact") {
+		resolved.compactionMode = "pi";
+		resolved.openaiWebSocketPrewarm = false;
+		resolved.requestBlockedReason = "compactionMode responses-compact was removed. Select responses or pi explicitly; historical checkpoint protection remains active.";
+		resolved.requestDiagnostics.push(resolved.requestBlockedReason);
+	}
+	return applyEndpointPolicy(resolved, model, sessionId);
 }
 
 export function applyEndpointPolicy(
@@ -167,6 +171,6 @@ export function applyEndpointPolicy(
 		}
 	}
 	settings.requestProfile = { ...settings.requestProfile,
-		supportsHostedTools: settings.webSearchImplementation === "hosted" || settings.imageGenerationImplementation === "hosted" };
+		supportsHostedTools: settings.webSearchImplementation === "hosted" };
 	return settings;
 }

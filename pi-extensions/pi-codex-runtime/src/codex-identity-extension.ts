@@ -1,5 +1,7 @@
 import { claimSessionFeature } from "./session-claims.js";
 import { installFastModeLifecycle } from "./fast-mode-state.js";
+import { readSubagentLineage, type SubagentLineage } from "./codex-session-lineage.js";
+import { installCodexTurnLifecycle } from "./codex-turn-lifecycle.js";
 import {
 	SessionManager,
 	type ExtensionAPI,
@@ -8,22 +10,19 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
 	advanceCodexWindow,
-	beginCodexTurn,
 	codexThreadIdentityFor,
 	createCodexChildIdentity,
 	createCodexRootIdentity,
-	endCodexTurn,
 	parseCodexThreadIdentity,
 	registerCodexThreadIdentity,
 	type CodexThreadIdentity,
 } from "./codex-wire-identity.js";
 
 export const CODEX_IDENTITY_CUSTOM_TYPE = "pi-codex/thread-identity";
-const SUBAGENT_DESCRIPTOR_CUSTOM_TYPE = "pi-subagent/descriptor";
-const SUBAGENT_LINEAGE_CUSTOM_TYPE = "pi-subagent/lineage";
 const IDENTITY_LIFECYCLE_SYMBOL = Symbol.for(
 	"@oai404iao/pi-codex/identity-lifecycle/v1",
 );
+const resolvingParents = new Set<string>();
 
 export interface CodexIdentitySessionView {
 	getSessionId(): string;
@@ -33,15 +32,6 @@ export interface CodexIdentitySessionView {
 	getEntries(): SessionEntry[];
 	getBranch?(): SessionEntry[];
 	appendCustomEntry?(customType: string, data?: unknown): string;
-}
-
-interface SubagentLineage {
-	agentId: string;
-	parentAgentId: string;
-	parentPiSessionId: string;
-	parentSessionFile?: string;
-	relation: "spawn" | "fork";
-	agentName?: string;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -70,72 +60,6 @@ function readIdentity(
 		} catch {
 			// A newer valid entry can repair a corrupt historical checkpoint.
 		}
-	}
-	return undefined;
-}
-
-function readSubagentLineage(
-	entries: readonly SessionEntry[],
-): SubagentLineage | undefined {
-	for (let index = entries.length - 1; index >= 0; index--) {
-		const entry = entries[index];
-		if (
-			entry?.type === "custom"
-			&& entry.customType === SUBAGENT_LINEAGE_CUSTOM_TYPE
-		) {
-			const lineage = record(entry.data);
-			if (
-				lineage?.version !== 1
-				|| lineage.openAIIdentity !== true
-				|| (lineage.relation !== "spawn" && lineage.relation !== "fork")
-				|| typeof lineage.agentId !== "string"
-				|| typeof lineage.parentAgentId !== "string"
-				|| typeof lineage.parentPiSessionId !== "string"
-			) {
-				return undefined;
-			}
-			return {
-				agentId: lineage.agentId,
-				parentAgentId: lineage.parentAgentId,
-				parentPiSessionId: lineage.parentPiSessionId,
-				relation: lineage.relation,
-				...(typeof lineage.parentSessionFile === "string"
-					? { parentSessionFile: lineage.parentSessionFile }
-					: {}),
-				...(typeof lineage.agentName === "string"
-					? { agentName: lineage.agentName }
-					: {}),
-			};
-		}
-		if (
-			entry?.type !== "custom"
-			|| entry.customType !== SUBAGENT_DESCRIPTOR_CUSTOM_TYPE
-		) {
-			continue;
-		}
-		const descriptor = record(entry.data);
-		const runtime = record(descriptor?.runtime);
-		if (
-			descriptor?.version !== 2
-			|| runtime?.openAIIdentity !== true
-			|| (descriptor.provider !== "spawn" && descriptor.provider !== "fork")
-			|| typeof descriptor.agentId !== "string"
-			|| typeof descriptor.parentAgentId !== "string"
-			|| typeof descriptor.parentPiSessionId !== "string"
-		) {
-			return undefined;
-		}
-		const agent = record(descriptor.agent);
-		return {
-			agentId: descriptor.agentId,
-			parentAgentId: descriptor.parentAgentId,
-			parentPiSessionId: descriptor.parentPiSessionId,
-			relation: descriptor.provider,
-			...(typeof descriptor.parentSessionFile === "string"
-				? { parentSessionFile: descriptor.parentSessionFile }
-				: {}),
-			...(typeof agent?.name === "string" ? { agentName: agent.name } : {}),
-		};
 	}
 	return undefined;
 }
@@ -179,18 +103,11 @@ function resolveParentIdentity(
 	if (active) return active;
 
 	const parent = openParentSession(session, lineage);
-	if (parent) {
-		const persisted = readIdentity(
-			parent.getEntries(),
-			lineage.parentPiSessionId,
-		);
-		if (persisted) return registerCodexThreadIdentity(persisted);
-
-		// pi-codex-minimal-tools owns the Codex identity even when the parent
-		// happened to use a non-Codex model before creating this OpenAI child.
-		const root = createCodexRootIdentity(lineage.parentPiSessionId);
-		appendIdentity(parent, root);
-		return registerCodexThreadIdentity(root);
+	if (parent && parent.getSessionId() === lineage.parentPiSessionId) {
+		if (resolvingParents.has(lineage.parentPiSessionId)) throw new Error("Cyclic Codex subagent lineage");
+		resolvingParents.add(lineage.parentPiSessionId);
+		try { return ensureCodexSessionIdentity(parent); }
+		finally { resolvingParents.delete(lineage.parentPiSessionId); }
 	}
 
 	// Ephemeral parents have no file to reopen. They are still represented by a
@@ -207,10 +124,30 @@ export function ensureCodexSessionIdentity(
 	} = {},
 ): CodexThreadIdentity {
 	const piSessionId = session.getSessionId();
-	const persisted = readIdentity(session.getEntries(), piSessionId);
-	if (persisted) return registerCodexThreadIdentity(persisted);
-
+	const branch = session.getBranch?.() ?? session.getEntries();
+	const persisted = readIdentity(branch, piSessionId);
 	const lineage = readSubagentLineage(session.getEntries());
+	if (persisted) {
+		if (lineage && (!persisted.parentThreadId || codexThreadIdentityFor(lineage.parentPiSessionId))) {
+			const parent = resolveParentIdentity(session, lineage);
+			persisted.sessionId = parent.sessionId;
+			persisted.parentThreadId = parent.threadId;
+			if (lineage.relation === "fork") persisted.forkedFromThreadId = parent.threadId;
+			persisted.subagentKind = "thread_spawn";
+			persisted.subagentHeader = "collab_spawn";
+		}
+		if (lineage?.agentName) persisted.agentName = lineage.agentName;
+		const stored = [...branch].reverse().find(entry =>
+			entry.type === "custom" && entry.customType === CODEX_IDENTITY_CUSTOM_TYPE
+			&& record(entry.data)?.piSessionId === piSessionId);
+		const raw = stored?.type === "custom" ? record(stored.data) : undefined;
+		if (raw?.windowId !== persisted.windowId || raw?.contextWindowId !== persisted.contextWindowId
+			|| raw?.agentName !== persisted.agentName || raw?.subagentKind !== persisted.subagentKind
+			|| raw?.sessionId !== persisted.sessionId || raw?.parentThreadId !== persisted.parentThreadId) {
+			appendIdentity(session, persisted, options.appendCurrent);
+		}
+		return registerCodexThreadIdentity(persisted);
+	}
 	let identity: CodexThreadIdentity;
 	if (lineage) {
 		identity = createCodexChildIdentity(
@@ -222,7 +159,7 @@ export function ensureCodexSessionIdentity(
 			},
 		);
 	} else {
-		const copied = readIdentity(session.getEntries());
+		const copied = readIdentity(branch);
 		identity = createCodexRootIdentity(piSessionId, {
 			...(options.sessionStartReason === "fork" && copied
 				? { forkedFromThreadId: copied.threadId }
@@ -279,22 +216,7 @@ export function installCodexIdentityLifecycle(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", async (_event, ctx) => {
 		const typed = ctx as unknown as { sessionManager: CodexIdentitySessionView };
-		const identity = ensure(typed);
-		if (!identity) return;
-		const lineage =
-			typeof typed.sessionManager.getEntries === "function"
-				? readSubagentLineage(typed.sessionManager.getEntries())
-				: undefined;
-		beginCodexTurn(identity.piSessionId, {
-			...(lineage?.parentPiSessionId
-				? { parentPiSessionId: lineage.parentPiSessionId }
-				: {}),
-		});
-	});
-
-	pi.on("agent_settled", async (_event, ctx) => {
-		const piSessionId = ctx.sessionManager?.getSessionId?.();
-		if (piSessionId) endCodexTurn(piSessionId);
+		ensure(typed);
 	});
 
 	pi.on("session_compact", async (event, ctx) => {
@@ -312,18 +234,10 @@ export function installCodexIdentityLifecycle(pi: ExtensionAPI): void {
 
 	pi.on("session_tree", async (_event, ctx) => {
 		const typed = ctx as unknown as { sessionManager: CodexIdentitySessionView };
-		const piSessionId = typed.sessionManager.getSessionId();
-		const branch = typed.sessionManager.getBranch?.()
-			?? typed.sessionManager.getEntries();
-		const identity = readIdentity(branch, piSessionId)
-			?? readIdentity(typed.sessionManager.getEntries(), piSessionId);
-		if (identity) registerCodexThreadIdentity(identity);
+		ensure(typed);
 	});
 
-	pi.on("session_shutdown", async (_event, ctx) => {
-		const piSessionId = ctx.sessionManager?.getSessionId?.();
-		if (piSessionId) endCodexTurn(piSessionId);
-	});
+	installCodexTurnLifecycle(pi);
 }
 
 /** Session identity and Fast inheritance, including when normal extension inheritance is off. */
@@ -338,6 +252,7 @@ export function createCodexSubagentInlineExtension(
 		factory: (pi) => {
 			installFastModeLifecycle(pi, options.parentSessionManager);
 			if (options.openAIIdentity !== false) installCodexIdentityLifecycle(pi);
+			else installCodexTurnLifecycle(pi);
 		},
 	};
 }

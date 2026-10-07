@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/openai/codex",
+    "revision": "5a3140176e668a2f72f3c098490eb7f7052d9d85",
+    "commitUrl": "https://github.com/openai/codex/commit/5a3140176e668a2f72f3c098490eb7f7052d9d85",
+    "license": "Apache-2.0"
+  },
+  "files": {
+    "LICENSE": {
+      "gitBlobSha": "4606e72e042564097e8780d66c1d4dcb611869bd",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/LICENSE"
+    },
+    "NOTICE": {
+      "gitBlobSha": "2805899d56d0332d175cfc613c67d45d6f006db7",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/NOTICE"
+    },
+    "codex-rs/ext/image-generation/imagegen_description.md": {
+      "gitBlobSha": "0e793f2a8d4950929e3f6dd8f7a5c5c766cb12f1",
+      "sha256": "ee89dd3b9df94cc8b42b14e48714c68d11d4cd66113853b42ccf9cbd7858af61",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/ext/image-generation/imagegen_description.md"
+    },
+    "codex-rs/ext/image-generation/src/tool.rs": {
+      "gitBlobSha": "d2777fb2023782ad7508fc4bddc097d33fb96359",
+      "sha256": "ae9ef06cadc8b548b30f24e8b42e6f4afb37c4f080e996eb9019167c57e309a1",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/ext/image-generation/src/tool.rs"
+    },
+    "codex-rs/ext/image-generation/src/backend.rs": {
+      "gitBlobSha": "105667dbe4a9a90f9daa2d44cf4dd2dc21d93a08",
+      "sha256": "a46c6c4efd9cecb1a46d384adc8c5d3c71fc73fbd4d6e75641a85bcea92fa69c",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/ext/image-generation/src/backend.rs"
+    },
+    "codex-rs/tools/src/json_schema/types.rs": {
+      "gitBlobSha": "0792816fd31c242d3000adcea6cbe8a3ed8f7874",
+      "sha256": "17b11a7cf8530b9df722d382cad8066aca6c2a5d27d593e937ffdd3304f64d4a",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/tools/src/json_schema/types.rs"
+    },
+    "codex-rs/codex-api/src/images.rs": {
+      "gitBlobSha": "3f14d17334213b8a2cc3848c29a7ad8547e8b537",
+      "sha256": "b8cf89eb7832ea32ef4729ed6b50bbc71b507b85e9909a313bf8a7f6ecf060e8",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/codex-api/src/images.rs"
+    }
+  },
+  "localCompatibilitySerialization": {
+    "path": "src/reserved-tools/image-generation.ts",
+    "classification": "modified TypeScript compatibility serialization",
+    "boundary": "Internal Codex namespace compatibility; not a stable public OpenAI API contract.",
+    "canonicalization": "SHA-256 of recursively lexicographically sorted JSON object keys; arrays retain their order and no whitespace is emitted.",
+    "namespaces": {
+      "image_generation": {
+        "namespace": "image_gen",
+        "function": "imagegen",
+        "description": {
+          "sourcePath": "codex-rs/ext/image-generation/imagegen_description.md",
+          "relationship": "byte-for-byte",
+          "sha256": "ee89dd3b9df94cc8b42b14e48714c68d11d4cd66113853b42ccf9cbd7858af61"
+        },
+        "parameters": {
+          "sourcePaths": ["codex-rs/ext/image-generation/src/tool.rs", "codex-rs/tools/src/json_schema/types.rs"],
+          "relationship": "compatibility serialization",
+          "canonicalJsonSha256": "8fb5fafe0933c00b7c0e3c1ab0b39fbecec0c71260eff733d438169344f7d23b"
+        },
+        "canonicalJsonSha256": "d9a89f293ef83431230fb34e047a24c63329be0b5150d59c5d7b3047aeec3a7f"
+      }
+    }
+  }
+}

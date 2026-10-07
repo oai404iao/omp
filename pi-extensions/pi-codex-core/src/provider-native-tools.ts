@@ -1,5 +1,6 @@
 import { createCodexReservedNamespaceTool } from "@oai404iao/pi-codex-runtime/internal/codex-reserved-tools";
 import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
+import type { WebSearchProfile } from "@oai404iao/pi-codex-runtime/internal/model-catalog/types";
 
 export interface NativeToolRewriteResult<T = unknown> {
 	payload: T;
@@ -11,12 +12,8 @@ export interface NativeToolRewriteOptions {
 	codexRequestExtensions?: boolean;
 	removeWebSearch?: boolean;
 	ownsNativeTool?: NativeToolOwnership;
-	imageModel?: string;
-	imageGeneration?: boolean | "hosted" | "standalone";
-	webSearch?: boolean | {
-		implementation?: "hosted" | "standalone";
-		contentTypes?: readonly ("text" | "image")[];
-	};
+	imageGeneration?: false | "standalone";
+	webSearch?: boolean | Partial<WebSearchProfile>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -27,19 +24,6 @@ function toolName(tool: Record<string, unknown>): string | undefined {
 	if (typeof tool.name === "string") return tool.name;
 	const nested = isRecord(tool.function) ? tool.function : undefined;
 	return typeof nested?.name === "string" ? nested.name : undefined;
-}
-
-function imageToolConfig(tool: Record<string, unknown>, options: NativeToolRewriteOptions): Record<string, unknown> {
-	const parameters = isRecord(tool.parameters) ? tool.parameters : isRecord(isRecord(tool.function) ? tool.function.parameters : undefined) ? (tool.function as Record<string, unknown>).parameters as Record<string, unknown> : {};
-	const config: Record<string, unknown> = { type: "image_generation" };
-	if (typeof options.imageModel === "string" && options.imageModel.trim()) config.model = options.imageModel.trim();
-	for (const key of ["size", "quality", "background", "output_format"]) {
-		const value = parameters[key];
-		if (typeof value === "string") config[key] = value;
-	}
-	if (!config.output_format) config.output_format = "png";
-	if (!config.action) config.action = "auto";
-	return config;
 }
 
 export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewriteOptions = {}): NativeToolRewriteResult<T> {
@@ -63,11 +47,8 @@ export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewri
 		}
 		if (name === "image_generation" && options.imageGeneration !== false) {
 			rewritten.push(name);
-			if (options.imageGeneration === "standalone") {
-				if (options.codexRequestExtensions === false) return [candidate];
-				return [createCodexReservedNamespaceTool("image_generation")];
-			}
-			return [imageToolConfig(candidate, options)];
+			if (options.codexRequestExtensions === false) return [candidate];
+			return [createCodexReservedNamespaceTool("image_generation")];
 		}
 		if (name === "web_search" && options.webSearch) {
 			rewritten.push(name);
@@ -78,8 +59,16 @@ export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewri
 			const contentTypes = typeof options.webSearch === "object"
 				? options.webSearch.contentTypes
 				: undefined;
+			const config = typeof options.webSearch === "object" ? options.webSearch : {};
 			return [{
 				type: "web_search",
+				external_web_access: config.mode !== "cached",
+				...(config.mode === "indexed" ? { indexed_web_access: true } : {}),
+				...(config.searchContextSize ? { search_context_size: config.searchContextSize } : {}),
+				...(config.userLocation ? { user_location: config.userLocation } : {}),
+				...(config.filters ? { filters: {
+					...(config.filters.allowedDomains ? { allowed_domains: config.filters.allowedDomains } : {}),
+				} } : {}),
 				...(contentTypes && contentTypes.length > 0
 					? { search_content_types: [...contentTypes] }
 					: {}),

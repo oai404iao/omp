@@ -17,7 +17,6 @@ export function reportHostedFailure(
 	for (const tool of body?.tools ?? []) {
 		const type = (tool as { type?: string })?.type;
 		if (type === "web_search" && owns?.("web_search") !== false) candidates.push("webSearch.hosted");
-		if (type === "image_generation" && owns?.("image_generation") !== false) candidates.push("imageGeneration.hosted");
 	}
 	return reportEndpointFailure(model, sessionId, candidates, error);
 }

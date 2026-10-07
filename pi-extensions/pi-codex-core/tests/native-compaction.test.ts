@@ -157,10 +157,10 @@ test("native compaction requests replay persisted sections and scope forced prom
 			await handlers.session_before_compact(event, ctx);
 			handlers.agent_settled();
 			await handlers.session_before_compact(event, ctx);
-			assert.deepEqual(bodies.map((body) => body.instructions), [
+			assert.deepEqual(bodies.map((body) => body.input.find((item: any) => item.role === "developer")?.content[0]?.text), [
 				getCurrentSystemPrompt([system]), "FORCED_BY_LATER_HANDLER", getCurrentSystemPrompt([system]),
 			]);
-			assert(bodies.every((body) => !JSON.stringify(body.input).includes("PERSISTED_CONTENT")));
+			assert(bodies.every((body) => !JSON.stringify(body.input.filter((item: any) => item.role !== "developer")).includes("PERSISTED_CONTENT")));
 		} finally {
 			globalThis.fetch = previousFetch;
 		}
@@ -435,10 +435,7 @@ test("responses compaction is requested through Pi's session compaction hook", a
 		);
 		assert.equal(requestHeaders?.get("session-id"), requestBody.prompt_cache_key);
 		assert.equal(requestHeaders?.get("session_id"), null);
-		assert.ok(
-			requestHeaders?.get("x-codex-window-id")
-			&& /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestHeaders.get("x-codex-window-id")!),
-		);
+		assert.equal(requestHeaders?.get("x-codex-window-id"), `${requestHeaders?.get("thread-id")}:0`);
 		assert.equal(requestHeaders?.get("x-codex-beta-features"), "remote_compaction_v2");
 	} finally {
 		globalThis.fetch = previousFetch;

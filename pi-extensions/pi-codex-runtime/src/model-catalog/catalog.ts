@@ -9,6 +9,7 @@ import {
 	type CodexMinimalToolsSettings,
 } from "../settings.js";
 import { resolveCodexRequestProfile } from "../codex-request-profile.js";
+import { sanitizeWebSearch } from "./profile-options.js";
 import type {
 	EffectiveModelProfile,
 	FastModeProfile,
@@ -25,21 +26,23 @@ import type {
 	ResponsesTransport,
 	SystemPromptPlacement,
 	WebSearchContentType,
-	WebSearchProfile,
 } from "./types.js";
 
 export const MODELS_FILE_NAME = "models.json";
 
 type JsonRecord = Record<string, unknown>;
+const removedHostedImagePatches = new WeakSet<ModelProfilePatch>();
 
 interface CatalogEntry {
 	patch: ModelProfilePatch;
 	sources: ModelProfileSource[];
+	removedHostedImageGeneration?: boolean;
 }
 
 interface LoadedCatalog {
 	entries: Map<string, CatalogEntry>;
 	resolved: Map<string, ModelProfilePatch>;
+	removedHostedImageGeneration: Set<string>;
 	diagnostics: string[];
 }
 
@@ -50,9 +53,11 @@ const SAFE_PROFILE: EffectiveModelProfile = {
 		endpoint: "auto",
 		mode: "standard",
 		reasoningSummary: "auto",
-		systemPromptPlacement: "instructions",
+	systemPromptPlacement: "developer",
 		transport: "sse",
 		websocketPrewarm: false,
+		supportsVerbosity: false,
+		supportsReasoningSummary: false,
 	},
 	tools: {
 		parallelCalls: true,
@@ -95,55 +100,6 @@ function stringEnum<T extends string>(value: unknown, values: readonly T[]): T |
 	return typeof value === "string" && values.includes(value as T) ? value as T : undefined;
 }
 
-function sanitizeContentTypes(
-	value: unknown,
-	path: string,
-	diagnostics: string[],
-): WebSearchContentType[] | undefined {
-	if (value === undefined) return undefined;
-	if (!Array.isArray(value)) {
-		diagnostics.push(`${path}: contentTypes must be an array`);
-		return undefined;
-	}
-	const result: WebSearchContentType[] = [];
-	for (const item of value) {
-		if (item !== "text" && item !== "image") {
-			diagnostics.push(`${path}: unsupported content type ${JSON.stringify(item)}`);
-			continue;
-		}
-		if (!result.includes(item)) result.push(item);
-	}
-	if (result.length === 0) {
-		diagnostics.push(`${path}: contentTypes must contain text and/or image`);
-		return undefined;
-	}
-	return result;
-}
-
-function sanitizeWebSearch(
-	value: unknown,
-	path: string,
-	diagnostics: string[],
-): false | WebSearchProfile | undefined {
-	if (value === undefined || value === false) return value;
-	if (!isRecord(value)) {
-		diagnostics.push(`${path}: webSearch must be false or an object`);
-		return undefined;
-	}
-	diagnoseUnknownKeys(value, ["implementation", "contentTypes"], `${path}.tools.webSearch`, diagnostics);
-	const implementation = stringEnum(value.implementation, ["hosted", "standalone"] as const);
-	if (!implementation) {
-		diagnostics.push(`${path}: webSearch.implementation must be hosted or standalone`);
-		return undefined;
-	}
-	const contentTypes = sanitizeContentTypes(value.contentTypes, path, diagnostics);
-	if (value.contentTypes !== undefined && !contentTypes) return false;
-	return {
-		implementation,
-		...(contentTypes ? { contentTypes } : {}),
-	};
-}
-
 function sanitizeResponses(
 	value: unknown,
 	path: string,
@@ -156,7 +112,8 @@ function sanitizeResponses(
 	}
 	diagnoseUnknownKeys(
 		value,
-		["providerShim", "endpoint", "mode", "reasoningSummary", "systemPromptPlacement", "transport", "websocketPrewarm"],
+		["providerShim", "endpoint", "mode", "reasoningSummary", "systemPromptPlacement", "transport", "websocketPrewarm",
+			"supportsVerbosity", "defaultVerbosity", "defaultReasoningEffort", "supportsReasoningSummary"],
 		`${path}.responses`,
 		diagnostics,
 	);
@@ -183,6 +140,16 @@ function sanitizeResponses(
 	else if (value.transport !== undefined) diagnostics.push(`${path}: invalid responses.transport`);
 	if (typeof value.websocketPrewarm === "boolean") result.websocketPrewarm = value.websocketPrewarm;
 	else if (value.websocketPrewarm !== undefined) diagnostics.push(`${path}: responses.websocketPrewarm must be boolean`);
+	for (const key of ["supportsVerbosity", "supportsReasoningSummary"] as const) {
+		if (typeof value[key] === "boolean") result[key] = value[key];
+		else if (value[key] !== undefined) diagnostics.push(`${path}: responses.${key} must be boolean`);
+	}
+	const verbosity = stringEnum(value.defaultVerbosity, ["low", "medium", "high"] as const);
+	if (verbosity) result.defaultVerbosity = verbosity;
+	else if (value.defaultVerbosity !== undefined) diagnostics.push(`${path}: invalid defaultVerbosity`);
+	const effort = stringEnum(value.defaultReasoningEffort, ["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+	if (effort) result.defaultReasoningEffort = effort;
+	else if (value.defaultReasoningEffort !== undefined) diagnostics.push(`${path}: invalid defaultReasoningEffort`);
 	return result;
 }
 
@@ -259,21 +226,25 @@ function sanitizeProfile(
 			if (webSearch !== undefined) tools.webSearch = webSearch;
 			if (
 				value.tools.imageGeneration === false
-				|| value.tools.imageGeneration === "hosted"
 				|| value.tools.imageGeneration === "standalone"
 			) {
 				tools.imageGeneration = value.tools.imageGeneration;
 			} else if (value.tools.imageGeneration !== undefined) {
-				diagnostics.push(`${path}: tools.imageGeneration must be false, hosted, or standalone`);
+				diagnostics.push(`${path}: ${value.id}: tools.imageGeneration must be false or standalone; hosted image generation was removed`);
+				tools.imageGeneration = false;
+				removedHostedImagePatches.add(result);
 			}
 			if (typeof value.tools.viewImage === "boolean") tools.viewImage = value.tools.viewImage;
 			else if (value.tools.viewImage !== undefined) diagnostics.push(`${path}: tools.viewImage must be boolean`);
 			result.tools = tools;
 		}
 	}
-	const compaction = stringEnum<NativeCompactionMode>(value.compaction, ["pi", "responses", "responses-compact"]);
+	const compaction = stringEnum<NativeCompactionMode>(value.compaction, ["pi", "responses"]);
 	if (compaction) result.compaction = compaction;
-	else if (value.compaction !== undefined) diagnostics.push(`${path}: invalid compaction mode`);
+	else if (value.compaction !== undefined) {
+		diagnostics.push(`${path}: invalid compaction mode; responses-compact was removed`);
+		result.compaction = "pi";
+	}
 	const fast = sanitizeFast(value.fast, path, diagnostics);
 	if (fast !== undefined) result.fast = fast;
 	return result;
@@ -353,11 +324,13 @@ function buildCatalog(): LoadedCatalog {
 		entries.set(key, {
 			patch: existing ? deepMerge(existing.patch, patch) : patch,
 			sources: existing ? ["bundled", "user"] : ["user"],
+			removedHostedImageGeneration: removedHostedImagePatches.has(patch),
 		});
 	}
 
 	const diagnostics = [...user.diagnostics];
 	const resolved = new Map<string, ModelProfilePatch>();
+	const removedHostedImageGeneration = new Set<string>();
 	const resolving: string[] = [];
 	const invalid = new Set<string>();
 	const resolveEntry = (key: string): ModelProfilePatch | undefined => {
@@ -376,6 +349,7 @@ function buildCatalog(): LoadedCatalog {
 		}
 		resolving.push(key);
 		let patch = entry.patch;
+		let removedImageSetting = entry.removedHostedImageGeneration === true;
 		if (patch.extends) {
 			const parentKey = normalizeId(patch.extends);
 			const parent = resolveEntry(parentKey);
@@ -385,6 +359,9 @@ function buildCatalog(): LoadedCatalog {
 				resolving.pop();
 				return undefined;
 			}
+			if (patch.tools?.imageGeneration === undefined) {
+				removedImageSetting = removedHostedImageGeneration.has(parentKey);
+			}
 			patch = {
 				...deepMerge(parent, patch),
 				id: entry.patch.id,
@@ -392,11 +369,14 @@ function buildCatalog(): LoadedCatalog {
 			};
 		}
 		resolving.pop();
-		if (!invalid.has(key)) resolved.set(key, patch);
+		if (!invalid.has(key)) {
+			resolved.set(key, patch);
+			if (removedImageSetting) removedHostedImageGeneration.add(key);
+		}
 		return invalid.has(key) ? undefined : patch;
 	};
 	for (const key of entries.keys()) resolveEntry(key);
-	return { entries, resolved, diagnostics };
+	return { entries, resolved, removedHostedImageGeneration, diagnostics };
 }
 
 function stableValue(value: unknown): unknown {
@@ -431,6 +411,10 @@ function normalizeProfile(
 		responsesMode: effective.responses.mode,
 		reasoningSummary: patch.responses?.reasoningSummary,
 	}).reasoningSummary;
+	if (effective.responses.systemPromptPlacement !== "developer") {
+		diagnostics.push(`${patch.id}: Responses instructions now use developer input; systemPromptPlacement is normalized to developer`);
+		effective.responses.systemPromptPlacement = "developer";
+	}
 
 	if (effective.responses.mode === "lite") {
 		effective.responses.systemPromptPlacement = "developer";
@@ -438,10 +422,6 @@ function normalizeProfile(
 		if (effective.tools.webSearch && effective.tools.webSearch.implementation === "hosted") {
 			diagnostics.push(`${patch.id}: Responses Lite cannot use hosted web search; webSearch was disabled`);
 			effective.tools.webSearch = false;
-		}
-		if (effective.tools.imageGeneration === "hosted") {
-			diagnostics.push(`${patch.id}: Responses Lite cannot use hosted image generation; imageGeneration was disabled`);
-			effective.tools.imageGeneration = false;
 		}
 	}
 	if (!effective.responses.providerShim) {
@@ -452,10 +432,6 @@ function normalizeProfile(
 		if (effective.tools.webSearch && effective.tools.webSearch.implementation === "hosted") {
 			diagnostics.push(`${patch.id}: hosted web search requires responses.providerShim; webSearch was disabled`);
 			effective.tools.webSearch = false;
-		}
-		if (effective.tools.imageGeneration === "hosted") {
-			diagnostics.push(`${patch.id}: hosted image generation requires responses.providerShim; imageGeneration was disabled`);
-			effective.tools.imageGeneration = false;
 		}
 		if (effective.compaction !== "pi") {
 			diagnostics.push(`${patch.id}: native compaction requires responses.providerShim; compaction was reset to pi`);
@@ -566,7 +542,7 @@ function legacyProfilePatch(
 				? requestProfile.patchTransport
 				: false,
 			webSearch: settings.webSearchEnabled && hostedTools && oldExtendedToolModel
-				? { implementation: "hosted", contentTypes: [...contentTypes] }
+				? { ...(existingWebSearch || {}), implementation: "hosted", contentTypes: [...contentTypes] }
 				: false,
 			viewImage: settings.viewImage,
 		},
@@ -599,6 +575,7 @@ export function resolveModelProfile(
 		profileHash: profileHash(effective),
 		effective,
 		diagnostics,
+		...(catalog.removedHostedImageGeneration.has(key) ? { removedHostedImageGeneration: true } : {}),
 	};
 }
 

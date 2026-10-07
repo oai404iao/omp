@@ -11,7 +11,11 @@
       "responses": {
         "providerShim": true,
         "mode": "standard",
-        "systemPromptPlacement": "instructions",
+        "systemPromptPlacement": "developer",
+        "supportsVerbosity": true,
+        "defaultVerbosity": "low",
+        "defaultReasoningEffort": "low",
+        "supportsReasoningSummary": true,
         "transport": "sse",
         "websocketPrewarm": false
       },
@@ -27,11 +31,13 @@
     },
     {
       "id": "openai/gpt-6-sol",
-      "extends": "openai/gpt-6-astra"
+      "extends": "openai/gpt-6-astra",
+      "responses": { "defaultReasoningEffort": "medium" }
     },
     {
       "id": "openai/gpt-6-luna",
-      "extends": "openai/gpt-6-astra"
+      "extends": "openai/gpt-6-astra",
+      "responses": { "defaultReasoningEffort": "medium" }
     },
     {
       "id": "openai/gpt-5.6-sol",
@@ -41,6 +47,10 @@
         "endpoint": "openai",
         "mode": "lite",
         "systemPromptPlacement": "developer",
+        "supportsVerbosity": true,
+        "defaultVerbosity": "low",
+        "defaultReasoningEffort": "low",
+        "supportsReasoningSummary": true,
         "transport": "auto",
         "websocketPrewarm": true
       },
@@ -62,11 +72,13 @@
     },
     {
       "id": "openai/gpt-5.6-terra",
-      "extends": "openai/gpt-5.6-sol"
+      "extends": "openai/gpt-5.6-sol",
+      "responses": { "defaultReasoningEffort": "medium" }
     },
     {
       "id": "openai/gpt-5.6-luna",
-      "extends": "openai/gpt-5.6-sol"
+      "extends": "openai/gpt-5.6-sol",
+      "responses": { "defaultReasoningEffort": "medium" }
     },
     {
       "id": "openai/gpt-5.5",
@@ -75,7 +87,11 @@
         "providerShim": true,
         "endpoint": "openai",
         "mode": "standard",
-        "systemPromptPlacement": "instructions",
+        "systemPromptPlacement": "developer",
+        "supportsVerbosity": true,
+        "defaultVerbosity": "low",
+        "defaultReasoningEffort": "medium",
+        "supportsReasoningSummary": true,
         "transport": "auto",
         "websocketPrewarm": true
       },
@@ -154,7 +170,7 @@
         "providerShim": true,
         "endpoint": "openai",
         "mode": "standard",
-        "systemPromptPlacement": "instructions",
+        "systemPromptPlacement": "developer",
         "transport": "sse",
         "websocketPrewarm": false
       },
@@ -162,7 +178,7 @@
         "parallelCalls": true,
         "applyPatch": false,
         "webSearch": false,
-        "imageGeneration": "hosted",
+        "imageGeneration": "standalone",
         "viewImage": false
       },
       "compaction": "pi",
@@ -190,6 +206,10 @@
         "endpoint": "codex",
         "mode": "lite",
         "systemPromptPlacement": "developer",
+        "supportsVerbosity": true,
+        "defaultVerbosity": "low",
+        "defaultReasoningEffort": "medium",
+        "supportsReasoningSummary": true,
         "transport": "auto",
         "websocketPrewarm": true,
         "reasoningSummary": "none"

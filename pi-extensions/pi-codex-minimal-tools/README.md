@@ -45,8 +45,8 @@ The latter re-exports runtime's identity-only SDK extension.
 Existing configuration stays at
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json`.
 The file locations are unchanged. Move nonlegacy endpoint overrides to Pi's
-own `models.json`; `directImageApiFallback` now uses the selected provider's
-Pi credentials and endpoint, not a separate `OPENAI_API_KEY` account.
+own `models.json`. Image execution is standalone-only and uses that provider's
+Pi credentials and endpoint; remove the obsolete `directImageApiFallback` setting.
 Schemas belong only to runtime:
 
 - [config.schema.json](https://unpkg.com/@oai404iao/pi-codex-runtime/config.schema.json)
@@ -58,8 +58,8 @@ tools and hosted result handling; Lite requests and incompatible opaque
 checkpoint transitions are blocked rather than silently downgraded.
 
 `endpoint_config` accepts exact `{ provider, baseUrl, webSearch?, imageGeneration?,
-compaction? }` entries. Tool lists contain `"hosted"`/`"standalone"`; compaction
-lists contain `"responses"`/`"responses-compact"`. Omitted lists inherit the
+compaction? }` entries. Search lists contain `"hosted"`/`"standalone"`; image lists
+contain only `"standalone"` and compaction lists only `"responses"`. Omitted lists inherit the
 model profile, `[]` denies the capability, and lists never select a fallback.
 Matching uses Pi's authenticated endpoint. Explicit unsupported responses warn
 and disable that mode only for the current session/endpoint, without changing

@@ -16,7 +16,7 @@ This package owns shared code split from `@oai404iao/pi-codex-minimal-tools`.
 Project material remains Copyright (c) 2026 oai404iao. The composite LICENSE
 and verified Apache license/NOTICE snapshots are retained.
 
-Codex protocol evidence remains pinned to
+Historical Codex protocol evidence remains pinned to
 `eb9dceba1a2e658142a456c5898836774835616b`;
 apply-patch compatibility evidence remains pinned to
 `03bb3b12367397e14a8facc2e018d645ff4d8e83`.
@@ -35,7 +35,20 @@ Modified namespace-tool compatibility serialization is in
 assets. This is not a license or authorization to access
 private endpoints; the internal Responses Lite path remains unsupported upstream.
 
-The descriptions match the pinned Codex `web_run_description.md` and
+The current image namespace is aligned with Apache-2.0 Codex revision
+`5a3140176e668a2f72f3c098490eb7f7052d9d85`; exact source identifiers and
+fingerprints are in `provenance/openai-codex-5a314017-image-generation.json`.
+The older reserved-tools evidence is retained unchanged.
+
+Current request metadata, model verbosity/reasoning defaults, search-history
+projection and bounded HTTP retry behavior are adapted from Apache-2.0 Codex
+revision `5a3140176e668a2f72f3c098490eb7f7052d9d85`.
+`provenance/openai-codex-5a314017-wire-alignment.json` records verified upstream
+blob IDs, SHA-256 hashes, exact model defaults and local adaptation boundaries.
+Pi retains its model descriptors and reviewed transport policy; no upstream
+model instructions, authentication claims or unavailable telemetry are copied.
+
+The descriptions match their respective pinned Codex `web_run_description.md` and
 `imagegen_description.md`; the parameter schemas are derived compatibility
 serializations, not verbatim source copies. Exact upstream paths, hashes and
 canonical-JSON fingerprints are in the reserved-tools provenance record.

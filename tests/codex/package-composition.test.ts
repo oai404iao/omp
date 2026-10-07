@@ -64,8 +64,7 @@ test("hosted-only capabilities are inactive without core and manual invocation f
 			await assert.rejects(host.tools.get("web_search").execute("w", { search_query: [{ q: "test" }] }, undefined, undefined, host.ctx), /requires pi-codex-core/);
 			host.ctx.model = compositionModel("gpt-4.1");
 			await host.emit("model_select");
-			assert.deepEqual(host.active(), ["read", "edit", "write", "bash", "unrelated"]);
-			await assert.rejects(host.tools.get("image_generation").execute("i", { prompt: "test" }, undefined, undefined, host.ctx), /requires pi-codex-core/);
+			assert(host.active().includes("image_generation"), "standalone image generation does not require core");
 			await host.emit("session_shutdown");
 		} finally { host.dispose(); }
 	}));

@@ -28,14 +28,17 @@ test("Codex reserved namespace definitions retain the reviewed Apache compatibil
 		"utf8",
 	));
 	const webProvenance = provenance.localCompatibilitySerialization.namespaces.web_search;
-	const imageProvenance = provenance.localCompatibilitySerialization.namespaces.image_generation;
+	const imageProvenance = JSON.parse(readFileSync(
+		new URL("../../pi-codex-runtime/provenance/openai-codex-5a314017-image-generation.json", import.meta.url),
+		"utf8",
+	)).localCompatibilitySerialization.namespaces.image_generation;
 	assert.equal(
 		sha256(web),
 		"f67597d3df3f3a77cb517646508e7305804ea029c6f8b1c1c1f241f0de0b214f",
 	);
 	assert.equal(
 		sha256(image),
-		"ccc508cff0a216bbdf368be8c98be94134a1aed0479cddd28c77d8e004f5b73e",
+		"d9a89f293ef83431230fb34e047a24c63329be0b5150d59c5d7b3047aeec3a7f",
 	);
 	assert.equal(
 		createHash("sha256").update(web.tools[0]!.description).digest("hex"),
@@ -43,7 +46,7 @@ test("Codex reserved namespace definitions retain the reviewed Apache compatibil
 	);
 	assert.equal(
 		createHash("sha256").update(image.tools[0]!.description).digest("hex"),
-		"77a992a7c90e45fcd11623a1efa34bfd4c7870697e0aa54ce9b28f690877170e",
+		"ee89dd3b9df94cc8b42b14e48714c68d11d4cd66113853b42ccf9cbd7858af61",
 	);
 	assert.equal(sha256(web), webProvenance.canonicalJsonSha256);
 	assert.equal(sha256(web.tools[0]!.parameters), webProvenance.parameters.canonicalJsonSha256);
@@ -65,7 +68,7 @@ test("Codex reserved namespace definitions are cloned per request", () => {
 	assert.notEqual(createCodexReservedNamespaceTool("web_search").tools[0]!.description, "mutated");
 });
 
-test("rewriteNativeOpenAiTools rewrites image_generation function tools to native Responses tools", () => {
+test("rewriteNativeOpenAiTools rewrites image_generation only to a standalone namespace", () => {
 	const payload = {
 		tools: [
 			{ type: "function", name: "image_generation", parameters: { output_format: "webp" } },
@@ -73,9 +76,9 @@ test("rewriteNativeOpenAiTools rewrites image_generation function tools to nativ
 			{ type: "function", name: "read" },
 		],
 	};
-	const result = rewriteNativeOpenAiTools(payload, { imageModel: "gpt-image-2" });
+	const result = rewriteNativeOpenAiTools(payload, { imageGeneration: "standalone" });
 	assert.deepEqual(result.rewritten, ["image_generation"]);
-	assert.deepEqual(result.payload.tools[0], { type: "image_generation", model: "gpt-image-2", output_format: "webp", action: "auto" });
+	assert.deepEqual(result.payload.tools[0], createCodexReservedNamespaceTool("image_generation"));
 	assert.deepEqual(result.payload.tools[1], { type: "function", function: { name: "web_search", parameters: {} } });
 	assert.equal((result.payload.tools[2] as any).name, "read");
 });
@@ -88,7 +91,7 @@ test("rewriteNativeOpenAiTools rewrites web_search only when enabled", () => {
 
 	const enabled = rewriteNativeOpenAiTools(payload, { webSearch: true });
 	assert.deepEqual(enabled.rewritten, ["web_search"]);
-	assert.deepEqual(enabled.payload.tools[0], { type: "web_search" });
+	assert.deepEqual(enabled.payload.tools[0], { type: "web_search", external_web_access: true });
 });
 
 test("rewriteNativeOpenAiTools removes only a disabled tool owned by this package", () => {

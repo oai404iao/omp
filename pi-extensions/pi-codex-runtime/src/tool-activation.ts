@@ -97,10 +97,7 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 					owned.exposure = exposure;
 				}
 			}
-			const hostedWithoutCore = !broker.coreEnabled && (
-				(name === "web_search" && model.webSearchImplementation === "hosted")
-				|| (name === "image_generation" && model.imageGenerationImplementation === "hosted" && !settings.directImageApiFallback)
-			);
+			const hostedWithoutCore = !broker.coreEnabled && name === "web_search" && model.webSearchImplementation === "hosted";
 			const endpointEnabled = name === "web_search" ? model.webSearchEnabled : name === "image_generation" ? model.imageGeneration : true;
 			const desired = available && owned.registered && capabilities[name].enabled && !hostedWithoutCore && endpointEnabled;
 			if (!desired) active.delete(name);

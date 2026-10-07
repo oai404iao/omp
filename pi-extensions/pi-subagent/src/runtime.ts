@@ -10,6 +10,7 @@ import { buildToolCeiling, resolveToolPolicy } from "./tool-policy.ts";
 import { TOOL_NAMES } from "./schemas.ts";
 import type { AgentDescriptor } from "./types.ts";
 import type { SessionView } from "./providers.ts";
+import { ensureCodexLineage } from "./task-attribution.ts";
 
 // Pi 0.99.1 exposes ModelRegistry in extension contexts, while SDK factories
 // accept ModelRuntime. Keep this compatibility boundary isolated here.
@@ -75,6 +76,7 @@ export async function createChildRuntime(options: {
 		}
 		if (available) {
 			const integration = await import("@oai404iao/pi-codex-minimal-tools/subagent-inline");
+			if (descriptor.settings.openAIIdentity) ensureCodexLineage(options.sessionManager, options.parentSession, descriptor);
 			factories.push(integration.createCodexSubagentInlineExtension({
 				parentSessionManager: options.parentSession, openAIIdentity,
 			}));

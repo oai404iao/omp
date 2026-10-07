@@ -76,7 +76,7 @@ export function createCodexStream<TApi extends Api>(
 				auth,
 				endpoint,
 			});
-			const requestIdentity = !settings.codexRequestExtensions ? undefined : resolveCodexRequestIdentity(
+			let requestIdentity = !settings.codexRequestExtensions ? undefined : resolveCodexRequestIdentity(
 				options?.sessionId,
 				options?.metadata as Record<string, unknown> | undefined,
 				"turn",
@@ -85,27 +85,27 @@ export function createCodexStream<TApi extends Api>(
 				buildRequestBody(model, context, requestProfile, {
 					...options,
 					...requestBodyToolOptions(settings),
+					requestIdentity,
 					ownsNativeTool: deps.ownsNativeTool,
 				}),
 				settings,
 				model,
+				(options as { serviceTier?: string } | undefined)?.serviceTier,
 			);
 			const webSearch = settings.modelProfile.effective.tools.webSearch;
 			body = rewriteNativeOpenAiTools(body, {
 				...requestBodyToolOptions(settings),
 				ownsNativeTool: deps.ownsNativeTool,
-				imageModel: settings.imageModel,
-				webSearch: settings.webSearchEnabled && webSearch
-					? {
-							implementation: webSearch.implementation,
-							contentTypes: webSearch.contentTypes,
-						}
-					: false,
+				webSearch: settings.webSearchEnabled && webSearch ? webSearch : false,
 			}).payload;
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
 				body = nextBody as ResponsesBody;
 			}
+			if (requestIdentity) requestIdentity = {
+				...requestIdentity, model: typeof body.model === "string" && body.model.trim() ? body.model : model.id,
+				reasoningEffort: body.reasoning?.effort,
+			};
 			options = withRequestServiceTier(options, body.service_tier);
 			ensureWebSearchDetailsIncluded(body);
 			assertOpaqueReplayAllowed(body, settings);
@@ -293,7 +293,7 @@ export function createCodexStream<TApi extends Api>(
 				);
 			}
 
-			const sseBody = prepareSseBody(sseUrl, bodyJson, sseHeaders, endpoint === "openai");
+			const sseBody = prepareSseBody(sseUrl, bodyJson, sseHeaders, model.provider);
 			const maxRetries = sseMaxRetries(options);
 			for (let attempt = 0; attempt <= maxRetries; attempt++) {
 				if (options?.signal?.aborted) {

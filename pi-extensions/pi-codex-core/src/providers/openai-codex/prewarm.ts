@@ -5,9 +5,10 @@ import { withWebSocketRequestMetadata } from "./request-metadata.js";
 import { type ResponsesBody, type WebSocketPrewarmRequest } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { parseWebSocket, sendWebSocketRequest } from "./websocket-events.js";
 import { acquireWebSocket } from "./websocket-session.js";
+import { isBasePrewarmInput } from "./request-prefix.js";
 
 export async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promise<void> {
-	if ((request.body.input?.length ?? 0) > 0) {
+	if (!isBasePrewarmInput(request.body.input ?? [])) {
 		throw new Error("Startup WebSocket prewarm must not include conversation input");
 	}
 	const acquired = await acquireWebSocket(

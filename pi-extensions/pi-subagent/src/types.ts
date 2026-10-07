@@ -63,6 +63,7 @@ export interface MailMessage {
 	text: string;
 	createdAt: string;
 	runId?: string;
+	codexTurnAttribution?: { parentTurnId?: string; rootTurnId?: string };
 }
 
 export interface AgentRecord {

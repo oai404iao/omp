@@ -70,8 +70,17 @@
               "description": "Reasoning summary mode. none omits reasoning.summary; absent defaults to auto in Standard mode and none in Lite mode."
             },
             "systemPromptPlacement": {
-              "enum": ["instructions", "developer"],
-              "description": "Standard-mode prompt placement. Lite always uses a developer message."
+              "const": "developer",
+              "description": "Both Standard and Lite place base instructions in developer input."
+            },
+            "supportsVerbosity": { "type": "boolean" },
+            "defaultVerbosity": { "enum": ["low", "medium", "high"] },
+            "defaultReasoningEffort": {
+              "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+            },
+            "supportsReasoningSummary": {
+              "type": "boolean",
+              "description": "Whether the model accepts reasoning.summary."
             },
             "transport": {
               "enum": ["sse", "websocket", "websocket-cached", "auto"],
@@ -150,15 +159,36 @@
                     "enum": ["text", "image"]
                   },
                   "uniqueItems": true
+                },
+                "mode": { "enum": ["cached", "indexed", "live"], "default": "live" },
+                "searchContextSize": { "enum": ["low", "medium", "high"] },
+                "maxOutputTokens": {
+                  "type": "integer", "minimum": 1, "default": 10000,
+                  "description": "Standalone search truncation budget for this model."
+                },
+                "userLocation": {
+                  "type": "object", "additionalProperties": false, "required": ["type"],
+                  "properties": {
+                    "type": { "const": "approximate" },
+                    "country": { "type": "string" },
+                    "region": { "type": "string" },
+                    "city": { "type": "string" },
+                    "timezone": { "type": "string" }
+                  }
+                },
+                "filters": {
+                  "type": "object", "additionalProperties": false,
+                  "properties": {
+                    "allowedDomains": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                  }
                 }
               }
             },
             "imageGeneration": {
-              "description": "Disable image generation, use hosted Responses image_generation, or use standalone Codex Images endpoints.",
-              "enum": [false, "hosted", "standalone"],
+              "description": "Disable image generation or use standalone Codex Images endpoints.",
+              "enum": [false, "standalone"],
               "enumDescriptions": [
                 "Do not expose an image-generation tool.",
-                "Use the hosted Responses image_generation tool.",
                 "Expose image_gen.imagegen and call the standalone Codex Images endpoints."
               ]
             },
@@ -169,8 +199,8 @@
           }
         },
         "compaction": {
-          "enum": ["pi", "responses", "responses-compact"],
-          "description": "Pi summary compaction, Codex remote compaction v2, or the legacy /responses/compact endpoint."
+          "enum": ["pi", "responses"],
+          "description": "Pi summary compaction or Codex remote compaction v2 through Responses."
         },
         "fast": {
           "description": "Disable Fast mode for this model or configure its service tier and optional usage-cost multiplier.",

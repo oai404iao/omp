@@ -50,14 +50,6 @@
     "pi-codex-runtime/src/model-catalog/catalog.ts": {
       "maxLines": 636,
       "reason": "Existing catalog resolver/schema boundary; split independently from transport relocation."
-    },
-    "pi-codex-runtime/src/codex-wire-identity.ts": {
-      "maxLines": 596,
-      "reason": "Existing shared identity persistence state; ownership contract precedes further extraction."
-    },
-    "pi-codex-imagegen/src/background-image-generation.ts": {
-      "maxLines": 476,
-      "reason": "Existing image request/parser; instance-owned job status and cancellation extracted."
     }
   }
 }

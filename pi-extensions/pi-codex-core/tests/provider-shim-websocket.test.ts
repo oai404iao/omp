@@ -139,7 +139,7 @@ test("OpenAI WebSocket URL and headers use the normal Responses endpoint and Pi 
 	assert.ok(threadId && UUID_V7_PATTERN.test(threadId));
 	assert.equal(threadId, sessionId);
 	assert.equal(headers.get("x-client-request-id"), threadId);
-	assert.ok(headers.get("x-codex-window-id") && UUID_V7_PATTERN.test(headers.get("x-codex-window-id")!));
+	assert.equal(headers.get("x-codex-window-id"), `${headers.get("thread-id")}:0`);
 });
 
 test("cacheRetention none uses full input on fresh sockets but preserves session identity", async () => {
@@ -1735,8 +1735,10 @@ test("resumed sessions prewarm once without replaying restored history", async (
 		assert.equal(result.content[0]?.text, "resumed response");
 		assert.equal(server.requests.length, 2);
 		assert.equal(server.requests[0]?.generate, false);
-		assert.deepEqual(server.requests[0]?.input, []);
-		assert.equal(server.requests[0]?.instructions, "stable system");
+		assert.equal(server.requests[0]?.input.length, 1);
+		assert.equal(server.requests[0]?.input[0].role, "developer");
+		assert.equal(server.requests[0]?.input[0].content[0].text, "stable system");
+		assert.equal(server.requests[0]?.instructions, undefined);
 		assert.equal(server.requests[1]?.previous_response_id, "warm_resume");
 		assert.equal(server.requests[1]?.input.length, 3);
 		assert.equal(server.requests.filter((request) => request.generate === false).length, 1);

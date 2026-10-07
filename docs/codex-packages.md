@@ -67,8 +67,8 @@ new configurations; old version-pinned bundle URLs remain unchanged. Do not crea
 parallel configuration directories named after the new capabilities.
 
 Global `config.json.imageGeneration:false` is a generation kill switch. It
-prevents image tool, command and presentation registration and blocks hosted,
-standalone and direct-fallback execution without changing Responses mode,
+prevents image tool, command and presentation registration and blocks
+standalone execution without changing Responses mode,
 transport, compaction, patch, web-search, image input or historical replay.
 Per-model `tools.imageGeneration:false` remains an independent profile override.
 
@@ -79,8 +79,7 @@ Standalone clients obtain authentication from Pi's model registry. Without core:
 
 - Catalog-supported `standalone` web/image profiles execute directly.
 - Hosted search stays inactive and explicit execution reports that core is needed.
-- Hosted image generation needs core, unless the existing
-  `directImageApiFallback` setting was explicitly enabled.
+- Image generation is standalone only; hosted image and direct fallback were removed.
 - No endpoint or unsupported model-family capability is guessed.
 - Missing authentication produces a tool error, not an implicit alternate account.
 
@@ -94,6 +93,10 @@ a separate environment key or forces another provider's endpoint.
 
 The internal Lite and reserved endpoints remain unsupported compatibility
 surfaces. Fixture success is not proof that a real account may access them.
+
+The request serializer is aligned against Codex `5a314017`. See
+[wire alignment and migration](codex-wire-alignment.md) for the retained Pi
+identity/privacy boundary and removed legacy execution modes.
 
 ## Broker and lifecycle contract
 

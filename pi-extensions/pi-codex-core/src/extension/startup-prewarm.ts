@@ -109,7 +109,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 		const task = sessionStartupPrewarmTasks.get(sessionId);
 		if (task?.generation === generation) task.resolvedModelIdentity = modelIdentity(model);
 		const profile = resolveCodexRequestProfile(settings.requestProfile);
-		const requestIdentity = !settings.codexRequestExtensions ? undefined : resolveCodexRequestIdentity(
+		let requestIdentity = !settings.codexRequestExtensions ? undefined : resolveCodexRequestIdentity(
 			sessionId,
 			undefined,
 			"prewarm",
@@ -124,6 +124,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 				tools: snapshot.tools,
 			}, profile, {
 				...requestBodyToolOptions(settings),
+				requestIdentity,
 				ownsNativeTool,
 				apiKey: auth.apiKey,
 				headers: auth.headers,
@@ -137,16 +138,13 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 		body = rewriteNativeOpenAiTools(body, {
 			...requestBodyToolOptions(settings),
 			ownsNativeTool,
-			imageModel: settings.imageModel,
-			webSearch: settings.webSearchEnabled && webSearch
-				? {
-						implementation: webSearch.implementation,
-						contentTypes: webSearch.contentTypes,
-					}
-				: false,
+			webSearch: settings.webSearchEnabled && webSearch ? webSearch : false,
 		}).payload;
 		ensureWebSearchDetailsIncluded(body);
 		body = withResponsesLiteWebSocketMetadata(body, profile.responsesMode);
+		if (requestIdentity) requestIdentity = {
+			...requestIdentity, model: model.id, reasoningEffort: body.reasoning?.effort,
+		};
 
 		const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, settings.responsesEndpoint);
 		const fallbackKey = webSocketFallbackKey(

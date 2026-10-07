@@ -77,7 +77,7 @@ export interface ResponsesBody {
 	instructions?: string;
 	previous_response_id?: string;
 	input: unknown[];
-	text: { verbosity: string };
+	text?: { verbosity: string };
 	include: string[];
 	prompt_cache_key?: string;
 	tool_choice: "auto";

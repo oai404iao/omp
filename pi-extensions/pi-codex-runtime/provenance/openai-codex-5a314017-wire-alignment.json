@@ -1,0 +1,296 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/openai/codex",
+    "revision": "5a3140176e668a2f72f3c098490eb7f7052d9d85",
+    "commitUrl": "https://github.com/openai/codex/commit/5a3140176e668a2f72f3c098490eb7f7052d9d85",
+    "license": "Apache-2.0"
+  },
+  "files": {
+    "LICENSE": {
+      "role": "upstream Apache-2.0 license",
+      "gitBlobSha": "4606e72e042564097e8780d66c1d4dcb611869bd",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/LICENSE"
+    },
+    "NOTICE": {
+      "role": "upstream NOTICE",
+      "gitBlobSha": "2805899d56d0332d175cfc613c67d45d6f006db7",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/NOTICE"
+    },
+    "codex-rs/models-manager/models.json": {
+      "role": "exact model verbosity, reasoning defaults and search truncation policies",
+      "gitBlobSha": "72a78e0eacf94103f4babda2a5245aba4ce848c1",
+      "sha256": "943ca7fe1d19ed019054158303f0dbbd80b3bef43b3aa425a71aa7cb3fb52c2b",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/models-manager/models.json"
+    },
+    "codex-rs/protocol/src/openai_models.rs": {
+      "role": "model support/default resolution and supported service-tier filtering",
+      "gitBlobSha": "45654aa8c552bf851c1f54b42b4709fd8370c856",
+      "sha256": "88d0f8df840078761b5a480ac21011ea097a55ffad6b0b8ad3742af215417d2d",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/protocol/src/openai_models.rs"
+    },
+    "codex-rs/core/src/client.rs": {
+      "role": "Standard/Lite request envelopes, deterministic prefix IDs, HTTP/WS headers, prewarm and metadata projection",
+      "gitBlobSha": "24f2964ffe566faa7a9de34636e11a528123c6c1",
+      "sha256": "6ca16eb5fb185192738d321c22eacf74664e0ae2c107176c1c8a7f23fde33089",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/client.rs"
+    },
+    "codex-rs/codex-api/src/common.rs": {
+      "role": "typed Responses HTTP and WebSocket bodies",
+      "gitBlobSha": "42c9fecd1a3065cf1729ce7b53f017fe1dbac53c",
+      "sha256": "6d2bdb9fdbd443120b73734d13ba19912ef6883553df92a926a2fa887d61a6b6",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/codex-api/src/common.rs"
+    },
+    "codex-rs/core/src/responses_metadata.rs": {
+      "role": "canonical Responses metadata, compatibility headers and distinct subagent labels",
+      "gitBlobSha": "bfdeb3b40f524401e1a57879ab2335a45130f588",
+      "sha256": "17821e5baed960026bc9b54f0af5085883c9c057647631fcd4d0070fdb3827bd",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/responses_metadata.rs"
+    },
+    "codex-rs/core/src/turn_metadata.rs": {
+      "role": "captured execution metadata and external-tool privacy projection",
+      "gitBlobSha": "db22fdcb5be2c7fdd3dbb08ccd88b5c0bcc1a2c7",
+      "sha256": "1f21ff3087374c114939b23095560183bea352882c84b97ee2e3178fc334fe53",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/turn_metadata.rs"
+    },
+    "codex-rs/core/src/session/mod.rs": {
+      "role": "wire window ID derived from thread ID and window number",
+      "gitBlobSha": "bc086f8661f32ca94cdac8fc161c8ff86f5aaf38",
+      "sha256": "5e94b4e8fc9fea7314169e7e29e88a96acbe7f9d0ec5e50a6a60de2d7ffc88df",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/session/mod.rs"
+    },
+    "codex-rs/core/src/session/session.rs": {
+      "role": "separate context-window UUID and window number metadata",
+      "gitBlobSha": "263f08f2f1ea43b283406c0200bcbccfa5e022a1",
+      "sha256": "0179bec86da0526042f5f9a26fcc6f03b018833aa7fc26f56ec83ccd51fdc9a9",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/session/session.rs"
+    },
+    "codex-rs/core/src/session/startup_prewarm.rs": {
+      "role": "Base/History prewarm with normal prompt construction",
+      "gitBlobSha": "554e69e178b937c865610b57e5ad27103658e948",
+      "sha256": "539659506976454262e2931fec0b5616ec990adac7e7423c6e73de28fbbe6fa7",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/session/startup_prewarm.rs"
+    },
+    "codex-rs/core/src/installation_id.rs": {
+      "role": "installation UUID persistence and file locking",
+      "gitBlobSha": "a42e6b6d8353c8b5e4e14e5413850402bd5cb64b",
+      "sha256": "c279cdce8837195f66c362aa87c8a068c75ac022305e72bb129e98581b6930b5",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/installation_id.rs"
+    },
+    "codex-rs/core/src/agent/control/spawn.rs": {
+      "role": "queued parent/root turn attribution",
+      "gitBlobSha": "20e28a8bfed7d5862ae3013207040386a1ac9f78",
+      "sha256": "00259e277fa784b548c28ad614c4817bccbb36198030582176b438e0e571d7d9",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/agent/control/spawn.rs"
+    },
+    "codex-rs/protocol/src/agent_path.rs": {
+      "role": "canonical agent path naming",
+      "gitBlobSha": "c0ad8b734a94baedc96e93186ce6d8cc3d588ce3",
+      "sha256": "18ddefda817a89b299cfbec14ea8e95ff4248e9fe5aca616656f39f7d5cfb045",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/protocol/src/agent_path.rs"
+    },
+    "codex-rs/protocol/src/protocol.rs": {
+      "role": "subagent metadata kind and truncation-policy semantics",
+      "gitBlobSha": "be48c2f1523083f39400aeafa75c4a532c0e6cf6",
+      "sha256": "54f175eeb1410f1b1937df7466da2dc73258ccc5e2b6f09bd6172868a19c23b7",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/protocol/src/protocol.rs"
+    },
+    "codex-rs/core/src/tools/handlers/extension_tools.rs": {
+      "role": "external-tool request metadata and captured model/truncation settings",
+      "gitBlobSha": "ea483528d0e5f2e21f674208ce187c53a16b1ca9",
+      "sha256": "2533d0692d3c9eac56146cd01addd9d36adfaa99276f72b1d32167e47346a661",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/tools/handlers/extension_tools.rs"
+    },
+    "codex-rs/ext/web-search/src/tool.rs": {
+      "role": "standalone search body, output budget and metadata headers",
+      "gitBlobSha": "411b405bd8c5b6e0a9ebf4db10376ff1266da777",
+      "sha256": "9a10c0e2b6a3a065a3ce2c5b6aafa52dfee3aa5b975408cf9f5aa8d237233a50",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/ext/web-search/src/tool.rs"
+    },
+    "codex-rs/ext/web-search/src/extension.rs": {
+      "role": "cached/indexed/live search settings and configured filters/location/context size",
+      "gitBlobSha": "725643f89b16f409536eade1fb7bbd8f86bcf290",
+      "sha256": "6af2bb8e013fa59faa056e862b0a1891c6658f4b8f7c3cd63dcf561f651e29f7",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/ext/web-search/src/extension.rs"
+    },
+    "codex-rs/ext/web-search/src/history.rs": {
+      "role": "bounded visible search conversation projection",
+      "gitBlobSha": "6d64e22124559bba621795174897d047b990673c",
+      "sha256": "332eb8049d9ebbec98373a4bbf3ae4166907ba156bc671f7f33f22ce118b3f9d",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/ext/web-search/src/history.rs"
+    },
+    "codex-rs/tools/src/response_history.rs": {
+      "role": "latest-user cutoff and shared assistant token budget",
+      "gitBlobSha": "ab16769afdb248e1e03e2090956adb548f7708e2",
+      "sha256": "c9344ab3f616a36ef3cfb5768dc84b57185a5d1bc16d043e8ad4f6b4d6a9882e",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/tools/src/response_history.rs"
+    },
+    "codex-rs/utils/string/src/truncate.rs": {
+      "role": "UTF-8 approximate token counting and middle truncation",
+      "gitBlobSha": "075d78fd7ac6202d91edf1c409413b4506b26feb",
+      "sha256": "2f00b33069af787f3d208ba8b9b5a8431309ea7b499a7a2d437ce93890c99333",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/utils/string/src/truncate.rs"
+    },
+    "codex-rs/utils/string/src/json.rs": {
+      "role": "ASCII-safe JSON header serialization",
+      "gitBlobSha": "da69ed6318f59d4d895c738eb9b83bfd2e67bdac",
+      "sha256": "c12a8177df2113e469f8550b11386a9efe4933d8b2858c6c08c6c5061b28e2b6",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/utils/string/src/json.rs"
+    },
+    "codex-rs/codex-api/src/search.rs": {
+      "role": "typed standalone search fields",
+      "gitBlobSha": "237e7a7ebff4a0eeaa6dbb7b94c457d23dfc09de",
+      "sha256": "a83fd7ddd41c86985cce2aa899a2907ca820c226d5e7337949cc7e47a35c5f4f",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/codex-api/src/search.rs"
+    },
+    "codex-rs/codex-api/src/endpoint/search.rs": {
+      "role": "alpha/search JSON request dispatch",
+      "gitBlobSha": "2de48fe7dbd99372bab1362ca707df85bead55b6",
+      "sha256": "928b21fc11629aa5a5beda53f966ae31f21adcfdd970a26c94b65239316a7370",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/codex-api/src/endpoint/search.rs"
+    },
+    "codex-rs/core/src/tools/hosted_spec.rs": {
+      "role": "hosted search configuration projection",
+      "gitBlobSha": "af7cdf801364b79af9e24924a63ed32543348f95",
+      "sha256": "add42354c1662ced395898ba4b8bac9b4546ee5b5963cd40bc3f542fc950765c",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/core/src/tools/hosted_spec.rs"
+    },
+    "codex-rs/model-provider-info/src/lib.rs": {
+      "role": "four-retry default HTTP policy, 200ms base delay and non-retryable 429",
+      "gitBlobSha": "f020d34c25413a7ac581dc5ed0a5187be17caa99",
+      "sha256": "93ce6cd0a65477dff89545b8b48853455da0654c4bcc5a1092596d88d9dfe25c",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/model-provider-info/src/lib.rs"
+    },
+    "codex-rs/codex-client/src/retry.rs": {
+      "role": "bounded retry attempts, jitter and Retry-After timing",
+      "gitBlobSha": "b10fa50794de347b73a76c83d0b6b36e055a7842",
+      "sha256": "4e61c0e5e5037866706863c32780748ec82e114160ec759a582621de0aad4c06",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/codex-client/src/retry.rs"
+    },
+    "codex-rs/http-client/src/retry_after.rs": {
+      "role": "Retry-After integer seconds and HTTP-date parsing",
+      "gitBlobSha": "9da9e0fb9e53f83980397c60fb0bb2e57c8ccd8b",
+      "sha256": "025334619c1f6a419ea670fc3728737e78b61238deae3ca0f7d6cd2ae67d9313",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/5a3140176e668a2f72f3c098490eb7f7052d9d85/codex-rs/http-client/src/retry_after.rs"
+    }
+  },
+  "modelDefaults": {
+    "sourcePath": "codex-rs/models-manager/models.json",
+    "fields": {
+      "support_verbosity": "responses.supportsVerbosity",
+      "default_verbosity": "responses.defaultVerbosity",
+      "default_reasoning_level": "responses.defaultReasoningEffort",
+      "supports_reasoning_summary_parameter": "responses.supportsReasoningSummary",
+      "truncation_policy.token_budget()": "tools.webSearch.maxOutputTokens (10000 when not overridden)"
+    },
+    "models": {
+      "gpt-6-astra": {
+        "support_verbosity": true,
+        "default_verbosity": "low",
+        "default_reasoning_level": "low",
+        "supports_reasoning_summary_parameter": true,
+        "truncation_policy": {
+          "mode": "tokens",
+          "limit": 10000
+        }
+      },
+      "gpt-6.1-sol": {
+        "support_verbosity": true,
+        "default_verbosity": "low",
+        "default_reasoning_level": "low",
+        "supports_reasoning_summary_parameter": true,
+        "truncation_policy": {
+          "mode": "tokens",
+          "limit": 10000
+        }
+      },
+      "gpt-6-sol": {
+        "support_verbosity": true,
+        "default_verbosity": "low",
+        "default_reasoning_level": "medium",
+        "supports_reasoning_summary_parameter": true,
+        "truncation_policy": {
+          "mode": "tokens",
+          "limit": 10000
+        }
+      },
+      "gpt-6-luna": {
+        "support_verbosity": true,
+        "default_verbosity": "low",
+        "default_reasoning_level": "medium",
+        "supports_reasoning_summary_parameter": true,
+        "truncation_policy": {
+          "mode": "tokens",
+          "limit": 10000
+        }
+      },
+      "gpt-5.6-sol": {
+        "support_verbosity": true,
+        "default_verbosity": "low",
+        "default_reasoning_level": "low",
+        "supports_reasoning_summary_parameter": true,
+        "truncation_policy": {
+          "mode": "tokens",
+          "limit": 10000
+        }
+      },
+      "gpt-5.6-terra": {
+        "support_verbosity": true,
+        "default_verbosity": "low",
+        "default_reasoning_level": "medium",
+        "supports_reasoning_summary_parameter": true,
+        "truncation_policy": {
+          "mode": "tokens",
+          "limit": 10000
+        }
+      },
+      "gpt-5.6-luna": {
+        "support_verbosity": true,
+        "default_verbosity": "low",
+        "default_reasoning_level": "medium",
+        "supports_reasoning_summary_parameter": true,
+        "truncation_policy": {
+          "mode": "tokens",
+          "limit": 10000
+        }
+      },
+      "gpt-5.5": {
+        "support_verbosity": true,
+        "default_verbosity": "low",
+        "default_reasoning_level": "medium",
+        "supports_reasoning_summary_parameter": true,
+        "truncation_policy": {
+          "mode": "tokens",
+          "limit": 10000
+        }
+      }
+    }
+  },
+  "limits": [
+    "Source and offline fixture alignment, not real endpoint or account acceptance.",
+    "Pi retains authentication, model descriptors, reasoning mappings, prompt ownership and installation identity; no Codex version, sandbox or attestation is fabricated.",
+    "Modern openai GPT-6 profiles retain the independently reviewed Pi Standard transport policy; upstream use_responses_lite is not copied by this default-metadata alignment.",
+    "Only listed model defaults are directly verified here. Additional local profile inheritance remains explicit compatibility policy, not evidence that an absent upstream model was verified.",
+    "The local JSON retry helper surfaces Retry-After advice beyond 60 seconds instead of retrying before the server deadline.",
+    "Historical model and reserved-tools provenance remains immutable; image namespace evidence is recorded separately."
+  ],
+  "localImplementations": [
+    "pi-extensions/pi-codex-runtime/src/model-catalog/default-models.json",
+    "pi-extensions/pi-codex-runtime/src/codex-metadata.ts",
+    "pi-extensions/pi-codex-runtime/src/codex-identity-types.ts",
+    "pi-extensions/pi-codex-runtime/src/codex-wire-identity.ts",
+    "pi-extensions/pi-codex-runtime/src/codex-installation.ts",
+    "pi-extensions/pi-codex-runtime/src/json-request.ts",
+    "pi-extensions/pi-codex-core/src/providers/openai-codex/request-body.ts",
+    "pi-extensions/pi-codex-core/src/providers/openai-codex/request-prefix.ts",
+    "pi-extensions/pi-codex-core/src/providers/openai-codex/request-metadata.ts",
+    "pi-extensions/pi-codex-core/src/providers/openai-codex/headers.ts",
+    "pi-extensions/pi-codex-core/src/providers/openai-codex/prewarm.ts",
+    "pi-extensions/pi-codex-core/src/adapter/compaction/metadata.ts",
+    "pi-extensions/pi-codex-web-search/src/tools/web-search.ts",
+    "pi-extensions/pi-codex-web-search/src/tools/web-search/history.ts",
+    "pi-extensions/pi-subagent/src/task-attribution.ts"
+  ]
+}
