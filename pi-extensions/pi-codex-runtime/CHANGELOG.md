@@ -1,5 +1,25 @@
 # @oai404iao/pi-codex-runtime
 
+## 1.0.0
+
+### Major Changes
+
+- 3b07cbf: Align Codex request identity, metadata, Responses envelopes, WebSocket prewarm,
+  search context/policy and image parameters with upstream revision 5a314017.
+  Preserve Pi authentication and privacy boundaries without fabricating Codex
+  telemetry or attestation.
+  
+  Remove hosted image generation, direct Images fallback and unary
+  `responses-compact` execution. Explicit old configurations require migration;
+  historical image outputs and opaque compaction replay remain supported.
+
+### Minor Changes
+
+- 7edbf75: Keep `/fast` selections in the session rather than rewriting the configured
+  new-session default. Restore selections on resume/reload and branch navigation.
+  Subagent requests dynamically follow the main agent's Fast selection, including
+  followups and sessions with OpenAI wire identity disabled.
+
 ## 0.5.0
 
 Final model defaults: `openai/gpt-6.1-sol` uses the GPT-5.6 Sol Lite profile

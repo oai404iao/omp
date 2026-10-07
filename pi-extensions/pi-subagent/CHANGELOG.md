@@ -1,5 +1,26 @@
 # @oai404iao/pi-subagent
 
+## 1.0.1
+
+### Patch Changes
+
+- 3b07cbf: Align Codex request identity, metadata, Responses envelopes, WebSocket prewarm,
+  search context/policy and image parameters with upstream revision 5a314017.
+  Preserve Pi authentication and privacy boundaries without fabricating Codex
+  telemetry or attestation.
+  
+  Remove hosted image generation, direct Images fallback and unary
+  `responses-compact` execution. Explicit old configurations require migration;
+  historical image outputs and opaque compaction replay remain supported.
+- 7edbf75: Keep `/fast` selections in the session rather than rewriting the configured
+  new-session default. Restore selections on resume/reload and branch navigation.
+  Subagent requests dynamically follow the main agent's Fast selection, including
+  followups and sessions with OpenAI wire identity disabled.
+- 993e0f0: Increase the default agent mailbox wait from 30 to 120 seconds and recommend
+  300-second waits for longer tasks instead of frequent short polling. Clarify in
+  tool descriptions and timeout results that waits end early on activity and
+  expiring a wait does not cancel agents or indicate task failure.
+
 ## 1.0.0
 
 ### Major Changes
