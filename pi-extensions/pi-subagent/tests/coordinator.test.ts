@@ -78,13 +78,13 @@ test("wait is activity-only, does not consume content, and context receipts ackn
 
 test("wait wakes on new messages and steered input, aborts cleanly", async t => {
 	const f = await fixture(t);
-	const waiting = f.coordinator.wait(f.caller);
+	const waiting = f.coordinator.wait(f.caller, 300_000);
 	f.coordinator.send(f.caller, "/root", "hello");
 	assert.equal((await waiting).timed_out, false);
 	const envelope = f.coordinator.inboxMessage("/root", f.manager)!;
 	f.manager.appendCustomMessageEntry(envelope.customType, envelope.content, true, envelope.details);
 	f.coordinator.reconcile("/root", f.manager);
-	const steering = f.coordinator.wait(f.caller);
+	const steering = f.coordinator.wait(f.caller, 300_000);
 	f.coordinator.notifyInput("/root");
 	assert.match((await steering).message, /new input/);
 	const abort = new AbortController();
@@ -94,13 +94,56 @@ test("wait wakes on new messages and steered input, aborts cleanly", async t => 
 	assert.match((await f.coordinator.wait(f.caller, 30000, undefined, () => true)).message, /new input/);
 });
 
+test("default wait lasts 120 seconds without cancelling the child; completion wakes a later wait", { timeout: 10_000 }, async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: () => finish.promise });
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "long task" });
+	await waitUntil(() => f.requests.length === 1);
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	let settled = false;
+	const waiting = f.coordinator.wait(f.caller).then(result => { settled = true; return result; });
+	t.mock.timers.tick(119_999);
+	await Promise.resolve();
+	assert.equal(settled, false);
+	t.mock.timers.tick(1);
+	assert.deepEqual(await waiting, {
+		message: "No new mailbox activity before the wait deadline. This timeout does not cancel agents or indicate task failure.",
+		timed_out: true,
+	});
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "running");
+	assert.equal(f.coordinator.activeCount, 1);
+	t.mock.timers.reset();
+	const completion = f.coordinator.wait(f.caller, 300_000);
+	finish.resolve("long task complete");
+	assert.equal((await completion).timed_out, false);
+	await f.idle();
+	assert.equal(f.requests.length, 1);
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "completed");
+	assert.equal(f.coordinator.treeStore.mailbox("/root")[0]?.text, "long task complete");
+});
+
+test("explicit timeout overrides the default", async t => {
+	const f = await fixture(t);
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	let settled = false;
+	const waiting = f.coordinator.wait(f.caller, 300_000).then(result => { settled = true; return result; });
+	t.mock.timers.tick(299_999);
+	await Promise.resolve();
+	assert.equal(settled, false);
+	t.mock.timers.tick(1);
+	assert.equal((await waiting).timed_out, true);
+});
+
 test("wait timeout limits and shutdown do not consume future mail", async t => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const f = await fixture(t);
 	const waiting = f.coordinator.wait(f.caller, 0);
 	t.mock.timers.tick(9999);
 	t.mock.timers.tick(1);
-	assert.deepEqual(await waiting, { message: "Wait timed out. Timeout raised to 10000 ms.", timed_out: true });
+	assert.deepEqual(await waiting, {
+		message: "No new mailbox activity before the wait deadline. This timeout does not cancel agents or indicate task failure. Timeout raised to 10000 ms.",
+		timed_out: true,
+	});
 	for (const invalid of [-1, 1.5, 3600001]) assert.throws(() => f.coordinator.wait(f.caller, invalid), /timeout_ms/);
 	const next = f.coordinator.wait(f.caller);
 	const rejection = assert.rejects(next, /interrupted/);

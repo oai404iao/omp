@@ -28,14 +28,16 @@ test("six-tool contract: plaintext closed schemas, required fields, defaults, no
 		assert(!Value.Check(schema, { target: "/root/worker", message: "text", interrupt: true }));
 	}
 	assert(Value.Check(WaitAgentParameters, {}));
+	assert.equal(JSON.parse(JSON.stringify(WaitAgentParameters)).properties.timeout_ms.default, 120_000);
 	assert(Value.Check(WaitAgentParameters, { timeout_ms: 0 }));
+	assert(Value.Check(WaitAgentParameters, { timeout_ms: 300_000 }));
 	assert(!Value.Check(WaitAgentParameters, { timeout_ms: 3600001 }));
 	assert(!Value.Check(WaitAgentParameters, { targets: ["worker"] }));
 	assert.doesNotMatch(JSON.stringify(schemas), /encrypted|fork_context|completed_turns|runtimeMode/);
 	assert.equal(Object.keys(TOOL_DESCRIPTIONS).length, 6);
 	assert.equal(createHash("sha256").update(JSON.stringify(TOOL_NAMES.map((name, index) => ({
 		name, description: TOOL_DESCRIPTIONS[name], parameters: schemas[index],
-	})))).digest("hex"), "e7a38685750155c0318508ec02895b5f8d0255ce2ca730a9a7cc2212853b6a6c",
+	})))).digest("hex"), "794afdeffa38a8756c8a275db26a258dd53959be4484692609edb92e842b745f",
 	"Approved six-tool description/schema snapshot changed; review the complete contract before updating.");
 });
 
