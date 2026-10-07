@@ -62,14 +62,26 @@ export async function createChildRuntime(options: {
 	const model = modelRuntime.getModel(descriptor.model.provider, descriptor.model.id);
 	if (!model) throw new Error(`child model unavailable: ${descriptor.model.provider}/${descriptor.model.id}`);
 	const factories: InlineExtension[] = [];
-	if (descriptor.settings.openAIIdentity &&
-		["openai-responses", "openai-codex-responses", "pi-virtual"].includes(model.api)) {
+	const openAIIdentity = descriptor.settings.openAIIdentity &&
+		["openai-responses", "openai-codex-responses", "pi-virtual"].includes(model.api);
+	try {
+		let available = true;
 		try {
-			const integration = await import("@oai404iao/pi-codex-minimal-tools/subagent-inline");
-			factories.push(integration.createCodexSubagentInlineExtension({ parentSessionManager: options.parentSession }));
-		} catch (cause) {
-			throw new Error("openAIIdentity requires @oai404iao/pi-codex-minimal-tools/subagent-inline", { cause });
+			import.meta.resolve("@oai404iao/pi-codex-minimal-tools/subagent-inline");
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ERR_MODULE_NOT_FOUND")) throw error;
+			if (openAIIdentity) throw error;
+			available = false;
 		}
+		if (available) {
+			const integration = await import("@oai404iao/pi-codex-minimal-tools/subagent-inline");
+			factories.push(integration.createCodexSubagentInlineExtension({
+				parentSessionManager: options.parentSession, openAIIdentity,
+			}));
+		}
+	} catch (cause) {
+		if (!openAIIdentity) throw cause;
+		throw new Error("openAIIdentity requires @oai404iao/pi-codex-minimal-tools/subagent-inline", { cause });
 	}
 	factories.push(
 		{ name: "pi-subagent-v2", factory: options.hooks },

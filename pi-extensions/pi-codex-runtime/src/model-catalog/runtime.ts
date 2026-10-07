@@ -8,6 +8,7 @@ import { resolveModelProfile } from "./catalog.js";
 import { requestConfigurationDiagnostics } from "./request-diagnostics.js";
 import { endpointDeclares, type EndpointCapability } from "../endpoint-config.js";
 import { endpointWasRejected } from "../endpoint-state.js";
+import { sessionFastMode } from "../fast-mode-state.js";
 import type {
 	ModelIdentityLike,
 	ResolvedModelProfile,
@@ -134,6 +135,7 @@ export function applyEndpointPolicy(
 	resolved: ResolvedCodexModelSettings, model: ModelIdentityLike | undefined, sessionId?: string,
 ): ResolvedCodexModelSettings {
 	const settings = { ...resolved, requestDiagnostics: [...resolved.requestDiagnostics] };
+	settings.fastMode = sessionFastMode(sessionId, settings.fastMode);
 	const allows = (capability: EndpointCapability): boolean => {
 		if (endpointDeclares(settings.endpoint_config, model ?? {}, capability)
 			&& !endpointWasRejected(model ?? {}, sessionId, capability)) return true;

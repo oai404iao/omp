@@ -200,7 +200,10 @@ See [`config.schema.json`](config.schema.json) and
 `maxDepth:0` disables spawning without removing communication tools.
 `openAIIdentity` independently adds the optional Codex identity lifecycle for
 OpenAI Responses/virtual models; it does not install Codex tools or change
-provider authentication. A missing optional adapter fails before model execution.
+provider authentication. When identity is required, a missing optional adapter
+fails before model execution. When the Codex adapter is installed, children also
+follow the main session's Fast mode for subsequent requests, independently of
+`openAIIdentity` and `inheritExtensions`, including through non-Responses parents.
 `/subagents` displays the catalog, tree and active-run count.
 
 ## Breaking migration

@@ -44,7 +44,10 @@ The global
 without replacing the selected model profile. Likewise,
 `config.json.webSocketEnabled:false` forces SSE and disables WebSocket prewarm
 without changing that profile.
-`./subagent-inline` supplies the existing SDK identity integration.
+`./subagent-inline` supplies the SDK identity integration and session Fast
+inheritance. Its `openAIIdentity:false` option disables wire identity without
+disabling Fast inheritance. `config.json.fastMode` is a new-session default;
+runtime changes are persisted as non-context session entries, not config writes.
 `./internal/*` is implementation wiring, not a stable public API.
 
 Broker composition requires ABI v1 and matching runtime package versions.

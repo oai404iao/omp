@@ -30,6 +30,12 @@ on the original model, or navigate before the checkpoint. Other third-party
 Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
 `apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,
 including `/codex-minimal-tools` and `/fast`. Unknown models remain native.
+`config.json.fastMode` supplies the default for new sessions. `/fast [on|off|status]`
+changes only the current session and never rewrites that default. Selections
+survive resume and `/reload`, follow the active session branch, and are copied
+into forks/clones. Subagents follow the main agent's current selection on their
+next request, including followups; requests already sent are unchanged. Models
+without Fast support remain unaffected. Edit the config to change the default.
 Pi supplies all descriptors; the extension does not register replacement models.
 `openai/gpt-6.1-sol` inherits the `openai/gpt-5.6-sol` default profile:
 Lite, auto WS/SSE, prewarm, native Responses compaction, custom patch and Fast

@@ -9,10 +9,10 @@ import {
 } from "@oai404iao/pi-codex-runtime/internal/capabilities";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import type { ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
+import { sessionFastMode, setSessionFastMode } from "@oai404iao/pi-codex-runtime/internal/fast-mode-state";
 import {
 	configPath,
 	loadSettings,
-	updateConfig,
 	type CodexMinimalToolsSettings,
 } from "@oai404iao/pi-codex-runtime/internal/settings";
 
@@ -45,11 +45,12 @@ export function applyFastModeServiceTier<T extends Record<string, unknown>>(
 function fastModeLines(ctx: ExtensionContext): string[] {
 	const settings = loadSettings(ctx.cwd);
 	const model = ctx.model as ModelLike | undefined;
-	const modelSettings = loadModelSettings(model, ctx.cwd, settings);
+	const modelSettings = loadModelSettings(model, ctx.cwd, settings, ctx.sessionManager?.getSessionId?.());
 	const activeTier = resolveFastModeServiceTier(modelSettings, model);
 	return [
 		"Codex Fast mode",
-		`enabled: ${settings.fastMode}`,
+		`enabled: ${modelSettings.fastMode}`,
+		`config default: ${settings.fastMode}`,
 		`service tier: ${modelSettings.fastServiceTier ?? "(unsupported)"}`,
 		`model: ${modelKey(model)}`,
 		`active for current model: ${Boolean(activeTier)}`,
@@ -60,7 +61,7 @@ function fastModeLines(ctx: ExtensionContext): string[] {
 export function syncFastModeStatus(ctx: ExtensionContext): void {
 	const settings = loadSettings(ctx.cwd);
 	const model = ctx.model as ModelLike | undefined;
-	const tier = resolveFastModeServiceTier(loadModelSettings(model, ctx.cwd, settings), model);
+	const tier = resolveFastModeServiceTier(loadModelSettings(model, ctx.cwd, settings, ctx.sessionManager?.getSessionId?.()), model);
 	const ui = ctx.ui as ExtensionContext["ui"] | undefined;
 	ui?.setStatus?.(
 		FAST_MODE_STATUS_KEY,
@@ -75,21 +76,21 @@ function showFastModeStatus(ctx: ExtensionCommandContext): void {
 
 export function registerFastMode(pi: ExtensionAPI): void {
 	pi.registerCommand("fast", {
-		description: "Toggle model-profile Fast mode. Usage: /fast [on|off|status]",
+		description: "Toggle Fast mode for this session without changing the config default. Usage: /fast [on|off|status]",
 		handler: async (args: string, ctx) => {
 			const command = args.trim().toLowerCase().split(/\s+/, 1)[0] ?? "";
 			const settings = loadSettings(ctx.cwd);
-			let patch: Partial<CodexMinimalToolsSettings> | undefined;
+			let enabled: boolean;
 
 			switch (command) {
 				case "":
-					patch = { fastMode: !settings.fastMode };
+					enabled = !sessionFastMode(ctx.sessionManager.getSessionId(), settings.fastMode);
 					break;
 				case "on":
-					patch = { fastMode: true };
+					enabled = true;
 					break;
 				case "off":
-					patch = { fastMode: false };
+					enabled = false;
 					break;
 				case "status":
 					showFastModeStatus(ctx);
@@ -100,7 +101,7 @@ export function registerFastMode(pi: ExtensionAPI): void {
 			}
 
 			try {
-				updateConfig(patch);
+				setSessionFastMode(pi, ctx.sessionManager, enabled);
 				showFastModeStatus(ctx);
 			} catch (error) {
 				ctx.ui.notify(
@@ -115,6 +116,9 @@ export function registerFastMode(pi: ExtensionAPI): void {
 		syncFastModeStatus(ctx);
 	});
 	pi.on("model_select", async (_event, ctx) => {
+		syncFastModeStatus(ctx);
+	});
+	pi.on("session_tree", async (_event, ctx) => {
 		syncFastModeStatus(ctx);
 	});
 	pi.on("session_shutdown", async (_event, ctx) => {

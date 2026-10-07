@@ -1,4 +1,5 @@
 import { claimSessionFeature } from "./session-claims.js";
+import { installFastModeLifecycle } from "./fast-mode-state.js";
 import {
 	SessionManager,
 	type ExtensionAPI,
@@ -325,17 +326,18 @@ export function installCodexIdentityLifecycle(pi: ExtensionAPI): void {
 	});
 }
 
-/** Named inline extension used by pi-subagent when normal inheritance is off. */
+/** Session identity and Fast inheritance, including when normal extension inheritance is off. */
 export function createCodexSubagentInlineExtension(
-	options: { parentSessionManager?: CodexIdentitySessionView } = {},
+	options: { parentSessionManager?: CodexIdentitySessionView; openAIIdentity?: boolean } = {},
 ): InlineExtension {
-	if (options.parentSessionManager) {
+	if (options.parentSessionManager && options.openAIIdentity !== false) {
 		ensureCodexSessionIdentity(options.parentSessionManager);
 	}
 	return {
 		name: "pi-codex-subagent-identity",
 		factory: (pi) => {
-			installCodexIdentityLifecycle(pi);
+			installFastModeLifecycle(pi, options.parentSessionManager);
+			if (options.openAIIdentity !== false) installCodexIdentityLifecycle(pi);
 		},
 	};
 }

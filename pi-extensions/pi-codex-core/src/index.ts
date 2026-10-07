@@ -125,7 +125,7 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 		`Responses WebSocket enabled: ${settings.webSocketEnabled}`,
 		`responses transport: ${modelSettings.openaiTransport}`,
 		`Responses WebSocket prewarm: ${modelSettings.openaiWebSocketPrewarm}`,
-		`fast mode: ${settings.fastMode ? modelSettings.fastServiceTier ?? "on (unsupported)" : "off"}${fastModeTier ? ", active" : ""}`,
+		`fast mode: ${modelSettings.fastMode ? modelSettings.fastServiceTier ?? "on (unsupported)" : "off"}${fastModeTier ? ", active" : ""}`,
 		`compaction: ${modelSettings.compactionMode}`,
 		`request profile: ${requestProfile.responsesMode}/${requestProfile.patchTransport}, summary=${requestProfile.reasoningSummary}, system=${requestProfile.systemPromptPlacement}, hosted=${requestProfile.supportsHostedTools}, parallel=${requestProfile.supportsParallelTools}`,
 		`web search: ${modelSettings.webSearchImplementation ?? "off"}`,
