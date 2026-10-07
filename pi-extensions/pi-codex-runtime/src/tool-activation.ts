@@ -9,6 +9,7 @@ import { installCodexIdentityLifecycle } from "./codex-identity-extension.js";
 import { loadModelSettings } from "./model-catalog/runtime.js";
 import { loadSettings, settingsDiagnostics } from "./settings.js";
 import { clearEndpointFailures, knownEndpointModel, watchEndpointFailures } from "./endpoint-state.js";
+import { installFastModeLifecycle } from "./fast-mode-state.js";
 
 function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_patch" | "web_search" | "image_generation"): boolean {
 	if (!broker.tools.get(name)?.registered) return false;
@@ -48,6 +49,7 @@ export function addPackageTool(
 export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	const broker = getCodexBroker(pi);
 	if (!broker.claim("activation")) return broker;
+	installFastModeLifecycle(pi);
 	installCodexIdentityLifecycle(pi);
 	const suppressed = new Map<NativeMutationToolName, number>();
 	const warned = new Set<string>();

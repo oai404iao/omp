@@ -65,7 +65,7 @@
     },
     "fastMode": {
       "type": "boolean",
-      "description": "Global user toggle for the Fast service tier declared by the active model profile.",
+      "description": "Fast mode default for new sessions. /fast changes only the current session; subagents follow the main agent. Only profiles declaring a Fast service tier are affected.",
       "default": false
     },
     "imageGeneration": {

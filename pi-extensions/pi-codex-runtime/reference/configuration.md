@@ -69,7 +69,7 @@ Restart Pi or run `/reload`.
 | --- | --- |
 | `/codex-minimal-tools` | Show the active model profile and effective capabilities. |
 | `/codex-minimal-tools:doctor` | Show config/catalog diagnostics. |
-| `/fast [on\|off\|status]` | Toggle the active profile's Fast service tier. |
+| `/fast [on\|off\|status]` | Toggle Fast for this session without changing the config default; status shows both values. |
 | `/image-gen <prompt> [@reference.png]` | Run background image generation or editing. |
 
 ## Two Configuration Files
@@ -120,7 +120,7 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `glyphStyle` | Use `unicode` or `ascii` UI glyphs. |
 | `autoEnable` | Add supported package tools automatically. |
 | `webSocketEnabled` | Global Responses WebSocket master switch. Set `false` to force SSE and disable WebSocket prewarm for every model profile. |
-| `fastMode` | Global user toggle; only profiles with `fast` are affected. |
+| `fastMode` | Default for new sessions; `/fast` saves a session-only selection. Subagents follow the main agent on subsequent requests. Only profiles with `fast` are affected. |
 | `imageGeneration` | Global master switch. Set `false` to omit image tools, `/image-gen`, presentation, hosted injection, standalone requests, and direct fallback without changing other model behavior. |
 | `imageOutputDir` | Generated-image output directory. Relative paths resolve from the workspace root. |
 | `imageModel` | Image model used by standalone/hosted image requests and direct fallback. |

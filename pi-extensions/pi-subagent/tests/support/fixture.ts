@@ -75,6 +75,7 @@ export async function fixture(t: TestContext, options: {
 	extension?: string;
 	persistent?: boolean;
 	trusted?: boolean;
+	modelApi?: Model<any>["api"];
 } = {}) {
 	const root = tempRoot(t);
 	const agentDir = join(root, "agent");
@@ -91,7 +92,7 @@ export async function fixture(t: TestContext, options: {
 	const modelRuntime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null });
 	const requests: Context[] = [];
 	modelRuntime.registerProvider("scripted", {
-		baseUrl: "http://scripted.invalid", apiKey: "test", api: "openai-responses",
+		baseUrl: "http://scripted.invalid", apiKey: "test", api: options.modelApi ?? "openai-responses",
 		models: [{
 			id: "echo", name: "Echo", reasoning: false, input: ["text"],
 			cost: usage.cost, contextWindow: 100000, maxTokens: 1000,
