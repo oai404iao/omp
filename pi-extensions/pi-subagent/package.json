@@ -41,12 +41,12 @@
     "@oai404iao/pi-codex-minimal-tools": "4.1.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.99.1",
-    "@earendil-works/pi-ai": "0.99.1",
-    "@earendil-works/pi-coding-agent": "0.99.1",
-    "@earendil-works/pi-tui": "0.99.1",
-    "@types/node": "^26.2.0",
-    "tsx": "^4.20.6",
+    "@earendil-works/pi-agent-core": "1.0.2",
+    "@earendil-works/pi-ai": "1.0.2",
+    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@earendil-works/pi-tui": "1.0.2",
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
     "typebox": "^1.1.24",
     "typescript": "^7.0.2"
   },
