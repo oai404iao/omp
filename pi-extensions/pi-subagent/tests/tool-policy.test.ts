@@ -11,9 +11,9 @@ test("mutation group grants a hard ceiling for native and extension implementati
 	assert.deepEqual(
 		buildToolCeiling({
 			requested: ["read", MUTATION_TOOL_GROUP],
-			mandatory: ["report"],
+			mandatory: ["send_message"],
 		}),
-		["read", "apply_patch", "edit", "write", "report"],
+		["read", "apply_patch", "edit", "write", "send_message"],
 	);
 });
 
@@ -51,12 +51,12 @@ test("explicit tools cannot reactivate an extension-disabled tool", () => {
 test("an omitted allowlist preserves extension choices while applying runtime controls", () => {
 	const policy = resolveToolPolicy({
 		requested: undefined,
-		mandatory: ["report"],
+		mandatory: ["send_message"],
 		denied: ["internal_only"],
-		registered: ["read", "apply_patch", "report", "internal_only"],
+		registered: ["read", "apply_patch", "send_message", "internal_only"],
 		active: ["read", "apply_patch", "internal_only"],
 	});
-	assert.deepEqual(policy.activeTools, ["read", "apply_patch", "report"]);
+	assert.deepEqual(policy.activeTools, ["read", "apply_patch", "send_message"]);
 });
 
 test("unknown logical tool groups fail loud", () => {
@@ -69,12 +69,12 @@ test("unknown logical tool groups fail loud", () => {
 test("requested callable-only tools do not become direct declarations", () => {
 	const policy = resolveToolPolicy({
 		requested: ["codemode", "deferred_tool"],
-		registered: ["codemode", "deferred_tool", "report"],
+		registered: ["codemode", "deferred_tool", "send_message"],
 		active: ["codemode"],
 		callable: ["deferred_tool"],
-		mandatory: ["report"],
+		mandatory: ["send_message"],
 	});
-	assert.deepEqual(policy.activeTools, ["codemode", "report"]);
+	assert.deepEqual(policy.activeTools, ["codemode", "send_message"]);
 	assert.deepEqual(policy.resolvedRequestedTools, ["codemode", "deferred_tool"]);
 });
 

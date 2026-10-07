@@ -1,8 +1,37 @@
 # Codex source map
 
-This map points from protocol conclusions to the source files used to verify
-them. Paths are relative to the analyzed `openai/codex` checkout at commit
-`eb9dceba1a2e658142a456c5898836774835616b` dated August 12, 2026.
+Current tracking baseline: `551bd409ebf03fc6ea0dcad0915368d8a493f012`
+(remote main verified October 6, 2026). The multi-agent v2 section below uses
+that revision. The Responses protocol conclusions in subsequent sections retain
+their analyzed `eb9dceba1a2e658142a456c5898836774835616b` baseline from
+August 12, 2026 unless explicitly overridden. A tracking update is not a blanket
+reverification of historical protocol claims or source fingerprints.
+
+## Multi-agent v2
+
+Owned by `pi-subagent`, not by the Responses transport runtime. Source hashes and
+licenses are recorded in
+[`openai-codex-551bd409-multi-agent-v2.json`](../../pi-subagent/provenance/openai-codex-551bd409-multi-agent-v2.json).
+
+| Upstream source | Local adaptation |
+| --- | --- |
+| `codex-rs/core/src/tools/handlers/multi_agents_spec.rs` | Six tools in `pi-subagent/src/schemas.ts`; plaintext parameters, no encrypted annotations. |
+| `codex-rs/core/src/tools/handlers/multi_agents_v2/message_tool.rs` | Separate message and task intents, same-tree communication. |
+| `codex-rs/core/src/tools/handlers/multi_agents_v2/wait.rs` | Caller-mailbox activity wait, no returned completion content. |
+| `codex-rs/core/src/agent/control/api.rs` | Agent control and non-root followup semantics. |
+| `codex-rs/core/src/agent/control/completion.rs` | Queue-only structural-parent results. |
+| `codex-rs/core/src/agent/control/execution.rs` | Tree-wide active execution admission. |
+| `codex-rs/core/src/agent/control/residency.rs` | Identity independent of loaded runtime residency. |
+| `codex-rs/core/src/agent/control/spawn.rs` | Reusable agent materialization; fresh child attribution at forks. |
+| `codex-rs/core/src/session/input_queue.rs` | Delivery at safe turn boundaries. |
+| `codex-rs/protocol/src/agent_path.rs` | Canonical tree paths and caller-relative descendants. |
+
+The design was initially reviewed at `594283af5c0a4c99cdede91b0d7951524b2535fb`.
+The tracked update changes fork/recovery attribution, not the approved six-tool
+contract. Pi's new store does not copy run-control attribution into child
+conversation forks. Historical grammar/reserved-tool provenance remains intact.
+
+## Historical Responses baselines
 
 The local executor behavior in [apply-patch behavior](../../pi-codex-core/reference/apply-patch-behavior.md)
 retains an explicitly documented earlier execution baseline.

@@ -1,16 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { AgentScope, RuntimeMode, SubagentSettings } from "./types.ts";
+import type { AgentScope, SubagentSettings } from "./types.ts";
 
 export const CONFIG_FILE_NAME = "subagent.json";
 
 export const DEFAULT_SETTINGS: Readonly<SubagentSettings> = {
 	agentScope: "user",
 	maxDepth: 3,
-	runtimeMode: "background",
-	maxConcurrentBackgroundRuns: 4,
-	maxIdleRuntimes: 0,
+	maxConcurrentAgents: 4,
 	inheritExtensions: false,
 	openAIIdentity: false,
 	maxOutputBytes: 50 * 1024,
@@ -20,9 +18,7 @@ const CONFIG_KEYS = new Set([
 	"$schema",
 	"agentScope",
 	"maxDepth",
-	"runtimeMode",
-	"maxConcurrentBackgroundRuns",
-	"maxIdleRuntimes",
+	"maxConcurrentAgents",
 	"inheritExtensions",
 	"openAIIdentity",
 	"maxOutputBytes",
@@ -79,11 +75,6 @@ function parseAgentScope(value: unknown, source: string): AgentScope {
 	throw new Error(`${source}: agentScope must be "user", "project", or "both"`);
 }
 
-function parseRuntimeMode(value: unknown, source: string): RuntimeMode {
-	if (value === "foreground" || value === "background") return value;
-	throw new Error(`${source}: runtimeMode must be "foreground" or "background"`);
-}
-
 function parseBoolean(value: unknown, key: string, source: string): boolean {
 	if (typeof value === "boolean") return value;
 	throw new Error(`${source}: ${key} must be a boolean`);
@@ -125,31 +116,15 @@ function applyConfig(
 						minimum: 0,
 						maximum: Number.MAX_SAFE_INTEGER,
 					}),
-		runtimeMode:
-			config.runtimeMode === undefined
-				? settings.runtimeMode
-				: parseRuntimeMode(config.runtimeMode, source),
-		maxConcurrentBackgroundRuns:
-			config.maxConcurrentBackgroundRuns === undefined
-				? settings.maxConcurrentBackgroundRuns
+		maxConcurrentAgents:
+			config.maxConcurrentAgents === undefined
+				? settings.maxConcurrentAgents
 				: parseInteger(
-						config.maxConcurrentBackgroundRuns,
-						"maxConcurrentBackgroundRuns",
+						config.maxConcurrentAgents,
+						"maxConcurrentAgents",
 						source,
 						{
 							minimum: 1,
-							maximum: Number.MAX_SAFE_INTEGER,
-						},
-					),
-		maxIdleRuntimes:
-			config.maxIdleRuntimes === undefined
-				? settings.maxIdleRuntimes
-				: parseInteger(
-						config.maxIdleRuntimes,
-						"maxIdleRuntimes",
-						source,
-						{
-							minimum: 0,
 							maximum: Number.MAX_SAFE_INTEGER,
 						},
 					),

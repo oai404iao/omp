@@ -75,7 +75,7 @@ Git history retain the port's package-level license and modification notices.
 ## DeepSeek Harness design reference
 
 `pi-extensions/pi-subagent` independently implements Pi extension and SDK
-integration while adapting high-level subagent design concepts from the public
+integration. Earlier versions adapted high-level subagent design concepts from the public
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 documentation at revision
 [`4d03472cd098dc48a630e526ca620f4f37f18a0e`](https://github.com/deepseek-ai/deepseek-harness/commit/4d03472cd098dc48a630e526ca620f4f37f18a0e).
@@ -87,3 +87,15 @@ included in the package; its immutable source revision, blob identifiers, and
 SHA-256 checksums are recorded in
 `pi-extensions/pi-subagent/provenance/deepseek-harness-4d03472.json`. See its
 package-level `THIRD_PARTY_NOTICES.md` for the implementation boundary.
+
+## Codex multi-agent v2 design reference
+
+The current `pi-subagent` runtime independently adapts Codex multi-agent v2
+at `551bd409ebf03fc6ea0dcad0915368d8a493f012` (Apache-2.0). It uses six
+plaintext JSON tools, its own TypeScript/Pi SDK implementation and an independent
+control store; no Rust implementation file is copied. The exact source hashes
+and Pi-specific differences are recorded in
+`pi-extensions/pi-subagent/provenance/openai-codex-551bd409-multi-agent-v2.json`.
+The package includes the identical verified Apache license and OpenAI NOTICE
+snapshots. Updating this tracking baseline does not rewrite the historical
+Responses/grammar provenance above.

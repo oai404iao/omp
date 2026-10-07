@@ -33,6 +33,13 @@ The new packages' initial `latest` aliases do not make them stable; use explicit
 See [Codex composition](docs/codex-packages.md) for package boundaries and
 [bootstrap activation](docs/audits/codex-bootstrap-activation.md) for evidence and remaining gates.
 
+`pi-subagent` now uses a breaking, asynchronous Codex multi-agent v2 runtime:
+six plaintext tools, reusable agent trees and context-delivered mailboxes.
+See its [migration guide](pi-extensions/pi-subagent/README.md#breaking-migration)
+before updating old tool/configuration definitions. The current Codex tracking
+baseline is `551bd409ebf03fc6ea0dcad0915368d8a493f012`; historical protocol
+provenance remains pinned independently.
+
 `external-thinking`, `pi-keep-defaults`, `pi-tree-continue`, and `pi-code-mode`
 have been removed from this repository and future artifact batches. Remove any
 existing installation/configuration and fully restart Pi. Historical npm

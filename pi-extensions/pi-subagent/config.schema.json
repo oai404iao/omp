@@ -1,72 +1,48 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:pi:pi-subagent:config",
-  "title": "pi-subagent configuration",
-  "description": "Global or project-local configuration for the pi-subagent extension.",
+  "title": "pi-subagent v2 configuration",
+  "description": "One asynchronous agent tree. Old scheduling and mailbox-protocol settings are not supported.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "$schema": {
-      "type": "string",
-      "description": "Path or URL to this schema.",
-      "default": "./config.schema.json"
-    },
+    "$schema": { "type": "string" },
     "agentScope": {
       "type": "string",
-      "enum": [
-        "user",
-        "project",
-        "both"
-      ],
-      "description": "Select user definitions, project definitions, or user definitions followed by project overrides.",
-      "default": "user"
+      "enum": ["user", "project", "both"],
+      "default": "user",
+      "description": "Definition catalog scope. Project definitions require project trust."
     },
     "maxDepth": {
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991,
-      "description": "Absolute delegation depth. A top-level Pi session has depth 0.",
-      "default": 3
+      "default": 3,
+      "description": "Absolute delegation depth. Root is depth zero."
     },
-    "runtimeMode": {
-      "type": "string",
-      "enum": [
-        "foreground",
-        "background"
-      ],
-      "description": "Single execution mode. foreground waits for every child's final answer and exposes no lifecycle tools; background starts continuable mailbox-v2 children that return a readable path plus durable id.",
-      "default": "background"
-    },
-    "maxConcurrentBackgroundRuns": {
+    "maxConcurrentAgents": {
       "type": "integer",
       "minimum": 1,
       "maximum": 9007199254740991,
-      "description": "Maximum number of continuable subagent turns that may execute concurrently within one extension runtime.",
-      "default": 4
-    },
-    "maxIdleRuntimes": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991,
-      "description": "Maximum settled continuable child runtimes retained in the process-wide idle LRU. Zero unloads immediately.",
-      "default": 0
+      "default": 4,
+      "description": "Maximum active child runs across the entire root tree. Admission fails immediately at capacity; root does not count."
     },
     "inheritExtensions": {
       "type": "boolean",
-      "description": "Load the parent's other Pi extensions in child runtimes. pi-subagent itself is filtered out and explicit agent tool ceilings still apply.",
-      "default": false
+      "default": false,
+      "description": "Load other Pi extensions in children, subject to project trust and tool ceilings. pi-subagent itself is excluded."
     },
     "openAIIdentity": {
       "type": "boolean",
-      "description": "Inject the pi-codex-minimal-tools identity lifecycle as a named inline extension for OpenAI Responses child models.",
-      "default": false
+      "default": false,
+      "description": "Inject the optional Codex identity lifecycle in OpenAI Responses and virtual children."
     },
     "maxOutputBytes": {
       "type": "integer",
       "minimum": 1024,
       "maximum": 1048576,
-      "description": "Maximum child output inserted into a parent tool result, report, or completion update.",
-      "default": 51200
+      "default": 51200,
+      "description": "Maximum completion body size in UTF-8 bytes, additionally bounded to 128 KiB for mailbox delivery. Full output stays in the child session."
     }
   }
 }

@@ -28,9 +28,7 @@ test("global and trusted project settings merge", () => {
 		join(agentDir, "subagent.json"),
 		JSON.stringify({
 			maxDepth: 5,
-			runtimeMode: "foreground",
-			maxConcurrentBackgroundRuns: 7,
-			maxIdleRuntimes: 5,
+			maxConcurrentAgents: 7,
 			inheritExtensions: true,
 			openAIIdentity: true,
 		}),
@@ -40,8 +38,7 @@ test("global and trusted project settings merge", () => {
 		JSON.stringify({
 			maxDepth: 2,
 			agentScope: "both",
-			maxConcurrentBackgroundRuns: 2,
-			maxIdleRuntimes: 1,
+			maxConcurrentAgents: 2,
 		}),
 	);
 
@@ -50,19 +47,15 @@ test("global and trusted project settings merge", () => {
 	assert.equal(loaded.settings.agentScope, "both");
 	assert.equal(loaded.settings.inheritExtensions, true);
 	assert.equal(loaded.settings.openAIIdentity, true);
-	assert.equal(loaded.settings.runtimeMode, "foreground");
-	assert.equal(loaded.settings.maxConcurrentBackgroundRuns, 2);
-	assert.equal(loaded.settings.maxIdleRuntimes, 1);
+	assert.equal(loaded.settings.maxConcurrentAgents, 2);
 	assert.equal(loaded.sources.length, 2);
 	assert.deepEqual(Object.keys(loaded.settings).sort(), [
 		"agentScope",
 		"inheritExtensions",
-		"maxConcurrentBackgroundRuns",
+		"maxConcurrentAgents",
 		"maxDepth",
-		"maxIdleRuntimes",
 		"maxOutputBytes",
 		"openAIIdentity",
-		"runtimeMode",
 	]);
 });
 
@@ -86,9 +79,7 @@ test("invalid settings fail loud", () => {
 	const configPath = join(agentDir, "subagent.json");
 	for (const [body, pattern] of [
 		[{ maxDepth: -1 }, /maxDepth must be a safe integer/],
-		[{ maxConcurrentBackgroundRuns: 0 }, /maxConcurrentBackgroundRuns must be a safe integer/],
-		[{ maxIdleRuntimes: -1 }, /maxIdleRuntimes must be a safe integer/],
-		[{ runtimeMode: "sometimes" }, /runtimeMode must be "foreground" or "background"/],
+		[{ maxConcurrentAgents: 0 }, /maxConcurrentAgents must be a safe integer/],
 		[{ agentScope: "everyone" }, /agentScope must be "user", "project", or "both"/],
 		[{ maxOutputBytes: 10 }, /maxOutputBytes must be a safe integer/],
 		[{ inheritExtensions: "yes" }, /inheritExtensions must be a boolean/],
@@ -112,6 +103,9 @@ test("retired settings and the removed report delivery key fail loud", () => {
 		"backgroundProtocol",
 		"syncBundledAgents",
 		"reportDelivery",
+		"runtimeMode",
+		"maxConcurrentBackgroundRuns",
+		"maxIdleRuntimes",
 	]) {
 		writeFileSync(configPath, JSON.stringify({ [retired]: true }));
 		assert.throws(
@@ -127,10 +121,10 @@ test("configuration is never rewritten by the extension", () => {
 	const agentDir = join(root, "agent");
 	mkdirSync(agentDir, { recursive: true });
 	const configPath = join(agentDir, "subagent.json");
-	const original = `${JSON.stringify({ runtimeMode: "foreground", maxDepth: 2 }, null, 2)}\n`;
+	const original = `${JSON.stringify({ maxConcurrentAgents: 2, maxDepth: 2 }, null, 2)}\n`;
 	writeFileSync(configPath, original);
 	const loaded = loadSettings({ cwd: root, projectTrusted: false, agentDir });
-	assert.equal(loaded.settings.runtimeMode, "foreground");
+	assert.equal(loaded.settings.maxConcurrentAgents, 2);
 	assert.equal(loaded.settings.maxDepth, 2);
 	assert.equal(readFileSync(configPath, "utf8"), original);
 });

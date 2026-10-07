@@ -1,0 +1,70 @@
+{
+  "upstream": {
+    "repository": "https://github.com/openai/codex",
+    "revision": "551bd409ebf03fc6ea0dcad0915368d8a493f012",
+    "commitDate": "2026-10-06T15:50:27Z",
+    "verifiedRemoteRef": "refs/heads/main",
+    "initialDesignRevision": "594283af5c0a4c99cdede91b0d7951524b2535fb",
+    "license": "Apache-2.0"
+  },
+  "scope": "Independently implemented Pi SDK adaptation of Codex multi-agent v2 tool contracts and runtime concepts. No upstream Rust implementation is copied.",
+  "rawUrlTemplate": "https://raw.githubusercontent.com/openai/codex/551bd409ebf03fc6ea0dcad0915368d8a493f012/{path}",
+  "differences": [
+    "Plaintext JSON messages; no encrypted schema annotations or encrypted argument plumbing.",
+    "Optional Markdown agent roles; no per-call model or reasoning overrides.",
+    "Only completed canonical parent turns are inherited.",
+    "Independent atomic control store and transcript-based message receipts.",
+    "list_agents includes registered unloaded agents on the current branch.",
+    "No persistent sleep/wakeup service or provider-specific tool namespace."
+  ],
+  "files": {
+    "LICENSE": {
+      "blob": "4606e72e042564097e8780d66c1d4dcb611869bd",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+    },
+    "NOTICE": {
+      "blob": "2805899d56d0332d175cfc613c67d45d6f006db7",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+    },
+    "codex-rs/core/src/tools/handlers/multi_agents_spec.rs": {
+      "blob": "edc9467b4d02cc023d8961373637116cf8ba6f6f",
+      "sha256": "e24132911b9da01e84691dd8e3ae1179f8b9a53b6653adc703dee2250abc9d0b"
+    },
+    "codex-rs/core/src/tools/handlers/multi_agents_v2/message_tool.rs": {
+      "blob": "26d329fa0eb4536513798a8b296a9c90a4e9cc37",
+      "sha256": "99eccf8315869c65e96b570c6d6c061623195a100cbb4c8e9d1e5b08eb36b7dd"
+    },
+    "codex-rs/core/src/tools/handlers/multi_agents_v2/wait.rs": {
+      "blob": "83458d1891c70773e56371ae2f29c012b1098cce",
+      "sha256": "6ea6b484878aa9ee812a860cdc4147124c0453c6f7bc3f9a43eb0b50e60d993e"
+    },
+    "codex-rs/core/src/agent/control/api.rs": {
+      "blob": "ef0a6994867fb212128e45493167fa4363cbfd2f",
+      "sha256": "59ab1e42d7a7d6c97b017072fe2267f5c5cd9f5038e8688a020518d0083ff5ef"
+    },
+    "codex-rs/core/src/agent/control/completion.rs": {
+      "blob": "48a468ea21dc901bd74570f853ccdf5565486cb3",
+      "sha256": "2439fc330cf0a4ec16bc4b83d8466b611923e809f55d873626f8c3b2253f97cd"
+    },
+    "codex-rs/core/src/agent/control/execution.rs": {
+      "blob": "adae03b8ec5ba7e0d9a2a4cbaac6c993952903ea",
+      "sha256": "128b4e565f0bf56ea765959fa2bab8411c28cfe60f289ed94d4bfdac73fba7eb"
+    },
+    "codex-rs/core/src/agent/control/residency.rs": {
+      "blob": "7f2ad89af891e710fbc891f4aa45cbc99754f27b",
+      "sha256": "d27f80177d5d48090348bbe5f39b8b35820c8f53a9e0f8be7433c8d5fdec6877"
+    },
+    "codex-rs/core/src/agent/control/spawn.rs": {
+      "blob": "c5a17767da2311532d3610b5d9da5d9cc2052add",
+      "sha256": "4d2c49d93e8b057c91d2fa2758c406277c38d27bf1f8c2631019d89af7b5800d"
+    },
+    "codex-rs/core/src/session/input_queue.rs": {
+      "blob": "de46d6a1d641a60d3556891620143055be7c97a8",
+      "sha256": "afb878f48e95186419c6c218f347a01919069ecdaf2973fa54dc192e8cea062b"
+    },
+    "codex-rs/protocol/src/agent_path.rs": {
+      "blob": "c0ad8b734a94baedc96e93186ce6d8cc3d588ce3",
+      "sha256": "18ddefda817a89b299cfbec14ea8e95ff4248e9fe5aca616656f39f7d5cfb045"
+    }
+  }
+}

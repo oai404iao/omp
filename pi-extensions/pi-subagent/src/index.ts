@@ -1,476 +1,84 @@
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_SETTINGS, loadSettings } from "./config.ts";
-import {
-	REPORT_CUSTOM_TYPE,
-	SubagentCoordinator,
-	type DelegationInput,
-} from "./coordinator.ts";
-import {
-	formatAgentCatalog,
-	formatAgentToolCatalog,
-	type AgentDiscoveryResult,
-} from "./agents.ts";
-import {
-	FollowupTaskParameters,
-	InterruptParameters,
-	ListAgentsParameters,
-	SendMessageParameters,
-	WaitAgentParameters,
-	delegationParameters,
-	forkDelegationParameters,
-} from "./schemas.ts";
-import { renderDelegationCall, renderDelegationResult, renderParentMessage } from "./render.ts";
-import type {
-	ControlDetails,
-	DelegationDetails,
-	ParentMessageDetails,
-	SubagentSettings,
-} from "./types.ts";
+import type { ExtensionAPI, ExtensionContext, SessionManager } from "@earendil-works/pi-coding-agent";
+import { loadSettings } from "./config.ts";
+import { SubagentCoordinator } from "./coordinator.ts";
+import { formatAgentCatalog } from "./agents.ts";
+import { createAgentTools } from "./tools.ts";
+import { MESSAGE_CUSTOM_TYPE } from "./store.ts";
+import { renderAgentMessage } from "./render.ts";
 
-const SOURCE_DIR = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_ROOT = dirname(SOURCE_DIR);
-
-function textContent(content: Array<{ type: string; text?: string }>): string {
-	return content.find((item) => item.type === "text")?.text ?? "";
-}
-
-function disableOwnedTools(
-	pi: ExtensionAPI,
-	registeredParameters: ReadonlyMap<string, unknown>,
-): void {
-	const ownedNames = new Set(
-		pi
-			.getAllTools()
-			.filter(
-				(tool) =>
-					registeredParameters.has(tool.name) &&
-					tool.parameters === registeredParameters.get(tool.name) &&
-					tool.sourceInfo.source !== "sdk",
-			)
-			.map((tool) => tool.name),
-	);
-	if (ownedNames.size === 0) return;
-	const activeTools = pi.getActiveTools();
-	const nextActiveTools = activeTools.filter((name) => !ownedNames.has(name));
-	if (nextActiveTools.length !== activeTools.length) pi.setActiveTools(nextActiveTools);
-}
-
-function assertBackgroundControlsEnabled(settings: SubagentSettings, toolName: string): void {
-	if (settings.runtimeMode === "foreground") {
-		throw new Error(
-			`tool "${toolName}" is unavailable in foreground-only mode (runtimeMode: "foreground")`,
-		);
-	}
-}
-
-function modeDescription(settings: SubagentSettings): string {
-	return settings.runtimeMode === "foreground"
-		? "Delegate a complete task to a named child path with selectable completed-turn context. " +
-				"This foreground-only tool waits for the child and returns its final answer. " +
-				"Independent sibling calls may still execute in parallel."
-		: "Delegate a complete task to a named child path with selectable completed-turn context. " +
-				"Background mode is continuable and returns a readable path plus durable id; use send_message to enqueue, followup_task to start, and wait_agent for quiet completions. " +
-				"Start independent children together in one assistant message.";
-}
-
-function registerDelegationTool(
-	pi: ExtensionAPI,
-	coordinator: SubagentCoordinator,
-	settings: SubagentSettings,
-	agentDiscovery?: AgentDiscoveryResult,
-): unknown {
-	const foregroundOnly = settings.runtimeMode === "foreground";
-	const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
-	const promptGuidelines = (foregroundOnly
-		? [
-				"Use subagent for focused independent work and give it a complete standalone prompt.",
-				"This subagent tool is foreground-only: every call waits for and returns the child's final answer.",
-				"Independent subagent calls can still be issued together in one assistant message and execute in parallel.",
-			]
-		: [
-				"Use subagent for focused independent work and give it a complete standalone prompt.",
-				"Call subagent multiple times in one assistant message when delegations are independent.",
-				"Every child is durable: continue parent work, then use send_message plus followup_task to give it more work and wait_agent for its completion updates.",
-			]).concat([
-					"Set task_name when a stable readable path will help later control calls; otherwise a name is generated from description.",
-					"Use fresh context by default and request all_completed or last_n_completed only when parent history materially helps.",
-				]);
-	const parameters = delegationParameters(agentNames);
-	pi.registerTool({
-		name: "subagent",
-		exposure: "model-only",
-		label: "Subagent",
-		description: modeDescription(settings) + formatAgentToolCatalog(agentDiscovery?.agents ?? []),
-		promptSnippet: foregroundOnly
-			? "Run focused independent work in foreground child agents"
-			: "Delegate focused work to named child agents",
-		promptGuidelines,
-		executionMode: "parallel",
-		parameters,
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const parent = await coordinator.parentFromContext(ctx);
-			const outcome = await coordinator.delegate(
-				parent,
-				"spawn",
-				params,
-				settings,
-				signal,
-				(details) =>
-					onUpdate?.({
-						content: [{ type: "text", text: details.trace.at(-1)?.text ?? `${details.agent}: ${details.status}` }],
-						details,
-					}),
-				agentDiscovery,
-			);
-			return coordinator.outcomeToolResult(outcome);
-		},
-		renderCall(args, theme) {
-			return renderDelegationCall(args, theme, "spawn", settings.runtimeMode);
-		},
-		renderResult(result, options, theme) {
-			return renderDelegationResult(
-				result.details as DelegationDetails | undefined,
-				textContent(result.content),
-				options,
-				theme,
-			);
-		},
-	});
-	return parameters;
-}
-
-function registerForkDelegationTool(
-	pi: ExtensionAPI,
-	coordinator: SubagentCoordinator,
-	settings: SubagentSettings,
-	agentDiscovery?: AgentDiscoveryResult,
-): unknown {
-	const agentNames = agentDiscovery?.agents.map((agent) => agent.name);
-	const parameters = forkDelegationParameters(agentNames);
-	pi.registerTool({
-		name: "subagent_fork",
-		exposure: "model-only",
-		label: "Subagent Fork",
-		description:
-			"Delegate a task to a child seeded with all completed turns in this conversation. " +
-			"The current in-flight tool-calling turn is excluded. " +
-			(settings.runtimeMode === "foreground"
-				? "This foreground-only tool waits for the child's final answer."
-				: "The fork is continuable and returns a readable path plus durable id.") +
-			formatAgentToolCatalog(agentDiscovery?.agents ?? []),
-		promptSnippet: "Delegate context-dependent work to a child seeded with completed turns",
-		promptGuidelines: [
-			"Use subagent_fork only when completed conversation history materially helps the delegated task.",
-		],
-		executionMode: "parallel",
-		parameters,
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const parent = await coordinator.parentFromContext(ctx);
-			const outcome = await coordinator.delegate(
-				parent,
-				"fork",
-				params satisfies DelegationInput,
-				settings,
-				signal,
-				(details) =>
-					onUpdate?.({
-						content: [{ type: "text", text: details.trace.at(-1)?.text ?? `${details.agent}: ${details.status}` }],
-						details,
-					}),
-				agentDiscovery,
-			);
-			return coordinator.outcomeToolResult(outcome);
-		},
-		renderCall(args, theme) {
-			return renderDelegationCall(args, theme, "fork", settings.runtimeMode);
-		},
-		renderResult(result, options, theme) {
-			return renderDelegationResult(
-				result.details as DelegationDetails | undefined,
-				textContent(result.content),
-				options,
-				theme,
-			);
-		},
-	});
-	return parameters;
-}
+const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 export default function subagentExtension(pi: ExtensionAPI): void {
-	const coordinator = new SubagentCoordinator(pi, PACKAGE_ROOT);
-	let sessionSettings: SubagentSettings = DEFAULT_SETTINGS;
-	let sessionDiscovery: AgentDiscoveryResult | undefined;
+	let coordinator: SubagentCoordinator | undefined;
+	let initializationError: unknown;
+	const current = () => {
+		if (!coordinator) throw new Error("pi-subagent is not initialized", { cause: initializationError });
+		return coordinator;
+	};
+	const register = (agents: Parameters<typeof createAgentTools>[2]) => {
+		for (const tool of createAgentTools(current, ctx => current().rootCaller(ctx), agents)) pi.registerTool(tool);
+	};
+	register([]);
 
-	registerDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
-	registerForkDelegationTool(pi, coordinator, DEFAULT_SETTINGS);
-	const backgroundControlParameters = new Map<string, unknown>([
-		["send_message", SendMessageParameters],
-		["followup_task", FollowupTaskParameters],
-		["wait_agent", WaitAgentParameters],
-		["interrupt_agent", InterruptParameters],
-		["list_agents", ListAgentsParameters],
-	]);
-
-	pi.registerTool({
-		name: "send_message",
-		exposure: "model-only",
-		label: "Send Message",
-		description:
-			"Send a message to a direct continuable child. It is durably appended to the child's FIFO mailbox and requires followup_task to start a turn. " +
-			"This call returns acceptance only, never the child's answer.",
-		promptSnippet: "Send or enqueue a message for a direct continuable subagent",
-		executionMode: "parallel",
-		parameters: SendMessageParameters,
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			assertBackgroundControlsEnabled(sessionSettings, "send_message");
-			const parent = await coordinator.parentFromContext(ctx);
-			const delivery = await coordinator.sendMessageWithOutcome(
-				parent,
-				params.subagent_id,
-				params.message,
-				signal,
-			);
-			return {
-				content: [
-					{
-						type: "text",
-						text: `message ${delivery.messageId} durably enqueued for ${delivery.taskPath}; ${delivery.pendingMessages} pending`,
-					},
-				],
-				details: {
-					kind: "control",
-					action: "send",
-					agentId: delivery.agentId,
-					taskPath: delivery.taskPath,
-					messageId: delivery.messageId,
-					pendingMessages: delivery.pendingMessages,
-				} satisfies ControlDetails,
-			};
-		},
+	const initialize = async (ctx: ExtensionContext) => {
+		await coordinator?.shutdown();
+		coordinator = undefined;
+		try {
+			const { settings } = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
+			const controller = new SubagentCoordinator(pi, PACKAGE_ROOT, settings);
+			const root = controller.attachRoot(ctx);
+			const catalog = controller.catalog(root);
+			coordinator = controller;
+			register(catalog.agents);
+			if (catalog.diagnostics.length) ctx.ui.notify(catalog.diagnostics.join("\n"), "warning");
+			initializationError = undefined;
+		} catch (error) {
+			initializationError = error;
+			throw error;
+		}
+	};
+	pi.on("session_start", (_event, ctx) => initialize(ctx));
+	pi.on("session_tree", (_event, ctx) => initialize(ctx));
+	pi.on("session_shutdown", async () => { await coordinator?.shutdown(); });
+	pi.on("before_agent_start", (_event, ctx) => {
+		if (!coordinator) return;
+		coordinator.rootCaller(ctx);
+		const message = coordinator.inboxMessage("/root", ctx.sessionManager as SessionManager);
+		return message ? { message } : undefined;
 	});
-
-	pi.registerTool({
-		name: "followup_task",
-		exposure: "model-only",
-		label: "Follow-up Task",
-		description:
-			"For a direct continuable child, atomically claim its current pending FIFO mailbox and start exactly one scheduled turn. " +
-			"This call returns turn acceptance, not the child's answer.",
-		promptSnippet: "Start one child turn from queued mailbox messages",
-		executionMode: "parallel",
-		parameters: FollowupTaskParameters,
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			assertBackgroundControlsEnabled(sessionSettings, "followup_task");
-			const parent = await coordinator.parentFromContext(ctx);
-			const outcome = await coordinator.followupTask(
-				parent,
-				params.subagent_id,
-				signal,
-			);
-			return {
-				content: [
-					{
-						type: "text",
-						text: `started turn ${outcome.turnId} for ${outcome.taskPath}, claiming ${outcome.claimedMessages} mailbox message${outcome.claimedMessages === 1 ? "" : "s"}`,
-					},
-				],
-				details: {
-					kind: "control",
-					action: "followup",
-					agentId: outcome.agentId,
-					taskPath: outcome.taskPath,
-					turnId: outcome.turnId,
-					claimedMessages: outcome.claimedMessages,
-				} satisfies ControlDetails,
-			};
-		},
+	pi.on("turn_end", (event, ctx) =>
+		coordinator?.boundary("/root", ctx.sessionManager as SessionManager, event.outcome, false));
+	pi.on("agent_before_settle", (event, ctx) =>
+		coordinator?.boundary("/root", ctx.sessionManager as SessionManager, event.outcome, true));
+	pi.on("turn_start", (_event, ctx) => coordinator?.reconcile("/root", ctx.sessionManager as SessionManager));
+	pi.on("input", () => { coordinator?.notifyInput("/root"); return { action: "continue" as const }; });
+	pi.on("agent_start", () => coordinator?.setRootRunning(true));
+	pi.on("agent_settled", (_event, ctx) => {
+		coordinator?.reconcile("/root", ctx.sessionManager as SessionManager);
+		coordinator?.setRootRunning(false);
 	});
-
-	pi.registerTool({
-		name: "wait_agent",
-		exposure: "model-only",
-		label: "Wait Agent",
-		description:
-			"Wait event-driven for unread completion updates from direct children. Existing updates return immediately; timeout does not consume later updates.",
-		promptSnippet: "Wait for quiet child completion updates",
-		parameters: WaitAgentParameters,
-		async execute(toolCallId, params, signal, _onUpdate, ctx) {
-			assertBackgroundControlsEnabled(sessionSettings, "wait_agent");
-			const parent = await coordinator.parentFromContext(ctx);
-			const outcome = await coordinator.waitAgent(
-				parent,
-				toolCallId,
-				params.timeout_ms,
-				signal,
-			);
-			return {
-				content: [
-					{
-						type: "text",
-						text: coordinator.formatWaitAgentOutcome(outcome),
-					},
-				],
-				details: {
-					kind: "control",
-					action: "wait",
-					timedOut: outcome.timedOut,
-					completionIds: outcome.updates.map(
-						(update) => update.completionId,
-					),
-					unreadUpdates: outcome.unreadUpdates,
-				} satisfies ControlDetails,
-			};
-		},
+	pi.registerMessageRenderer(MESSAGE_CUSTOM_TYPE, (message, options, theme) => {
+		const content = typeof message.content === "string" ? message.content :
+			message.content.filter(item => item.type === "text").map(item => item.text).join("");
+		return renderAgentMessage(content, options.expanded, theme);
 	});
-
-	pi.registerTool({
-		name: "interrupt_agent",
-		exposure: "model-only",
-		label: "Interrupt Agent",
-		description:
-			"Request cancellation of a live child or descendant's current turn. The child session remains available for later messages. " +
-			"An inactive or already-settled target is an accepted no-op.",
-		promptSnippet: "Interrupt a live descendant's current turn without deleting its session",
-		executionMode: "parallel",
-		parameters: InterruptParameters,
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			assertBackgroundControlsEnabled(sessionSettings, "interrupt_agent");
-			const parent = await coordinator.parentFromContext(ctx);
-			const outcome = await coordinator.interruptWithOutcome(
-				parent,
-				params.agent_id,
-			);
-			return {
-				content: [{ type: "text", text: `interrupt requested for ${outcome.taskPath}` }],
-				details: {
-					kind: "control",
-					action: "interrupt",
-					agentId: outcome.agentId,
-					taskPath: outcome.taskPath,
-				} satisfies ControlDetails,
-			};
-		},
-	});
-
-	pi.registerTool({
-		name: "list_agents",
-		exposure: "model-only",
-		label: "List Agents",
-		description:
-			"List direct continuable children or all descendants. running means an active turn, idle means resident between turns, " +
-			"ready means persisted and cold-resumable, and children show pending task messages separately from unread completion updates.",
-		promptSnippet: "List continuable child agents and their lifecycle status",
-		parameters: ListAgentsParameters,
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			assertBackgroundControlsEnabled(sessionSettings, "list_agents");
-			const parent = await coordinator.parentFromContext(ctx);
-			const scope = params.scope ?? "children";
-			const entries = await coordinator.list(parent, scope);
-			return {
-				content: [{ type: "text", text: coordinator.formatCatalog(entries, scope) }],
-				details: { kind: "control", action: "list" } satisfies ControlDetails,
-			};
-		},
-	});
-
-	for (const customType of [REPORT_CUSTOM_TYPE]) {
-		pi.registerMessageRenderer<ParentMessageDetails>(customType, (message, options, theme) => {
-			const content =
-				typeof message.content === "string"
-					? message.content
-					: message.content
-							.filter((item): item is Extract<(typeof message.content)[number], { type: "text" }> => item.type === "text")
-							.map((item) => item.text)
-							.join("");
-			return renderParentMessage(content, message.details, options.expanded, options.outputPad, theme);
-		});
-	}
-
 	pi.registerCommand("subagents", {
-		description: "Show available agent definitions and continuable descendants",
+		description: "Show the agent catalog and current root tree",
 		handler: async (_args, ctx) => {
-			const discovery =
-				sessionDiscovery ??
-				coordinator.discoverAvailableAgents(
-					ctx.cwd,
-					sessionSettings,
-					ctx.isProjectTrusted(),
-				);
-			const parent = await coordinator.parentFromContext(ctx);
-			const entries = await coordinator.list(parent, "descendants");
-			const sections = [
-				`Mode: ${sessionSettings.runtimeMode}`,
-				`Background concurrency: ${sessionSettings.maxConcurrentBackgroundRuns}`,
-				`Idle runtime LRU: ${sessionSettings.maxIdleRuntimes}`,
-				"Background protocol: durable mailbox",
-				`OpenAI identity inline: ${sessionSettings.openAIIdentity ? "enabled" : "disabled"}`,
-				`User agent dir: ${coordinator.getUserAgentsDir()}`,
-				`Agents:\n${formatAgentCatalog(discovery.agents)}`,
-				`Children:\n${coordinator.formatCatalog(entries, "descendants")}`,
-			];
-			if (discovery.diagnostics.length > 0) {
-				sections.push(`Diagnostics:\n${discovery.diagnostics.join("\n")}`);
-			}
-			ctx.ui.notify(sections.join("\n\n"), "info");
+			const controller = current();
+			const caller = controller.rootCaller(ctx);
+			const catalog = controller.catalog(caller);
+			ctx.ui.notify([
+				`Active child runs: ${controller.activeCount}/${controller.settings.maxConcurrentAgents}`,
+				`Agent definitions: ${controller.getUserAgentsDir()}`,
+				formatAgentCatalog(catalog.agents),
+				controller.list(caller).agents.map(agent => `${agent.agent_name} [${agent.agent_status}]`).join("\n"),
+				...catalog.diagnostics,
+			].join("\n\n"), "info");
 		},
-	});
-
-	pi.on("session_start", async (_event, ctx) => {
-		const loaded = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
-		coordinator.configureBackgroundRuns(
-			loaded.settings.maxConcurrentBackgroundRuns,
-		);
-		await coordinator.configureIdleRuntimes(
-			loaded.settings.maxIdleRuntimes,
-		);
-		sessionSettings = loaded.settings;
-		sessionDiscovery = coordinator.discoverAvailableAgents(
-			ctx.cwd,
-			sessionSettings,
-			ctx.isProjectTrusted(),
-		);
-		const registeredParameters = new Map<string, unknown>([
-			[
-				"subagent",
-				registerDelegationTool(pi, coordinator, sessionSettings, sessionDiscovery),
-			],
-			[
-				"subagent_fork",
-				registerForkDelegationTool(pi, coordinator, sessionSettings, sessionDiscovery),
-			],
-		]);
-		if (sessionDiscovery.agents.length === 0) {
-			disableOwnedTools(pi, registeredParameters);
-			ctx.ui.notify(
-				`pi-subagent: no available agent definitions (scope: ${sessionSettings.agentScope}). ` +
-				`Add your own Markdown definitions in ${coordinator.getUserAgentsDir()} ` +
-				"or the trusted project .pi/agents directory selected by agentScope, then run /reload. " +
-				"Use /subagents to inspect the catalog.",
-				"warning",
-			);
-		}
-		if (sessionSettings.runtimeMode === "foreground") {
-			disableOwnedTools(pi, backgroundControlParameters);
-		}
-		if (sessionDiscovery.diagnostics.length > 0) {
-			ctx.ui.notify(sessionDiscovery.diagnostics.join("\n"), "warning");
-		}
-	});
-
-	pi.on("agent_end", async (_event, ctx) => {
-		const parent = await coordinator.parentFromContext(ctx);
-		await coordinator.releaseWaitAgentDeliveries(
-			parent,
-			"parent agent turn ended without a durable wait_agent result",
-		);
-	});
-
-	pi.on("session_shutdown", async () => {
-		await coordinator.shutdown();
 	});
 }
 
 export { SubagentCoordinator } from "./coordinator.ts";
-export type { ChildProvider } from "./providers.ts";

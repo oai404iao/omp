@@ -1,4482 +1,530 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { afterEach, test, type TestContext } from "node:test";
-import {
-	createAssistantMessageEventStream,
-	getCurrentTools,
-	type AssistantMessage,
-	type AssistantMessageEventStream,
-	type Context,
-	type Model,
-	type ToolCall,
-} from "@earendil-works/pi-ai";
-import {
-	type ExtensionAPI,
-	type ExtensionContext,
-	type ExtensionToolContext,
-	ModelRegistry,
-	ModelRuntime,
-	SessionManager,
-} from "@earendil-works/pi-coding-agent";
-import { CODEX_IDENTITY_CUSTOM_TYPE } from "@oai404iao/pi-codex-minimal-tools/subagent-inline";
-import { DEFAULT_SETTINGS } from "../src/config.ts";
-import {
-	COMPLETION_FAILURE_CUSTOM_TYPE,
-	COMPLETION_UPDATE_CUSTOM_TYPE,
-	readCompletionMailbox,
-	type CompletionUpdate,
-} from "../src/completion-mailbox.ts";
-import { SubagentCoordinator, AGENT_CUSTOM_TYPE } from "../src/coordinator.ts";
-import {
-	DESCRIPTOR_CUSTOM_TYPE,
-	foldDescriptor,
-} from "../src/descriptor.ts";
-import {
-	MAILBOX_CLAIM_CUSTOM_TYPE,
-	MAILBOX_COMMIT_CUSTOM_TYPE,
-	readMailbox,
-} from "../src/mailbox.ts";
-import { withTargetResolutionOrder } from "./support/target-resolution-order.ts";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { getCurrentTools } from "@earendil-works/pi-ai";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { MESSAGE_CUSTOM_TYPE, MAX_PENDING_MESSAGES, TreeStore } from "../src/store.ts";
+import type { AgentCaller } from "../src/coordinator.ts";
+import { createAgentTools } from "../src/tools.ts";
+import { deferred, fixture, waitUntil } from "./support/fixture.ts";
 
-const roots: string[] = [];
-const UUID_V7_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function tempRoot(): string {
-	const root = mkdtempSync(join(tmpdir(), "pi-subagent-coordinator-"));
-	roots.push(root);
-	return root;
-}
-
-afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+test("spawn accepts before completion, persists identity and final result, unloads runtime", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: () => finish.promise });
+	assert.deepEqual(await f.coordinator.spawn(f.caller, { task_name: "review", message: "Review it" }), { task_name: "/root/review" });
+	const record = f.coordinator.treeStore.record("/root/review");
+	assert(existsSync(record.sessionFile));
+	assert.equal(record.status, "running");
+	assert.equal(f.coordinator.activeCount, 1);
+	assert.equal(f.coordinator.treeStore.mailbox("/root").length, 0);
+	finish.resolve("review complete");
+	await f.idle();
+	assert.equal(f.coordinator.treeStore.record("/root/review").status, "completed");
+	assert.equal(f.coordinator.treeStore.mailbox("/root")[0]?.text, "review complete");
+	assert(f.coordinator.list(f.caller).agents.some(agent => agent.agent_name === "/root/review"));
+	assert.equal(f.manager.getEntries().filter(entry => entry.type === "usage").length, 1);
 });
 
-function scriptedStream(
-	model: Model<any>,
-	text: string,
-	signal?: AbortSignal,
-	delayMs = 0,
-	onStart?: () => void,
-	onEnd?: () => void,
-): AssistantMessageEventStream {
-	const stream = createAssistantMessageEventStream();
-	onStart?.();
-	let ended = false;
-	const finish = () => {
-		if (ended) return;
-		ended = true;
-		onEnd?.();
-	};
-	const run = () => {
-		const partial: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 1,
-				output: 1,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 2,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "pending",
-			timestamp: Date.now(),
-		};
-		stream.push({ type: "start", partial });
-		if (signal?.aborted) {
-			const error = { ...partial, stopReason: "aborted" as const, errorMessage: "aborted" };
-			stream.push({ type: "error", reason: "aborted", error });
-			stream.end();
-			finish();
-			return;
-		}
-		partial.content = [{ type: "text", text }];
-		stream.push({ type: "text_start", contentIndex: 0, partial });
-		stream.push({ type: "text_delta", contentIndex: 0, delta: text, partial });
-		stream.push({ type: "text_end", contentIndex: 0, content: text, partial });
-		stream.push({
-			type: "done",
-			reason: "stop",
-			message: { ...partial, stopReason: "stop" },
-		});
-		stream.end();
-		finish();
-	};
-	if (delayMs > 0) {
-		const timer = setTimeout(run, delayMs);
-		signal?.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timer);
-				run();
-			},
-			{ once: true },
-		);
-	} else {
-		queueMicrotask(run);
-	}
-	return stream;
-}
-
-function reportThenAnswerStream(
-	model: Model<any>,
-	context: Context,
-	turn: number,
-): AssistantMessageEventStream {
-	if (context.messages.some((message) => message.role === "toolResult")) {
-		return scriptedStream(model, `child answer ${turn}`);
-	}
-	const stream = createAssistantMessageEventStream();
-	queueMicrotask(() => {
-		const toolCall: ToolCall = {
-			type: "toolCall",
-			id: `report-${turn}`,
-			name: "report",
-			arguments: { output: `finding ${turn}` },
-		};
-		const partial: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 1,
-				output: 1,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 2,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "pending",
-			timestamp: Date.now(),
-		};
-		stream.push({ type: "start", partial });
-		partial.content = [toolCall];
-		stream.push({ type: "toolcall_start", contentIndex: 0, partial });
-		stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial });
-		stream.push({
-			type: "done",
-			reason: "toolUse",
-			message: { ...partial, stopReason: "toolUse" },
-		});
-		stream.end();
-	});
-	return stream;
-}
-
-function toolCallStream(
-	model: Model<any>,
-	toolCall: ToolCall,
-): AssistantMessageEventStream {
-	const stream = createAssistantMessageEventStream();
-	queueMicrotask(() => {
-		const partial: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 1,
-				output: 1,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 2,
-				cost: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					total: 0,
-				},
-			},
-			stopReason: "pending",
-			timestamp: Date.now(),
-		};
-		stream.push({ type: "start", partial });
-		partial.content = [toolCall];
-		stream.push({ type: "toolcall_start", contentIndex: 0, partial });
-		stream.push({
-			type: "toolcall_end",
-			contentIndex: 0,
-			toolCall,
-			partial,
-		});
-		stream.push({
-			type: "done",
-			reason: "toolUse",
-			message: { ...partial, stopReason: "toolUse" },
-		});
-		stream.end();
-	});
-	return stream;
-}
-
-function appendCompletedParentTurn(
-	session: SessionManager,
-	userText: string,
-	assistantText: string,
-): void {
-	session.appendMessage({
-		role: "user",
-		content: userText,
-		timestamp: Date.now(),
-	});
-	session.appendMessage({
-		role: "assistant",
-		content: [{ type: "text", text: assistantText }],
-		api: "openai-responses",
-		provider: "scripted",
-		model: "echo",
-		usage: {
-			input: 1,
-			output: 1,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 2,
-			cost: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				total: 0,
-			},
-		},
-		stopReason: "stop",
-		timestamp: Date.now(),
-	});
-}
-
-function userMessageText(
-	message: Extract<Context["messages"][number], { role: "user" }>,
-): string {
-	return typeof message.content === "string"
-		? message.content
-		: message.content
-				.filter(
-					(item): item is Extract<
-						(typeof message.content)[number],
-						{ type: "text" }
-					> => item.type === "text",
-				)
-				.map((item) => item.text)
-				.join("");
-}
-
-async function fixture(
-	options: {
-		delayMs?: number;
-		reportFirst?: boolean;
-		persistent?: boolean;
-		childExtension?: string;
-		onRequestTools?: (tools: string[]) => void;
-		onRequestContext?: (context: Context) => void;
-		onStreamStart?: () => void;
-		onStreamEnd?: () => void;
-		streamSimple?: (
-			model: Model<any>,
-			context: Context,
-			turn: number,
-			signal: AbortSignal | undefined,
-		) => AssistantMessageEventStream;
-	} = {},
-) {
-	const root = tempRoot();
-	const agentDir = join(root, "agent");
-	mkdirSync(join(agentDir, "agents"), { recursive: true });
-	for (const [name, tools] of [
-		["scout", "read, grep, find, ls, bash"],
-		["worker", "read, grep, find, ls, bash, $mutation, subagent, subagent_fork, send_message, followup_task, wait_agent, interrupt_agent, list_agents"],
-	]) {
-		writeFileSync(
-			join(agentDir, "agents", `${name}.md`),
-			`---\nname: ${name}\ndescription: Test ${name}\ntools: ${tools}\n---\nFollow the test task.\n`,
-		);
-	}
-	if (options.childExtension) {
-		const extensionsDir = join(agentDir, "extensions");
-		mkdirSync(extensionsDir, { recursive: true });
-		writeFileSync(join(extensionsDir, "model-tools.js"), options.childExtension);
-	}
-	const modelRuntime = await ModelRuntime.create({
-		authPath: join(root, "auth.json"),
-		modelsPath: null,
-	});
-	let turn = 0;
-	modelRuntime.registerProvider("scripted", {
-		baseUrl: "http://scripted.invalid",
-		apiKey: "test",
-		api: "openai-responses",
-		models: [
-			{
-				id: "echo",
-				name: "Echo",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 10_000,
-				maxTokens: 1000,
-			},
-		],
-		streamSimple: (model, context, streamOptions) => {
-			const currentTurn = ++turn;
-			options.onRequestContext?.(context);
-			options.onRequestTools?.(getCurrentTools(context.messages).map((tool) => tool.name));
-			if (options.streamSimple) {
-				return options.streamSimple(
-					model,
-					context,
-					currentTurn,
-					streamOptions?.signal,
-				);
-			}
-			return options.reportFirst
-				? reportThenAnswerStream(model, context, currentTurn)
-				: scriptedStream(
-						model,
-						`child answer ${currentTurn}`,
-						streamOptions?.signal,
-						options.delayMs,
-						options.onStreamStart,
-						options.onStreamEnd,
-					);
-		},
-	});
-	const model = modelRuntime.getModel("scripted", "echo");
-	assert.ok(model);
-	const sessionManager =
-		options.persistent === false
-			? SessionManager.inMemory(root)
-			: SessionManager.create(root, join(root, "sessions"));
-	sessionManager.appendModelChange(model.provider, model.id);
-	sessionManager.appendThinkingLevelChange("off");
-	const messages: Array<{ content: string }> = [];
-	const events: string[] = [];
-	const eventDetails: Array<{ name: string; data: unknown }> = [];
-	const pi = {
-		events: {
-			emit: (name: string, data: unknown) => {
-				if (name === "pi-subagent:start" || name === "pi-subagent:end") {
-					events.push(name);
-				}
-				eventDetails.push({ name, data });
-			},
-		},
-		sendMessage: (message: { content: string }) => messages.push(message),
-	} as unknown as ExtensionAPI;
-	const coordinator = new SubagentCoordinator(
-		pi,
-		resolve(import.meta.dirname, ".."),
-		agentDir,
-	);
-	const context = {
-		cwd: root,
-		sessionManager,
-		modelRegistry: new ModelRegistry(modelRuntime),
-		model,
-		thinkingLevel: "off",
-		isProjectTrusted: () => true,
-		isIdle: () => true,
-	} as unknown as ExtensionContext;
-	const parent = await coordinator.parentFromContext(context);
-	return {
-		coordinator,
-		parent,
-		messages,
-		events,
-		eventDetails,
-		agentDir,
-		pi,
-		context,
-		modelRuntime,
-		model,
-	};
-}
-
-async function waitUntil(
-	predicate: () => boolean | Promise<boolean>,
-	timeoutMs = 2000,
-): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (!(await predicate())) {
-		if (Date.now() >= deadline) throw new Error("condition timed out");
-		await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
-	}
-}
-
-async function waitForChildReady(
-	coordinator: SubagentCoordinator,
-	parent: Parameters<SubagentCoordinator["list"]>[0],
-	agentId: string,
-): Promise<void> {
-	await waitUntil(async () => {
-		const entries = await coordinator.list(parent, "children");
-		return entries.some(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === agentId
-				&& entry.status === "ready",
-		);
-	});
-}
-
-async function waitForChildStatus(
-	coordinator: SubagentCoordinator,
-	parent: Parameters<SubagentCoordinator["list"]>[0],
-	agentId: string,
-	status: "running" | "idle" | "ready",
-): Promise<void> {
-	await waitUntil(async () => {
-		const entries = await coordinator.list(parent, "children");
-		return entries.some(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === agentId
-				&& entry.status === status,
-		);
-	});
-}
-
-function codexIdentityEntries(session: Pick<SessionManager, "getEntries">) {
-	return session.getEntries().filter(
-		(entry) =>
-			entry.type === "custom"
-			&& entry.customType === CODEX_IDENTITY_CUSTOM_TYPE,
-	);
-}
-
-function registerNeutralProvider(
-	modelRuntime: ModelRuntime,
-	onRequestContext?: (context: Context) => void,
-): Model<any> {
-	modelRuntime.registerProvider("neutral", {
-		baseUrl: "http://neutral.invalid",
-		apiKey: "test",
-		api: "anthropic-messages",
-		models: [
-			{
-				id: "claude",
-				name: "Claude",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 10_000,
-				maxTokens: 1000,
-			},
-		],
-		streamSimple: (model, context, streamOptions) => {
-			onRequestContext?.(context);
-			return scriptedStream(model, "neutral answer", streamOptions?.signal);
-		},
-	});
-	const neutral = modelRuntime.getModel("neutral", "claude");
-	assert.ok(neutral);
-	return neutral;
-}
-
-function registerScriptedVirtualModel(
-	modelRuntime: ModelRuntime,
-	route: () => Model<any>,
-): Model<any> {
-	modelRuntime.registerVirtualModel({
-		provider: "scripted",
-		id: "auto",
-		name: "Auto",
-		thinkingLevels: ["off"],
-		route: () => ({ model: route(), thinkingLevel: "off" as const }),
-	});
-	const virtual = modelRuntime.getModel("scripted", "auto");
-	assert.ok(virtual);
-	return virtual;
-}
-
-function parentCompletions(
-	parent: Parameters<SubagentCoordinator["list"]>[0],
-): CompletionUpdate[] {
-	return readCompletionMailbox(
-		(parent.sessionManager as SessionManager).getEntries(),
-		{ parentAgentId: parent.agentId },
-	).updates;
-}
-
-async function waitForCompletions(
-	parent: Parameters<SubagentCoordinator["list"]>[0],
-	count: number,
-): Promise<void> {
-	await waitUntil(() => parentCompletions(parent).length >= count);
-}
-
-function appendWaitAgentToolResult(
-	parent: Parameters<SubagentCoordinator["list"]>[0],
-	toolCallId: string,
-): void {
-	(parent.sessionManager as SessionManager).appendMessage({
-		role: "toolResult",
-		toolCallId,
-		toolName: "wait_agent",
-		content: [{ type: "text", text: "completion delivered" }],
-		isError: false,
-		timestamp: Date.now(),
-	});
-}
-
-test("one-shot child returns only its own final output and usage", async () => {
-	const { coordinator, parent, events, eventDetails } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "inspect module",
-				prompt: "Inspect it.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
-		);
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind === "foreground") {
-			assert.equal(outcome.result.output, "child answer 1");
-			assert.equal(outcome.result.stopReason, "completed");
-			assert.equal(outcome.result.usage.turns, 1);
-			assert.match(outcome.result.turnId, UUID_V7_PATTERN);
-			assert.equal(outcome.details.turnId, outcome.result.turnId);
-		}
-		assert.deepEqual(events, ["pi-subagent:start", "pi-subagent:end"]);
-		assert.deepEqual(
-			eventDetails.map((event) => ({
-				name: event.name,
-				turnId: (event.data as { turnId?: string }).turnId,
-			})),
-			[
-				{
-					name: "pi-subagent:turn-start",
-					turnId: outcome.details.turnId,
-				},
-				{ name: "pi-subagent:start", turnId: undefined },
-				{
-					name: "pi-subagent:turn-end",
-					turnId: outcome.details.turnId,
-				},
-				{ name: "pi-subagent:end", turnId: undefined },
-			],
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
+test("send to idle child is queue-only; followup carries task and cold resumes same session", async t => {
+	const f = await fixture(t);
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "Initial work", fork_turns: "none" });
+	await f.idle();
+	const file = f.coordinator.treeStore.record("/root/worker").sessionFile;
+	assert.deepEqual(f.coordinator.send(f.caller, "worker", "extra context"), { accepted: true });
+	assert.equal(f.requests.length, 1);
+	assert.equal(f.coordinator.activeCount, 0);
+	await f.coordinator.followup(f.caller, "worker", "Now continue");
+	await f.idle();
+	assert.equal(f.coordinator.treeStore.record("/root/worker").sessionFile, file);
+	assert.equal(f.requests.length, 2);
+	assert.match(JSON.stringify(f.requests[1]), /extra context/);
+	assert.match(JSON.stringify(f.requests[1]), /Now continue/);
+	assert.match(JSON.stringify(f.requests[1]), /Initial work/);
+	assert.equal(f.coordinator.treeStore.mailbox("/root/worker").length, 0);
 });
 
-for (const scenario of [
-	{ name: "inherited defaults activate native tools", inherit: true, defaults: true, active: true },
-	{ name: "inherited builtins are inactive by default", inherit: true, active: false },
-	{ name: "no inheritance disables builtins even with defaults", inherit: false, defaults: true, active: false },
-	{ name: "settings can disable inherited builtins", inherit: true, defaults: true, disabled: true, active: false },
-	{ name: "explicit ceiling activates native tools", inherit: true, tools: "read, codemode, tool_search", active: true },
-	{ name: "ceiling excludes native tools despite defaults", inherit: true, defaults: true, tools: "read", active: false },
-	{ name: "explicit tools do not override no inheritance", inherit: false, tools: "codemode", error: true },
-	{ name: "explicit tools do not override disabled builtins", inherit: true, disabled: true, tools: "codemode", error: true },
-]) {
-	test(`child codemode policy: ${scenario.name}`, async () => {
-		const observed: string[][] = [];
-		const { coordinator, parent, agentDir } = await fixture({ onRequestTools: tools => observed.push(tools) });
-		mkdirSync(join(agentDir, "agents"), { recursive: true });
-		writeFileSync(join(agentDir, "agents", "native.md"),
-			`---\nname: native\ndescription: Native tools\n${scenario.tools ? `tools: ${scenario.tools}\n` : ""}---\nInspect the task.\n`);
-		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({
-			...(scenario.defaults ? { defaultTools: ["+codemode", "+tool_search"] } : {}),
-			...(scenario.disabled ? { extensions: ["-builtin:codemode", "-builtin:tool-search"] } : {}),
-		}));
-		try {
-			const pending = coordinator.delegate(parent, "spawn", {
-				agent: "native", description: "native load policy", prompt: "Inspect it.",
-			}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: scenario.inherit });
-			if (scenario.error) {
-				await assert.rejects(pending, /codemode.*not registered/);
-				assert.deepEqual(observed, []);
-			} else {
-				const outcome = await pending;
-				assert.equal(outcome.kind, "foreground");
-				assert.equal(observed.length, 1);
-				for (const name of ["codemode", "tool_search"]) assert.equal(observed[0].includes(name), scenario.active, name);
-				assert(!observed[0].some(name => name.startsWith("mcp__")));
-			}
-		} finally { await coordinator.shutdown(); }
-	});
-}
+test("running messages and tasks enter a safe boundary without parallel model runs", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: (_ctx, n) => n === 1 ? finish.promise : "handled updates" });
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "start" });
+	await waitUntil(() => f.requests.length === 1);
+	f.coordinator.send(f.caller, "worker", "mail while sampling");
+	await f.coordinator.followup(f.caller, "worker", "task while sampling");
+	assert.equal(f.requests.length, 1);
+	finish.resolve("first answer");
+	await f.idle();
+	assert.equal(f.requests.length, 2);
+	assert.match(JSON.stringify(f.requests[1]), /mail while sampling/);
+	assert.match(JSON.stringify(f.requests[1]), /task while sampling/);
+	assert.equal(f.events.filter(event => event.name === "pi-subagent:turn-start").length, 1);
+	assert.equal(f.coordinator.treeStore.mailbox("/root").length, 1);
+});
 
-for (const exposure of ["codemode", "deferred"]) {
-	test(`child ${exposure} tools keep the registry ceiling, nested permissions, trace and usage`, async () => {
-		const declared: string[][] = [];
-		const { coordinator, parent, agentDir } = await fixture({
-			childExtension: `export default function (pi) {
-				pi.registerTool({
-					name: "measure", label: "Measure", description: "Metered fixture", exposure: "${exposure}",
-					parameters: { type: "object", properties: {} },
-					async execute() {
-						return { content: [{ type: "text", text: "measured" }], details: undefined,
-							usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 5,
-								cost: { input: 0.1, output: 0.15, cacheRead: 0, cacheWrite: 0, total: 0.25 } } };
-					},
-				});
-				pi.registerTool({
-					name: "blocked", label: "Blocked", description: "Permission fixture", exposure: "${exposure}",
-					parameters: { type: "object", properties: {} },
-					async execute() { throw new Error("must not execute"); },
-				});
-				pi.on("tool_call", event => event.toolName === "blocked" ? { block: true, reason: "nested permission denied" } : undefined);
-				pi.on("before_agent_start", () => {
-					pi.registerTool({
-						name: "forbidden", label: "Forbidden", description: "Late tool outside ceiling", exposure: "${exposure}",
-						parameters: { type: "object", properties: {} },
-						async execute() { throw new Error("must not execute"); },
-					});
+test("wait is activity-only, does not consume content, and context receipts acknowledge", async t => {
+	const f = await fixture(t);
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "start" });
+	await f.idle();
+	const before = f.coordinator.treeStore.mailbox("/root");
+	const result = await f.coordinator.wait(f.caller);
+	assert.equal(result.timed_out, false);
+	assert.doesNotMatch(JSON.stringify(result), /answer 1|completion:/);
+	assert.deepEqual(f.coordinator.treeStore.mailbox("/root"), before);
+	const message = f.coordinator.inboxMessage("/root", f.manager)!;
+	f.manager.appendCustomMessageEntry(message.customType, message.content, true, message.details);
+	f.coordinator.reconcile("/root", f.manager);
+	assert.equal(f.coordinator.treeStore.mailbox("/root").length, 0);
+});
+
+test("wait wakes on new messages and steered input, aborts cleanly", async t => {
+	const f = await fixture(t);
+	const waiting = f.coordinator.wait(f.caller);
+	f.coordinator.send(f.caller, "/root", "hello");
+	assert.equal((await waiting).timed_out, false);
+	const envelope = f.coordinator.inboxMessage("/root", f.manager)!;
+	f.manager.appendCustomMessageEntry(envelope.customType, envelope.content, true, envelope.details);
+	f.coordinator.reconcile("/root", f.manager);
+	const steering = f.coordinator.wait(f.caller);
+	f.coordinator.notifyInput("/root");
+	assert.match((await steering).message, /new input/);
+	const abort = new AbortController();
+	const aborted = f.coordinator.wait(f.caller, 30000, abort.signal);
+	abort.abort(new Error("user abort"));
+	await assert.rejects(aborted, /user abort/);
+	assert.match((await f.coordinator.wait(f.caller, 30000, undefined, () => true)).message, /new input/);
+});
+
+test("wait timeout limits and shutdown do not consume future mail", async t => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const f = await fixture(t);
+	const waiting = f.coordinator.wait(f.caller, 0);
+	t.mock.timers.tick(9999);
+	t.mock.timers.tick(1);
+	assert.deepEqual(await waiting, { message: "Wait timed out. Timeout raised to 10000 ms.", timed_out: true });
+	for (const invalid of [-1, 1.5, 3600001]) assert.throws(() => f.coordinator.wait(f.caller, invalid), /timeout_ms/);
+	const next = f.coordinator.wait(f.caller);
+	const rejection = assert.rejects(next, /interrupted/);
+	await f.coordinator.shutdown();
+	await rejection;
+});
+
+test("interrupt stops only current run, preserves mailbox/history, and allows later work", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: (_ctx, n) => n === 1 ? finish.promise : "new task complete" });
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "start" });
+	await waitUntil(() => f.requests.length === 1);
+	f.coordinator.send(f.caller, "worker", "keep this message");
+	assert.deepEqual(f.coordinator.interrupt(f.caller, "worker"), { previous_status: "running" });
+	await f.idle();
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "interrupted");
+	assert.equal(f.coordinator.treeStore.mailbox("/root").length, 0);
+	assert.equal(f.coordinator.treeStore.mailbox("/root/worker").length, 1);
+	await f.coordinator.followup(f.caller, "worker", "new task");
+	await f.idle();
+	assert.match(JSON.stringify(f.requests.at(-1)), /keep this message/);
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "completed");
+	assert.deepEqual(f.coordinator.interrupt(f.caller, "worker"), { previous_status: "completed" });
+});
+
+test("a followup after interruption is not killed by the old cancellation", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: (_ctx, n) => n === 1 ? finish.promise : "restarted" });
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "start" });
+	await waitUntil(() => f.requests.length === 1);
+	f.coordinator.interrupt(f.caller, "worker");
+	await f.coordinator.followup(f.caller, "worker", "followup after interrupt");
+	await f.idle();
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "completed");
+	assert.match(JSON.stringify(f.requests.at(-1)), /followup after interrupt/);
+});
+
+test("capacity fails fast without phantom agents; settled agents do not occupy slots", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { settings: { maxConcurrentAgents: 1 }, reply: (_ctx, n) => n === 1 ? finish.promise : "done" });
+	await f.coordinator.spawn(f.caller, { task_name: "a", message: "work" });
+	await assert.rejects(f.coordinator.spawn(f.caller, { task_name: "b", message: "work" }), /capacity/);
+	assert.equal(f.coordinator.list(f.caller).agents.length, 2);
+	finish.resolve("done");
+	await f.idle();
+	await f.coordinator.spawn(f.caller, { task_name: "b", message: "work" });
+	await f.idle();
+	assert.equal(f.coordinator.list(f.caller).agents.length, 3);
+});
+
+test("duplicate parallel spawn names reserve once, unknown roles and no-session fail", async t => {
+	const f = await fixture(t);
+	const results = await Promise.allSettled([
+		f.coordinator.spawn(f.caller, { task_name: "same", message: "a" }),
+		f.coordinator.spawn(f.caller, { task_name: "same", message: "b" }),
+	]);
+	assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+	await f.idle();
+	await assert.rejects(f.coordinator.spawn(f.caller, { task_name: "unknown", message: "a", agent_type: "missing" }), /unknown agent_type/);
+	const ephemeral = await fixture(t, { persistent: false });
+	await assert.rejects(ephemeral.coordinator.spawn(ephemeral.caller, { task_name: "a", message: "a" }), /persisted root/);
+	assert.equal(ephemeral.coordinator.list(ephemeral.caller).agents.length, 1);
+});
+
+test("root and child tool definitions match, removed tools absent, permissions enforced", async t => {
+	const f = await fixture(t);
+	await f.coordinator.spawn(f.caller, { task_name: "scout", message: "work", agent_type: "scout" });
+	await f.idle();
+	const tools = getCurrentTools(f.requests[0]!.messages);
+	const expected = createAgentTools(f.coordinator, () => f.caller, f.coordinator.catalog(f.caller).agents);
+	for (const definition of expected) {
+		const child = tools.find(tool => tool.name === definition.name);
+		assert.ok(child, definition.name);
+		assert.equal(child.description, definition.description);
+		assert.deepEqual(JSON.parse(JSON.stringify(child.parameters)), JSON.parse(JSON.stringify(definition.parameters)));
+	}
+	assert(!tools.some(tool => ["subagent", "subagent_fork", "report", "bash", "write", "edit"].includes(tool.name)));
+});
+
+test("cold restart restores mailbox and identity without auto execution", async t => {
+	const f = await fixture(t);
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "start" });
+	await f.idle();
+	const record = structuredClone(f.coordinator.treeStore.record("/root/worker"));
+	f.coordinator.send(f.caller, "worker", "durable unread");
+	await f.restart();
+	assert.equal(f.requests.length, 1);
+	assert.equal(f.coordinator.treeStore.record("/root/worker").descriptor.id, record.descriptor.id);
+	await f.coordinator.followup(f.caller, "worker", "continue");
+	await f.idle();
+	assert.match(JSON.stringify(f.requests.at(-1)), /durable unread/);
+	assert.equal(f.coordinator.treeStore.record("/root/worker").sessionFile, record.sessionFile);
+});
+
+test("cross-agent messaging works and completion always goes to structural parent", async t => {
+	const f = await fixture(t);
+	for (const task_name of ["a", "b"]) await f.coordinator.spawn(f.caller, { task_name, message: task_name });
+	await f.idle();
+	const a = f.coordinator.treeStore.record("/root/a");
+	const callerA: AgentCaller = {
+		...f.caller, path: "/root/a", depth: 1, sessionManager: SessionManager.open(a.sessionFile),
+	};
+	f.coordinator.send(callerA, "/root", "child to root");
+	f.coordinator.send(callerA, "/root/b", "sibling context");
+	await f.coordinator.followup(callerA, "/root/b", "sibling task");
+	await f.idle();
+	assert.equal(f.coordinator.treeStore.mailbox("/root/b").length, 0);
+	assert.equal(f.coordinator.treeStore.mailbox("/root/a").length, 0);
+	assert.equal(f.coordinator.treeStore.mailbox("/root").filter(message => message.from === "/root/b").length, 2);
+	assert.throws(() => f.coordinator.send(callerA, "b", "invalid relative sibling"), /unknown agent/);
+	await assert.rejects(f.coordinator.followup(callerA, "/root", "not allowed"), /cannot start/);
+	assert.throws(() => f.coordinator.interrupt(callerA, "/root/a"), /yourself/);
+	assert.throws(() => f.coordinator.interrupt(callerA, "/root"), /root/);
+});
+
+test("nested delegation shares the capacity/depth policy and needs no resident parent", async t => {
+	let childSpawned = false;
+	const f = await fixture(t, { settings: { maxDepth: 2 }, reply: (context) => {
+		const text = JSON.stringify(context.messages);
+		if (text.includes("make grandchild") && !childSpawned) {
+			childSpawned = true;
+			return [{ type: "toolCall", id: "spawn_nested", name: "spawn_agent",
+				arguments: { task_name: "nested", message: "grandchild work", fork_turns: "none" } }];
+		}
+		return "done";
+	} });
+	await f.coordinator.spawn(f.caller, { task_name: "parent", message: "make grandchild", fork_turns: "none" });
+	await f.idle();
+	assert(f.coordinator.list(f.caller).agents.some(agent => agent.agent_name === "/root/parent/nested"));
+	const grandchild = f.coordinator.treeStore.record("/root/parent/nested");
+	const nestedCaller: AgentCaller = {
+		...f.caller, path: "/root/parent/nested", depth: 2, sessionManager: SessionManager.open(grandchild.sessionFile),
+	};
+	await assert.rejects(f.coordinator.spawn(nestedCaller, { task_name: "too_deep", message: "no" }), /depth/);
+});
+
+test("active-branch visibility excludes abandoned children and their messages", async t => {
+	const f = await fixture(t);
+	const anchor = f.manager.getLeafId()!;
+	await f.coordinator.spawn(f.caller, { task_name: "abandoned", message: "a" });
+	await f.idle();
+	f.manager.branch(anchor);
+	assert.equal(f.coordinator.list(f.caller).agents.length, 1);
+	assert.equal(f.coordinator.inboxMessage("/root", f.manager), undefined);
+	assert.throws(() => f.coordinator.send(f.caller, "/root/abandoned", "no"), /unknown agent/);
+	await f.restart();
+	assert.equal(f.coordinator.list(f.caller).agents.length, 1);
+});
+
+test("a task from an abandoned sibling cannot trigger undeliverable restart loops", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: (_ctx, n) => n === 1 ? finish.promise :
+		n < 5 ? "done" : { error: "runaway guard" } });
+	await f.coordinator.spawn(f.caller, { task_name: "a", message: "initial a", fork_turns: "none" });
+	await waitUntil(() => f.requests.length === 1);
+	const beforeB = f.manager.getLeafId()!;
+	await f.coordinator.spawn(f.caller, { task_name: "b", message: "initial b", fork_turns: "none" });
+	await waitUntil(() => f.coordinator.treeStore.record("/root/b").status === "completed");
+	const callerB: AgentCaller = {
+		...f.caller, path: "/root/b", depth: 1,
+		sessionManager: SessionManager.open(f.coordinator.treeStore.record("/root/b").sessionFile),
+	};
+	await f.coordinator.followup(callerB, "/root/a", "hidden sibling task");
+	f.coordinator.interrupt(f.caller, "a");
+	await f.idle();
+	f.manager.branch(beforeB);
+	await f.restart();
+	await f.coordinator.followup(f.caller, "a", "visible followup");
+	await f.idle();
+	assert.equal(f.requests.length, 3);
+	assert.equal(f.coordinator.treeStore.mailbox("/root/a")[0]?.text, "hidden sibling task");
+	assert.doesNotMatch(JSON.stringify(f.requests[2]), /hidden sibling task/);
+});
+
+test("strict argument validation and exact prefix filtering", async t => {
+	const f = await fixture(t);
+	for (const task_name of ["test", "testing"]) await f.coordinator.spawn(f.caller, { task_name, message: "work" });
+	await f.idle();
+	assert.deepEqual(f.coordinator.list(f.caller, "test").agents.map(agent => agent.agent_name), ["/root/test"]);
+	for (const message of ["", "   ", "x".repeat(131073)]) {
+		assert.throws(() => f.coordinator.send(f.caller, "test", message), /message/);
+	}
+	assert.throws(() => f.coordinator.send(f.caller, "../test", "no"), /task_name/);
+	await assert.rejects(f.coordinator.spawn(f.caller, { task_name: "bad-name", message: "a" }), /task_name/);
+	await assert.rejects(f.coordinator.spawn(f.caller, { task_name: "oversized", message: "文".repeat(100000) }), /byte capacity/);
+});
+
+test("parent mailbox overflow retains a completion outbox until context delivery frees space", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: () => finish.promise });
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" });
+	for (let n = 0; n < MAX_PENDING_MESSAGES; n++) f.coordinator.send(f.caller, "/root", `message ${n}`);
+	finish.resolve("completion survives backpressure");
+	await f.idle();
+	assert.equal(f.coordinator.treeStore.record("/root/worker").outbox?.length, 1);
+	const envelope = f.coordinator.inboxMessage("/root", f.manager)!;
+	f.manager.appendCustomMessageEntry(MESSAGE_CUSTOM_TYPE, envelope.content, true, envelope.details);
+	f.coordinator.reconcile("/root", f.manager);
+	assert.equal(f.coordinator.treeStore.record("/root/worker").outbox?.length, 0);
+	assert.equal(f.coordinator.treeStore.mailbox("/root")[0]?.text, "completion survives backpressure");
+});
+
+test("receipt on disk but absent control ACK is recovered without duplicate context delivery", async t => {
+	const f = await fixture(t);
+	f.coordinator.send(f.caller, "/root", "once");
+	const envelope = f.coordinator.inboxMessage("/root", f.manager)!;
+	f.manager.appendCustomMessageEntry(envelope.customType, envelope.content, true, envelope.details);
+	assert.equal(f.coordinator.treeStore.mailbox("/root").length, 1);
+	await f.restart();
+	assert.equal(f.coordinator.inboxMessage("/root", f.manager), undefined);
+});
+
+test("recovered running records become interrupted and are not rerun", async t => {
+	const f = await fixture(t);
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" });
+	await f.idle();
+	f.coordinator.treeStore.update(state => { state.agents["/root/worker"]!.status = "running"; });
+	await f.restart();
+	assert.equal(f.requests.length, 1);
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "interrupted");
+});
+
+test("old descriptor versions in control store fail rather than migrating", async t => {
+	const f = await fixture(t);
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" });
+	await f.idle();
+	const store = f.coordinator.treeStore;
+	const file = join(store.directory, "state.json");
+	const data = JSON.parse(readFileSync(file, "utf8"));
+	data.agents["/root/worker"].descriptor.version = 4;
+	writeFileSync(file, JSON.stringify(data));
+	assert.throws(() => new TreeStore(f.manager.getSessionDir(), store.snapshot.id, f.manager.getSessionId()), /descriptor/);
+});
+
+test("SDK preflight handled input rejects acceptance and leaves task recoverable", async t => {
+	const f = await fixture(t, {
+		settings: { inheritExtensions: true },
+		extension: `export default function(pi) { pi.on("input", () => ({action:"handled"})); }`,
+	});
+	await assert.rejects(f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" }), /handled/);
+	await f.idle();
+	assert.equal(f.requests.length, 0);
+	assert.equal(f.coordinator.treeStore.mailbox("/root/worker").filter(message => message.kind === "task").length, 1);
+});
+
+test("configured tool ceilings cannot be expanded by nested roles or late extensions", async t => {
+	const f = await fixture(t, {
+		settings: { inheritExtensions: true },
+		extension: `export default function(pi) { pi.registerTool({name:"late",label:"Late",description:"Excluded",parameters:{type:"object",properties:{}}, execute:async()=>({content:[],details:{}})}); }`,
+	});
+	await f.coordinator.spawn(f.caller, { task_name: "empty", message: "work", agent_type: "empty" });
+	await f.idle();
+	assert(!getCurrentTools(f.requests[0]!.messages).some(tool => tool.name === "late"));
+	const record = f.coordinator.treeStore.record("/root/empty");
+	const caller: AgentCaller = { ...f.caller, path: "/root/empty", depth: 1, tools: [], sessionManager: SessionManager.open(record.sessionFile) };
+	await assert.rejects(f.coordinator.spawn(caller, { task_name: "broader", message: "no", agent_type: "scout" }), /ceiling/);
+});
+
+test("shutdown cancels waiters and active work, drains admission, is idempotent", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: () => finish.promise });
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" });
+	const waiting = assert.rejects(f.coordinator.wait(f.caller), /interrupted/);
+	await Promise.all([f.coordinator.shutdown(), f.coordinator.shutdown()]);
+	await waiting;
+	assert.equal(f.coordinator.activeCount, 0);
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "interrupted");
+});
+
+test("project extensions and settings remain untrusted inside inherited children", async t => {
+	const f = await fixture(t, { trusted: false, settings: { inheritExtensions: true } });
+	mkdirSync(join(f.root, ".pi", "extensions"), { recursive: true });
+	writeFileSync(join(f.root, ".pi", "extensions", "untrusted.js"), `
+		export default function(pi) {
+			pi.registerTool({name:"untrusted_project_tool",label:"Bad",description:"Must not load",
+				parameters:{type:"object",properties:{}},execute:async()=>({content:[],details:{}})});
+		}`);
+	writeFileSync(join(f.root, ".pi", "settings.json"), JSON.stringify({ defaultTools: ["untrusted_project_tool"] }));
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" });
+	await f.idle();
+	assert(!getCurrentTools(f.requests[0]!.messages).some(tool => tool.name === "untrusted_project_tool"));
+});
+
+test("compaction cannot hide final output or usage from the runtime", async t => {
+	const f = await fixture(t, {
+		settings: { inheritExtensions: true },
+		extension: `export default function(pi) {
+			let compacted = false;
+			pi.on("turn_end", () => {
+				if (compacted) return;
+				compacted = true;
+				return {entries:[{type:"compaction",summary:"short summary",firstKeptEntryId:null,
+					usage:{input:5,output:2,cacheRead:0,cacheWrite:0,totalTokens:7,
+					cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}}],continue:true};
+			});
+		}`,
+	});
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" });
+	await f.idle();
+	assert.equal(f.requests.length, 2);
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "completed");
+	assert.equal(f.coordinator.treeStore.mailbox("/root")[0]?.text, "answer 2");
+	const usage = f.manager.getEntries().flatMap(entry => entry.type === "usage" ? [entry.usage.totalTokens] : []);
+	assert.equal(usage.reduce((sum, value) => sum + value, 0), 11);
+});
+
+for (const failing of [false, true]) {
+	test(`followup after final boundary starts a new run (error=${failing})`, async t => {
+		const reached = deferred();
+		const resume = deferred();
+		const key = `__pi_subagent_settle_${failing}`;
+		(globalThis as any)[key] = { reached, resume };
+		t.after(() => { delete (globalThis as any)[key]; });
+		const f = await fixture(t, {
+			settings: { inheritExtensions: true },
+			reply: (_ctx, n) => n === 1 && failing ? { error: "quota denied" } : `answer ${n}`,
+			extension: `export default function(pi) {
+				let once = false;
+				pi.on("agent_settled", async () => {
+					if(once) return; once = true;
+					globalThis["${key}"].reached.resolve();
+					await globalThis["${key}"].resume.promise;
 				});
 			}`,
-			onRequestTools: tools => declared.push(tools),
-			streamSimple(model, context, turn) {
-				if (turn === 1) return toolCallStream(model, {
-					type: "toolCall", id: "nested-parent", name: "codemode", arguments: { code: `
-						if (typeof models !== "undefined") throw new Error("unexpected classifier/model API");
-						if (ALL_TOOLS.some(t => ["forbidden", "subagent", "subagent_fork"].includes(t.name))) throw new Error("ceiling/exposure leak");
-						const values = await Promise.all([tools.measure({}), tools.measure({})]);
-						let denied = false;
-						try { await tools.blocked({}); } catch (error) { denied = String(error).includes("nested permission denied"); }
-						if (!denied) throw new Error("permission bypass");
-						return values.join(", ");
-					` },
-				});
-				const result = context.messages.find(message => message.role === "toolResult" && message.toolName === "codemode");
-				assert(result?.role === "toolResult");
-				assert.equal(result.isError, false, JSON.stringify(result));
-				assert(result.nestedCalls?.calls.some(call => call.name === "blocked" && call.status === "error"));
-				return scriptedStream(model, "nested work complete");
-			},
 		});
-		mkdirSync(join(agentDir, "agents"), { recursive: true });
-		writeFileSync(join(agentDir, "agents", "native.md"),
-			"---\nname: native\ndescription: Native tools\ntools: codemode, measure, blocked, subagent, subagent_fork\n---\nInspect the task.\n");
+		await f.coordinator.spawn(f.caller, { task_name: "worker", message: "first" });
+		await reached.promise;
 		try {
-			const outcome = await coordinator.delegate(parent, "spawn", {
-				agent: "native", description: "nested execution", prompt: "Inspect it.",
-			}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true });
-			assert.equal(outcome.kind, "foreground");
-			if (outcome.kind !== "foreground") return;
-			assert.equal(outcome.result.output, "nested work complete");
-			assert(declared.every(tools => tools.includes("codemode") && !tools.includes("measure") && !tools.includes("blocked") && !tools.includes("forbidden")));
-			assert.equal(outcome.result.usage.input, 8);
-			assert.equal(outcome.result.usage.output, 6);
-			assert.equal(outcome.result.usage.totalTokens, 14);
-			assert.equal(outcome.result.usage.cost.total, 0.5);
-			assert.equal(outcome.result.usage.turns, 2);
-			const nested = outcome.details.trace.filter(item => item.name === "measure");
-			assert.equal(nested.length, 2);
-			assert(nested.every(item => item.parentToolCallId === "nested-parent" && item.toolCallId?.startsWith("nested-parent/")));
-		} finally { await coordinator.shutdown(); }
+			await f.coordinator.followup(f.caller, "worker", "accepted after closing boundary");
+		} finally { resume.resolve(); }
+		await f.idle();
+		assert.equal(f.requests.length, 2);
+		assert.equal(f.coordinator.treeStore.record("/root/worker").status, "completed");
+		const results = f.coordinator.treeStore.mailbox("/root");
+		assert.equal(results.length, 2);
+		if (failing) assert.match(results[0]!.text, /quota denied/);
+		assert.match(JSON.stringify(f.requests[1]), /accepted after closing boundary/);
 	});
 }
 
-for (const maxIdleRuntimes of [0, 1]) test(`child tool_search declarations survive followup with maxIdleRuntimes=${maxIdleRuntimes}`, async () => {
-	const declared: string[][] = [];
-	const { coordinator, parent, agentDir } = await fixture({
-		childExtension: `export default function (pi) {
-			pi.registerTool({
-				name: "measure", label: "Measure", description: "Measure fixture", exposure: "deferred",
-				parameters: { type: "object", properties: {} },
-				async execute() { return { content: [{ type: "text", text: "measured" }], details: undefined }; },
-			});
-		}`,
-		onRequestTools: tools => declared.push(tools),
-		streamSimple(model, _context, turn) {
-			if (turn === 1) return toolCallStream(model, {
-				type: "toolCall", id: "search-tool", name: "tool_search", arguments: { query: "measure" },
-			});
-			if (turn === 2 || turn === 4) return toolCallStream(model, {
-				type: "toolCall", id: `measure-tool-${turn}`, name: "measure", arguments: {},
-			});
-			return scriptedStream(model, "deferred work complete");
-		},
-	});
-	mkdirSync(join(agentDir, "agents"), { recursive: true });
-	writeFileSync(join(agentDir, "agents", "native.md"),
-		"---\nname: native\ndescription: Deferred tools\ntools: tool_search, measure\n---\nInspect the task.\n");
-	try {
-		await coordinator.configureIdleRuntimes(maxIdleRuntimes);
-		const outcome = await coordinator.delegate(parent, "spawn", {
-			agent: "native", description: "deferred discovery", prompt: "Inspect it.",
-		}, { ...DEFAULT_SETTINGS, runtimeMode: "background", inheritExtensions: true, maxIdleRuntimes });
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForCompletions(parent, 1);
-		await waitForChildStatus(coordinator, parent, outcome.details.agentId, maxIdleRuntimes ? "idle" : "ready");
-		assert.equal(parentCompletions(parent)[0].output, "deferred work complete");
-		assert(!declared[0].includes("measure"));
-		assert(declared[1].includes("measure"));
-		await coordinator.sendMessage(parent, outcome.details.agentId, "Measure again without searching.");
-		await coordinator.followupTask(parent, outcome.details.agentId);
-		await waitForCompletions(parent, 2);
-		await waitForChildStatus(coordinator, parent, outcome.details.agentId, maxIdleRuntimes ? "idle" : "ready");
-		assert.equal(parentCompletions(parent)[1].output, "deferred work complete");
-		assert.equal(declared.length, 5);
-		assert(declared[3].includes("measure"), "a restored declaration must not require another tool_search");
-	} finally { await coordinator.shutdown(); }
+test("immediate interrupt at spawn acceptance cannot miss SDK startup", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: () => finish.promise });
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" });
+	f.coordinator.interrupt(f.caller, "worker");
+	await f.idle();
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "interrupted");
 });
 
-test("one-shot children exclude report even when an inherited extension registers and reactivates it late", async () => {
-	const observedTools: string[][] = [];
-	const { coordinator, parent, agentDir } = await fixture({
-		childExtension: `
-export default function lateReport(pi) {
-	pi.on("before_agent_start", () => {
-		pi.registerTool({
-			name: "report", label: "Report", description: "Late report",
-			parameters: { type: "object", properties: {} },
-			async execute() { return { content: [{ type: "text", text: "forbidden" }] }; },
-		});
-		pi.setActiveTools([...pi.getAllTools().map((tool) => tool.name), "report"]);
-	});
-}`,
-		onRequestTools: (tools) => observedTools.push(tools),
-	});
-	mkdirSync(join(agentDir, "agents"), { recursive: true });
-	writeFileSync(join(agentDir, "agents", "unrestricted.md"),
-		"---\nname: unrestricted\ndescription: No tool allowlist\n---\nInspect the task.\n");
-	try {
-		const outcome = await coordinator.delegate(parent, "spawn", {
-			agent: "unrestricted", description: "test native denial", prompt: "Inspect it.",
-		}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true });
-		assert.equal(outcome.kind, "foreground");
-		assert.equal(observedTools.length, 1);
-		assert(observedTools[0].includes("read"));
-		assert(!observedTools[0].includes("report"));
-	} finally {
-		await coordinator.shutdown();
-	}
+test("caller cancellation after acceptance does not own background work", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { reply: () => finish.promise });
+	const signal = new AbortController();
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" }, signal.signal);
+	signal.abort();
+	finish.resolve("independent result");
+	await f.idle();
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "completed");
 });
 
-test("fork completion uses finalized events even when a boundary omits the entire conversation", async () => {
-	const { coordinator, parent } = await fixture({
-		childExtension: `export default function (pi) {
-			pi.on("turn_end", (event) => ({
-				entries: [...event.entries, ...event.context.contextEntries
-					.filter(({ sourceEntry }) => sourceEntry.type === "message" && sourceEntry.message.role !== "system")
-					.map(({ sourceEntry }) => ({ type: "context_edit", targetId: sourceEntry.id, replacement: null }))],
-			}));
-		}`,
-		streamSimple(model) {
-			const stream = createAssistantMessageEventStream();
-			queueMicrotask(() => {
-				const error: AssistantMessage = {
-					role: "assistant", api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(),
-					content: [{ type: "text", text: "final failure" }], stopReason: "error", errorMessage: "terminal fixture failure",
-					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-				};
-				stream.push({ type: "error", reason: "error", error });
-				stream.end();
-			});
-			return stream;
-		},
-	});
-	try {
-		for (let index = 0; index < 3; index++) appendCompletedParentTurn(parent.sessionManager as SessionManager, `q${index}`, `a${index}`);
-		const outcome = await coordinator.delegate(parent, "fork", {
-			agent: "scout", description: "projected context", prompt: "Inspect it.",
-		}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true });
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind !== "foreground") return;
-		assert.equal(outcome.result.stopReason, "error");
-		assert.equal(outcome.result.output, "final failure");
-		assert(outcome.result.sessionFile);
-		const child = SessionManager.open(outcome.result.sessionFile);
-		assert(child.getBranch().some((entry) => entry.type === "context_edit"));
-		assert(!child.buildSessionContext().messages.some((message) => message.role === "assistant"));
-	} finally { await coordinator.shutdown(); }
-});
-
-test("delegation waits for before-settle work and returns only its last finalized answer", async () => {
-	const { coordinator, parent, eventDetails } = await fixture({
-		childExtension: `export default function (pi) {
-			let continued = false;
-			pi.on("agent_before_settle", (event) => {
-				if (continued || event.outcome !== "completed") return;
-				continued = true;
-				return { entries: [...event.entries, {
-					type: "custom_message", customType: "test/boundary", content: "finish verification", display: false,
-				}], continue: true };
+test("cancellation during SDK initialization rejects acceptance and releases capacity", async t => {
+	const reached = deferred();
+	const resume = deferred();
+	(globalThis as any).__pi_subagent_init_gate = { reached, resume };
+	t.after(() => { delete (globalThis as any).__pi_subagent_init_gate; });
+	const f = await fixture(t, {
+		settings: { inheritExtensions: true },
+		extension: `export default function(pi) {
+			pi.on("session_start", async () => {
+				globalThis.__pi_subagent_init_gate.reached.resolve();
+				await globalThis.__pi_subagent_init_gate.resume.promise;
 			});
 		}`,
 	});
-	try {
-		const outcome = await coordinator.delegate(parent, "spawn", {
-			agent: "scout", description: "boundary work", prompt: "Inspect it.",
-		}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true });
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind !== "foreground") return;
-		assert.equal(outcome.result.output, "child answer 2");
-		assert.equal(outcome.result.usage.turns, 2);
-		assert.equal(eventDetails.filter((event) => event.name === "pi-subagent:end").length, 1);
-	} finally { await coordinator.shutdown(); }
+	const controller = new AbortController();
+	const spawn = f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" }, controller.signal);
+	const rejection = assert.rejects(spawn, /cancelled initialization/);
+	await reached.promise;
+	controller.abort(new Error("cancelled initialization"));
+	resume.resolve();
+	await rejection;
+	await f.idle();
+	assert.equal(f.requests.length, 0);
+	assert.equal(f.coordinator.treeStore.record("/root/worker").status, "interrupted");
+	assert.equal(f.coordinator.treeStore.mailbox("/root/worker").length, 1);
 });
 
-test("delegation assigns stable readable paths and disambiguates generated siblings", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const first = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "auth",
-				description: "inspect auth",
-				prompt: "Inspect auth.",
-			},
-			DEFAULT_SETTINGS,
-		);
-		assert.equal(first.kind, "continuable");
-		if (first.kind !== "continuable") return;
-		assert.equal(first.details.taskPath, "/root/auth");
-		await waitForChildReady(coordinator, parent, first.details.agentId);
-
-		await assert.rejects(
-			() =>
-				coordinator.delegate(
-					parent,
-					"spawn",
-					{
-						agent: "scout",
-						task_name: "auth",
-						description: "duplicate auth",
-						prompt: "Inspect again.",
-					},
-					DEFAULT_SETTINGS,
-				),
-			/task path \/root\/auth is already in use/,
-		);
-
-		const generatedOne = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "inspect cache",
-				prompt: "Inspect cache.",
-			},
-			DEFAULT_SETTINGS,
-		);
-		const generatedTwo = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "inspect cache",
-				prompt: "Inspect cache again.",
-			},
-			DEFAULT_SETTINGS,
-		);
-		assert.equal(generatedOne.details.taskPath, "/root/inspect-cache");
-		assert.equal(generatedTwo.details.taskPath, "/root/inspect-cache-2");
-		const listed = await coordinator.list(parent, "children");
-		assert.equal(
-			listed.some(
-				(entry) =>
-					entry.kind === "child"
-					&& entry.taskPath === "/root/auth"
-					&& entry.agentId === first.details.agentId,
-			),
-			true,
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
+test("cold runtime retains Codex identity independently from transport and context", async t => {
+	const f = await fixture(t, { settings: { openAIIdentity: true } });
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "work" });
+	await f.idle();
+	const file = f.coordinator.treeStore.record("/root/worker").sessionFile;
+	const identities = SessionManager.open(file).getEntries().filter(entry =>
+		entry.type === "custom" && entry.customType.includes("codex") && entry.customType.includes("identity"));
+	assert(identities.length > 0);
+	await f.coordinator.followup(f.caller, "worker", "continue");
+	await f.idle();
+	const later = SessionManager.open(file).getEntries().filter(entry =>
+		entry.type === "custom" && entry.customType.includes("codex") && entry.customType.includes("identity"));
+	assert.deepEqual(later, identities);
+	assert.doesNotMatch(JSON.stringify(f.requests), /customType.*identity/);
 });
 
-test("absolute and relative task paths resolve to the same serialized child", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "reader",
-				description: "read target",
-				prompt: "Initial read.",
-			},
-			DEFAULT_SETTINGS,
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-
-		const relativeDelivery = await coordinator.sendMessageWithOutcome(
-			parent,
-			"reader",
-			"Read again.",
-		);
-		assert.equal(relativeDelivery.agentId, outcome.details.agentId);
-		assert.equal(relativeDelivery.taskPath, "/root/reader");
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-
-		const absoluteDelivery = await coordinator.sendMessageWithOutcome(
-			parent,
-			"/root/reader",
-			"Read once more.",
-		);
-		assert.equal(absoluteDelivery.agentId, outcome.details.agentId);
-		assert.equal(absoluteDelivery.taskPath, "/root/reader");
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("a nested parent resolves a direct child by its relative path", async () => {
-	let scoutTurns = 0;
-	const { coordinator, parent } = await fixture({
-		streamSimple: (model, context, turn, signal) => {
-			const canDelegate = getCurrentTools(context.messages).some(
-				(tool) => tool.name === "subagent",
-			);
-			if (!canDelegate) {
-				scoutTurns++;
-				return scriptedStream(
-					model,
-					`nested scout turn ${scoutTurns}`,
-					signal,
-				);
-			}
-			const toolResults = context.messages.filter(
-				(message) => message.role === "toolResult",
-			);
-			const latest = toolResults.at(-1);
-			if (!latest) {
-				return toolCallStream(model, {
-					type: "toolCall",
-					id: `spawn-leaf-${turn}`,
-					name: "subagent",
-					arguments: {
-						agent: "scout",
-						task_name: "leaf",
-						description: "nested leaf",
-						prompt: "Complete the first leaf turn.",
-					},
-				});
-			}
-			if (latest.toolName === "subagent") {
-				return toolCallStream(model, {
-					type: "toolCall",
-					id: `message-leaf-${turn}`,
-					name: "send_message",
-					arguments: {
-						subagent_id: "leaf",
-						message: "Complete a relative-address follow-up.",
-					},
-				});
-			}
-			if (latest.toolName === "send_message") {
-				return toolCallStream(model, {
-					type: "toolCall",
-					id: `followup-leaf-${turn}`,
-					name: "followup_task",
-					arguments: { subagent_id: "./leaf" },
-				});
-			}
-			return scriptedStream(model, "nested parent done", signal);
-		},
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "worker",
-				task_name: "parent",
-				description: "nested parent",
-				prompt: "Spawn leaf and send a relative follow-up.",
-			},
-			DEFAULT_SETTINGS,
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-		const descendants = await coordinator.list(parent, "descendants");
-		const leaf = descendants.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.taskPath === "/root/parent/leaf",
-		);
-		assert.equal(leaf?.kind, "child");
-		assert.equal(scoutTurns, 2);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("an unrelated cyclic descriptor component cannot block readable path operations", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const seed = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "seed",
-				description: "seed child",
-				prompt: "Create a descriptor seed.",
-			},
-			DEFAULT_SETTINGS,
-		);
-		assert.equal(seed.kind, "continuable");
-		if (seed.kind !== "continuable") return;
-		await waitForChildReady(coordinator, parent, seed.details.agentId);
-		const seedEntry = (await coordinator.list(parent, "children")).find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === seed.details.agentId,
-		);
-		assert.equal(seedEntry?.kind, "child");
-		if (seedEntry?.kind !== "child" || !seedEntry.sessionFile) return;
-		const seedManager = SessionManager.open(
-			seedEntry.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		const folded = foldDescriptor(seedManager.getEntries());
-		assert.equal(folded.kind, "valid");
-		if (folded.kind !== "valid") return;
-		const rootFile = parent.sessionManager.getSessionFile();
-		assert.ok(rootFile);
-		const cycleIds = [
-			"01900000-0000-7000-8000-0000000000a1",
-			"01900000-0000-7000-8000-0000000000b2",
-		] as const;
-		for (let index = 0; index < cycleIds.length; index++) {
-			const manager = SessionManager.create(
-				parent.cwd,
-				parent.sessionManager.getSessionDir(),
-				{ parentSession: rootFile },
-			);
-			manager.appendCustomEntry(DESCRIPTOR_CUSTOM_TYPE, {
-				...structuredClone(folded.descriptor),
-				agentId: cycleIds[index],
-				parentAgentId: cycleIds[1 - index],
-				parentSessionFile: rootFile,
-				task: {
-					name: `cycle-${index + 1}`,
-					path: `/root/cycle-${index + 1}`,
-				},
+test("followup racing idle disposal waits for a single replacement runtime", async t => {
+	const reached = deferred();
+	const resume = deferred();
+	(globalThis as any).__pi_subagent_disposal = { reached, resume };
+	t.after(() => { delete (globalThis as any).__pi_subagent_disposal; });
+	const f = await fixture(t, {
+		settings: { inheritExtensions: true },
+		extension: `export default function(pi) {
+			pi.on("session_shutdown", async () => {
+				globalThis.__pi_subagent_disposal.reached.resolve();
+				await globalThis.__pi_subagent_disposal.resume.promise;
 			});
-			appendCompletedParentTurn(
-				manager,
-				"persist cycle fixture",
-				"cycle fixture persisted",
-			);
-		}
-		let longParentPath = "/root";
-		const targetLength = 4092;
-		const suffix = "/parent";
-		while (
-			longParentPath.length + 65 + suffix.length
-			<= targetLength
-		) {
-			longParentPath += `/${"x".repeat(64)}`;
-		}
-		const remaining =
-			targetLength - longParentPath.length - suffix.length;
-		if (remaining >= 2) {
-			longParentPath += `/${"x".repeat(remaining - 1)}`;
-		}
-		longParentPath += suffix;
-		const topologyIds = [
-			"01900000-0000-7000-8000-0000000000c3",
-			"01900000-0000-7000-8000-0000000000d4",
-		] as const;
-		for (let index = 0; index < topologyIds.length; index++) {
-			const manager = SessionManager.create(
-				parent.cwd,
-				parent.sessionManager.getSessionDir(),
-				{ parentSession: rootFile },
-			);
-			manager.appendCustomEntry(DESCRIPTOR_CUSTOM_TYPE, {
-				...structuredClone(folded.descriptor),
-				agentId: topologyIds[index],
-				parentAgentId:
-					index === 0 ? parent.agentId : topologyIds[0],
-				parentSessionFile: rootFile,
-				depth: index + 1,
-				task:
-					index === 0
-						? {
-								name: "parent",
-								path: longParentPath,
-							}
-						: {
-								name: "child",
-								path: "/root/child",
-							},
-			});
-			appendCompletedParentTurn(
-				manager,
-				"persist topology fixture",
-				"topology fixture persisted",
-			);
-		}
-		const withCycle = await coordinator.list(parent, "descendants");
-		assert.equal(
-			withCycle.filter(
-				(entry) =>
-					entry.kind === "diagnostic"
-					&& /lineage contains a cycle/.test(entry.message),
-			).length,
-			2,
-		);
-		assert.equal(
-			withCycle.some(
-				(entry) =>
-					entry.kind === "diagnostic"
-					&& /cannot be joined/.test(entry.message),
-			),
-			true,
-		);
-
-		const delivery = await coordinator.sendMessageWithOutcome(
-			parent,
-			"/root/seed",
-			"Path lookup still works.",
-		);
-		assert.equal(delivery.agentId, seed.details.agentId);
-		await waitForChildReady(coordinator, parent, seed.details.agentId);
-		const afterCycle = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "after-cycle",
-				description: "after cycle",
-				prompt: "Create after corrupt topology.",
-			},
-			DEFAULT_SETTINGS,
-		);
-		assert.equal(afterCycle.details.taskPath, "/root/after-cycle");
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("last_n_completed context excludes the active parent tool turn", async () => {
-	const requestContexts: Context[] = [];
-	const { coordinator, parent } = await fixture({
-		onRequestContext: (context) => requestContexts.push(context),
-	});
-	try {
-		const manager = parent.sessionManager as SessionManager;
-		appendCompletedParentTurn(manager, "question one", "answer one");
-		appendCompletedParentTurn(manager, "question two", "answer two");
-		appendCompletedParentTurn(manager, "question three", "answer three");
-		manager.appendMessage({
-			role: "user",
-			content: "active parent turn",
-			timestamp: Date.now(),
-		});
-		manager.appendMessage({
-			role: "assistant",
-			content: [
-				{
-					type: "toolCall",
-					id: "active-delegation",
-					name: "subagent",
-					arguments: {},
-				},
-			],
-			api: "openai-responses",
-			provider: "scripted",
-			model: "echo",
-			usage: {
-				input: 1,
-				output: 1,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 2,
-				cost: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					total: 0,
-				},
-			},
-			stopReason: "toolUse",
-			timestamp: Date.now(),
-		});
-
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "context-reader",
-				description: "read context",
-				prompt: "Use inherited context.",
-				context: {
-					mode: "last_n_completed",
-					completed_turns: 2,
-				},
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
-		);
-		assert.equal(outcome.kind, "foreground");
-		assert.equal(outcome.details.provider, "fork");
-		assert.equal(outcome.details.taskPath, "/root/context-reader");
-		const request = requestContexts[0];
-		assert.ok(request);
-		const userTexts = request.messages
-			.filter(
-				(
-					message,
-				): message is Extract<
-					Context["messages"][number],
-					{ role: "user" }
-				> => message.role === "user",
-			)
-			.map(userMessageText);
-		assert.deepEqual(userTexts, [
-			"question two",
-			"question three",
-			"Use inherited context.",
-		]);
-		assert.equal(
-			request.messages.some(
-				(message) =>
-					message.role === "user"
-					&& message.content === "active parent turn",
-			),
-			false,
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("subagent_fork can create a continuable inherited-context child", async () => {
-	const requestContexts: Context[] = [];
-	const { coordinator, parent } = await fixture({
-		onRequestContext: (context) => requestContexts.push(context),
-	});
-	try {
-		appendCompletedParentTurn(
-			parent.sessionManager as SessionManager,
-			"shared question",
-			"shared answer",
-		);
-		const outcome = await coordinator.delegate(
-			parent,
-			"fork",
-			{
-				agent: "scout",
-				task_name: "continuable-fork",
-				description: "continue inherited",
-				prompt: "Start inherited work.",
-			},
-			DEFAULT_SETTINGS,
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		assert.equal(outcome.details.provider, "fork");
-		assert.equal(outcome.details.taskPath, "/root/continuable-fork");
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-		assert.equal(
-			requestContexts[0]?.messages.some(
-				(message) =>
-					message.role === "user"
-					&& userMessageText(message) === "shared question",
-			),
-			true,
-		);
-
-		await coordinator.sendMessage(
-			parent,
-			"/root/continuable-fork",
-			"Continue the same fork.",
-		);
-		await coordinator.followupTask(parent, "/root/continuable-fork");
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-		assert.equal(requestContexts.length, 2);
-		// The follow-up turn carries the claimed mailbox batch.
-		assert.match(
-			JSON.stringify(requestContexts[1]?.messages),
-			/Continue the same fork\./,
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("continuable fork preserves mailbox queue, start, and quiet completion semantics", async () => {
-	const { coordinator, parent, messages } = await fixture();
-	try {
-		appendCompletedParentTurn(
-			parent.sessionManager as SessionManager,
-			"mailbox context",
-			"mailbox answer",
-		);
-		const settings = {
-			...DEFAULT_SETTINGS,
-		};
-		const outcome = await coordinator.delegate(
-			parent,
-			"fork",
-			{
-				agent: "scout",
-				task_name: "mailbox-fork",
-				description: "mailbox fork",
-				prompt: "Run the initial inherited turn.",
-			},
-			settings,
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-		const delivery = await coordinator.sendMessageWithOutcome(
-			parent,
-			"mailbox-fork",
-			"Run a durable follow-up.",
-		);
-		assert.equal(delivery.kind, "mailbox");
-		const started = await coordinator.followupTask(
-			parent,
-			"/root/mailbox-fork",
-		);
-		assert.equal(started.agentId, outcome.details.agentId);
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-		assert.equal(messages.length, 0);
-		const waited = await coordinator.waitAgent(
-			parent,
-			"wait-mailbox-fork",
-			0,
-		);
-		assert.equal(waited.updates.length, 2);
-		assert.equal(
-			waited.taskPaths[outcome.details.agentId],
-			"/root/mailbox-fork",
-		);
-		appendWaitAgentToolResult(parent, "wait-mailbox-fork");
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("idle runtime LRU retains the newest child and cold-resumes an evicted path", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		await coordinator.configureIdleRuntimes(1);
-		const settings = {
-			...DEFAULT_SETTINGS,
-			maxIdleRuntimes: 1,
-		};
-		const first = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "first",
-				description: "first idle",
-				prompt: "Finish first.",
-			},
-			settings,
-		);
-		assert.equal(first.kind, "continuable");
-		if (first.kind !== "continuable") return;
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			first.details.agentId,
-			"idle",
-		);
-
-		const second = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "second",
-				description: "second idle",
-				prompt: "Finish second.",
-			},
-			settings,
-		);
-		assert.equal(second.kind, "continuable");
-		if (second.kind !== "continuable") return;
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			second.details.agentId,
-			"idle",
-		);
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			first.details.agentId,
-			"ready",
-		);
-
-		await coordinator.sendMessage(
-			parent,
-			"/root/first",
-			"Cold resume the first child.",
-		);
-		await coordinator.followupTask(parent, "/root/first");
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			first.details.agentId,
-			"idle",
-		);
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			second.details.agentId,
-			"ready",
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("reusing an idle runtime emits paired activation start and end events", async () => {
-	const { coordinator, parent, eventDetails } = await fixture();
-	try {
-		await coordinator.configureIdleRuntimes(1);
-		const settings = {
-			...DEFAULT_SETTINGS,
-			maxIdleRuntimes: 1,
-		};
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "event-pairs",
-				description: "event pairs",
-				prompt: "Finish once.",
-			},
-			settings,
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-			"idle",
-		);
-		await coordinator.sendMessage(
-			parent,
-			"event-pairs",
-			"Finish a second retained-runtime turn.",
-		);
-		await coordinator.followupTask(parent, "event-pairs");
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-			"idle",
-		);
-		const lifecycle = eventDetails.filter(
-			(event) =>
-				(
-					event.name === "pi-subagent:start"
-					|| event.name === "pi-subagent:end"
-				)
-				&& (event.data as { agentId?: string }).agentId
-					=== outcome.details.agentId,
-		);
-		assert.deepEqual(
-			lifecycle.map((event) => event.name),
-			[
-				"pi-subagent:start",
-				"pi-subagent:end",
-				"pi-subagent:start",
-				"pi-subagent:end",
-			],
-		);
-		const starts = lifecycle
-			.filter((event) => event.name === "pi-subagent:start")
-			.map((event) => (event.data as { runId: string }).runId);
-		const ends = lifecycle
-			.filter((event) => event.name === "pi-subagent:end")
-			.map((event) => (event.data as { runId: string }).runId);
-		assert.deepEqual(ends, starts);
-		assert.notEqual(starts[0], starts[1]);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("an unaccepted retained-runtime turn is silent and remains retryable", async () => {
-	const { coordinator, parent, messages } = await fixture({ delayMs: 80 });
-	try {
-		coordinator.configureBackgroundRuns(1);
-		await coordinator.configureIdleRuntimes(2);
-		const settings = {
-			...DEFAULT_SETTINGS,
-			maxConcurrentBackgroundRuns: 1,
-			maxIdleRuntimes: 2,
-		};
-		const retained = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "retained",
-				description: "retained child",
-				prompt: "Finish the initial turn.",
-			},
-			settings,
-		);
-		assert.equal(retained.kind, "continuable");
-		if (retained.kind !== "continuable") return;
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			retained.details.agentId,
-			"idle",
-		);
-		assert.equal(parentCompletions(parent).length, 1);
-
-		const blocker = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "blocker",
-				description: "scheduler blocker",
-				prompt: "Hold the only scheduler slot.",
-			},
-			settings,
-		);
-		assert.equal(blocker.kind, "continuable");
-		await coordinator.sendMessage(
-			parent,
-			"retained",
-			"This queued turn must stay silent.",
-		);
-		const controller = new AbortController();
-		const cancelled = coordinator.followupTask(
-			parent,
-			"retained",
-			controller.signal,
-		);
-		setTimeout(
-			() => controller.abort(new Error("cancel queued retry")),
-			10,
-		);
-		await assert.rejects(cancelled, /cancel queued retry/);
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			retained.details.agentId,
-			"idle",
-		);
-		// The cancelled claim leaves the batch pending and adds no completion.
-		assert.equal(parentCompletions(parent).length, 1);
-		const stillQueued = await coordinator.list(parent, "children");
-		const retainedEntry = stillQueued.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === retained.details.agentId,
-		);
-		assert.equal(
-			retainedEntry?.kind === "child"
-				? retainedEntry.pendingMessages
-				: undefined,
-			1,
-		);
-		assert.equal(messages.length, 0);
-
-		if (blocker.kind === "continuable") {
-			await waitForChildStatus(
-				coordinator,
-				parent,
-				blocker.details.agentId,
-				"idle",
-			);
-		}
-		await coordinator.followupTask(parent, "retained");
-		await waitForCompletions(parent, 2);
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			retained.details.agentId,
-			"idle",
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("concurrent settlements still enforce the idle runtime LRU limit", async () => {
-	const { coordinator, parent } = await fixture({ delayMs: 30 });
-	try {
-		await coordinator.configureIdleRuntimes(1);
-		const settings = {
-			...DEFAULT_SETTINGS,
-			maxIdleRuntimes: 1,
-		};
-		const [first, second] = await Promise.all([
-			coordinator.delegate(
-				parent,
-				"spawn",
-				{
-					agent: "scout",
-					task_name: "concurrent-one",
-					description: "concurrent one",
-					prompt: "Finish concurrently.",
-				},
-				settings,
-			),
-			coordinator.delegate(
-				parent,
-				"spawn",
-				{
-					agent: "scout",
-					task_name: "concurrent-two",
-					description: "concurrent two",
-					prompt: "Finish concurrently.",
-				},
-				settings,
-			),
-		]);
-		assert.equal(first.kind, "continuable");
-		assert.equal(second.kind, "continuable");
-		await waitUntil(async () => {
-			const entries = await coordinator.list(parent, "children");
-			const children = entries.filter(
-				(entry) =>
-					entry.kind === "child"
-					&& (
-						entry.taskPath === "/root/concurrent-one"
-						|| entry.taskPath === "/root/concurrent-two"
-					),
-			);
-			return (
-				children.length === 2
-				&& children.every(
-					(entry) =>
-						entry.kind === "child"
-						&& (
-							entry.status === "idle"
-							|| entry.status === "ready"
-						),
-				)
-				&& children.filter(
-					(entry) =>
-						entry.kind === "child"
-						&& entry.status === "idle",
-				).length === 1
-			);
-		});
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("mailbox child remains recoverable after an initial provider failure with idle LRU", async () => {
-	let failFirst = true;
-	const { coordinator, parent } = await fixture({
-		streamSimple: (model, _context, _turn, signal) => {
-			if (failFirst) {
-				failFirst = false;
-				throw new Error("provider failed before assistant persistence");
-			}
-			return scriptedStream(model, "recovered child", signal);
-		},
-	});
-	try {
-		await coordinator.configureIdleRuntimes(1);
-		const settings = {
-			...DEFAULT_SETTINGS,
-			maxIdleRuntimes: 1,
-		};
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "recoverable",
-				description: "recover failed child",
-				prompt: "The provider will fail this turn.",
-			},
-			settings,
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitUntil(async () => {
-			const entries = await coordinator.list(parent, "children");
-			return entries.some(
-				(entry) =>
-					entry.kind === "child"
-					&& entry.agentId === outcome.details.agentId
-					&& (
-						entry.status === "ready"
-						|| entry.status === "idle"
-					),
-			);
-		});
-
-		const delivered = await coordinator.sendMessageWithOutcome(
-			parent,
-			"recoverable",
-			"Recover from durable mailbox work.",
-		);
-		assert.equal(delivered.kind, "mailbox");
-		await coordinator.followupTask(parent, "recoverable");
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-			"idle",
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("OpenAI identity config injects the Codex lifecycle inline", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "codex identity child",
-				prompt: "Inspect it.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "foreground" as const,
-				openAIIdentity: true,
-			},
-		);
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind !== "foreground") return;
-		assert.ok(outcome.details.sessionFile);
-		const child = SessionManager.open(
-			outcome.details.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		const childIdentityEntry = [...child.getEntries()]
-			.reverse()
-			.find(
-				(entry) =>
-					entry.type === "custom"
-					&& entry.customType === CODEX_IDENTITY_CUSTOM_TYPE,
-			);
-		assert.equal(childIdentityEntry?.type, "custom");
-		if (childIdentityEntry?.type !== "custom") return;
-		const childIdentity = childIdentityEntry.data as {
-			sessionId: string;
-			threadId: string;
-			parentThreadId?: string;
-		};
-
-		const parentIdentityEntry = [...parent.sessionManager.getEntries()]
-			.reverse()
-			.find(
-				(entry) =>
-					entry.type === "custom"
-					&& entry.customType === CODEX_IDENTITY_CUSTOM_TYPE,
-			);
-		assert.equal(parentIdentityEntry?.type, "custom");
-		if (parentIdentityEntry?.type !== "custom") return;
-		const parentIdentity = parentIdentityEntry.data as {
-			sessionId: string;
-			threadId: string;
-		};
-		assert.equal(parentIdentity.sessionId, parentIdentity.threadId);
-		assert.equal(childIdentity.sessionId, parentIdentity.sessionId);
-		assert.notEqual(childIdentity.threadId, parentIdentity.threadId);
-		assert.equal(childIdentity.parentThreadId, parentIdentity.threadId);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("OpenAI identity config off does not inject the inline lifecycle", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "provider-neutral child",
-				prompt: "Inspect it.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const, openAIIdentity: false },
-		);
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind !== "foreground" || !outcome.details.sessionFile) return;
-		const child = SessionManager.open(
-			outcome.details.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		assert.equal(
-			child
-				.getEntries()
-				.some(
-					(entry) =>
-						entry.type === "custom"
-						&& entry.customType === CODEX_IDENTITY_CUSTOM_TYPE,
-				),
-			false,
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("virtual model routing to OpenAI injects Codex identity", async () => {
-	const { coordinator, parent, modelRuntime } = await fixture();
-	try {
-		const echo = modelRuntime.getModel("scripted", "echo");
-		assert.ok(echo);
-		const virtual = registerScriptedVirtualModel(modelRuntime, () => echo);
-		parent.model = virtual;
-		parent.thinkingLevel = "off";
-
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "virtual openai identity",
-				prompt: "Inspect it.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "foreground" as const,
-				openAIIdentity: true,
-			},
-		);
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind !== "foreground" || !outcome.details.sessionFile) return;
-		const child = SessionManager.open(
-			outcome.details.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		const childEntries = codexIdentityEntries(child);
-		assert.equal(childEntries.length, 1);
-		const childEntry = childEntries[0];
-		if (childEntry?.type !== "custom") return;
-		const childIdentity = childEntry.data as {
-			sessionId: string;
-			threadId: string;
-			parentThreadId?: string;
-			subagentKind?: string;
-		};
-
-		const parentEntries = codexIdentityEntries(parent.sessionManager);
-		assert.equal(parentEntries.length, 1);
-		const parentEntry = parentEntries[0];
-		if (parentEntry?.type !== "custom") return;
-		const parentIdentity = parentEntry.data as {
-			sessionId: string;
-			threadId: string;
-		};
-		assert.equal(parentIdentity.sessionId, parentIdentity.threadId);
-		assert.equal(childIdentity.sessionId, parentIdentity.sessionId);
-		assert.notEqual(childIdentity.threadId, parentIdentity.threadId);
-		assert.equal(childIdentity.parentThreadId, parentIdentity.threadId);
-		assert.equal(childIdentity.subagentKind, "collab_spawn");
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("virtual model with OpenAI identity config off does not inject the inline lifecycle", async () => {
-	const { coordinator, parent, modelRuntime } = await fixture();
-	try {
-		const echo = modelRuntime.getModel("scripted", "echo");
-		assert.ok(echo);
-		const virtual = registerScriptedVirtualModel(modelRuntime, () => echo);
-		parent.model = virtual;
-		parent.thinkingLevel = "off";
-
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "virtual identity disabled",
-				prompt: "Inspect it.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "foreground" as const,
-				openAIIdentity: false,
-			},
-		);
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind !== "foreground" || !outcome.details.sessionFile) return;
-		const child = SessionManager.open(
-			outcome.details.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		assert.equal(codexIdentityEntries(child).length, 0);
-		assert.equal(codexIdentityEntries(parent.sessionManager).length, 0);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("virtual model routing to non-OpenAI keeps identity out of the request transcript", async () => {
-	const requestContexts: Context[] = [];
-	const { coordinator, parent, modelRuntime } = await fixture();
-	try {
-		const neutral = registerNeutralProvider(modelRuntime, (context) => {
-			requestContexts.push(context);
-		});
-		const virtual = registerScriptedVirtualModel(modelRuntime, () => neutral);
-		parent.model = virtual;
-		parent.thinkingLevel = "off";
-
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "virtual neutral identity",
-				prompt: "Inspect it.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "foreground" as const,
-				openAIIdentity: true,
-			},
-		);
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind !== "foreground" || !outcome.details.sessionFile) return;
-		const child = SessionManager.open(
-			outcome.details.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		// The router is unknown before the request, so a virtual child may carry
-		// the identity as custom session metadata even on a non-OpenAI route.
-		const childEntries = codexIdentityEntries(child);
-		assert.equal(childEntries.length, 1);
-		const childEntry = childEntries[0];
-		if (childEntry?.type !== "custom") return;
-		const childIdentity = childEntry.data as {
-			sessionId: string;
-			threadId: string;
-			parentThreadId?: string;
-		};
-
-		assert.ok(requestContexts.length >= 1);
-		const serialized = JSON.stringify(requestContexts);
-		assert.equal(serialized.includes(CODEX_IDENTITY_CUSTOM_TYPE), false);
-		assert.equal(serialized.includes(childIdentity.threadId), false);
-		assert.equal(serialized.includes(childIdentity.sessionId), false);
-		if (childIdentity.parentThreadId) {
-			assert.equal(serialized.includes(childIdentity.parentThreadId), false);
-		}
-		assert.equal(codexIdentityEntries(parent.sessionManager).length, 1);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("virtual model that switches OpenAI then non-OpenAI keeps one identity across cold resume", async () => {
-	const { coordinator, parent, modelRuntime } = await fixture({
-		reportFirst: true,
-	});
-	try {
-		const echo = modelRuntime.getModel("scripted", "echo");
-		assert.ok(echo);
-		const neutral = registerNeutralProvider(modelRuntime);
-		let calls = 0;
-		const virtual = registerScriptedVirtualModel(
-			modelRuntime,
-			() => (calls++ === 0 ? echo : neutral),
-		);
-		parent.model = virtual;
-		parent.thinkingLevel = "off";
-
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "virtual mixed identity",
-				prompt: "Inspect it.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "background" as const,
-				openAIIdentity: true,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable" || !outcome.details.sessionFile) return;
-		await waitForCompletions(parent, 1);
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-			"ready",
-		);
-		const firstRun = SessionManager.open(
-			outcome.details.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		const firstEntries = codexIdentityEntries(firstRun);
-		assert.equal(firstEntries.length, 1);
-		const firstEntry = firstEntries[0];
-		if (firstEntry?.type !== "custom") return;
-		const firstThreadId = (firstEntry.data as { threadId: string }).threadId;
-		assert.equal(codexIdentityEntries(parent.sessionManager).length, 1);
-
-		await coordinator.sendMessage(
-			parent,
-			outcome.details.agentId,
-			"Continue on the neutral route.",
-		);
-		await coordinator.followupTask(parent, outcome.details.agentId);
-		await waitForCompletions(parent, 2);
-		const resumed = SessionManager.open(
-			outcome.details.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		const resumedEntries = codexIdentityEntries(resumed);
-		assert.equal(resumedEntries.length, 1);
-		const resumedEntry = resumedEntries[0];
-		assert(resumedEntry?.type === "custom");
-		assert.equal(
-			(resumedEntry.data as { threadId: string }).threadId,
-			firstThreadId,
-		);
-		assert.equal(codexIdentityEntries(parent.sessionManager).length, 1);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("delegation never restores missing user definitions", async () => {
-	const { coordinator, parent, agentDir } = await fixture();
-	try {
-		rmSync(join(agentDir, "agents"), { recursive: true });
-		assert.equal(existsSync(join(agentDir, "agents")), false);
-		await assert.rejects(() => coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "missing scout",
-				prompt: "Inspect it.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
-		), /unknown subagent "scout"/);
-		assert.equal(existsSync(join(agentDir, "agents")), false);
-		assert.equal(existsSync(join(agentDir, ".pi-subagent")), false);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("continuable child settles, becomes ready, and cold-resumes for a later message", async () => {
-	const { coordinator, parent, messages, events } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "background scout",
-				prompt: "Inspect it.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-		);
-		assert.equal(outcome.kind, "continuable");
-		await waitForChildStatus(coordinator, parent, outcome.details.agentId, "ready");
-		const id = outcome.details.agentId;
-		const firstList = await coordinator.list(parent, "children");
-		assert.equal(firstList[0]?.kind, "child");
-		if (firstList[0]?.kind === "child") {
-			assert.equal(firstList[0].status, "ready");
-			assert.equal(firstList[0].agentId, id);
-			assert.equal(firstList[0].parentAgentId, parent.agentId);
-		}
-
-		await coordinator.sendMessage(parent, id, "Inspect one more thing.");
-		await coordinator.followupTask(parent, id);
-		await waitForCompletions(parent, 2);
-		await waitForChildStatus(coordinator, parent, id, "ready");
-		const completions = parentCompletions(parent);
-		assert.match(completions[0]!.output, /child answer 1/);
-		assert.match(completions[1]!.output, /child answer 2/);
-		assert.equal(messages.length, 0);
-		assert.deepEqual(events, [
-			"pi-subagent:start",
-			"pi-subagent:end",
-			"pi-subagent:start",
-			"pi-subagent:end",
-		]);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-async function assertMailboxFifo(
-	t: TestContext,
-	maxIdleRuntimes: number,
-	resolutionOrder: readonly [0 | 1, 0 | 1],
-): Promise<void> {
-	const requestContexts: Context[] = [];
-	const {
-		coordinator,
-		parent,
-		messages,
-		eventDetails,
-		agentDir,
-		pi,
-		context,
-	} = await fixture({
-		onRequestContext: (requestContext) => requestContexts.push(requestContext),
-	});
-	let restarted: SubagentCoordinator | undefined;
-	try {
-		await coordinator.configureIdleRuntimes(maxIdleRuntimes);
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "durable mailbox child",
-				prompt: "Initial task.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				maxIdleRuntimes,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		const settledStatus = maxIdleRuntimes > 0 ? "idle" : "ready";
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-			settledStatus,
-		);
-		const eventCount = eventDetails.length;
-		assert.equal(requestContexts.length, 1);
-		assert.equal(messages.length, 0);
-
-		const inputs = ["First queued request.", "Second queued request."] as const;
-		const operations = coordinator as unknown as {
-			sendMessageSerialized(...args: unknown[]): Promise<unknown>;
-		};
-		const send = operations.sendMessageSerialized;
-		let concurrentSends = 0;
-		let peakSends = 0;
-		const serialized = t.mock.method(operations, "sendMessageSerialized", async (...args: unknown[]) => {
-			concurrentSends++;
-			peakSends = Math.max(peakSends, concurrentSends);
-			try {
-				return await send.apply(coordinator, args);
-			} finally {
-				concurrentSends--;
-			}
-		});
-		const [first, second] = await withTargetResolutionOrder(t, coordinator, resolutionOrder, [
-			() => coordinator.sendMessageWithOutcome(
-				parent,
-				outcome.details.agentId,
-				inputs[0],
-			),
-			() => coordinator.sendMessageWithOutcome(
-				parent,
-				outcome.details.taskPath,
-				inputs[1],
-			),
-		]);
-		assert.equal(serialized.mock.callCount(), 2);
-		assert.equal(peakSends, 1, "path and id aliases must share one serialization queue");
-		serialized.mock.restore();
-		assert.equal(first.kind, "mailbox");
-		assert.equal(second.kind, "mailbox");
-		if (first.kind !== "mailbox" || second.kind !== "mailbox") return;
-		assert.notEqual(first.messageId, second.messageId);
-		assert.match(first.messageId, UUID_V7_PATTERN);
-		assert.match(second.messageId, UUID_V7_PATTERN);
-		const receipts = [first, second] as const;
-		const expectedMessages = resolutionOrder.map((index) => ({
-			messageId: receipts[index].messageId,
-			content: inputs[index],
-		}));
-		assert.equal(receipts[resolutionOrder[0]].pendingMessages, 1);
-		assert.equal(receipts[resolutionOrder[1]].pendingMessages, 2);
-		for (const receipt of receipts) {
-			assert.equal(receipt.agentId, outcome.details.agentId);
-			assert.equal(receipt.taskPath, outcome.details.taskPath);
-		}
-		assert.equal(requestContexts.length, 1);
-		assert.equal(messages.length, 0);
-		assert.equal(eventDetails.length, eventCount);
-
-		const queued = await coordinator.list(parent, "children");
-		const child = queued.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(child?.kind, "child");
-		if (child?.kind !== "child") return;
-		assert.equal(child.status, settledStatus);
-		assert.equal(child.pendingMessages, 2);
-		assert.equal(child.unreadUpdates, 1);
-		assert.match(coordinator.formatCatalog(queued, "children"), /pending=2/);
-		assert.ok(child.sessionFile);
-		const persisted = SessionManager.open(
-			child.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		assert.deepEqual(
-			readMailbox(persisted.getEntries()).pending.map(
-				({ messageId, content }) => ({ messageId, content }),
-			),
-			expectedMessages,
-		);
-
-		await coordinator.shutdown();
-		restarted = new SubagentCoordinator(
-			pi,
-			resolve(import.meta.dirname, ".."),
-			agentDir,
-		);
-		const restartedParent = await restarted.parentFromContext(context);
-		const afterRestart = await restarted.list(restartedParent, "children");
-		const restartedChild = afterRestart.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(restartedChild?.kind, "child");
-		if (restartedChild?.kind === "child") {
-			assert.equal(restartedChild.pendingMessages, 2);
-			assert.equal(restartedChild.unreadUpdates, 1);
-		}
-
-		const followup = await restarted.followupTask(
-			restartedParent,
-			outcome.details.agentId,
-		);
-		assert.match(followup.turnId, UUID_V7_PATTERN);
-		assert.equal(followup.claimedMessages, 2);
-		await waitUntil(() => requestContexts.length === 2);
-		await waitForChildReady(
-			restarted,
-			restartedParent,
-			outcome.details.agentId,
-		);
-		assert.equal(messages.length, 0);
-		const serializedContext = JSON.stringify(requestContexts[1]?.messages);
-		const positions = expectedMessages.map(({ content }) => serializedContext.indexOf(content));
-		assert.ok(positions.every(position => position >= 0), "every queued message must reach the model");
-		assert.ok(positions[0]! < positions[1]!, "replay must retain durable append order");
-		const drained = await restarted.list(restartedParent, "children");
-		const drainedChild = drained.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(drainedChild?.kind, "child");
-		if (drainedChild?.kind === "child") {
-			assert.equal(drainedChild.pendingMessages, 0);
-			assert.equal(drainedChild.unreadUpdates, 2);
-		}
-		await assert.rejects(
-			() => restarted!.followupTask(restartedParent, outcome.details.agentId),
-			/no pending mailbox messages/,
-		);
-	} finally {
-		await restarted?.shutdown();
-		await coordinator.shutdown();
-	}
-}
-
-for (const maxIdleRuntimes of [0, 1]) {
-	for (const resolutionOrder of [[0, 1], [1, 0]] as const) {
-		test(
-			`mailbox send_message only persists FIFO work until followup_task starts one turn (lookup=${resolutionOrder}, idle=${maxIdleRuntimes})`,
-			(t) => assertMailboxFifo(t, maxIdleRuntimes, resolutionOrder),
-		);
-	}
-}
-
-test("mailbox completion is quiet and wait_agent durably delivers an existing update", async () => {
-	const requestContexts: Context[] = [];
-	const { coordinator, parent, messages } = await fixture({
-		onRequestContext: (requestContext) => requestContexts.push(requestContext),
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "quiet completion child",
-				prompt: "Initial task.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		assert.equal(messages.length, 0);
-		assert.equal(requestContexts.length, 1);
-
-		const before = await coordinator.list(parent, "children");
-		const beforeChild = before.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(beforeChild?.kind, "child");
-		if (beforeChild?.kind === "child") {
-			assert.equal(beforeChild.pendingMessages, 0);
-			assert.equal(beforeChild.unreadUpdates, 1);
-		}
-		assert.match(coordinator.formatCatalog(before, "children"), /updates=1/);
-
-		const waited = await coordinator.waitAgent(
-			parent,
-			"wait-existing",
-			100,
-		);
-		assert.equal(waited.timedOut, false);
-		assert.equal(waited.updates.length, 1);
-		assert.equal(waited.updates[0]?.childAgentId, outcome.details.agentId);
-		assert.match(waited.updates[0]?.output ?? "", /child answer 1/);
-		assert.equal(waited.unreadUpdates, 0);
-		assert.equal(requestContexts.length, 1);
-
-		// The delivery remains recoverable until Pi persists this tool result.
-		assert.equal(
-			readCompletionMailbox(parent.sessionManager.getEntries(), {
-				parentAgentId: parent.agentId,
-			}).unread.length,
-			1,
-		);
-		appendWaitAgentToolResult(parent, "wait-existing");
-		assert.equal(
-			readCompletionMailbox(parent.sessionManager.getEntries(), {
-				parentAgentId: parent.agentId,
-			}).unread.length,
-			0,
-		);
-		const after = await coordinator.list(parent, "children");
-		const afterChild = after.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		if (afterChild?.kind === "child") {
-			assert.equal(afterChild.unreadUpdates, 0);
-		}
-		const timeout = await coordinator.waitAgent(
-			parent,
-			"wait-empty",
-			0,
-		);
-		assert.equal(timeout.timedOut, true);
-		assert.deepEqual(timeout.updates, []);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("wait_agent delivery survives failed readable-path enrichment", async () => {
-	const { coordinator, parent } = await fixture();
-	const originalList = SessionManager.list;
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				task_name: "path-fallback",
-				description: "path fallback",
-				prompt: "Finish once.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-		SessionManager.list = async () => {
-			throw new Error("catalog unavailable during path enrichment");
-		};
-		const waited = await coordinator.waitAgent(
-			parent,
-			"wait-path-fallback",
-			0,
-		);
-		assert.equal(waited.updates.length, 1);
-		assert.equal(
-			waited.taskPaths[outcome.details.agentId],
-			outcome.details.agentId,
-		);
-		appendWaitAgentToolResult(parent, "wait-path-fallback");
-	} finally {
-		SessionManager.list = originalList;
-		await coordinator.shutdown();
-	}
-});
-
-test("mailbox completion persistence failure emits an explicit error and no false update", async () => {
-	const { coordinator, parent, messages, eventDetails } = await fixture();
-	const manager = parent.sessionManager as SessionManager;
-	const appendCustomEntry = manager.appendCustomEntry.bind(manager);
-	manager.appendCustomEntry = (customType, data) => {
-		if (customType === COMPLETION_UPDATE_CUSTOM_TYPE) {
-			throw new Error("completion storage unavailable");
-		}
-		return appendCustomEntry(customType, data);
-	};
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "failed completion storage",
-				prompt: "Finish once.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		await waitUntil(() =>
-			eventDetails.some(
-				(event) => event.name === "pi-subagent:completion-error",
-			),
-		);
-		assert.equal(messages.length, 0);
-		assert.equal(
-			readCompletionMailbox(parent.sessionManager.getEntries(), {
-				parentAgentId: parent.agentId,
-			}).unread.length,
-			0,
-		);
-		const failure = eventDetails.find(
-			(event) => event.name === "pi-subagent:completion-error",
-		)?.data as { error?: string } | undefined;
-		assert.match(failure?.error ?? "", /completion storage unavailable/);
-		if (outcome.kind === "continuable") {
-			await waitForChildReady(
-				coordinator,
-				parent,
-				outcome.details.agentId,
-			);
-			const listed = await coordinator.list(parent, "children");
-			const child = listed.find(
-				(entry) =>
-					entry.kind === "child"
-					&& entry.agentId === outcome.details.agentId,
-			);
-			assert.equal(child?.kind, "child");
-			if (child?.kind === "child" && child.sessionFile) {
-				const persisted = SessionManager.open(
-					child.sessionFile,
-					parent.sessionManager.getSessionDir(),
-					parent.cwd,
-				);
-				assert.equal(
-					persisted
-						.getEntries()
-						.filter(
-							(entry) =>
-								entry.type === "custom"
-								&& entry.customType
-									=== COMPLETION_FAILURE_CUSTOM_TYPE,
-						).length,
-					1,
-				);
-			}
-		}
-	} finally {
-		manager.appendCustomEntry = appendCustomEntry;
-		await coordinator.shutdown();
-	}
-});
-
-test("wait_agent wakes from a durable completion event without polling or starting another turn", async () => {
-	const requestContexts: Context[] = [];
-	const { coordinator, parent, messages, eventDetails } = await fixture({
-		delayMs: 80,
-		onRequestContext: (requestContext) => requestContexts.push(requestContext),
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "event waiter child",
-				prompt: "Finish after the waiter subscribes.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		let settled = false;
-		const waiting = coordinator
-			.waitAgent(parent, "wait-live", 1_000)
-			.then((value) => {
-				settled = true;
-				return value;
-			});
-		await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
-		assert.equal(settled, false);
-		await assert.rejects(
-			() => coordinator.waitAgent(parent, "wait-competing", 100),
-			/already waiting/,
-		);
-		const waited = await waiting;
-		assert.equal(waited.timedOut, false);
-		assert.equal(waited.updates.length, 1);
-		assert.equal(waited.updates[0]?.childAgentId, outcome.details.agentId);
-		assert.equal(messages.length, 0);
-		assert.equal(requestContexts.length, 1);
-		assert.equal(
-			eventDetails.filter(
-				(event) => event.name === "pi-subagent:turn-start",
-			).length,
-			1,
-		);
-		appendWaitAgentToolResult(parent, "wait-live");
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("a failed wait_agent delivery can be released and retried in the same runtime", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "retry wait delivery",
-				prompt: "Finish once.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		const first = await coordinator.waitAgent(
-			parent,
-			"wait-failed-result",
-			0,
-		);
-		assert.equal(first.timedOut, false);
-		await assert.rejects(
-			() => coordinator.waitAgent(parent, "wait-before-release", 0),
-			/awaiting its durable tool result/,
-		);
-		assert.equal(
-			await coordinator.releaseWaitAgentDeliveries(
-				parent,
-				"simulated failed tool result",
-			),
-			1,
-		);
-		const retried = await coordinator.waitAgent(
-			parent,
-			"wait-retried-result",
-			0,
-		);
-		assert.equal(
-			retried.updates[0]?.completionId,
-			first.updates[0]?.completionId,
-		);
-		appendWaitAgentToolResult(parent, "wait-retried-result");
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("wait_agent bounds one oversized head without consuming the next completion", async () => {
-	const { coordinator, parent } = await fixture({
-		streamSimple: (model, _context, turn, signal) =>
-			scriptedStream(
-				model,
-				(turn === 1 ? "A" : "B").repeat(400_000),
-				signal,
-			),
-	});
-	try {
-		const settings = {
-			...DEFAULT_SETTINGS,
-			maxOutputBytes: 1024 * 1024,
-		};
-		const first = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "large first completion",
-				prompt: "Return the first output.",
-			},
-			settings,
-		);
-		const second = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "large second completion",
-				prompt: "Return the second output.",
-			},
-			settings,
-		);
-		assert.equal(first.kind, "continuable");
-		assert.equal(second.kind, "continuable");
-		if (first.kind !== "continuable" || second.kind !== "continuable") return;
-		await waitForChildReady(coordinator, parent, first.details.agentId);
-		await waitForChildReady(coordinator, parent, second.details.agentId);
-
-		const firstWait = await coordinator.waitAgent(
-			parent,
-			"wait-large-first",
-			0,
-		);
-		assert.equal(firstWait.updates.length, 1);
-		assert.equal(firstWait.updates[0]?.outputTruncated, true);
-		assert.equal(firstWait.unreadUpdates, 1);
-		assert.match(firstWait.updates[0]?.output ?? "", /^A+$/);
-		appendWaitAgentToolResult(parent, "wait-large-first");
-
-		const secondWait = await coordinator.waitAgent(
-			parent,
-			"wait-large-second",
-			0,
-		);
-		assert.equal(secondWait.updates.length, 1);
-		assert.equal(
-			secondWait.updates[0]?.childAgentId,
-			second.details.agentId,
-		);
-		assert.match(secondWait.updates[0]?.output ?? "", /^B+$/);
-		appendWaitAgentToolResult(parent, "wait-large-second");
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("wait_agent timeout and abort leave future completion activity untouched", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const timedOut = await coordinator.waitAgent(
-			parent,
-			"wait-timeout",
-			5,
-		);
-		assert.equal(timedOut.timedOut, true);
-		assert.deepEqual(timedOut.updates, []);
-
-		const abortController = new AbortController();
-		const aborted = coordinator.waitAgent(
-			parent,
-			"wait-abort",
-			1_000,
-			abortController.signal,
-		);
-		abortController.abort(new Error("caller canceled wait"));
-		await assert.rejects(() => aborted, /caller canceled wait/);
-
-		const afterAbort = await coordinator.waitAgent(
-			parent,
-			"wait-after-abort",
-			0,
-		);
-		assert.equal(afterAbort.timedOut, true);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("shutdown rejects and cleans an event-driven wait_agent waiter", async () => {
-	const { coordinator, parent } = await fixture();
-	const waiting = coordinator.waitAgent(
-		parent,
-		"wait-shutdown",
-		30_000,
-	);
-	await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
-	const shutdown = coordinator.shutdown();
-	await assert.rejects(() => waiting, /shutting down/);
-	await shutdown;
-});
-
-test("unread mailbox completion survives coordinator and session reload", async () => {
-	const {
-		coordinator,
-		parent,
-		messages,
-		agentDir,
-		pi,
-		context,
-		model,
-	} = await fixture();
-	let restarted: SubagentCoordinator | undefined;
-	try {
-		(parent.sessionManager as SessionManager).appendMessage({
-			role: "user",
-			content: [{ type: "text", text: "parent checkpoint" }],
-			timestamp: Date.now(),
-		});
-		(parent.sessionManager as SessionManager).appendMessage({
-			role: "assistant",
-			content: [{ type: "text", text: "checkpointed" }],
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 1,
-				output: 1,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 2,
-				cost: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					total: 0,
-				},
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		});
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "reload completion child",
-				prompt: "Finish before restart.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		assert.equal(messages.length, 0);
-		const parentFile = parent.sessionManager.getSessionFile();
-		assert.ok(parentFile);
-		await coordinator.shutdown();
-
-		const reopenedParentManager = SessionManager.open(
-			parentFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		const reopenedContext = {
-			...context,
-			sessionManager: reopenedParentManager,
-		} as unknown as ExtensionContext;
-		restarted = new SubagentCoordinator(
-			pi,
-			resolve(import.meta.dirname, ".."),
-			agentDir,
-		);
-		const restartedParent = await restarted.parentFromContext(
-			reopenedContext,
-		);
-		const listed = await restarted.list(restartedParent, "children");
-		const child = listed.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(child?.kind, "child");
-		if (child?.kind === "child") assert.equal(child.unreadUpdates, 1);
-		const waited = await restarted.waitAgent(
-			restartedParent,
-			"wait-after-reload",
-			0,
-		);
-		assert.equal(waited.timedOut, false);
-		assert.equal(waited.updates[0]?.childAgentId, outcome.details.agentId);
-	} finally {
-		await restarted?.shutdown();
-		await coordinator.shutdown();
-	}
-});
-
-test("nested wait_agent consumes only direct-child completion from the parent session", async () => {
-	const { coordinator, parent, messages } = await fixture({
-		streamSimple: (model, context, turn, signal) => {
-			const toolResults = context.messages.filter(
-				(message) => message.role === "toolResult",
-			);
-			const hasNestedControls = getCurrentTools(context.messages).some(
-				(tool) => tool.name === "wait_agent",
-			);
-			if (!hasNestedControls) {
-				return scriptedStream(
-					model,
-					"grandchild complete",
-					signal,
-				);
-			}
-			const latestToolResult = toolResults.at(-1);
-			if (!latestToolResult) {
-				return toolCallStream(model, {
-					type: "toolCall",
-					id: `nested-subagent-${turn}`,
-					name: "subagent",
-					arguments: {
-						agent: "scout",
-						description: "nested mailbox child",
-						prompt: "Complete nested work.",
-					},
-				});
-			}
-			if (latestToolResult.toolName === "subagent") {
-				return toolCallStream(model, {
-					type: "toolCall",
-					id: `nested-wait-${turn}`,
-					name: "wait_agent",
-					arguments: { timeout_ms: 1_000 },
-				});
-			}
-			return scriptedStream(model, "worker consumed grandchild", signal);
-		},
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "worker",
-				description: "nested mailbox parent",
-				prompt: "Spawn and wait for one direct child.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		assert.equal(messages.length, 0);
-		const descendants = await coordinator.list(parent, "descendants");
-		const worker = descendants.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		const grandchild = descendants.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.descriptor.label === "nested mailbox child",
-		);
-		assert.equal(worker?.kind, "child");
-		assert.equal(grandchild?.kind, "child");
-		if (worker?.kind === "child") {
-			assert.equal(
-				worker.taskPath,
-				"/root/nested-mailbox-parent",
-			);
-			assert.equal(worker.unreadUpdates, 1);
-		}
-		if (grandchild?.kind === "child") {
-			assert.equal(
-				grandchild.taskPath,
-				"/root/nested-mailbox-parent/nested-mailbox-child",
-			);
-			assert.equal(grandchild.parentAgentId, outcome.details.agentId);
-			assert.equal(grandchild.unreadUpdates, 0);
-		}
-		const rootWait = await coordinator.waitAgent(
-			parent,
-			"wait-worker-only",
-			0,
-		);
-		assert.equal(rootWait.updates.length, 1);
-		assert.equal(
-			rootWait.updates[0]?.childAgentId,
-			outcome.details.agentId,
-		);
-		appendWaitAgentToolResult(parent, "wait-worker-only");
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("concurrent mailbox followup_task calls cannot claim or start the same batch twice", async () => {
-	const requestContexts: Context[] = [];
-	const { coordinator, parent, messages } = await fixture({
-		delayMs: 50,
-		onRequestContext: (requestContext) => requestContexts.push(requestContext),
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "single claim child",
-				prompt: "Initial task.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		await coordinator.sendMessage(
-			parent,
-			outcome.details.agentId,
-			"Claim exactly once.",
-		);
-
-		const attempts = await Promise.allSettled([
-			coordinator.followupTask(parent, outcome.details.agentId),
-			coordinator.followupTask(parent, outcome.details.agentId),
-		]);
-		assert.equal(
-			attempts.filter((attempt) => attempt.status === "fulfilled").length,
-			1,
-		);
-		assert.equal(
-			attempts.filter((attempt) => attempt.status === "rejected").length,
-			1,
-		);
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		assert.equal(messages.length, 0);
-		assert.equal(requestContexts.length, 2);
-		const listed = await coordinator.list(parent, "children");
-		const child = listed.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(child?.kind, "child");
-		if (child?.kind !== "child" || !child.sessionFile) return;
-		const persisted = SessionManager.open(
-			child.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		const claims = persisted
-			.getEntries()
-			.filter(
-				(entry) =>
-					entry.type === "custom"
-					&& entry.customType === MAILBOX_CLAIM_CUSTOM_TYPE,
-			);
-		assert.equal(claims.length, 1);
-		const commits = persisted
-			.getEntries()
-			.filter(
-				(entry) =>
-					entry.type === "custom"
-					&& entry.customType === MAILBOX_COMMIT_CUSTOM_TYPE,
-			);
-		assert.equal(commits.length, 1);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("mailbox enqueue waits for a newly accepted child session to become durable", async () => {
-	const requestContexts: Context[] = [];
-	const { coordinator, parent, messages } = await fixture({
-		delayMs: 60,
-		onRequestContext: (requestContext) => requestContexts.push(requestContext),
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "initially unflushed child",
-				prompt: "Initial task.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		let accepted = false;
-		const enqueue = coordinator
-			.sendMessageWithOutcome(
-				parent,
-				outcome.details.agentId,
-				"Persist after the first assistant entry.",
-			)
-			.then((delivery) => {
-				accepted = true;
-				return delivery;
-			});
-		await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
-		assert.equal(accepted, false);
-		const delivery = await enqueue;
-		assert.equal(delivery.kind, "mailbox");
-		assert.equal(requestContexts.length, 1);
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		assert.equal(messages.length, 0);
-		const listed = await coordinator.list(parent, "children");
-		const child = listed.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(child?.kind, "child");
-		if (child?.kind === "child") assert.equal(child.pendingMessages, 1);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("mailbox prompt preflight failure leaves the unclaimed batch pending", async () => {
-	const { coordinator, parent, messages, modelRuntime } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "preflight mailbox child",
-				prompt: "Initial task.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		await coordinator.sendMessage(
-			parent,
-			outcome.details.agentId,
-			"Do not lose this batch.",
-		);
-		const registered = modelRuntime.getRegisteredProviderConfig("scripted");
-		assert.ok(registered);
-		modelRuntime.unregisterProvider("scripted");
-		const { apiKey: _apiKey, ...withoutAuth } = registered;
-		modelRuntime.registerProvider("scripted", withoutAuth);
-		await assert.rejects(
-			() => coordinator.followupTask(parent, outcome.details.agentId),
-			/No API key found for scripted/,
-		);
-		const listed = await coordinator.list(parent, "children");
-		const child = listed.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(child?.kind, "child");
-		if (child?.kind !== "child" || !child.sessionFile) return;
-		assert.equal(child.pendingMessages, 1);
-		const persisted = SessionManager.open(
-			child.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		assert.equal(
-			persisted
-				.getEntries()
-				.filter(
-					(entry) =>
-						entry.type === "custom"
-						&& entry.customType === MAILBOX_CLAIM_CUSTOM_TYPE,
-				).length,
-			0,
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("mailbox commits a claimed turn even when an input extension transforms its prompt", async () => {
-	const childExtension = `
-export default function transformMailbox(pi) {
-	pi.on("input", async (event) => {
-		if (event.text.startsWith("[[pi-subagent-mailbox-turn:")) {
-			return { action: "transform", text: "extension prefix\\n" + event.text };
-		}
-		return { action: "continue" };
-	});
-}
-`;
-	const { coordinator, parent, messages } = await fixture({ childExtension });
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "transformed mailbox child",
-				prompt: "Initial task.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				inheritExtensions: true,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		await coordinator.sendMessage(
-			parent,
-			outcome.details.agentId,
-			"Transform but consume once.",
-		);
-		await coordinator.followupTask(parent, outcome.details.agentId);
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		assert.equal(messages.length, 0);
-		const listed = await coordinator.list(parent, "children");
-		const child = listed.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(child?.kind, "child");
-		if (child?.kind === "child") assert.equal(child.pendingMessages, 0);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("foreground delegation rejects an input-handled prompt instead of publishing a successful task", async () => {
-	const { coordinator, parent, messages } = await fixture({
-		childExtension: `export default function (pi) {
-			pi.on("input", () => ({ action: "handled" }));
 		}`,
 	});
-	try {
-		await assert.rejects(
-			coordinator.delegate(parent, "spawn", {
-				agent: "worker", description: "handled task", prompt: "Do not report a fake completion.",
-			}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground", inheritExtensions: true }),
-			/handled before a user turn started/,
-		);
-		assert.deepEqual(messages, []);
-		assert.deepEqual(await coordinator.list(parent, "children"), []);
-	} finally { await coordinator.shutdown(); }
-});
-
-test("mailbox rejects an input-handled prompt without claiming its batch", async () => {
-	const childExtension = `
-export default function handleMailbox(pi) {
-	pi.on("input", async (event) => {
-		if (event.text.startsWith("[[pi-subagent-mailbox-turn:")) {
-			return { action: "handled" };
-		}
-		return { action: "continue" };
-	});
-}
-`;
-	const { coordinator, parent, messages } = await fixture({ childExtension });
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "handled mailbox child",
-				prompt: "Initial task.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				inheritExtensions: true,
-			},
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		await coordinator.sendMessage(
-			parent,
-			outcome.details.agentId,
-			"Keep this pending.",
-		);
-		await assert.rejects(
-			() => coordinator.followupTask(parent, outcome.details.agentId),
-			/handled before a user turn started/,
-		);
-		const listed = await coordinator.list(parent, "children");
-		const child = listed.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(child?.kind, "child");
-		if (child?.kind !== "child" || !child.sessionFile) return;
-		assert.equal(child.pendingMessages, 1);
-		const persisted = SessionManager.open(
-			child.sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		assert.equal(
-			persisted
-				.getEntries()
-				.filter(
-					(entry) =>
-						entry.type === "custom"
-						&& entry.customType === MAILBOX_CLAIM_CUSTOM_TYPE,
-				).length,
-			0,
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("interrupting a mailbox followup while it waits for capacity preserves its batch", async () => {
-	let releaseHolder!: () => void;
-	const holder = new Promise<void>((resolve) => { releaseHolder = resolve; });
-	let holding = false;
-	const { coordinator, parent, messages } = await fixture({
-		streamSimple(model, context, turn, signal) {
-			const lastUser = context.messages.filter((message) => message.role === "user").at(-1);
-			if (!lastUser || !userMessageText(lastUser).includes("Hold the only slot.")) {
-				return scriptedStream(model, `child answer ${turn}`, signal);
-			}
-			holding = true;
-			const stream = createAssistantMessageEventStream();
-			void holder.then(async () => {
-				for await (const event of scriptedStream(model, `child answer ${turn}`, signal)) stream.push(event);
-				stream.end();
-			});
-			return stream;
-		},
-	});
-	coordinator.configureBackgroundRuns(1);
-	try {
-		const settings = {
-			...DEFAULT_SETTINGS,
-			maxConcurrentBackgroundRuns: 1,
-		};
-		const first = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "capacity holder",
-				prompt: "Initial first task.",
-			},
-			settings,
-		);
-		assert.equal(first.kind, "continuable");
-		await waitForChildReady(
-			coordinator,
-			parent,
-			first.details.agentId,
-		);
-		const second = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "queued mailbox child",
-				prompt: "Initial second task.",
-			},
-			settings,
-		);
-		assert.equal(second.kind, "continuable");
-		await waitForChildReady(
-			coordinator,
-			parent,
-			second.details.agentId,
-		);
-		assert.equal(messages.length, 0);
-		if (first.kind !== "continuable" || second.kind !== "continuable") return;
-
-		await coordinator.sendMessage(
-			parent,
-			first.details.agentId,
-			"Hold the only slot.",
-		);
-		await coordinator.sendMessage(
-			parent,
-			second.details.agentId,
-			"Remain pending if interrupted.",
-		);
-		await coordinator.followupTask(parent, first.details.agentId);
-		await waitUntil(() => holding);
-		const blocked = coordinator.followupTask(parent, second.details.agentId);
-		const interrupted = assert.rejects(blocked, /interrupted/);
-		await waitUntil(async () => {
-			const entries = await coordinator.list(parent, "children");
-			return entries.some(
-				(entry) =>
-					entry.kind === "child"
-					&& entry.agentId === second.details.agentId
-					&& entry.status === "running",
-			);
-		});
-		await coordinator.interrupt(parent, second.details.agentId);
-		await interrupted;
-		await waitUntil(async () => {
-			const entries = await coordinator.list(parent, "children");
-			const child = entries.find(
-				(entry) =>
-					entry.kind === "child"
-					&& entry.agentId === second.details.agentId,
-			);
-			return child?.kind === "child"
-				&& child.status === "ready"
-				&& child.pendingMessages === 1;
-		});
-	} finally {
-		releaseHolder();
-		await coordinator.shutdown();
-	}
-});
-
-test("concurrent messages cold-resume one runtime and preserve one lifecycle", async () => {
-	const { coordinator, parent, messages, events, eventDetails } = await fixture({
-		delayMs: 30,
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "serialized cold child",
-				prompt: "Initial task.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-		);
-		assert.equal(outcome.kind, "continuable");
-		await waitForCompletions(parent, 1);
-
-		await Promise.all([
-			coordinator.sendMessage(parent, outcome.details.agentId, "First follow-up."),
-			coordinator.sendMessage(parent, outcome.details.agentId, "Second follow-up."),
-		]);
-		// Enqueue-only delivery starts no turn and produces no new completion.
-		assert.equal(parentCompletions(parent).length, 1);
-		await coordinator.followupTask(parent, outcome.details.agentId);
-		await waitForCompletions(parent, 2);
-		assert.deepEqual(events, [
-			"pi-subagent:start",
-			"pi-subagent:end",
-			"pi-subagent:start",
-			"pi-subagent:end",
-		]);
-		assert.match(parentCompletions(parent)[1]!.output, /child answer 2/);
-		assert.equal(messages.length, 0);
-		const turnStarts = eventDetails
-			.filter((event) => event.name === "pi-subagent:turn-start")
-			.map((event) => (event.data as { turnId: string }).turnId);
-		const turnEnds = eventDetails
-			.filter((event) => event.name === "pi-subagent:turn-end")
-			.map((event) => (event.data as { turnId: string }).turnId);
-		assert.deepEqual(turnEnds, turnStarts);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("a resident agent waiting on descendants can accept a follow-up", async () => {
-	let requests = 0;
-	const { coordinator, parent, eventDetails } = await fixture({
-		delayMs: 20,
-		onRequestContext: () => {
-			requests += 1;
-		},
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "waiting parent",
-				prompt: "Complete while a descendant remains active.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-		);
-		assert.equal(outcome.kind, "continuable");
-		const active = (
-			coordinator as unknown as {
-				active: Map<
-					string,
-					{
-						ownedChildren: Set<string>;
-						currentRun?: Promise<unknown>;
-					}
-				>;
-			}
-		).active.get(outcome.details.agentId);
-		assert.ok(active);
-		active.ownedChildren.add("test-descendant");
-		await active.currentRun;
-
-		await coordinator.sendMessage(
-			parent,
-			outcome.details.agentId,
-			"Continue while the descendant is still active.",
-		);
-		const followup = coordinator.followupTask(
-			parent,
-			outcome.details.agentId,
-		);
-		await waitUntil(() => requests === 2);
-		await followup;
-		await active.currentRun;
-		const starts = eventDetails
-			.filter((event) => event.name === "pi-subagent:turn-start")
-			.map((event) => (event.data as { turnId: string }).turnId);
-		const ends = eventDetails
-			.filter((event) => event.name === "pi-subagent:turn-end")
-			.map((event) => (event.data as { turnId: string }).turnId);
-		assert.equal(new Set(starts).size, 2);
-		assert.deepEqual(ends, starts);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("a follow-up cannot start while the previous turn is still running", async () => {
-	const { coordinator, parent } = await fixture({ delayMs: 80 });
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "busy follow-up target",
-				prompt: "Finish the initial turn.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(coordinator, parent, outcome.details.agentId);
-
-		await coordinator.sendMessage(
-			parent,
-			outcome.details.agentId,
-			"Run the first follow-up.",
-		);
-		await coordinator.followupTask(parent, outcome.details.agentId);
-		// The accepted turn still owns the child, so the next batch cannot
-		// start; the message stays pending instead of being lost.
-		await coordinator.sendMessage(
-			parent,
-			outcome.details.agentId,
-			"Queue this behind the running turn.",
-		);
-		await assert.rejects(
-			() => coordinator.followupTask(parent, outcome.details.agentId),
-			/already has a scheduled or running turn/,
-		);
-		const queued = await coordinator.list(parent, "children");
-		const target = queued.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		assert.equal(
-			target?.kind === "child" ? target.pendingMessages : undefined,
-			1,
-		);
-
-		await waitForCompletions(parent, 2);
-		const retried = await coordinator.followupTask(
-			parent,
-			outcome.details.agentId,
-		);
-		assert.equal(retried.claimedMessages, 1);
-		await waitForCompletions(parent, 3);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("background turns obey the configured concurrency limit", async () => {
-	let activeStreams = 0;
-	let maxActiveStreams = 0;
-	const { coordinator, parent, messages } = await fixture({
-		delayMs: 80,
-		onStreamStart: () => {
-			activeStreams += 1;
-			maxActiveStreams = Math.max(maxActiveStreams, activeStreams);
-		},
-		onStreamEnd: () => {
-			activeStreams -= 1;
-		},
-	});
-	try {
-		coordinator.configureBackgroundRuns(2);
-		const settings = {
-			...DEFAULT_SETTINGS,
-			runtimeMode: "background" as const,
-			maxConcurrentBackgroundRuns: 2,
-		};
-		const outcomes = await Promise.all(
-			["one", "two", "three"].map((description) =>
-				coordinator.delegate(
-					parent,
-					"spawn",
-					{
-						agent: "scout",
-						description,
-						prompt: `Task ${description}.`,
-					},
-					settings,
-				),
-			),
-		);
-		assert.equal(
-			outcomes.every((outcome) => outcome.kind === "continuable"),
-			true,
-		);
-		await waitForCompletions(parent, 3);
-		assert.equal(maxActiveStreams, 2);
-		assert.equal(activeStreams, 0);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("interrupt cancels a background turn while it waits for capacity", async () => {
-	const { coordinator, parent, messages, eventDetails } = await fixture({
-		delayMs: 120,
-	});
-	try {
-		coordinator.configureBackgroundRuns(1);
-		const settings = {
-			...DEFAULT_SETTINGS,
-			runtimeMode: "background" as const,
-			maxConcurrentBackgroundRuns: 1,
-		};
-		const first = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "capacity holder",
-				prompt: "Hold the only background slot.",
-			},
-			settings,
-		);
-		assert.equal(first.kind, "continuable");
-
-		let queuedAgentId: string | undefined;
-		const queued = coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "queued child",
-				prompt: "This should be interrupted while queued.",
-			},
-			settings,
-			undefined,
-			(details) => {
-				queuedAgentId = details.agentId;
-			},
-		);
-		await waitUntil(() => queuedAgentId !== undefined);
-		await coordinator.interrupt(parent, queuedAgentId!);
-		await assert.rejects(queued, /was interrupted/);
-		await waitForCompletions(parent, 1);
-		assert.equal(messages.length, 0);
-		assert.deepEqual(
-			eventDetails.filter(
-				(event) =>
-					(event.data as { agentId?: string }).agentId === queuedAgentId &&
-					(event.name === "pi-subagent:turn-start" ||
-						event.name === "pi-subagent:turn-end"),
-			),
-			[],
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("interrupt cancels a cold follow-up while it waits for capacity and keeps its batch", async () => {
-	const { coordinator, parent } = await fixture({ delayMs: 100 });
-	try {
-		coordinator.configureBackgroundRuns(4);
-		const initial = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "cold follow-up target",
-				prompt: "Create the durable target.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "background" as const,
-				maxConcurrentBackgroundRuns: 4,
-			},
-		);
-		assert.equal(initial.kind, "continuable");
-		await waitForCompletions(parent, 1);
-		coordinator.configureBackgroundRuns(1);
-
-		const holder = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "follow-up capacity holder",
-				prompt: "Hold the only slot.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "background" as const,
-				maxConcurrentBackgroundRuns: 1,
-			},
-		);
-		assert.equal(holder.kind, "continuable");
-
-		await coordinator.sendMessage(
-			parent,
-			initial.details.agentId,
-			"Queue the first cold follow-up.",
-		);
-		const firstFollowUp = coordinator.followupTask(
-			parent,
-			initial.details.agentId,
-		);
-		await waitUntil(async () => {
-			const entries = await coordinator.list(parent, "children");
-			return entries.some(
-				(entry) =>
-					entry.kind === "child" &&
-					entry.agentId === initial.details.agentId &&
-				entry.status === "running",
-			);
-		});
-		await coordinator.interrupt(parent, initial.details.agentId);
-		await assert.rejects(firstFollowUp, /was interrupted/);
-		// The unclaimed batch survives the interruption and stays retryable.
-		await waitForChildStatus(
-			coordinator,
-			parent,
-			initial.details.agentId,
-			"ready",
-		);
-		assert.equal(parentCompletions(parent).length, 1);
-		const pending = await coordinator.list(parent, "children");
-		const pendingEntry = pending.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === initial.details.agentId,
-		);
-		assert.equal(
-			pendingEntry?.kind === "child"
-				? pendingEntry.pendingMessages
-				: undefined,
-			1,
-		);
-		// The capacity holder settles on its own before the batch is retried.
-		await waitForCompletions(parent, 2);
-		const retried = await coordinator.followupTask(
-			parent,
-			initial.details.agentId,
-		);
-		assert.equal(retried.claimedMessages, 1);
-		await waitForCompletions(parent, 3);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("interrupting a queued resident follow-up keeps later completions flowing", async () => {
-	const { coordinator, parent } = await fixture({ delayMs: 60 });
-	try {
-		coordinator.configureBackgroundRuns(1);
-		const settings = {
-			...DEFAULT_SETTINGS,
-			runtimeMode: "background" as const,
-			maxConcurrentBackgroundRuns: 1,
-		};
-		const waiting = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "resident waiting child",
-				prompt: "Finish while retaining a descendant.",
-			},
-			settings,
-		);
-		assert.equal(waiting.kind, "continuable");
-		const active = (
-			coordinator as unknown as {
-				active: Map<
-					string,
-					{
-						ownedChildren: Set<string>;
-						currentRun?: Promise<unknown>;
-						suppressSettlement: boolean;
-					}
-				>;
-			}
-		).active.get(waiting.details.agentId);
-		assert.ok(active);
-		active.ownedChildren.add("test-descendant");
-		await active.currentRun;
-
-		const holder = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "resident capacity holder",
-				prompt: "Hold the slot during the interrupted follow-up.",
-			},
-			settings,
-		);
-		assert.equal(holder.kind, "continuable");
-
-		await coordinator.sendMessage(
-			parent,
-			waiting.details.agentId,
-			"Queue this resident follow-up.",
-		);
-		const interrupted = coordinator.followupTask(
-			parent,
-			waiting.details.agentId,
-		);
-		await waitUntil(async () => {
-			const entries = await coordinator.list(parent, "children");
-			return entries.some(
-				(entry) =>
-					entry.kind === "child" &&
-					entry.agentId === waiting.details.agentId &&
-					entry.status === "running",
-			);
-		});
-		await coordinator.interrupt(parent, waiting.details.agentId);
-		await assert.rejects(interrupted, /was interrupted/);
-		await waitUntil(() => active.currentRun === undefined);
-		assert.equal(active.suppressSettlement, false);
-		assert.equal(parentCompletions(parent).length, 1);
-
-		await coordinator.sendMessage(
-			parent,
-			waiting.details.agentId,
-			"Run successfully after the interruption.",
-		);
-		await coordinator.followupTask(parent, waiting.details.agentId);
-		await waitUntil(() => active.currentRun === undefined);
-		active.ownedChildren.delete("test-descendant");
-		await (
-			coordinator as unknown as {
-				finalizeContinuable(activation: unknown): Promise<void>;
-			}
-		).finalizeContinuable(active);
-		await waitForCompletions(parent, 2);
-		assert.match(parentCompletions(parent)[1]!.output, /child answer 2/);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("shutdown rejects a send_message already queued on the agent lock", async () => {
-	const { coordinator, parent } = await fixture({ delayMs: 120 });
-	let shutdownComplete = false;
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "shutdown child",
-				prompt: "Stay active during shutdown.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-		);
-		assert.equal(outcome.kind, "continuable");
-
-		const operations = (
-			coordinator as unknown as {
-				agentOperations: {
-					run<T>(agentId: string, operation: () => Promise<T>): Promise<T>;
-				};
-			}
-		).agentOperations;
-		let blockerStarted = false;
-		let releaseBlocker!: () => void;
-		const blockerGate = new Promise<void>((resolve) => {
-			releaseBlocker = resolve;
-		});
-		const blocker = operations.run(outcome.details.agentId, async () => {
-			blockerStarted = true;
-			await blockerGate;
-		});
-		await waitUntil(() => blockerStarted);
-
-		const queuedSend = coordinator.sendMessage(
-			parent,
-			outcome.details.agentId,
-			"Must not run after shutdown starts.",
-		);
-		const shutdown = coordinator.shutdown().then(() => {
-			shutdownComplete = true;
-		});
-		releaseBlocker();
-		await blocker;
-		await assert.rejects(queuedSend, /shutting down/);
-		await shutdown;
-	} finally {
-		if (!shutdownComplete) await coordinator.shutdown();
-	}
-});
-
-test("concurrent shutdown callers wait for an in-flight delegation", async () => {
-	const { coordinator, parent, eventDetails } = await fixture({ delayMs: 120 });
-	const delegation = coordinator.delegate(
-		parent,
-		"spawn",
-		{
-			agent: "scout",
-			description: "in-flight foreground child",
-			prompt: "Remain active until shutdown.",
-		},
-		{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
-	);
-	await waitUntil(() =>
-		eventDetails.some((event) => event.name === "pi-subagent:turn-start"),
-	);
-	await Promise.all([coordinator.shutdown(), coordinator.shutdown()]);
-	const outcome = await delegation;
-	assert.equal(outcome.kind, "foreground");
-	if (outcome.kind === "foreground") {
-		assert.equal(outcome.result.stopReason, "aborted");
-	}
-	assert.equal(
-		(
-			coordinator as unknown as {
-				active: Map<string, unknown>;
-			}
-		).active.size,
-		0,
-	);
-});
-
-test("interrupt stops only the live activation and preserves its resumable session", async () => {
-	const { coordinator, parent } = await fixture({ delayMs: 100 });
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "interruptible scout",
-				prompt: "Keep working.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-		);
-		assert.equal(outcome.kind, "continuable");
-		await coordinator.interrupt(parent, outcome.details.agentId);
-		await waitForCompletions(parent, 1);
-		assert.equal(parentCompletions(parent)[0]!.stopReason, "aborted");
-		const entries = await coordinator.list(parent, "children");
-		assert.equal(entries[0]?.kind, "child");
-		if (entries[0]?.kind === "child") assert.equal(entries[0].status, "ready");
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("agent ids are a durable namespace distinct from pi session ids", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "id semantics scout",
-				prompt: "Inspect it.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		const { agentId, piSessionId, sessionFile } = outcome.details;
-		assert.match(agentId, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
-		assert.ok(piSessionId);
-		assert.ok(sessionFile);
-		assert.notEqual(agentId, piSessionId);
-		assert.notEqual(agentId, parent.agentId);
-		// The persisted parent session gets a durable agent id of its own,
-		// distinct from its pi session (file) id.
-		assert.notEqual(parent.agentId, parent.sessionManager.getSessionId());
-		// The child session file is flushed once its first assistant message
-		// lands; wait for the run to settle before reading it back.
-		await waitForCompletions(parent, 1);
-
-		// The child session records its agent id and descriptor, and the
-		// descriptor's parent chain points at the parent's durable agent id.
-		const child = SessionManager.open(
-			sessionFile,
-			parent.sessionManager.getSessionDir(),
-			parent.cwd,
-		);
-		const folded = foldDescriptor(child.getEntries());
-		assert.equal(folded.kind, "valid");
-		if (folded.kind === "valid") {
-			assert.equal(folded.descriptor.agentId, agentId);
-			assert.equal(folded.descriptor.parentAgentId, parent.agentId);
-		}
-		const childAgentEntries = child
-			.getEntries()
-			.filter(
-				(entry) =>
-					entry.type === "custom" &&
-					entry.customType === AGENT_CUSTOM_TYPE &&
-					(entry.data as { agentId?: string } | undefined)?.agentId === agentId,
-			);
-		assert.equal(childAgentEntries.length, 1);
-
-		// The parent session persists the same agent id, so a forked or
-		// re-created parent session file keeps the child tree addressable.
-		const parentAgentEntries = parent.sessionManager
-			.getEntries()
-			.filter(
-				(entry) =>
-					entry.type === "custom" &&
-					entry.customType === AGENT_CUSTOM_TYPE &&
-					(entry.data as { agentId?: string } | undefined)?.agentId === parent.agentId,
-			);
-		assert.equal(parentAgentEntries.length, 1);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("resumed children keep their agent id across cold starts", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "resumable scout",
-				prompt: "Inspect it.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		const agentId = outcome.details.agentId;
-		await waitForCompletions(parent, 1);
-
-		await coordinator.sendMessage(parent, agentId, "Inspect one more thing.");
-		await coordinator.followupTask(parent, agentId);
-		await waitForCompletions(parent, 2);
-		const entries = await coordinator.list(parent, "children");
-		assert.equal(entries.length, 1);
-		assert.equal(entries[0]?.kind, "child");
-		if (entries[0]?.kind === "child") assert.equal(entries[0].agentId, agentId);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("fork children get a fresh agent id while chaining to the parent agent", async () => {
-	const { coordinator, parent } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"fork",
-			{
-				agent: "scout",
-				description: "forked scout",
-				prompt: "Inspect it.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
-		);
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind !== "foreground") return;
-		assert.notEqual(outcome.details.agentId, parent.agentId);
-		assert.match(
-			outcome.details.agentId,
-			/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("continuable child can explicitly report before its quiet completion", async () => {
-	const { coordinator, parent, messages } = await fixture({ reportFirst: true });
-	try {
-		await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "reporting scout",
-				prompt: "Report a finding.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-		);
-		await waitUntil(() => messages.length === 1);
-		assert.match(messages[0]!.content, /reported:[\s\S]*finding 1/);
-		await waitForCompletions(parent, 1);
-		assert.match(parentCompletions(parent)[0]!.output, /child answer 2/);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("a report is delivered without starting or queueing a parent turn", async () => {
-	const { coordinator, parent, messages, eventDetails } = await fixture({
-		reportFirst: true,
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "reporting scout",
-				prompt: "Report a finding.",
-			},
-			DEFAULT_SETTINGS,
-		);
-		assert.equal(outcome.kind, "continuable");
-		if (outcome.kind !== "continuable") return;
-		await waitForChildReady(
-			coordinator,
-			parent,
-			outcome.details.agentId,
-		);
-		assert.equal(messages.length, 1);
-		assert.match(messages[0]!.content, /reported:[\s\S]*finding 1/);
-		// The report is recorded for the parent session without waking it: no
-		// additional parent turn, scheduler slot or activation is created.
-		assert.equal(
-			eventDetails.filter(
-				(event) => event.name === "pi-subagent:turn-start",
-			).length,
-			1,
-		);
-		const listed = await coordinator.list(parent, "children");
-		const child = listed.find(
-			(entry) =>
-				entry.kind === "child"
-				&& entry.agentId === outcome.details.agentId,
-		);
-		if (child?.kind === "child") assert.equal(child.unreadUpdates, 1);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("continuable mode fails loud for an ephemeral parent", async () => {
-	const { coordinator, parent } = await fixture({ persistent: false });
-	try {
-		await assert.rejects(
-			() =>
-				coordinator.delegate(
-					parent,
-					"spawn",
-					{
-						agent: "scout",
-						description: "ephemeral child",
-						prompt: "Inspect it.",
-					},
-					{ ...DEFAULT_SETTINGS, runtimeMode: "background" as const },
-				),
-			/require a persisted parent session/,
-		);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("foreground mode waits for the child result", async () => {
-	const { coordinator, parent, events } = await fixture();
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "scout",
-				description: "foreground scout",
-				prompt: "Inspect it.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "foreground" as const,
-			},
-		);
-		assert.equal(outcome.kind, "foreground");
-		if (outcome.kind === "foreground") assert.equal(outcome.result.output, "child answer 1");
-		assert.deepEqual(events, ["pi-subagent:start", "pi-subagent:end"]);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("foreground mode requires a fresh child for every delegation", async () => {
-	const { coordinator, parent, events } = await fixture();
-	try {
-		for (const description of ["first scout", "second scout"]) {
-			const outcome = await coordinator.delegate(
-				parent,
-				"spawn",
-				{
-					agent: "scout",
-					description,
-					prompt: "Inspect it.",
-				},
-				{
-					...DEFAULT_SETTINGS,
-					runtimeMode: "foreground" as const,
-				},
-			);
-			assert.equal(outcome.kind, "foreground");
-		}
-		assert.deepEqual(events, [
-			"pi-subagent:start",
-			"pi-subagent:end",
-			"pi-subagent:start",
-			"pi-subagent:end",
-		]);
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("foreground children hide background lifecycle controls", async () => {
-	const observedTools: string[][] = [];
-	const { coordinator, parent } = await fixture({
-		onRequestTools: (tools) => observedTools.push(tools),
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "worker",
-				description: "inspect foreground tools",
-				prompt: "Inspect it.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "foreground" as const,
-			},
-		);
-		assert.equal(outcome.kind, "foreground");
-		assert.equal(observedTools.length, 1);
-		assert.ok(observedTools[0].includes("subagent"));
-		assert.ok(observedTools[0].includes("subagent_fork"));
-		for (const tool of [
-			"send_message",
-			"followup_task",
-			"wait_agent",
-			"interrupt_agent",
-			"list_agents",
-		]) {
-			assert.ok(!observedTools[0].includes(tool));
-		}
-		const staleDefinitions = coordinator.createChildToolDefinitions(
-			() => {
-				throw new Error("activation should not be read");
-			},
-			"foreground",
-		);
-		for (const tool of staleDefinitions) assert.equal(tool.exposure, "model-only", tool.name);
-		for (const [toolName, args] of [
-			[
-				"send_message",
-				{ subagent_id: "stale-child", message: "follow up" },
-			],
-			["followup_task", { subagent_id: "stale-child" }],
-			["wait_agent", { timeout_ms: 0 }],
-			["interrupt_agent", { agent_id: "stale-child" }],
-			["list_agents", {}],
-		] as const) {
-			const tool = staleDefinitions.find((candidate) => candidate.name === toolName);
-			assert.ok(tool);
-			await assert.rejects(
-				() =>
-					tool.execute(
-						`stale-${toolName}`,
-						args,
-						undefined,
-						undefined,
-						{} as ExtensionToolContext,
-					),
-				/foreground-only mode/,
-			);
-		}
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("nested delegation tools enumerate and describe the available agent definitions", async () => {
-	const observed = new Map<string, unknown>();
-	const descriptions = new Map<string, string>();
-	const { coordinator, parent } = await fixture({
-		onRequestContext: (context) => {
-			for (const name of ["subagent", "subagent_fork"]) {
-				const tool = getCurrentTools(context.messages).find((candidate) => candidate.name === name);
-				if (tool) descriptions.set(name, tool.description);
-				const properties = (
-					tool?.parameters as { properties?: Record<string, unknown> } | undefined
-				)?.properties;
-				observed.set(
-					name,
-					(properties?.agent as { enum?: unknown } | undefined)?.enum,
-				);
-			}
-		},
-	});
-	try {
-		await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "worker",
-				description: "inspect nested schema",
-				prompt: "Inspect it.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
-		);
-		for (const name of ["subagent", "subagent_fork"]) {
-			assert.deepEqual(observed.get(name), ["scout", "worker"]);
-			assert.match(descriptions.get(name)!, /Available agents:\n- scout: Test scout\n- worker: Test worker/);
-			assert.doesNotMatch(descriptions.get(name)!, /Follow the test task/);
-		}
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-for (const toolName of ["subagent", "subagent_fork"]) {
-	test(`nested ${toolName} executes its activation-scoped catalog snapshot`, async () => {
-		let scoutPath = "";
-		let edited = false;
-		let expectedPrompt = "Follow the test task";
-		let childRequests = 0;
-		const { coordinator, parent, agentDir } = await fixture({
-			streamSimple(model, context) {
-				const tools = getCurrentTools(context.messages);
-				const delegation = tools.find((tool) => tool.name === toolName);
-				if (delegation) {
-					if (!edited) {
-						assert.match(delegation.description, /scout: Test scout/);
-						writeFileSync(scoutPath,
-							"---\nname: scout\ndescription: Edited scout\ntools: none\n---\nEdited child prompt.\n");
-						edited = true;
-					}
-					if (!context.messages.some((message) => message.role === "toolResult")) {
-						return toolCallStream(model, {
-							type: "toolCall", id: "nested-snapshot", name: toolName,
-							arguments: { agent: "scout", description: "inspect snapshot", prompt: "Inspect." },
-						});
-					}
-				} else {
-					childRequests++;
-					assert.match(
-						JSON.stringify(context.messages.filter((message) => message.role === "system")),
-						new RegExp(expectedPrompt),
-					);
-					assert.deepEqual(tools.map((tool) => tool.name).sort(),
-						expectedPrompt === "Edited child prompt" ? [] : ["bash", "find", "grep", "ls", "read"]);
-				}
-				return scriptedStream(model, "done");
-			},
-		});
-		scoutPath = join(agentDir, "agents", "scout.md");
-		try {
-			for (const prompt of ["Follow the test task", "Edited child prompt"]) {
-				expectedPrompt = prompt;
-				await coordinator.delegate(parent, "spawn", {
-					agent: "worker", description: "snapshot parent", prompt: "Delegate to scout.",
-				}, { ...DEFAULT_SETTINGS, runtimeMode: "foreground" });
-			}
-			assert.equal(childRequests, 2);
-		} finally {
-			await coordinator.shutdown();
-		}
-	});
-}
-
-test("worker mutation policy falls back to Pi edit and write tools", async () => {
-	const observedTools: string[][] = [];
-	const { coordinator, parent } = await fixture({
-		onRequestTools: (tools) => observedTools.push(tools),
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "worker",
-				description: "apply a focused change",
-				prompt: "Make the change.",
-			},
-			{ ...DEFAULT_SETTINGS, runtimeMode: "foreground" as const },
-		);
-		assert.equal(outcome.kind, "foreground");
-		assert.equal(observedTools.length, 1);
-		assert.ok(observedTools[0].includes("edit"));
-		assert.ok(observedTools[0].includes("write"));
-		assert.ok(!observedTools[0].includes("apply_patch"));
-		assert.ok(!observedTools[0].includes("$mutation"));
-	} finally {
-		await coordinator.shutdown();
-	}
-});
-
-test("worker mutation policy composes with an extension-selected apply_patch", async () => {
-	const observedTools: string[][] = [];
-	const childExtension = `
-export default function modelTools(pi) {
-	const parameters = {
-		type: "object",
-		properties: {},
-		additionalProperties: false,
-	};
-	pi.on("session_start", async () => {
-		for (const name of ["apply_patch", "dangerous"]) {
-			pi.registerTool({
-				name,
-				label: name,
-				description: name,
-				parameters,
-				async execute() {
-					return { content: [{ type: "text", text: "ok" }] };
-				},
-			});
-		}
-		const active = pi.getActiveTools();
-		pi.setActiveTools([
-			...active.filter((name) => name !== "edit" && name !== "write"),
-			"apply_patch",
-			"dangerous",
-		]);
-	});
-}
-`;
-	const { coordinator, parent } = await fixture({
-		childExtension,
-		onRequestTools: (tools) => observedTools.push(tools),
-	});
-	try {
-		const outcome = await coordinator.delegate(
-			parent,
-			"spawn",
-			{
-				agent: "worker",
-				description: "apply a focused change",
-				prompt: "Make the change.",
-			},
-			{
-				...DEFAULT_SETTINGS,
-				runtimeMode: "foreground" as const,
-				inheritExtensions: true,
-			},
-		);
-		assert.equal(outcome.kind, "foreground");
-		assert.equal(observedTools.length, 1);
-		assert.ok(observedTools[0].includes("apply_patch"));
-		assert.ok(!observedTools[0].includes("edit"));
-		assert.ok(!observedTools[0].includes("write"));
-		assert.ok(!observedTools[0].includes("dangerous"));
-		assert.ok(!observedTools[0].includes("$mutation"));
-	} finally {
-		await coordinator.shutdown();
-	}
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "first" });
+	await reached.promise;
+	const followup = f.coordinator.followup(f.caller, "worker", "next after dispose");
+	resume.resolve();
+	await followup;
+	await f.idle();
+	assert.equal(f.requests.length, 2);
+	assert.match(JSON.stringify(f.requests[1]), /next after dispose/);
+	assert.equal(f.coordinator.treeStore.mailbox("/root/worker").length, 0);
 });
