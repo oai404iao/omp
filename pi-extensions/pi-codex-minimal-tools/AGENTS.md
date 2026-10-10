@@ -1,6 +1,9 @@
 # pi-codex-minimal-tools — maintenance
 
-Pure composition package. Read `README.md` and root `docs/codex-packages.md`.
+Pure composition package. Follow [root guidance](../../AGENTS.md) for setup,
+compatibility checks, Changesets and publication boundaries. Read
+[README.md](README.md) and [Codex composition](../../docs/codex-packages.md)
+before changing factory wiring or public exports.
 Wire behavior and its references belong to the implementation owners, not here.
 
 ## Layout and ownership
@@ -17,13 +20,15 @@ Wire behavior and its references belong to the implementation owners, not here.
 ## Commands (repository root)
 
 ```bash
-pnpm install --frozen-lockfile --ignore-scripts
 pnpm --filter @oai404iao/pi-codex-minimal-tools run check
 pnpm run test:codex-composition
 pnpm run check:architecture
 pnpm run test:codex-packages
-pnpm run ci
 ```
+
+The package check is a typecheck; behavioral and installation coverage comes
+from the root composition and tarball tests above. Run `pnpm run ci` for complete
+pre-PR verification; it includes these checks.
 
 Use the root pnpm-lock.yaml; no package lockfiles. Tests use mocked fetch or loopback
 servers and do not require real Codex credentials. Transport tests must close
