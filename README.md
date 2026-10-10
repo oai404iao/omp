@@ -77,6 +77,19 @@ Test an individual extension directly:
 pi -e ./pi-extensions/pi-subagent
 ```
 
+### Local-only extensions
+
+[`pi-local-notify`](pi-extensions/pi-local-notify/README.md) provides Kitty
+desktop notifications with tmux passthrough. It is a private, local-only
+extension outside the seven npm release workspaces. Try it with:
+
+```bash
+pi -e ./pi-extensions/pi-local-notify
+```
+
+It does not install itself or change Pi/tmux configuration. Run its checks with
+`npm --prefix pi-extensions/pi-local-notify run check` after the root install.
+
 ## Versioning
 
 Package-facing changes use Changesets:

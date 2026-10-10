@@ -1,0 +1,22 @@
+{
+  "name": "@oai404iao/pi-local-notify",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local Kitty desktop notifications with tmux passthrough for Pi.",
+  "type": "module",
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.99.1"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test tests/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
