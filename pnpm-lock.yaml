@@ -1139,8 +1139,8 @@ packages:
   import-meta-resolve@4.2.0:
     resolution: {integrity: sha512-Iqv2fzaTQN28s/FwZAoFq0ZSs/7hMAHJVX+w8PZl3cY19Pxk6jFFalxQoIfW2826i/fDLXv8IiEZRIT0lDuWcg==, tarball: https://registry.npmjs.org/import-meta-resolve/-/import-meta-resolve-4.2.0.tgz}
 
-  ip-address@10.5.0:
-    resolution: {integrity: sha512-R5SnVLJmgYYvf2F2ZgwSBnelz5G4q5AxIC277GDfUaNbrZKNANcBC7RHqYYePlszf4kBolVkJauG0ZjHHFh55g==, tarball: https://registry.npmjs.org/ip-address/-/ip-address-10.5.0.tgz}
+  ip-address@10.7.3:
+    resolution: {integrity: sha512-A1kdq/tSb5QjvKvAMgIoEvDBIgL7qaqVP/jkvSwYYRZ9iEzvPpopxp2wQfu3SuZRHtpHNxMn8Fs0bS+gf5Xmwg==, tarball: https://registry.npmjs.org/ip-address/-/ip-address-10.7.3.tgz}
     engines: {node: '>= 12'}
 
   isexe@2.0.0:
@@ -2190,7 +2190,7 @@ snapshots:
 
   import-meta-resolve@4.2.0: {}
 
-  ip-address@10.5.0: {}
+  ip-address@10.7.3: {}
 
   isexe@2.0.0: {}
 
@@ -2323,7 +2323,7 @@ snapshots:
 
   socks@2.8.9:
     dependencies:
-      ip-address: 10.5.0
+      ip-address: 10.7.3
       smart-buffer: 4.2.0
 
   standardwebhooks@1.1.1:
