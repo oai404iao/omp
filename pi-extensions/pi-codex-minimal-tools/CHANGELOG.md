@@ -1,5 +1,17 @@
 # @oai404iao/pi-codex-minimal-tools
 
+## 4.1.2
+
+### Patch Changes
+
+- d250a74: Use pnpm for development scripts and document frozen-lockfile installation.
+- Updated dependencies [a80379d]
+- Updated dependencies [d250a74]
+  - @oai404iao/pi-codex-runtime@1.0.1
+  - @oai404iao/pi-codex-core@1.0.1
+  - @oai404iao/pi-codex-imagegen@1.0.1
+  - @oai404iao/pi-codex-web-search@0.5.1
+
 ## 4.1.1
 
 ### Patch Changes
