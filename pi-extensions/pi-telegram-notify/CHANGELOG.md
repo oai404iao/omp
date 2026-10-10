@@ -1,5 +1,11 @@
 # @oai404iao/pi-telegram-notify
 
+## 0.6.1
+
+### Patch Changes
+
+- d250a74: Use pnpm for development scripts and document frozen-lockfile installation.
+
 ## 0.6.0
 
 ### Minor Changes

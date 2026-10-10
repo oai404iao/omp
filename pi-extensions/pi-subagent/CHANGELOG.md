@@ -1,5 +1,11 @@
 # @oai404iao/pi-subagent
 
+## 1.0.2
+
+### Patch Changes
+
+- d250a74: Use pnpm for development scripts and document frozen-lockfile installation.
+
 ## 1.0.1
 
 ### Patch Changes

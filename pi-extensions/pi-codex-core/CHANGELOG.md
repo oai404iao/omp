@@ -1,5 +1,20 @@
 # @oai404iao/pi-codex-core
 
+## 1.0.1
+
+### Patch Changes
+
+- a80379d: Preserve selected native edit/write tools when apply_patch is active. Hide their
+  model-facing declarations through Pi's prepareLoadout API instead of physically
+  deactivating them, so tree navigation, reload and resume retain the user's tool
+  selection without in-memory restoration receipts. Keep prewarm and compaction
+  snapshots aligned with the owned patch projection; explicitly disabled tools
+  remain disabled.
+- d250a74: Use pnpm for development scripts and document frozen-lockfile installation.
+- Updated dependencies [a80379d]
+- Updated dependencies [d250a74]
+  - @oai404iao/pi-codex-runtime@1.0.1
+
 ## 1.0.0
 
 ### Major Changes
