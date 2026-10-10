@@ -136,9 +136,10 @@ test("active tool sync follows the model profile and preserves unrelated tools",
 		{ provider: "openai", id: "gpt-5.5", input: ["text"] },
 		DEFAULT_SETTINGS,
 	);
-	assert.deepEqual(next.activeTools, ["read", "bash", "old_custom", "apply_patch", "web_search"]);
+	assert.deepEqual(next.activeTools, ["read", "bash", "edit", "write", "old_custom", "apply_patch", "web_search"]);
 	assert.deepEqual(next.added, ["apply_patch", "web_search"]);
-	assert.deepEqual(next.removed.sort(), ["edit", "write"].sort());
+	assert.deepEqual(next.removed, []);
+	assert.deepEqual(next.preserved, current);
 }));
 
 test("unsupported models remove only package tools", () => withAgentDir(() => {

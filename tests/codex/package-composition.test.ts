@@ -41,7 +41,8 @@ for (const scenario of cases) {
 					const enabled = scenario.tools.filter(name => name !== "view_image");
 					for (const name of enabled) assert.ok(host.active().includes(name), `${name} should activate`);
 					assert.ok(host.active().includes("unrelated"));
-					assert.equal(host.active().includes("write"), !scenario.core);
+					assert(host.active().includes("edit"));
+					assert(host.active().includes("write"));
 					host.ctx.model = compositionModel("unknown-future-model");
 					await host.emit("model_select");
 					assert.deepEqual(host.active(), ["read", "edit", "write", "bash", "unrelated"]);

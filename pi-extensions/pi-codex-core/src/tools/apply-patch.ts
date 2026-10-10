@@ -1,6 +1,7 @@
 import { lstat, realpath, stat } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { withFileMutationQueue, type ToolLoadout, type ToolLoadoutChanges } from "@earendil-works/pi-coding-agent";
+import { NATIVE_MUTATION_TOOL_NAMES } from "@oai404iao/pi-codex-runtime/internal/capabilities";
 import { applyPatch, resolvePatchPath, type ApplyPatchResult } from "../patch/apply.js";
 import { parseApplyPatch } from "../patch/parser.js";
 import { createApplyPatchRenderers } from "../patch/render.js";
@@ -127,6 +128,14 @@ export function createApplyPatchToolDefinition(options: { cwd?: string; deferRen
 		],
 		parameters: applyPatchToolSchema,
 		outputSchema: applyPatchOutputSchema,
+		prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges | undefined {
+			if (!loadout.declared.some(tool => tool.name === "apply_patch")) return undefined;
+			return {
+				hiddenDeclarations: loadout.declared
+					.filter(tool => NATIVE_MUTATION_TOOL_NAMES.some(name => name === tool.name))
+					.map(tool => tool.name),
+			};
+		},
 		async execute(_toolCallId: string, params: ApplyPatchInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
 			const cwd = ctx?.cwd ?? options.cwd ?? process.cwd();
 			return executeApplyPatchTool(params, cwd, signal);

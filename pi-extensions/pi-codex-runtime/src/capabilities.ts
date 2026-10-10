@@ -4,7 +4,6 @@ import { loadModelSettings } from "./model-catalog/runtime.js";
 export const PACKAGE_TOOL_NAMES = ["image_generation", "view_image", "apply_patch", "web_search"] as const;
 export type PackageToolName = (typeof PACKAGE_TOOL_NAMES)[number];
 export const NATIVE_MUTATION_TOOL_NAMES = ["edit", "write"] as const;
-export type NativeMutationToolName = (typeof NATIVE_MUTATION_TOOL_NAMES)[number];
 
 export interface ModelLike {
 	provider?: string;
@@ -124,12 +123,6 @@ export function computeNextActiveTools(currentActive: readonly string[], model: 
 				current.add(tool);
 				added.push(tool);
 			}
-		}
-	}
-
-	if (current.has("apply_patch")) {
-		for (const nativeMutationTool of NATIVE_MUTATION_TOOL_NAMES) {
-			if (current.delete(nativeMutationTool)) removed.push(nativeMutationTool);
 		}
 	}
 

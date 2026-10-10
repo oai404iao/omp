@@ -125,6 +125,27 @@ for (const mode of ["on", "only"] as const) for (const autoEnable of [true, fals
 		}));
 }
 
+for (const mode of ["on", "only"] as const) {
+	test(`native codemode ${mode} can use selected native editing tools while patch declarations are preferred`, () =>
+		withNativeCodemode({ mode }, async (session, cwd) => {
+			assert(session.getActiveToolNames().includes("apply_patch"));
+			for (const name of ["edit", "write"]) {
+				assert(session.getActiveToolNames().includes(name));
+				assert(session.getCallableToolNames().includes(name));
+			}
+			const result = await runCode(session, `
+				await tools.write({ path: "native-fallback.txt", content: "fallback" });
+				return ALL_TOOLS.map(tool => tool.name);
+			`);
+			assert.equal(readFileSync(join(cwd, "native-fallback.txt"), "utf8"), "fallback");
+			for (const name of ["edit", "write"]) {
+				assert(result.text.includes(`"${name}"`));
+				assert(!result.declared.includes(name));
+			}
+			assert(getCurrentTools(session.messages).some(tool => tool.name === "write"));
+		}));
+}
+
 test("native codemode receives structured patch/search/image data and forwards images explicitly", () =>
 	withNativeCodemode({}, async (session, cwd) => {
 		const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jC1sAAAAASUVORK5CYII=";
