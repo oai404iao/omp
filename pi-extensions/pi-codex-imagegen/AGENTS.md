@@ -29,27 +29,28 @@ Independent image capability, using runtime without core or web-search.
 
 Read root CONTRIBUTING.md, RELEASING.md and docs/codex-packages.md. Source evidence
 is in pi-codex-runtime/reference/source-map.md.
-Use the root package-lock.json; never add package locks. All new modules must be
+Use the root pnpm-lock.yaml; never add package locks. All new modules must be
 at most 400 lines. Preserve the Pi 0.99.1 floor and exact 0.99.1 target; run
-`npm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
+`pnpm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
 Tarball-facing changes require a changeset. AGENTS/tests/reference are not shipped.
-Run `npm run changeset:sync` for recursive consumers; never loosen exact workspace pins.
+Run `pnpm run changeset:sync` for recursive consumers; never loosen exact workspace pins.
 
 From repository root:
 
 ```bash
-npm run check -w @oai404iao/pi-codex-imagegen
-npm run test:codex-composition
-npm run check:architecture
-npm run test:codex-packages
-npm run ci
+pnpm --filter @oai404iao/pi-codex-imagegen run check
+pnpm run test:codex-composition
+pnpm run check:architecture
+pnpm run test:codex-packages
+pnpm run ci
 ```
 
 Behavioral regressions live in `tests/`; neutral fixtures and cross-capability
 integration live in root `tests/codex/`. Owner tests must not import core or
 web-search implementations; hosted transport integration belongs at root.
-Tests use mocked HTTP/loopback, not real credentials. Tarball tests npm-install
-Codex and external host archives independently from the root lock, without external links.
+Tests use mocked HTTP/loopback, not real credentials. Tarball tests use frozen,
+offline pnpm installs of Codex and external host archives from the root lock.
+Internal pnpm symlinks must stay inside the consumer fixture, never outside it.
 Restore process environment, fetch, timers and sockets when adding fixtures.
 
 ## Code Comments Rules (Strict)

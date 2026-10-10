@@ -1,13 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import {
   assertLockedPublishedArtifact,
   currentCommit,
   existingTagCommit,
   lookupPublishedVersion,
   lockedPublishedArtifact,
-  npm,
   releaseNotes,
   sha512,
   tagFor,
@@ -31,6 +30,7 @@ if (includeBootstrap && process.env.GITHUB_ACTIONS === "true") {
 }
 const commit = currentCommit();
 const candidates = [];
+const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 function assertCleanCheckout() {
   const status = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], {
@@ -111,8 +111,8 @@ mkdirSync(outputDirectory, { recursive: true });
 
 function currentPackedPaths(name) {
   const packed = spawnSync(
-    npm,
-    ["pack", "--dry-run", "--json", "--ignore-scripts", "--workspace", name],
+    pnpm,
+    ["--dir", orderedWorkspaces.find(entry => entry.name === name).directory, "pack", "--dry-run", "--json", "--ignore-scripts"],
     {
       cwd: root,
       encoding: "utf8",
@@ -129,10 +129,10 @@ function currentPackedPaths(name) {
   } catch (error) {
     throw new Error(`could not parse current tarball for ${name}: ${error.message}`);
   }
-  if (!Array.isArray(output) || output.length !== 1 || !Array.isArray(output[0]?.files)) {
-    throw new Error(`npm pack returned an unexpected file list for ${name}`);
+  if (!output || !Array.isArray(output.files)) {
+    throw new Error(`pnpm pack returned an unexpected file list for ${name}`);
   }
-  return new Set(output[0].files.map((file) => normalizePackagePath(file.path)));
+  return new Set(output.files.map((file) => normalizePackagePath(file.path)));
 }
 
 function assertPublishedPayloadIsUnchanged(name, version, directory, sourceCommit) {
@@ -252,10 +252,11 @@ for (const { name, directory } of orderedWorkspaces) {
   writeFileSync(stagedManifestPath, `${JSON.stringify(stagedManifest, null, 2)}\n`);
 
   const packed = spawnSync(
-    npm,
+    pnpm,
     [
-      "pack",
+      "--dir",
       stagedPackage,
+      "pack",
       "--json",
       "--ignore-scripts",
       "--pack-destination",
@@ -268,20 +269,19 @@ for (const { name, directory } of orderedWorkspaces) {
     },
   );
   if (packed.status !== 0) {
-    throw new Error(`npm pack failed for ${name}: ${(packed.stderr || packed.stdout).trim()}`);
+    throw new Error(`pnpm pack failed for ${name}: ${(packed.stderr || packed.stdout).trim()}`);
   }
 
-  const output = JSON.parse(packed.stdout);
-  if (!Array.isArray(output) || output.length !== 1) {
-    throw new Error(`npm pack returned an unexpected result for ${name}`);
-  }
-  const item = output[0];
+  const item = JSON.parse(packed.stdout);
   if (item.name !== name || item.version !== manifest.version || typeof item.filename !== "string") {
-    throw new Error(`npm pack identity mismatch for ${name}@${manifest.version}`);
+    throw new Error(`pnpm pack identity mismatch for ${name}@${manifest.version}`);
   }
 
-  const filename = item.filename;
-  const tarballPath = resolve(outputDirectory, filename);
+  const tarballPath = resolve(outputDirectory, item.filename);
+  const filename = basename(tarballPath);
+  if (dirname(tarballPath) !== outputDirectory || !filename.endsWith(".tgz")) {
+    throw new Error(`pnpm pack returned an unexpected artifact path for ${name}: ${item.filename}`);
+  }
   rmSync(stagedPackage, { recursive: true, force: true });
   candidates.push({
     name,

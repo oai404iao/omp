@@ -118,7 +118,7 @@ exit 1
     assert.notEqual(child.status, 0);
     assert.match(child.stderr, /locked as published.*registry verification is pending/i);
     const calls = readFileSync(callLog, "utf8");
-    assert.doesNotMatch(calls, /git archive|npm pack|npm publish|git tag /);
+    assert.doesNotMatch(calls, /git archive|(?:npm|pnpm) pack|npm publish|git tag /);
     assert.equal(calls.split("\n").filter(line => line.startsWith("npm view ")).length, 1);
   } finally {
     rmSync(temporary, { recursive: true, force: true });

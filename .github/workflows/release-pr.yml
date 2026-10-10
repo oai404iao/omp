@@ -25,25 +25,25 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.x"
-          cache: npm
-
-      - name: Pin npm
-        run: npm install --global npm@11.19.0 --ignore-scripts
+          cache: pnpm
 
       - name: Install locked dependencies
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Verify packages
-        run: npm run ci
+        run: pnpm run ci
 
       - name: Create or update the release pull request
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          version-script: npm run changeset:version
+          version-script: pnpm run changeset:version
           pr-title: "chore: version packages"
           commit-message: "chore: version packages"
           push-with-git-cli: false

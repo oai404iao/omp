@@ -72,7 +72,7 @@ private `src/*` forwards in the bundle.
 
 See the [configuration guide](https://github.com/oai404iao/omp/blob/main/pi-extensions/pi-codex-runtime/reference/configuration.md)
 and [installation/composition guide](https://github.com/oai404iao/omp/blob/main/docs/codex-packages.md).
-For local testing, run root `npm ci --ignore-scripts`, then
+For local testing, run root `pnpm install --frozen-lockfile --ignore-scripts`, then
 `pi install /absolute/path/to/omp/pi-extensions/pi-codex-minimal-tools`.
 These source changes do not themselves publish a new npm release.
 

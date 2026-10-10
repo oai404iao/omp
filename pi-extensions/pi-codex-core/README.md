@@ -104,9 +104,9 @@ installations. Mixed runtime versions fail.
 See [the package guide](../../docs/codex-packages.md). From repository root:
 
 ```bash
-npm run check -w @oai404iao/pi-codex-core
-npm run test:codex-composition
-npm run test:codex-packages
+pnpm --filter @oai404iao/pi-codex-core run check
+pnpm run test:codex-composition
+pnpm run test:codex-packages
 ```
 
 Owner regressions and transport fixtures are in `tests/`. Protocol references:

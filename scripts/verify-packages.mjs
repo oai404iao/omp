@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { readManifest, registry, root, workspaces } from "./workspaces.mjs";
 import { piFloor, piVersion } from "./pi-baselines.mjs";
+import { readPnpmLock } from "./pnpm-lock.mjs";
 
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-const lock = JSON.parse(readFileSync(resolve(root, "package-lock.json"), "utf8"));
+const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const lock = readPnpmLock(resolve(root, "pnpm-lock.yaml"));
 
 const errors = [];
 const seenNames = new Set();
@@ -60,12 +61,12 @@ function normalizePackagePath(path) {
 function parsePackOutput(name, stdout) {
   try {
     const output = JSON.parse(stdout);
-    if (!Array.isArray(output) || output.length !== 1 || !Array.isArray(output[0]?.files)) {
-      throw new Error("unexpected npm pack JSON shape");
+    if (!output || !Array.isArray(output.files)) {
+      throw new Error("unexpected pnpm pack JSON shape");
     }
-    return output[0];
+    return output;
   } catch (error) {
-    report(`${name}: could not parse npm pack output: ${error.message}`);
+    report(`${name}: could not parse pnpm pack output: ${error.message}`);
     return undefined;
   }
 }
@@ -142,15 +143,19 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   ) {
     report(`${manifest.name}: publishConfig must target the public npm registry`);
   }
-  if (lock.packages?.[directory]?.version !== manifest.version) {
-    report(
-      `${manifest.name}: package-lock workspace version ${String(lock.packages?.[directory]?.version)} does not match ${manifest.version}`,
-    );
+  const importer = lock.importers?.[directory];
+  if (!importer) report(`${manifest.name}: missing pnpm lockfile importer`);
+  for (const field of ["dependencies", "devDependencies", "optionalDependencies"]) {
+    for (const [name, specifier] of Object.entries(manifest[field] ?? {})) {
+      if (importer?.[field]?.[name]?.specifier !== specifier) {
+        report(`${manifest.name}: pnpm lockfile ${field}.${name} does not match ${specifier}`);
+      }
+    }
   }
 
   const packed = spawnSync(
-    npm,
-    ["pack", "--dry-run", "--json", "--ignore-scripts", "--workspace", expectedName],
+    pnpm,
+    ["--dir", directory, "pack", "--dry-run", "--json", "--ignore-scripts"],
     {
       cwd: root,
       encoding: "utf8",
@@ -159,7 +164,7 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   );
 
   if (packed.status !== 0) {
-    report(`${manifest.name}: npm pack failed: ${(packed.stderr || packed.stdout).trim()}`);
+    report(`${manifest.name}: pnpm pack failed: ${(packed.stderr || packed.stdout).trim()}`);
     continue;
   }
 
@@ -216,9 +221,8 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
     }
   }
 
-  const unpackedSize = Number(packOutput.unpackedSize ?? 0);
   console.log(
-    `✓ ${manifest.name}@${manifest.version} [${releaseStatus}]: ${packedPaths.size} files, ${unpackedSize.toLocaleString()} bytes unpacked`,
+    `✓ ${manifest.name}@${manifest.version} [${releaseStatus}]: ${packedPaths.size} files`,
   );
 }
 

@@ -12,7 +12,7 @@ Gitea remote is retained as a migration backup.
 
 ## Packages
 
-All seven npm workspace packages use the `@oai404iao` scope. Scope naming does
+All seven pnpm workspace packages use the `@oai404iao` npm scope. Scope naming does
 not change the private/public eligibility below.
 
 | Package manifest (checkout version) | Release track |
@@ -57,15 +57,15 @@ Codex Code Mode reference material in the remaining packages are unaffected.
 Requirements:
 
 - Node.js 22.19 or newer
-- npm 11.5.1 or newer; the repository pins npm 11.19.0
+- pnpm 12.4.1 (pinned by the repository)
 - Pi 0.99.1 peer floor and exact development target.
   Full CI verifies both lock-validation roles.
 
 ```bash
-npm ci --ignore-scripts
-npm run check
-npm run pack:check
-npm run ci:pi-matrix
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run check
+pnpm run pack:check
+pnpm run ci:pi-matrix
 ```
 
 See [Pi compatibility](docs/pi-compatibility.md) for actual-version checks,
@@ -88,14 +88,14 @@ pi -e ./pi-extensions/pi-local-notify
 ```
 
 It does not install itself or change Pi/tmux configuration. Run its checks with
-`npm --prefix pi-extensions/pi-local-notify run check` after the root install.
+`pnpm --dir pi-extensions/pi-local-notify run check` after the root install.
 
 ## Versioning
 
 Package-facing changes use Changesets:
 
 ```bash
-npm run changeset
+pnpm run changeset
 ```
 
 Do not edit package versions manually. See [RELEASING.md](RELEASING.md) for

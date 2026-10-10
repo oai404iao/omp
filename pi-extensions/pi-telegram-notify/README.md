@@ -117,9 +117,11 @@ npm 包名使用 `@oai404iao/pi-telegram-notify`，但配置目录继续使用
 
 ## 开发校验
 
+在仓库根目录执行：
+
 ```bash
-npm install
-npm run check
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @oai404iao/pi-telegram-notify run check
 ```
 
 ## License

@@ -7,6 +7,7 @@ import { root, workspaces } from "./workspaces.mjs";
 import { readChangesets } from "@changesets/read";
 import { orderReleaseWorkspaces } from "./release-dependencies.mjs";
 import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
+import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
 
 export const generatedId = "workspace-dependent-releases";
 export const dependencyFields = ["dependencies", "optionalDependencies"];
@@ -98,15 +99,15 @@ export async function syncDependentChangesets(cwd = root, write = false) {
   const path = join(directory, filename);
   const current = existsSync(path) ? readFileSync(path, "utf8") : undefined;
   if (expected === current && files.length === (expected ? 1 : 0)) return;
-  if (!write) throw new Error("Dependent changesets are missing or stale; run npm run changeset:sync");
+  if (!write) throw new Error("Dependent changesets are missing or stale; run pnpm run changeset:sync");
   for (const file of files) if (file !== filename || !expected) rmSync(join(directory, file));
   if (expected) writeFileSync(path, expected);
 }
 
 export async function versionWorkspace(cwd = root, { updateLock = true } = {}) {
   const before = workspaceManifests(cwd);
-  const lockPath = join(cwd, "package-lock.json");
-  const previousLock = JSON.parse(readFileSync(lockPath, "utf8"));
+  const lockPath = join(cwd, "pnpm-lock.yaml");
+  const previousLock = readPnpmLock(lockPath);
   // Fail before Changesets writes versions if an existing pin is already invalid.
   exactPinEdits(before, before);
   await syncDependentChangesets(cwd, true);
@@ -120,9 +121,9 @@ export async function versionWorkspace(cwd = root, { updateLock = true } = {}) {
   }
   exactPinEdits(workspaceManifests(cwd), workspaceManifests(cwd));
   if (updateLock) {
-    run(cwd, "npm", ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"]);
-    const lock = preserveRegistryIntegrity(previousLock, JSON.parse(readFileSync(lockPath, "utf8")));
-    writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+    run(cwd, "pnpm", ["install", "--lockfile-only", "--ignore-scripts", "--no-frozen-lockfile"]);
+    const lock = preserveRegistryIntegrity(previousLock, readPnpmLock(lockPath));
+    writePnpmLock(lockPath, lock);
   }
 }
 

@@ -244,9 +244,9 @@ listing, and no Codex durable sleep or provider-specific tool namespace.
 
 ```bash
 # Repository root; use the canonical root lockfile.
-npm run check -w @oai404iao/pi-subagent
-npm run ci
-npm run ci:pi-matrix
+pnpm --filter @oai404iao/pi-subagent run check
+pnpm run ci
+pnpm run ci:pi-matrix
 ```
 
 Tests use scripted local models and actual Pi SDK runtimes, not live credentials.

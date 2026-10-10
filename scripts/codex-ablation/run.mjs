@@ -28,7 +28,7 @@ const manifest = {
 	dirty: execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).trim(),
 	node: process.version,
 	piVersion,
-	lockSha256: sha256(join(root, "package-lock.json")),
+	lockSha256: sha256(join(root, "pnpm-lock.yaml")),
 	nativeSha256: sha256(new URL(import.meta.resolve("@earendil-works/pi-ai/api/openai-codex-responses"))),
 	nativeSharedSha256: sha256(new URL(import.meta.resolve("@earendil-works/pi-ai/api/openai-responses-shared"))),
 	sources: Object.fromEntries(sources.map((name) => [name, sha256(join(import.meta.dirname, name))])),
