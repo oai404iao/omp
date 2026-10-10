@@ -47,10 +47,10 @@
     "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/prepare-release-artifacts.test.mjs scripts/initial-codex-bootstrap.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs scripts/pi-baselines.test.mjs"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.99.1",
-    "@earendil-works/pi-ai": "0.99.1",
-    "@earendil-works/pi-coding-agent": "0.99.1",
-    "@earendil-works/pi-tui": "0.99.1",
+    "@earendil-works/pi-agent-core": "1.0.4",
+    "@earendil-works/pi-ai": "1.0.4",
+    "@earendil-works/pi-coding-agent": "1.0.4",
+    "@earendil-works/pi-tui": "1.0.4",
     "@changesets/cli": "3.0.3",
     "@changesets/read": "1.0.1",
     "@oai404iao/pi-codex-core": "workspace:*",
@@ -58,10 +58,10 @@
     "@oai404iao/pi-codex-minimal-tools": "workspace:*",
     "@oai404iao/pi-codex-runtime": "workspace:*",
     "@oai404iao/pi-codex-web-search": "workspace:*",
-    "@types/node": "26.6.2",
-    "tsx": "4.23.14",
+    "@types/node": "26.6.4",
+    "tsx": "4.23.15",
     "typescript": "7.0.2",
     "typescript-ast": "npm:typescript@5.9.3",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   }
 }
