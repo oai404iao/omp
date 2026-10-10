@@ -566,8 +566,21 @@ versions cannot replay v4 checkpoints.
 
 ## Apply Patch
 
-When `apply_patch` activates, the extension temporarily hides Pi's `edit` and
-`write` tools and restores their prior positions after switching away.
+When `apply_patch` activates, its `prepareLoadout` hook hides the model-facing
+declarations of selected Pi `edit` and `write` tools. It does not deactivate
+them: they remain callable from codemode and recorded in Pi's session transcript.
+When the patch tool is inactive, Pi exposes the selected native tools again.
+Tree navigation, reload and resume preserve the selection without plugin
+restoration receipts. Explicitly disabled tools stay disabled.
+
+Older sessions may already contain a tool selection without `edit` or `write`.
+The extension does not guess whether those tools were removed by an older plugin
+or deliberately disabled. Start a new session with the desired tools rather than
+editing historical tool declarations; for example:
+
+```bash
+pi --model anthropic/claude-opus-5-5 --tools read,bash,edit,write,codemode
+```
 
 The executor supports Codex `@@ class/function` contexts, ordered update
 chunks, `*** Move to:`, `*** End of File`, fuzzy matching, CRLF preservation,

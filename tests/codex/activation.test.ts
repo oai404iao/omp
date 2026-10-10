@@ -193,7 +193,7 @@ test("active non-OpenAI models remove package tools even when OpenAI models exis
 	assert.deepEqual(pi.activeTools, ["read"]);
 }));
 
-test("apply_patch follows model profiles and restores edit/write after switching away", async () => withAgentDir(async () => {
+test("apply_patch follows model profiles without changing selected edit/write tools", async () => withAgentDir(async () => {
 	const pi = fakePi();
 	pi.setActiveTools(["read", "edit", "write"]);
 	codexMinimalTools(pi as any);
@@ -203,7 +203,7 @@ test("apply_patch follows model profiles and restores edit/write after switching
 		model: { provider: "openai", id: "gpt-5.5", input: ["text"] },
 		modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-5.5", input: ["text"] }] },
 	});
-	assert.deepEqual(pi.activeTools, ["read", "apply_patch", "web_search"]);
+	assert.deepEqual(pi.activeTools, ["read", "edit", "write", "apply_patch", "web_search"]);
 
 	await emit(pi, "model_select", {
 		cwd: process.cwd(),
@@ -272,7 +272,7 @@ test("additionalModelIds enables apply_patch and web_search for an exact custom 
 		modelRegistry: { getAll: () => [{ provider: "openai", id: "deepseek-v4-flash", input: ["text"] }] },
 	};
 	await emit(pi, "model_select", ctx);
-	assert.deepEqual(pi.activeTools, ["read", "apply_patch", "web_search"]);
+	assert.deepEqual(pi.activeTools, ["read", "edit", "write", "apply_patch", "web_search"]);
 
 	const handler = pi.handlers.before_provider_request?.[0];
 	assert.ok(handler);
@@ -299,7 +299,7 @@ test("additionalModelIds can activate apply_patch for a non-OpenAI custom provid
 		model: { provider: "custom", id: "deepseek-v4-flash", input: ["text"] },
 		modelRegistry: { getAll: () => [{ provider: "custom", id: "deepseek-v4-flash", input: ["text"] }] },
 	});
-	assert.deepEqual(pi.activeTools, ["read", "apply_patch"]);
+	assert.deepEqual(pi.activeTools, ["read", "edit", "write", "apply_patch"]);
 }));
 
 test("before_provider_request preserves function placeholders when hosted tools are disabled by profile", async () => withAgentDir(async (agentDir) => {

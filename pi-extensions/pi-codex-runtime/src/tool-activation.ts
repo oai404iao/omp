@@ -2,8 +2,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { hasConfiguredModelsLoaded } from "./activation.js";
 import { getCodexBroker, type CodexBroker } from "./broker.js";
 import {
-	computeToolCapabilities, NATIVE_MUTATION_TOOL_NAMES, PACKAGE_TOOL_NAMES,
-	type ModelLike, type NativeMutationToolName, type PackageToolName,
+	computeToolCapabilities, PACKAGE_TOOL_NAMES,
+	type PackageToolName,
 } from "./capabilities.js";
 import { installCodexIdentityLifecycle } from "./codex-identity-extension.js";
 import { loadModelSettings } from "./model-catalog/runtime.js";
@@ -11,7 +11,7 @@ import { loadSettings, settingsDiagnostics } from "./settings.js";
 import { clearEndpointFailures, knownEndpointModel, watchEndpointFailures } from "./endpoint-state.js";
 import { installFastModeLifecycle } from "./fast-mode-state.js";
 
-function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_patch" | "web_search" | "image_generation"): boolean {
+export function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: "apply_patch" | "web_search" | "image_generation"): boolean {
 	if (!broker.tools.get(name)?.registered) return false;
 	const expected = broker.ownedTools.get(name);
 	if (!expected || expected.replaced) return false;
@@ -51,16 +51,9 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	if (!broker.claim("activation")) return broker;
 	installFastModeLifecycle(pi);
 	installCodexIdentityLifecycle(pi);
-	const suppressed = new Map<NativeMutationToolName, number>();
 	const warned = new Set<string>();
 	let watchedSession: string | undefined;
 	let stopWatching: (() => void) | undefined;
-	const restore = (active: string[]) => {
-		for (const [name, index] of [...suppressed].sort(([, a], [, b]) => a - b)) {
-			if (!active.includes(name)) active.splice(Math.min(index, active.length), 0, name);
-		}
-		return active;
-	};
 	let syncing = false;
 	const sync = (ctx: ExtensionContext, quiet = false) => {
 		if (syncing) return;
@@ -103,17 +96,10 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 			if (!desired) active.delete(name);
 			else if (settings.autoEnable) active.add(name);
 		}
-		if (ownsPatch && active.has("apply_patch")) {
-			for (const name of NATIVE_MUTATION_TOOL_NAMES) {
-				if (active.delete(name) && !suppressed.has(name)) suppressed.set(name, current.indexOf(name));
-			}
-		}
 		const next = current.filter(name => active.has(name));
 		for (const name of active) if (!next.includes(name)) next.push(name);
-		if (!ownsPatch || !active.has("apply_patch")) restore(next);
 		// Re-registration can auto-activate a tool; keep the existing activation policy authoritative.
 		if (next.join("\0") !== (pi.getActiveTools?.() ?? []).join("\0")) pi.setActiveTools(next);
-		if (!ownsPatch || !active.has("apply_patch")) suppressed.clear();
 		} finally { syncing = false; }
 	};
 	pi.on("session_start", (_event, ctx) => {
@@ -128,7 +114,6 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 			});
 		}
 		broker.presentation.clear();
-		suppressed.clear();
 		warned.clear();
 		sync(ctx);
 	});
@@ -139,23 +124,12 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 	});
 	pi.on("model_select", (_event, ctx) => sync(ctx));
 	pi.on("thinking_level_select", (_event, ctx) => sync(ctx));
-	pi.on("session_tree", (_event, ctx) => {
-		// Restoration receipts belong to the previous physical loadout, not
-		// to tools absent from the newly selected branch.
-		suppressed.clear();
-		sync(ctx);
-	});
+	pi.on("session_tree", (_event, ctx) => sync(ctx));
 	pi.on("agent_end", () => broker.presentation.scheduleFlush());
 	pi.on("session_shutdown", () => {
 		const errors: unknown[] = [];
 		try { broker.presentation.flush(); } catch (error) { errors.push(error); }
 		try { broker.presentation.clear(); } catch (error) { errors.push(error); }
-		try {
-			const current = pi.getActiveTools?.() ?? [];
-			const next = restore([...current]);
-			if (next.join("\0") !== current.join("\0")) pi.setActiveTools(next);
-			suppressed.clear();
-		} catch (error) { errors.push(error); }
 		if (errors.length) throw new AggregateError(errors, "Codex shutdown failed");
 	});
 	return broker;

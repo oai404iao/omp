@@ -32,8 +32,11 @@ supported, forwarding to runtime's identically named subpath.
 
 ## Model and configuration behavior
 
-The default bundle keeps its existing tool names, activation, mutation-tool
-suppression, commands, schemas, saved message types and wire formats.
+The default bundle keeps its existing tool names, package-tool activation,
+commands, schemas, saved message types and wire formats. Patch activation hides
+selected native mutation-tool declarations through Pi's `prepareLoadout` hook,
+not by removing tools from the active set. The session transcript retains them
+for tree navigation and resume, and codemode can still call them.
 Unknown or disabled model profiles remain on Pi's native implementation.
 `openai-codex/gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna` have exact Responses
 Lite profiles. Pi 0.99.1 is the package floor; 0.87.1 first supplied the Sol/Luna
