@@ -5,4 +5,5 @@ npm-debug.log*
 pnpm-debug.log*
 release-artifacts/
 .release-input/
-!pi-extensions/pi-codex-minimal-tools/AGENTS.md
+!/AGENTS.md
+!/pi-extensions/*/AGENTS.md

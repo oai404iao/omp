@@ -23,16 +23,21 @@ Provider/transport capability. Does not install web or image generation.
    output indices and signatures. HTTP fallback is not a generic retry.
 5. Preserve grammar hashes and Apache adaptation notices. Core owns the sole
    grammar asset and transport/apply-patch references under `reference/`.
+6. Patch `prepareLoadout` hides native edit/write declarations only for the
+   request; never remove those tools from Pi's active set or saved transcript.
+   Preserve codemode callable access and tree/resume behavior. `view_image`
+   stays model-only so its image reaches the model directly.
 
 ## Workflow and verification
 
-Read root CONTRIBUTING.md, RELEASING.md and docs/codex-packages.md. Source evidence
-is in pi-codex-runtime/reference/source-map.md.
-Use the root pnpm-lock.yaml; never add package locks. All new modules must be
-at most 400 lines. Preserve the Pi 0.99.1 floor and exact 0.99.1 target; run
-`pnpm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
-Tarball-facing changes require a changeset. AGENTS/tests/reference are not shipped.
-Run `pnpm run changeset:sync` for recursive consumers; never loosen exact workspace pins.
+Follow [root guidance](../../AGENTS.md) for setup, compatibility checks,
+Changesets and publication boundaries. For broker or lifecycle changes, read
+[Codex composition](../../docs/codex-packages.md). For request/replay changes,
+read [wire alignment](../../docs/codex-wire-alignment.md) and the applicable
+protocol notes in `reference/`; source evidence is indexed in
+[runtime's source map](../pi-codex-runtime/reference/source-map.md).
+Keep new source modules within the 400-line budget; this package has no
+architecture exceptions. AGENTS/tests/reference are not shipped.
 
 From repository root:
 
@@ -40,9 +45,10 @@ From repository root:
 pnpm --filter @oai404iao/pi-codex-core run check
 pnpm run test:codex-composition
 pnpm run check:architecture
-pnpm run test:codex-packages
-pnpm run ci
 ```
+
+Use `pnpm run test:codex-packages` for installation/asset changes and
+`pnpm run ci` for complete pre-PR verification; CI includes the focused checks.
 
 Behavioral regressions and transport harnesses live in `tests/`. Neutral fixtures
 and cross-capability integration live in root `tests/codex/`. Core tests must not

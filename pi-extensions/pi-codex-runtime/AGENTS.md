@@ -6,8 +6,10 @@ Shared library, not a Pi extension. No default factory or `pi.extensions`.
 
 - `src/broker.ts`: synchronous event-bus discovery, ABI/runtime-version checks,
   package claims and presentation snapshots. Do not use module identity to dedupe.
-- `src/tool-activation.ts`: one session owner for installed-tool projection and
-  edit/write suppression. Never suppress tools owned by uninstalled capabilities.
+- `src/tool-activation.ts`: one session owner for package-tool activation and
+  exposure. Never alter tools owned by uninstalled capabilities. Core's patch
+  `prepareLoadout` hook hides selected native mutation-tool declarations without
+  removing them from Pi's active set; preserve their resume and codemode access.
 - `src/session-claims.ts`, `codex-identity-extension.ts`: shared identity hooks,
   including the supported `./subagent-inline` SDK integration.
 - `src/model-catalog/`, `settings.ts`: exact catalog profiles and legacy paths.
@@ -25,17 +27,19 @@ Shared library, not a Pi extension. No default factory or `pi.extensions`.
 4. Schemas/default-models here are the sole copies. Preserve existing configuration
    locations; do not add bundle mirrors or infer unknown model support.
 5. Preserve namespace JSON fingerprints, modification notices and license snapshots.
-   Wire identity and catalog have inherited, downward-only line exceptions.
+   Only the catalog has a reviewed, downward-only line exception in root
+   `scripts/codex-architecture.json`.
 
 ## Workflow and verification
 
-Read root CONTRIBUTING.md, RELEASING.md and docs/codex-packages.md. Source evidence
-is in this package's reference/source-map.md.
-Use the root pnpm-lock.yaml; never add package locks. All new modules must be
-at most 400 lines. Preserve the Pi 0.99.1 floor and exact 0.99.1 target; run
-`pnpm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
-Tarball-facing changes require a changeset. AGENTS/tests/reference are not shipped.
-Run `pnpm run changeset:sync` for recursive consumers; never loosen exact workspace pins.
+Follow [root guidance](../../AGENTS.md) for setup, compatibility checks,
+Changesets and publication boundaries. For broker changes, read
+[Codex composition](../../docs/codex-packages.md); for settings/catalog changes,
+read [configuration](reference/configuration.md) and
+[model catalog](reference/model-catalog.md). Source evidence is indexed in
+[the source map](reference/source-map.md).
+Keep new source modules within the 400-line budget. AGENTS/tests/reference
+are not shipped; canonical schemas and default models are runtime assets.
 
 From repository root:
 
@@ -43,9 +47,11 @@ From repository root:
 pnpm --filter @oai404iao/pi-codex-runtime run check
 pnpm run test:codex-composition
 pnpm run check:architecture
-pnpm run test:codex-packages
-pnpm run ci
 ```
+
+Use `pnpm run test:codex-packages` for exports, assets or broker composition
+changes and `pnpm run ci` for complete pre-PR verification; CI includes the
+focused checks.
 
 Behavioral regressions live in `tests/`; neutral fixtures and cross-capability
 integration live in root `tests/codex/`. Runtime tests must not import core or

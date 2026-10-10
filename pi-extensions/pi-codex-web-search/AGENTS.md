@@ -20,17 +20,20 @@ Independent web_search capability, using runtime without core or imagegen.
 4. Unknown profiles stay native; do not guess endpoint support or model families.
 5. Namespace evidence belongs to runtime's `reserved-tools/web-search.ts`.
    Do not duplicate or independently edit its pinned descriptions/fingerprints.
+6. Runtime owns tool exposure: standalone search is direct/codemode-callable;
+   hosted search is model-only. Preserve the output schema and structured
+   results rather than relying only on rendered model-facing text.
 
 ## Workflow and verification
 
-Read root CONTRIBUTING.md, RELEASING.md and docs/codex-packages.md. Source evidence
-is in pi-codex-runtime/reference/source-map.md; search protocol notes are in
-this package's reference/web-search-streaming-rendering.md.
-Use the root pnpm-lock.yaml; never add package locks. All new modules must be
-at most 400 lines. Preserve the Pi 0.99.1 floor and exact 0.99.1 target; run
-`pnpm run ci:pi-matrix` for compatibility changes. Do not alter release locks or private/blocked status.
-Tarball-facing changes require a changeset. AGENTS/tests/reference are not shipped.
-Run `pnpm run changeset:sync` for recursive consumers; never loosen exact workspace pins.
+Follow [root guidance](../../AGENTS.md) for setup, compatibility checks,
+Changesets and publication boundaries. For hosted/standalone composition, read
+[Codex composition](../../docs/codex-packages.md); for search protocol or display
+changes, read [streaming and rendering](reference/web-search-streaming-rendering.md).
+Source evidence is indexed in
+[runtime's source map](../pi-codex-runtime/reference/source-map.md).
+Keep new source modules within the 400-line budget; this package has no
+architecture exceptions. AGENTS/tests/reference are not shipped.
 
 From repository root:
 
@@ -38,9 +41,10 @@ From repository root:
 pnpm --filter @oai404iao/pi-codex-web-search run check
 pnpm run test:codex-composition
 pnpm run check:architecture
-pnpm run test:codex-packages
-pnpm run ci
 ```
+
+Use `pnpm run test:codex-packages` for standalone installation or export changes
+and `pnpm run ci` for complete pre-PR verification; CI includes the focused checks.
 
 Behavioral regressions live in `tests/`; neutral fixtures and cross-capability
 integration live in root `tests/codex/`. Owner tests must not import core or
