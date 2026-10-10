@@ -4,8 +4,8 @@
 
 ## Verification
 
-- [ ] `npm run check`
-- [ ] `npm run pack:check`
+- [ ] `pnpm run check`
+- [ ] `pnpm run pack:check`
 - [ ] No credentials, private endpoints, or local configuration were added
 
 ## Release impact

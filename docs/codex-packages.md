@@ -133,7 +133,7 @@ Upgrade the bundle to a broker-enabled release before mixing installations.
 
 The repository-only [offline ablation audit](audits/codex-ablation.md) compares
 selected components and Pi 0.87.1's built-in Codex stream implementation.
-Run `npm run test:codex-ablation` for reproducible fixtures without credentials
+Run `pnpm run test:codex-ablation` for reproducible fixtures without credentials
 or model requests. These characterize current behavior, including known gaps;
 they are not model-quality or latency benchmarks.
 The same audit records the implemented transport fixes, synthetic compression
@@ -144,12 +144,12 @@ and is never invoked by CI or the offline experiment.
 From repository root:
 
 ```bash
-npm ci --ignore-scripts
-npm run ci
-npm run changeset:status
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run ci
+pnpm run changeset:status
 ```
 
-`npm run test:codex-packages` packs all five Codex packages, npm-installs them in
+`pnpm run test:codex-packages` packs all five Codex packages, pnpm-installs them in
 temporary consumers, and uses the selected baseline's actual Pi loader. It covers runtime,
 each capability, all pairs, all capabilities, the bundle, duplicate composition,
 reversed order, separate physical runtime copies and shutdown/reload. Standalone
@@ -157,10 +157,13 @@ auth/HTTP are deterministic fixtures; there are no real credentials or endpoints
 
 Every Codex dependency in those consumers comes from a tarball and cannot resolve
 back to workspace source. S4 installs external Pi/transport dependencies from
-the root lock's exact registry tarballs using offline production `npm ci`.
-The test projects only the production/host-peer closure, preserving nested
-dependency versions and checksums, and checks that even executable symlinks
-stay inside the consumer. It imports the consumer's own Pi loader, not the
+the root `pnpm-lock.yaml`'s exact registry artifacts using
+`pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-scripts`.
+The root frozen install populates the pnpm store needed by these offline checks.
+The test projects only the production/host-peer closure, preserving dependency
+and peer snapshots and checksums. pnpm's internal symlinks, including executable
+links, are allowed only inside the consumer fixture; none may resolve outside
+it or back to the checkout. It imports the consumer's own Pi loader, not the
 workspace loader. The node_modules capability closure is independently asserted.
 These tests deliberately use local Codex tarballs, not mutable registry installs;
 they do not themselves verify publication or real endpoint/account access.
@@ -171,7 +174,7 @@ Unit tests additionally exercise activation, unknown/disabled models, legacy
 configuration, new/fork, no UI, abort, late image results and old replay fixtures.
 Behavioral tests live with their runtime/core/web-search/imagegen owners.
 Root `tests/codex/` owns cross-package integration and the pure-bundle boundary;
-run `npm run test:codex-composition`. It is included in `npm run ci`.
+run `pnpm run test:codex-composition`. It is included in `pnpm run ci`.
 The [reference index](../pi-extensions/pi-codex-runtime/reference/README.md) and
 [source map](../pi-extensions/pi-codex-runtime/reference/source-map.md) locate
 protocol documentation, schemas, fixtures and source/licensing evidence.

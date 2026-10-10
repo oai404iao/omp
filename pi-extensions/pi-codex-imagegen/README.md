@@ -55,9 +55,9 @@ providers. Reserved endpoints remain unsupported compatibility surfaces.
 See [the package guide](../../docs/codex-packages.md). From repository root:
 
 ```bash
-npm run check -w @oai404iao/pi-codex-imagegen
-npm run test:codex-composition
-npm run test:codex-packages
+pnpm --filter @oai404iao/pi-codex-imagegen run check
+pnpm run test:codex-composition
+pnpm run test:codex-packages
 ```
 
 Client/capture/display/background-job regressions are in `tests/`; cross-package

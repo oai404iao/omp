@@ -1,17 +1,23 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stringify } from "yaml";
 import { piVersion } from "./pi-baselines.mjs";
 import { root, readManifest } from "./workspaces.mjs";
 import { isolatedConsumerLock } from "./isolated-consumer-lock.mjs";
+import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
 
 // This integration probe is intentionally pinned to the workspace Pi floor.
 const prefix = "@oai404iao/";
 const names = ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools"];
 const manifests = new Map(names.map(name => [prefix + name, readManifest(`pi-extensions/${name}`)]));
+// pnpm may choose another store when the OS temporary directory is on a
+// different filesystem. Offline fixtures must reuse the root install's store.
+const storeDirectory = pnpm(["store", "path", "--silent"], root).trim();
 const directory = mkdtempSync(join(tmpdir(), "codex-tarball-consumers-"));
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 const previousFetch = globalThis.fetch;
@@ -22,8 +28,8 @@ const packed = new Map();
 const consumers = new Map();
 let checks = 0;
 
-function npm(args, cwd) {
-  const result = spawnSync("npm", args, {
+function pnpm(args, cwd) {
+  const result = spawnSync("pnpm", args, {
     cwd, encoding: "utf8", timeout: 90000,
     env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" },
   });
@@ -62,10 +68,13 @@ function install(label, requested) {
   assert.deepEqual([...included].sort(), [...expected].map(name => prefix + name).sort(),
     "a capability dependency would reinstall an unrequested capability");
   const consumer = isolatedConsumerLock(`fixture-${label}`, included, manifests, packed,
-    JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")));
+    readPnpmLock(join(root, "pnpm-lock.yaml")));
   writeFileSync(join(path, "package.json"), JSON.stringify(consumer.manifest));
-  writeFileSync(join(path, "package-lock.json"), JSON.stringify(consumer.lock));
-  npm(["ci", "--offline", "--ignore-scripts", "--legacy-peer-deps", "--omit=dev"], path);
+  writeFileSync(join(path, "pnpm-workspace.yaml"), stringify(consumer.workspace));
+  writePnpmLock(join(path, "pnpm-lock.yaml"), consumer.lock);
+  // The projection already validates reviewed artifact identities. pnpm 12's
+  // policy recheck otherwise needs registry metadata even for a frozen lock.
+  pnpm(["install", "--store-dir", storeDirectory, "--frozen-lockfile", "--offline", "--trust-lockfile", "--ignore-scripts", "--prod"], path);
   assertContainedTree(join(path, "node_modules"), path);
   assert.deepEqual(readdirSync(join(path, "node_modules/@oai404iao")).sort(), [...included].map(n => n.slice(prefix.length)).sort());
   for (const name of included) {
@@ -106,8 +115,10 @@ function runProbes(label, orders, expectedTools, core) {
 try {
   mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
   for (const name of names) {
-    const [result] = JSON.parse(npm(["pack", "--json", "--ignore-scripts", "--pack-destination", directory], join(root, "pi-extensions", name)));
-    packed.set(prefix + name, { path: join(directory, result.filename), integrity: result.integrity });
+    const result = JSON.parse(pnpm(["pack", "--json", "--config.ignore-scripts=true", "--pack-destination", directory], join(root, "pi-extensions", name)));
+    const path = result.filename.startsWith("/") ? result.filename : join(directory, result.filename);
+    const integrity = `sha512-${createHash("sha512").update(readFileSync(path)).digest("base64")}`;
+    packed.set(prefix + name, { path, integrity });
   }
   const matrix = [
     ["runtime", ["pi-codex-runtime"], [], false],
@@ -133,7 +144,7 @@ try {
   const web = join(consumers.get("web"), "node_modules", prefix + "pi-codex-web-search/index.ts");
   const allTools = ["apply_patch", "view_image", "web_search", "image_generation"];
   runProbes("bundle", [[bundle, web], [web, bundle]], allTools, true);
-  console.log(`✓ Codex: ${checks} production tarball/Pi ${piVersion()} combinations; locked offline npm ci; no external links or capability leakage`);
+  console.log(`✓ Codex: ${checks} production tarball/Pi ${piVersion()} combinations; frozen offline pnpm install; no external links or capability leakage`);
 } finally {
   globalThis.fetch = previousFetch;
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

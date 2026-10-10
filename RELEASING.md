@@ -16,14 +16,14 @@ version returning E404 is pending verification, not a fresh publication candidat
 See [activation evidence](docs/audits/codex-bootstrap-activation.md).
 
 S4 implements recursive exact-pin changesets, dependency-ordered artifacts and
-no-links production consumers. These tests do not authorize registry writes or
+isolated production consumers with no external links. These tests do not authorize registry writes or
 verify real account/model access. See
 [Codex composition](docs/codex-packages.md) for the tested boundaries.
 
-Use `npm run changeset:sync` after authoring a changeset. Its generated consumer
+Use `pnpm run changeset:sync` after authoring a changeset. Its generated consumer
 changeset covers `dependencies` and `optionalDependencies` recursively, including
 subagent's optional dependency on the compatibility bundle. The release-PR
-workflow already calls `npm run changeset:version`; that wrapper preserves exact
+workflow already calls `pnpm run changeset:version`; that wrapper preserves exact
 pins and rejects pin changes without a corresponding consumer version bump.
 Its tests version temporary fixtures; actual alpha versions belong in a reviewed
 version PR, never in an unreviewed direct main update.
@@ -139,8 +139,8 @@ For a workspace on the `bootstrap` track:
 
 1. Fetch public `main`, then check out a clean commit reachable from it (use
    `git fetch github main` and normally `git checkout github/main`). Run
-   `npm ci --ignore-scripts`, `npm run ci`, and
-   `npm run release:bootstrap-artifacts`.
+   `pnpm install --frozen-lockfile --ignore-scripts`, `pnpm run ci`, and
+   `pnpm run release:bootstrap-artifacts`.
 2. Publish only that workspace's named tarball from `release-artifacts/` with
    interactive 2FA and `--access public`, using the prepared manifest's
    `distTag`: `next` for prereleases, `latest` for stable releases. Do not
@@ -164,7 +164,8 @@ The publish job uses a GitHub-hosted runner, `id-token: write`, npm 11.19.0,
 and provenance. It does not read an `NPM_TOKEN`. Verification runs in a
 separate read-only job without OIDC. That job uploads exact, checksummed npm
 tarballs; the protected publish job publishes those tarballs without running
-package lifecycle scripts.
+package lifecycle scripts. Development, verification and lockfile updates use
+the repository-pinned pnpm 12.4.1; npm remains the registry publication client.
 
 ## Package publication eligibility
 
@@ -173,7 +174,7 @@ Release eligibility is explicit in two places:
 1. `scripts/workspaces.mjs` must set one of:
    - `blocked`: package stays private and is excluded from artifacts;
    - `bootstrap`: package is non-private but is included only by the local
-     `npm run release:bootstrap-artifacts` command;
+     `pnpm run release:bootstrap-artifacts` command;
    - `publishable`: package is non-private and enters guarded workflow
      artifacts.
 2. only `blocked` packages may set `"private": true`.
@@ -233,7 +234,7 @@ release-lock entry that is only added after verified bootstrap. See
 
 Public and supported-package peer ranges currently require Pi 0.99.1 or
 newer; the exact development target is 0.99.1, with both lock-validation
-roles checked by `npm run ci:pi-matrix`. Actual SDK resolution is checked, not
+roles checked by `pnpm run ci:pi-matrix`. Actual SDK resolution is checked, not
 inferred from peer declarations. Update the development baseline, peer ranges,
 lockfile, compatibility notes, and tests together. Do not lower the minimum
 below the tested baseline.
@@ -274,7 +275,7 @@ separate publication authorization.
 1. Add a changeset in each package-facing pull request:
 
    ```bash
-   npm run changeset
+   pnpm run changeset
    ```
 
 2. Merge changes to `main`. `release-pr.yml` creates or updates the version PR.

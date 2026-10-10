@@ -17,15 +17,15 @@ Wire behavior and its references belong to the implementation owners, not here.
 ## Commands (repository root)
 
 ```bash
-npm ci --ignore-scripts
-npm run check -w @oai404iao/pi-codex-minimal-tools
-npm run test:codex-composition
-npm run check:architecture
-npm run test:codex-packages
-npm run ci
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @oai404iao/pi-codex-minimal-tools run check
+pnpm run test:codex-composition
+pnpm run check:architecture
+pnpm run test:codex-packages
+pnpm run ci
 ```
 
-Use the root lockfile; no package lockfiles. Tests use mocked fetch or loopback
+Use the root pnpm-lock.yaml; no package lockfiles. Tests use mocked fetch or loopback
 servers and do not require real Codex credentials. Transport tests must close
 sockets, restore environment/fetch/timers, and reset identity state.
 
@@ -38,7 +38,7 @@ sockets, restore environment/fetch/timers, and reset identity state.
 3. Existing configuration paths retain the `pi-codex-minimal-tools` directory name.
 4. Tarballs have an explicit six-file allowlist checked by root pack validation.
    Keep maintenance documents out of published artifacts.
-5. Tarball-facing edits require changesets and `npm run changeset:sync`.
+5. Tarball-facing edits require changesets and `pnpm run changeset:sync`.
    Do not alter release eligibility, locks, Pi baselines or default tool behavior
    during mechanical cleanup.
 

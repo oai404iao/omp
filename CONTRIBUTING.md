@@ -2,24 +2,25 @@
 
 ## Setup
 
-Use the repository root so npm installs the locked workspace dependency graph:
+Use Node.js 22.19 or newer and the pinned pnpm 12.4.1. Run from the repository
+root so pnpm installs the locked workspace dependency graph:
 
 ```bash
-npm ci --ignore-scripts
+pnpm install --frozen-lockfile --ignore-scripts
 ```
 
-Do not commit per-package `package-lock.json` files. The root
-`package-lock.json` is the single CI lockfile.
+The root `pnpm-lock.yaml` is the single CI lockfile; `pnpm-workspace.yaml`
+defines the workspace. Do not add npm or per-package lockfiles.
 
 ## Checks
 
 Run the complete local verification before opening a pull request:
 
 ```bash
-npm run ci
+pnpm run ci
 ```
 
-For Pi compatibility work also run `npm run ci:pi-matrix`. It runs complete CI
+For Pi compatibility work also run `pnpm run ci:pi-matrix`. It runs complete CI
 through the floor and target roles (both Pi 0.99.1) without modifying
 the working tree. Stage new source files so they enter its tracked-file snapshot.
 See [Pi compatibility](docs/pi-compatibility.md) for logs and test limitations.
@@ -44,8 +45,8 @@ Add a changeset when a pull request changes a package's behavior, public
 configuration, dependencies, or published documentation:
 
 ```bash
-npm run changeset
-npm run changeset:sync
+pnpm run changeset
+pnpm run changeset:sync
 ```
 
 `changeset:sync` maintains `.changeset/workspace-dependent-releases*.md` for
@@ -57,10 +58,17 @@ consumed history in `.changeset/pre/`. `changeset:check` verifies coverage and e
 consumer-bump validation, and root-lock refresh. Do not invoke bare Changesets
 versioning in the release workflow.
 
-`test:codex-packages` uses offline production `npm ci` against a projected root
-lock: Codex packages come from local tarballs, external dependencies from locked
-registry tarballs, with no external symlinks. It runs each consumer's Pi loader.
-Run `npm ci --ignore-scripts` first to populate the normal npm tarball cache.
+`test:codex-packages` uses
+`pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-scripts` against a
+projected root lock: Codex packages come from local tarballs, external
+dependencies from locked registry artifacts. pnpm's internal symlinks are
+allowed only when they resolve inside the consumer fixture; none may resolve
+back to the checkout or elsewhere outside it. It runs each consumer's Pi loader.
+Run `pnpm install --frozen-lockfile --ignore-scripts` first to populate the pnpm
+store. The offline checks reuse that store and fail if a required artifact is
+missing; they do not silently fetch it from the registry.
+The fixture-only `--trust-lockfile` skips pnpm's registry-metadata policy
+recheck, not frozen-lockfile or artifact integrity verification.
 
 Infrastructure-only, test-only, and repository documentation changes do not
 need a changeset unless they alter a published package.

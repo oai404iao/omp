@@ -61,8 +61,8 @@ Kitty 聚焦的是承载 tmux 的 Kitty 窗口。嵌套 tmux、SSH 和 Zellij �
 在仓库根目录安装现有锁定的开发工具，然后运行：
 
 ```bash
-npm ci --ignore-scripts
-npm --prefix pi-extensions/pi-local-notify run check
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --dir pi-extensions/pi-local-notify run check
 ```
 
 测试校验 OSC 99 编码、tmux 透传、去重、模式和子会话隔离，不会发送真实通知。

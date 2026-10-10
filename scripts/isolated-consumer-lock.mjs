@@ -1,79 +1,131 @@
 /**
- * Project a production dependency closure from the reviewed root lock, retaining
- * exact registry URLs/integrities. No package is linked to workspace node_modules.
+ * Project a production dependency closure from the reviewed pnpm v9 lock.
+ * Registry artifacts retain their exact URLs/hashes and peer-specific snapshots;
+ * workspace dependencies are replaced with the packed artifacts, never links.
  */
 export function isolatedConsumerLock(name, included, manifests, artifacts, sourceLock) {
-  const source = sourceLock.packages;
+  if (String(sourceLock.lockfileVersion) !== "9.0") throw new Error("Expected a pnpm v9 lockfile");
   const packages = {};
+  const snapshots = {};
   const dependencies = {};
-  const visited = new Set();
-  const workspaceLocations = new Map([...manifests.keys()].map(pkg => [
-    `pi-extensions/${pkg.split("/")[1]}`, `node_modules/${pkg}`,
-  ]));
-  const relocated = path => {
-    for (const [from, to] of workspaceLocations) {
-      if (path.startsWith(`${from}/node_modules/`)) return to + path.slice(from.length);
+  const importerDependencies = {};
+  const overrides = {};
+  const locals = new Set(included);
+  const hosts = new Map();
+  const root = sourceLock.importers["."];
+  const importerFor = pkg => sourceLock.importers[`pi-extensions/${pkg.split("/")[1]}`];
+  const locked = (importer, dependency) => importer?.dependencies?.[dependency]
+    ?? importer?.optionalDependencies?.[dependency] ?? importer?.devDependencies?.[dependency];
+  const packageKey = snapshot => snapshot.split("(")[0];
+
+  function visit(dependency, reference) {
+    if (typeof reference !== "string" || /^(?:link:|file:|workspace:)/.test(reference)) {
+      throw new Error(`Unpinned or linked external dependency: ${dependency}`);
     }
-    return path;
-  };
-  function locate(from, dependency) {
-    let parent = from;
-    while (true) {
-      const candidate = `${parent ? `${parent}/` : ""}node_modules/${dependency}`;
-      if (source[candidate]) return candidate;
-      if (!parent) return undefined;
-      const index = parent.lastIndexOf("/node_modules/");
-      parent = index < 0 ? "" : parent.slice(0, index);
+    // Alias references carry the real package name, rather than the import name.
+    const key = sourceLock.snapshots[`${dependency}@${reference}`]
+      ? `${dependency}@${reference}` : reference;
+    if (snapshots[key]) return;
+    const entry = sourceLock.packages[packageKey(key)];
+    const snapshot = sourceLock.snapshots[key];
+    if (!entry || !snapshot) throw new Error(`Missing locked dependency: ${dependency} -> ${reference}`);
+    if (!entry.resolution?.integrity || entry.resolution.type || entry.resolution.directory) {
+      throw new Error(`Unpinned or linked external dependency: ${key}`);
     }
-  }
-  function visit(path) {
-    if (visited.has(path)) return;
-    visited.add(path);
-    const entry = structuredClone(source[path]);
-    if (entry.link || !entry.resolved || !entry.integrity) {
-      throw new Error(`Unpinned or linked external dependency: ${path}`);
+    if (!entry.resolution.tarball?.startsWith("https://registry.npmjs.org/")) {
+      throw new Error(`External dependency is not a locked registry artifact: ${key}`);
     }
-    if (!entry.resolved.startsWith("https://registry.npmjs.org/")) {
-      throw new Error(`External dependency is not a locked registry artifact: ${path}`);
-    }
-    delete entry.dev;
-    delete entry.devOptional;
-    packages[relocated(path)] = entry;
-    for (const dependency of Object.keys({ ...entry.dependencies, ...entry.optionalDependencies, ...entry.peerDependencies })) {
-      const target = locate(path, dependency);
-      if (target) visit(target);
-      else if (!(dependency in (entry.optionalDependencies ?? {})) && !entry.peerDependenciesMeta?.[dependency]?.optional) {
-        throw new Error(`Missing locked dependency: ${path} -> ${dependency}`);
+    packages[packageKey(key)] = structuredClone(entry);
+    snapshots[key] = structuredClone(snapshot);
+    for (const [dep, ref] of Object.entries({ ...snapshot.dependencies, ...snapshot.optionalDependencies })) visit(dep, ref);
+    for (const peer of Object.keys(entry.peerDependencies ?? {})) {
+      if (!snapshot.dependencies?.[peer] && !snapshot.optionalDependencies?.[peer]
+        && !entry.peerDependenciesMeta?.[peer]?.optional) {
+        throw new Error(`Missing locked dependency: ${key} -> ${peer}`);
       }
     }
   }
-  for (const pkg of included) {
+
+  // Hoist the explicitly selected Pi host peers into the isolated consumer.
+  for (const pkg of locals) {
     const manifest = manifests.get(pkg);
     const artifact = artifacts.get(pkg);
-    dependencies[pkg] = `file:${artifact.path}`;
-    packages[`node_modules/${pkg}`] = {
-      name: pkg, version: manifest.version, resolved: `file:${artifact.path}`, integrity: artifact.integrity,
-      dependencies: manifest.dependencies, optionalDependencies: manifest.optionalDependencies,
-      peerDependencies: manifest.peerDependencies, peerDependenciesMeta: manifest.peerDependenciesMeta,
-      engines: manifest.engines,
-    };
-    const location = `pi-extensions/${pkg.split("/")[1]}`;
-    for (const dependency of Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies })) {
-      if (manifests.has(dependency)) continue;
-      const path = locate(location, dependency);
-      if (!path) throw new Error(`Missing locked dependency: ${pkg} -> ${dependency}`);
-      visit(path);
-    }
+    if (!manifest || !artifact?.path || !artifact.integrity) throw new Error(`Missing packed workspace artifact: ${pkg}`);
+    overrides[pkg] = `file:${artifact.path}`;
     for (const dependency of Object.keys(manifest.peerDependencies ?? {})) {
-      const path = locate("", dependency);
-      if (!path) throw new Error(`Missing locked Pi host peer: ${dependency}`);
-      visit(path);
-      const entry = source[path];
-      dependencies[dependency] = entry.name && entry.name !== dependency
-        ? `npm:${entry.name}@${entry.version}` : entry.version;
+      if (locals.has(dependency)) continue;
+      const entry = locked(root, dependency) ?? locked(importerFor(pkg), dependency);
+      if (!entry) throw new Error(`Missing locked Pi host peer: ${dependency}`);
+      if (hosts.has(dependency) && hosts.get(dependency).version !== entry.version) {
+        throw new Error(`Conflicting locked Pi host peer: ${dependency}`);
+      }
+      hosts.set(dependency, entry);
     }
   }
+  for (const [dependency, entry] of hosts) {
+    visit(dependency, entry.version);
+    const version = packageKey(entry.version);
+    const specifier = version.includes("@") ? `npm:${version}` : version;
+    dependencies[dependency] = specifier;
+    importerDependencies[dependency] = { specifier, version: entry.version };
+  }
+
+  const localReferences = new Map();
+  function localReference(pkg, visiting = new Set()) {
+    if (localReferences.has(pkg)) return localReferences.get(pkg);
+    if (visiting.has(pkg)) throw new Error(`Cyclic workspace peers: ${pkg}`);
+    visiting.add(pkg);
+    const peers = Object.keys(manifests.get(pkg).peerDependencies ?? {}).sort().map(peer => {
+      const ref = locals.has(peer) ? localReference(peer, visiting) : hosts.get(peer).version;
+      return `(${peer}@${ref})`;
+    }).join("");
+    visiting.delete(pkg);
+    const reference = overrides[pkg] + peers;
+    localReferences.set(pkg, reference);
+    return reference;
+  }
+  for (const pkg of locals) {
+    const manifest = manifests.get(pkg);
+    const reference = localReference(pkg);
+    dependencies[pkg] = overrides[pkg];
+    importerDependencies[pkg] = { specifier: overrides[pkg], version: reference };
+    const entry = { resolution: { integrity: artifacts.get(pkg).integrity, tarball: overrides[pkg] }, version: manifest.version };
+    for (const field of ["engines", "os", "cpu", "libc", "peerDependencies", "peerDependenciesMeta"]) {
+      if (manifest[field]) entry[field] = structuredClone(manifest[field]);
+    }
+    if (manifest.bin) entry.hasBin = true;
+    packages[`${pkg}@${overrides[pkg]}`] = entry;
+    const snapshot = {};
+    for (const field of ["dependencies", "optionalDependencies"]) {
+      for (const dependency of Object.keys(manifest[field] ?? {})) {
+        let ref;
+        if (manifests.has(dependency)) {
+          if (!locals.has(dependency)) throw new Error(`Missing packed workspace dependency: ${pkg} -> ${dependency}`);
+          ref = localReference(dependency);
+        } else {
+          ref = locked(importerFor(pkg), dependency)?.version;
+          if (!ref) throw new Error(`Missing locked dependency: ${pkg} -> ${dependency}`);
+          visit(dependency, ref);
+        }
+        (snapshot[field] ??= {})[dependency] = ref;
+      }
+    }
+    for (const dependency of Object.keys(manifest.peerDependencies ?? {})) {
+      if (snapshot.dependencies?.[dependency] || snapshot.optionalDependencies?.[dependency]) continue;
+      const field = manifest.peerDependenciesMeta?.[dependency]?.optional ? "optionalDependencies" : "dependencies";
+      (snapshot[field] ??= {})[dependency] = locals.has(dependency) ? localReference(dependency) : hosts.get(dependency).version;
+    }
+    snapshots[`${pkg}@${reference}`] = snapshot;
+  }
   const manifest = { name, version: "1.0.0", private: true, type: "module", dependencies };
-  packages[""] = { name, version: manifest.version, dependencies };
-  return { manifest, lock: { name, version: manifest.version, lockfileVersion: 3, requires: true, packages } };
+  const workspace = { autoInstallPeers: false, lockfileIncludeTarballUrl: true, overrides };
+  const lock = {
+    lockfileVersion: "9.0",
+    settings: { ...sourceLock.settings, autoInstallPeers: false },
+    overrides,
+    importers: { ".": { dependencies: importerDependencies } },
+    packages,
+    snapshots,
+  };
+  return { manifest, workspace, lock };
 }

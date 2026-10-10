@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { parse } from "yaml";
 import { artifactWorkspaces, publishableWorkspaces, readManifest, workspaces } from "./workspaces.mjs";
 
 for (const [directory, name] of [
@@ -9,7 +11,8 @@ for (const [directory, name] of [
   ["pi-code-mode", "pi-code-mode"],
 ]) {
   test(`removed ${name} is absent from workspaces and every artifact selection`, () => {
-    assert(!readManifest(".").workspaces.includes(`pi-extensions/${directory}`));
+    const workspace = parse(readFileSync(new URL("../pnpm-workspace.yaml", import.meta.url), "utf8"));
+    assert(!workspace.packages.includes(`pi-extensions/${directory}`));
     for (const entries of [workspaces, publishableWorkspaces, artifactWorkspaces(), artifactWorkspaces(true)]) {
       assert(!entries.some(entry => entry.name === `@oai404iao/${name}`));
     }

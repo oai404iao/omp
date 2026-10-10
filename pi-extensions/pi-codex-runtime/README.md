@@ -61,9 +61,9 @@ See [the package guide](../../docs/codex-packages.md) for lifecycle and release
 constraints. From repository root, run:
 
 ```bash
-npm run check -w @oai404iao/pi-codex-runtime
-npm run test:codex-composition
-npm run test:codex-packages
+pnpm --filter @oai404iao/pi-codex-runtime run check
+pnpm run test:codex-composition
+pnpm run test:codex-packages
 ```
 
 Shared behavior regressions are in `tests/`. See the

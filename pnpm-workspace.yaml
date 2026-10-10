@@ -1,0 +1,13 @@
+packages:
+  - pi-extensions/pi-codex-minimal-tools
+  - pi-extensions/pi-codex-runtime
+  - pi-extensions/pi-codex-core
+  - pi-extensions/pi-codex-web-search
+  - pi-extensions/pi-codex-imagegen
+  - pi-extensions/pi-subagent
+  - pi-extensions/pi-telegram-notify
+
+# Keep exact published pins while resolving matching development packages locally.
+linkWorkspacePackages: true
+autoInstallPeers: false
+lockfileIncludeTarballUrl: true

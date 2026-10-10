@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isPiDependency, piFloorArtifacts, piVersion } from "./pi-baselines.mjs";
 import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
+import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
 import { root, workspaces } from "./workspaces.mjs";
 
 const selector = process.argv[2] ?? "all";
@@ -16,7 +17,7 @@ const baselines = selector === "all" ? ["floor", "target"] : [selector];
 const resultsParent = process.env.OMP_PI_MATRIX_LOG_DIR;
 if (resultsParent) mkdirSync(resultsParent, { recursive: true });
 const results = mkdtempSync(join(resultsParent ?? tmpdir(), "omp-pi-matrix-results-"));
-const sourceLock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
+const sourceLock = readPnpmLock(join(root, "pnpm-lock.yaml"));
 const files = spawnSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" });
 assert.equal(files.status, 0, files.stderr);
 const tracked = files.stdout.split("\0").filter(Boolean);
@@ -64,13 +65,13 @@ for (const baseline of baselines) {
         }
         writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
       }
-      run("npm", ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"]);
-      const path = join(cwd, "package-lock.json");
-      const lock = preserveRegistryIntegrity(sourceLock, JSON.parse(readFileSync(path, "utf8")), piFloorArtifacts);
-      writeFileSync(path, `${JSON.stringify(lock, null, 2)}\n`);
+      run("pnpm", ["install", "--lockfile-only", "--ignore-scripts", "--no-frozen-lockfile"]);
+      const path = join(cwd, "pnpm-lock.yaml");
+      const lock = preserveRegistryIntegrity(sourceLock, readPnpmLock(path), piFloorArtifacts);
+      writePnpmLock(path, lock);
     }
-    run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
-    run("npm", ["run", "ci"]);
+    run("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"]);
+    run("pnpm", ["run", "ci"]);
     console.log(`✓ Pi ${baseline} ${piVersion(baseline)}: complete CI passed (${log})`);
   } catch (error) {
     failed.push(baseline);

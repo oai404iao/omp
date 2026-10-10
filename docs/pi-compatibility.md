@@ -118,35 +118,35 @@ parent wakeups or an idle-command replacement.
 ## Commands
 
 ```bash
-npm ci --ignore-scripts
-npm run ci                  # Complete checks for the installed target
-npm run ci:pi-matrix         # Complete floor + target verification in temporary copies
-npm run ci:pi-floor          # Floor only
-npm run ci:pi-target         # Target only
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run ci                  # Complete checks for the installed target
+pnpm run ci:pi-matrix         # Complete floor + target verification in temporary copies
+pnpm run ci:pi-floor          # Floor only
+pnpm run ci:pi-target         # Target only
 ```
 
 The matrix copies **tracked working-tree files**, including staged new files.
 Stage new source files before invoking it; it does not copy arbitrary untracked
 configuration, stage changes, or commit the caller's work. Each copy gets an
-independent node_modules tree; there are no links back to the workspace.
+independent node_modules tree; pnpm's internal symlinks are allowed, but none
+may resolve outside the fixture or back to the workspace.
 Logs include the Node version, exact Pi version and source SHA-256. Sources must
 remain unchanged between the two snapshots.
 
-The target copy uses the root lock unchanged. The floor copy projects the exact
+The target copy uses the root `pnpm-lock.yaml` unchanged. The floor copy projects the exact
 floor development pins, creates a temporary lock from the root-lock seed, and
 runs its own clean installation and complete CI. This preparation can read npm
 registry metadata; it is not an offline lock-generation promise. The resulting
-Codex production consumers use locked offline npm ci. Temporary fixture locks
+Codex production consumers use
+`pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-scripts` with the
+populated pnpm store. Run the root frozen install first; a missing store artifact
+fails offline verification rather than fetching from the network. Temporary fixture locks
 are removed, not committed as a second project lock.
 
-Pi's published shrinkwrap can omit integrity for nested packages
-(chord, agent-core, ai, telemetry and tui). The root lock includes their
-registry SHA-512 values, verified against downloaded tarball bytes.
-`preserveRegistryIntegrity` retains these exact artifact hashes during floor
-projection. The 0.99.1 target's previously unhashed shrinkwrap artifacts were
-checked against registry tarball bytes before recording their SHA-512 values.
-Both roles use those exact artifacts. Unknown or conflicting hashes
-still fail closed; the production-consumer check rejects unhashed dependencies.
+The pnpm lock records resolved registry artifacts and their integrity hashes.
+Consumer projection preserves the selected dependency and peer snapshots and
+their checksums, rather than re-resolving version ranges. Unknown or conflicting
+hashes fail closed; the production-consumer check rejects unhashed dependencies.
 
 Failed copies are removed but their logs are retained. The matrix returns failure
 if either baseline fails; it does not automatically retry failing tests.

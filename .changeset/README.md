@@ -4,7 +4,7 @@ Every pull request that changes a published package's behavior or public
 configuration must include a changeset:
 
 ```bash
-npm run changeset
+pnpm run changeset
 ```
 
 Choose only the affected packages, select the SemVer bump, and write a

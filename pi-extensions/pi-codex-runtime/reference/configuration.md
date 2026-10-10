@@ -54,7 +54,7 @@ sessions; it does not register providers, tools, commands, or renderers.
 
 ## Install
 
-To test this checkout, run root `npm ci --ignore-scripts` and install the bundle
+To test this checkout, run root `pnpm install --frozen-lockfile --ignore-scripts` and install the bundle
 directory. An isolated source directory cannot supply its workspace dependencies:
 
 ```bash

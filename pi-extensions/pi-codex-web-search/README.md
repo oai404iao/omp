@@ -59,9 +59,9 @@ account access. `./internal/*` is implementation wiring.
 See [the package guide](../../docs/codex-packages.md). From repository root:
 
 ```bash
-npm run check -w @oai404iao/pi-codex-web-search
-npm run test:codex-composition
-npm run test:codex-packages
+pnpm --filter @oai404iao/pi-codex-web-search run check
+pnpm run test:codex-composition
+pnpm run test:codex-packages
 ```
 
 Standalone client/activity/rendering regressions are in `tests/`; hosted transport

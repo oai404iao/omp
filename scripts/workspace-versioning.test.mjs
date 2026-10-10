@@ -49,9 +49,10 @@ test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagate
   const cwd = mkdtempSync(join(tmpdir(), "omp-version-fixture-"));
   try {
     mkdirSync(join(cwd, ".changeset"));
-    writeFileSync(join(cwd, "package-lock.json"), readFileSync(join(root, "package-lock.json")));
+    writeFileSync(join(cwd, "pnpm-lock.yaml"), readFileSync(join(root, "pnpm-lock.yaml")));
+    writeFileSync(join(cwd, "pnpm-workspace.yaml"), readFileSync(join(root, "pnpm-workspace.yaml")));
     writeFileSync(join(cwd, "package.json"), JSON.stringify({
-      name: "fixture", private: true, workspaces: workspaces.map(e => e.directory),
+      name: "fixture", private: true,
     }));
     writeFileSync(join(cwd, ".changeset/config.json"), readFileSync(join(root, ".changeset/config.json")));
     const original = workspaceManifests();
