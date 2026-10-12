@@ -1,5 +1,16 @@
 # @oai404iao/pi-subagent
 
+## 1.1.0
+
+### Minor Changes
+
+- 3975947: Add a live, session-scoped subagent dashboard with agent details, usage and recent activity.
+
+### Patch Changes
+
+- 6916823: Show agent types in subagent tool calls and results, preserving type metadata for transcript rendering.
+- d250a74: Use pnpm for development scripts and document frozen-lockfile installation.
+
 ## 1.0.1
 
 ### Patch Changes
