@@ -133,6 +133,7 @@ if (args[2] === "version") {
       encoding: "utf8",
       env: {
         ...process.env,
+        RELEASE_PACKAGE: "",
         PATH: `${binaryDirectory}:${process.env.PATH}`,
         CALL_LOG: callLog,
         FAKE_COMMIT: commit,
@@ -169,6 +170,19 @@ function bootstrapCandidate(name = "@oai404iao/pi-codex-runtime") {
   return { ...candidate(name), version, tag: `${name}@${version}`, distTag: "next", prerelease: true,
     sourceCommit: "32ba01f3c08b7fd63d09e9b2373cf081c4525533" };
 }
+
+test("full-batch publisher fixture ignores the caller's release selection", () => {
+  const previous = process.env.RELEASE_PACKAGE;
+  process.env.RELEASE_PACKAGE = "@oai404iao/pi-subagent";
+  try {
+    const { process: child, result } = runPublisher([candidate("@fixture/full-batch")]);
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(result.ok, true);
+  } finally {
+    if (previous === undefined) delete process.env.RELEASE_PACKAGE;
+    else process.env.RELEASE_PACKAGE = previous;
+  }
+});
 
 function bootstrapOptions(value) {
   return {

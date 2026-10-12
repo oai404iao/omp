@@ -113,7 +113,7 @@ exit 1
 `);
     for (const file of ["git", "npm"]) chmodSync(join(bin, file), 0o755);
     const child = spawnSync(process.execPath, [join(scripts, "prepare-release-artifacts.mjs")], {
-      encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CALL_LOG: callLog },
+      encoding: "utf8", env: { ...process.env, RELEASE_PACKAGE: "", PATH: `${bin}:${process.env.PATH}`, CALL_LOG: callLog },
     });
     assert.notEqual(child.status, 0);
     assert.match(child.stderr, /locked as published.*registry verification is pending/i);

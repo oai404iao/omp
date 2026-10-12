@@ -60,7 +60,7 @@ printf '%s\\n' '${JSON.stringify({ name: manifest.name, version: manifest.versio
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "fixture"]);
   const child = spawnSync(process.execPath, [join(scripts, "prepare-release-artifacts.mjs")], {
     cwd: temporary, encoding: "utf8", timeout: 30000,
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CALL_LOG: join(temporary, "calls.log") },
+    env: { ...process.env, RELEASE_PACKAGE: "", PATH: `${bin}:${process.env.PATH}`, CALL_LOG: join(temporary, "calls.log") },
   });
   const calls = readFileSync(join(temporary, "calls.log"), "utf8").trim().split("\n");
   assert.equal(calls.length, 1);
@@ -88,4 +88,16 @@ test("preparation rejects pnpm output outside the expected artifact directory", 
   assert.notEqual(child.status, 0);
   assert.match(child.stderr, /pnpm pack returned an unexpected artifact path/);
   assert.equal(existsSync(join(temporary, "release-artifacts/manifest.json")), false);
+});
+
+test("full-batch preparation fixture ignores the caller's release selection", t => {
+  const previous = process.env.RELEASE_PACKAGE;
+  process.env.RELEASE_PACKAGE = "@oai404iao/pi-subagent";
+  try {
+    const { child } = prepareFixture(t);
+    assert.equal(child.status, 0, child.stdout + child.stderr);
+  } finally {
+    if (previous === undefined) delete process.env.RELEASE_PACKAGE;
+    else process.env.RELEASE_PACKAGE = previous;
+  }
 });
