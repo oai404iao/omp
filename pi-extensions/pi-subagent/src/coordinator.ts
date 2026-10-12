@@ -24,6 +24,9 @@ import { buildToolCeiling } from "./tool-policy.ts";
 import { createAgentTools } from "./tools.ts";
 import { inboxEnvelope, persistTaskAttribution, taskMessage } from "./task-attribution.ts";
 import { addUsage, emptyUsage, finalAssistantText, finalStopReason, truncateUtf8 } from "./result.ts";
+import { DashboardReader } from "./dashboard-source.ts";
+import type { DashboardSnapshot, DashboardSource } from "./dashboard-types.ts";
+import { AgentTelemetry } from "./telemetry.ts";
 import {
 	DESCRIPTOR_VERSION, snapshotAgent, type AgentDefinition, type AgentDescriptor, type AgentListItem,
 	type AgentRecord, type MailMessage, type SpawnInput, type SubagentSettings, type WaitResult,
@@ -45,6 +48,7 @@ interface ActiveRun {
 	path: string;
 	caller: AgentCaller;
 	runtime?: AgentSessionRuntime;
+	telemetry?: AgentTelemetry;
 	abort: AbortController;
 	accepting: boolean;
 	restartAfterInterrupt: boolean;
@@ -65,7 +69,7 @@ function validateMessage(message: string): void {
 }
 
 /** One controller owns the whole root tree; runtime residency never defines identity. */
-export class SubagentCoordinator {
+export class SubagentCoordinator implements DashboardSource {
 	private store?: TreeStore;
 	private root?: AgentCaller;
 	private rootRunning = false;
@@ -76,6 +80,8 @@ export class SubagentCoordinator {
 	private readonly discovery = new Map<string, AgentDiscoveryResult>();
 	private closing = false;
 	private shutdownPromise?: Promise<void>;
+	private readonly dashboardReader = new DashboardReader();
+	private readonly dashboardListeners = new Set<() => void>();
 
 	constructor(
 		private readonly pi: ExtensionAPI,
@@ -93,6 +99,33 @@ export class SubagentCoordinator {
 	}
 	get activeCount(): number { return this.limiter.count; }
 	setRootRunning(running: boolean): void { this.rootRunning = running; }
+
+	getSnapshot(): DashboardSnapshot {
+		if (this.closing) return {
+			agents: [], activeCount: 0, maxConcurrentAgents: this.settings.maxConcurrentAgents, closed: true,
+		};
+		return this.dashboardReader.read({
+			records: Object.values(this.store?.snapshot.agents ?? {}),
+			rootBranch: this.root?.sessionManager.getBranch() ?? [],
+			live: path => {
+				const run = this.active.get(path);
+				return run?.runtime ? { session: run.runtime.session, telemetry: run.telemetry } : undefined;
+			},
+			activeCount: this.activeCount, maxConcurrentAgents: this.settings.maxConcurrentAgents,
+		});
+	}
+
+	subscribe(listener: () => void): () => void {
+		this.dashboardListeners.add(listener);
+		return () => { this.dashboardListeners.delete(listener); };
+	}
+
+	private dashboardChanged(): void {
+		for (const listener of this.dashboardListeners) {
+			// Observers must never change admission, delivery or completion behavior.
+			try { listener(); } catch { /* A failed UI observer is isolated from agent work. */ }
+		}
+	}
 
 	attachRoot(ctx: ExtensionContext): AgentCaller {
 		if (this.closing) throw new Error("subagent controller is shutting down");
@@ -224,6 +257,7 @@ export class SubagentCoordinator {
 						mailbox: [task],
 					};
 				});
+				this.dashboardChanged();
 				transferred = true;
 				await this.start(path, caller, persisted, release, signal);
 				return { task_name: path };
@@ -454,6 +488,7 @@ export class SubagentCoordinator {
 		signal?.addEventListener("abort", abort, { once: true });
 		if (signal?.aborted) abort();
 		this.active.set(path, run);
+		this.dashboardChanged();
 		run.done = (async () => {
 			try {
 				checkSignal(run.abort.signal);
@@ -481,6 +516,9 @@ export class SubagentCoordinator {
 						if (session.model) agent.descriptor.model = { provider: session.model.provider, id: session.model.id };
 						agent.descriptor.thinkingLevel = session.thinkingLevel;
 					});
+					run.telemetry = new AgentTelemetry(session, runId,
+						() => this.dashboardChanged(), error => this.reportError(path, error));
+					this.dashboardChanged();
 					this.pi.events.emit("pi-subagent:turn-start", { taskPath: path, runId });
 					let failure: unknown;
 					// preflight runs before Pi's operation is active. Publish acceptance
@@ -514,6 +552,9 @@ export class SubagentCoordinator {
 					const stop = run.abort.signal.aborted ? "aborted" :
 						failure ? "error" : finalStopReason(messages, 0, "error");
 					const status = stop === "completed" ? "completed" : stop === "aborted" ? "interrupted" : "errored";
+					run.telemetry.finish(status);
+					run.telemetry.dispose();
+					run.telemetry = undefined;
 					const terminal = [...messages].reverse().find(message => message.role === "assistant");
 					const output = failure ? errorText(failure) : status === "errored" ?
 						terminal?.errorMessage ?? `Agent stopped: ${stop}` : finalAssistantText(messages, 0);
@@ -542,11 +583,14 @@ export class SubagentCoordinator {
 				if (!accepted) reject(error);
 				const record = this.treeStore.record(path);
 				if (record.status === "running" || record.status === "pending_init") {
+					run.telemetry?.finish(run.abort.signal.aborted ? "interrupted" : "errored");
 					this.settle(path, record.runId ?? uuidv7(), run.abort.signal.aborted ? "interrupted" : "errored", errorText(error));
 				}
 				this.reportError(path, error);
 			} finally {
 				run.phase = "disposing";
+				run.telemetry?.dispose();
+				run.telemetry = undefined;
 				signal?.removeEventListener("abort", abort);
 				run.accepting = false;
 				// Followups arriving during disposal await done before creating a
@@ -554,6 +598,7 @@ export class SubagentCoordinator {
 				try { await run.runtime?.dispose(); } catch (error) { this.reportError(path, error); }
 				if (this.active.get(path) === run) this.active.delete(path);
 				release();
+				this.dashboardChanged();
 			}
 		})();
 		// No detached rejection is allowed to bypass cleanup or become unhandled.
@@ -581,6 +626,7 @@ export class SubagentCoordinator {
 			}
 		});
 		this.flushOutboxes();
+		this.dashboardChanged();
 	}
 
 	private flushOutboxes(): void {
@@ -633,6 +679,9 @@ export class SubagentCoordinator {
 	shutdown(): Promise<void> {
 		if (this.shutdownPromise) return this.shutdownPromise;
 		this.closing = true;
+		this.dashboardChanged();
+		this.dashboardListeners.clear();
+		this.dashboardReader.clear();
 		for (const path of this.waiters.keys()) this.wake(path, "shutdown");
 		for (const run of this.active.values()) {
 			run.abort.abort(new Error("subagent controller shutdown"));

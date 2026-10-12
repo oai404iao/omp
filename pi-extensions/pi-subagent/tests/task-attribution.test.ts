@@ -37,6 +37,7 @@ test("FIFO task attribution ignores ordinary mail and clears an older cause when
 	assert.equal(envelope.customType, MESSAGE_CUSTOM_TYPE);
 	assert.deepEqual(envelope.details.codexTurnAttribution, { parentTurnId: "first" });
 	assert.deepEqual(envelope.details.messageIds, ["context", "first", "second"]);
+	assert.deepEqual(envelope.details.tasks, [{ id: "first", text: "first" }, { id: "second", text: "second" }]);
 	persistTaskAttribution(session, [message("new", "task"), message("later", "task", "ignored")]);
 	assertEntry(session, { version: 1 });
 });
