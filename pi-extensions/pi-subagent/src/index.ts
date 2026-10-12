@@ -7,12 +7,14 @@ import { formatAgentCatalog } from "./agents.ts";
 import { createAgentTools } from "./tools.ts";
 import { MESSAGE_CUSTOM_TYPE } from "./store.ts";
 import { renderAgentMessage } from "./render.ts";
+import { openDashboard } from "./dashboard.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 export default function subagentExtension(pi: ExtensionAPI): void {
 	let coordinator: SubagentCoordinator | undefined;
 	let initializationError: unknown;
+	let dashboardOpen = false;
 	const current = () => {
 		if (!coordinator) throw new Error("pi-subagent is not initialized", { cause: initializationError });
 		return coordinator;
@@ -65,10 +67,21 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		return renderAgentMessage(content, options.expanded, theme);
 	});
 	pi.registerCommand("subagents", {
-		description: "Show the agent catalog and current root tree",
-		handler: async (_args, ctx) => {
+		description: "Open the current session's subagent dashboard (catalog: show agent definitions)",
+		handler: async (args, ctx) => {
 			const controller = current();
 			const caller = controller.rootCaller(ctx);
+			if (args.trim() && args.trim() !== "catalog") {
+				ctx.ui.notify("Usage: /subagents [catalog]", "warning");
+				return;
+			}
+			if (!args.trim() && ctx.mode === "tui") {
+				if (dashboardOpen) return;
+				dashboardOpen = true;
+				try { await openDashboard(ctx, controller); }
+				finally { dashboardOpen = false; }
+				return;
+			}
 			const catalog = controller.catalog(caller);
 			ctx.ui.notify([
 				`Active child runs: ${controller.activeCount}/${controller.settings.maxConcurrentAgents}`,

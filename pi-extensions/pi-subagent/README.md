@@ -125,6 +125,11 @@ Control state and transcripts live alongside Pi session storage:
 └─ sessions/*.jsonl
 ```
 
+The dashboard keeps best-effort run timing and context snapshots in adjacent
+`sessions/*.jsonl.telemetry.json` files. This metadata is independent of
+transcript ancestry and control-state commits; missing or damaged telemetry
+does not prevent agent execution or recovery.
+
 The control snapshot is atomically replaced and synced before acknowledging
 messages. Child JSONL setup is materialized before publishing the child, without
 inventing a user/assistant turn. Transcript receipts are checked on disk before
@@ -211,7 +216,45 @@ provider authentication. When identity is required, a missing optional adapter
 fails before model execution. When the Codex adapter is installed, children also
 follow the main session's Fast mode for subsequent requests, independently of
 `openAIIdentity` and `inheritExtensions`, including through non-Responses parents.
-`/subagents` displays the catalog, tree and active-run count.
+### Subagent dashboard
+
+`/subagents` opens a live, read-only dashboard in Pi's terminal UI. It follows
+the current root session and canonical branch, including completed agents whose
+runtimes have unloaded. Other sessions and abandoned-branch agents are excluded.
+Opening or closing the dashboard does not start, interrupt or resume agents.
+`/subagents catalog` retains the agent-definition catalog and text tree.
+Outside terminal UI mode, `/subagents` retains the text summary.
+
+The left pane lists agent paths, types, current tasks, status, estimated cost,
+run time, request/tool counts, tokens and creation time. Select an agent to see
+its information, usage and recent activity on the right. Narrow terminals use
+a list/detail layout instead of squeezing both panes together.
+
+- `↑`/`↓` or `j`/`k`: select an agent.
+- `Tab`: switch panes; `PgUp`/`PgDn`: scroll the focused pane.
+- `Enter`: open details in the narrow layout; `Esc`: return, then close.
+- With details focused, `Enter` expands or collapses the task preview.
+- Fullscreen mode also supports mouse selection and scrolling.
+
+Statistics are **agent-owned**, excluding copied parent history. The summary
+sums visible child agents once, not the root's mirrored subagent usage.
+Token/cost totals include recorded tool model usage, compaction and auxiliary
+usage. `req` counts finalized Pi assistant responses, not HTTP attempts; nested
+tool executions are reported separately from top-level tool calls. Reasoning
+tokens, when available, are a subset of output tokens.
+
+Cost is an estimate from recorded usage, not a bill. Missing pricing or data is
+shown as unavailable rather than free. Context is Pi's estimated current usage,
+including inherited history; it is separate from cumulative token consumption.
+An unloaded agent shows its last context snapshot. After compaction, context
+can remain unknown until the next model response.
+
+Run time sums execution intervals, including tools and in-run waits but excluding
+idle time between tasks. New runs retain separate timing/context metadata;
+older or crash-interrupted runs can have incomplete timing. Unknown values and
+partial history are identified explicitly; opening the dashboard never replays
+work to recover statistics. Recent activity is bounded and shows summaries,
+not thinking text or complete tool arguments/results.
 
 ## Breaking migration
 

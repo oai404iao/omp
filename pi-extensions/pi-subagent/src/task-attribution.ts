@@ -61,6 +61,8 @@ export function inboxEnvelope(treeId: string, messages: readonly MailMessage[]) 
 		details: {
 			treeId, messageIds: messages.map(message => message.id),
 			senders: [...new Set(messages.map(message => message.from))],
+			// UI metadata follows actual delivery, not enqueueing. Kept out of model context.
+			tasks: messages.filter(message => message.kind === "task").map(({ id, text }) => ({ id, text })),
 			...(codexTurnAttribution ? { codexTurnAttribution } : {}),
 		},
 	};
