@@ -4,16 +4,24 @@ import { isDeepStrictEqual } from "node:util";
 import { assertReleaseDependencies, orderReleaseWorkspaces } from "./release-dependencies.mjs";
 import { readManifest, workspaces } from "./workspaces.mjs";
 import { sha512 } from "./release-utils.mjs";
+import { targetedReleaseWorkspaces } from "./targeted-release.mjs";
 
-export function validateReleaseBatch(candidates, entries = workspaces, manifestFor = e => readManifest(e.directory)) {
+export function validateReleaseBatch(candidates, entries = workspaces, manifestFor = e => readManifest(e.directory), requestedPackage) {
+  if (requestedPackage) {
+    const expected = targetedReleaseWorkspaces(requestedPackage, entries, manifestFor).map(entry => entry.name).sort();
+    if (!isDeepStrictEqual(candidates.map(candidate => candidate.name).sort(), expected)) {
+      throw new Error("Targeted release batch must contain exactly the requested package dependency closure");
+    }
+  }
   const selected = candidates.map(candidate => {
     const entry = entries.find(entry => entry.name === candidate.name);
     if (!entry || entry.releaseStatus !== "publishable") throw new Error(`Unapproved release candidate: ${candidate.name}`);
     const manifest = manifestFor(entry);
-    if (manifest.private || manifest.version !== candidate.version || entry.directory !== candidate.directory) {
+    if (manifest.private || manifest.name !== candidate.name || manifest.version !== candidate.version || entry.directory !== candidate.directory) {
       throw new Error(`Release candidate differs from checkout: ${candidate.name}`);
     }
-    if (!["publish", "recover"].includes(candidate.mode)) throw new Error(`Invalid release mode: ${candidate.name}`);
+    const modes = requestedPackage && candidate.name !== requestedPackage ? ["verify"] : ["publish", "recover"];
+    if (!modes.includes(candidate.mode)) throw new Error(`Invalid release mode: ${candidate.name}`);
     const prerelease = manifest.version.includes("-");
     if (candidate.tag !== `${candidate.name}@${candidate.version}` || candidate.prerelease !== prerelease
       || candidate.distTag !== (prerelease ? "next" : "latest")

@@ -300,6 +300,43 @@ Prerelease SemVer versions are published with the `next` dist-tag; stable
 versions use `latest`. Do not promote experimental packages until
 clean-install smoke tests pass.
 
+### Targeted package releases
+
+The optional `package` input on `publish.yml` accepts one exact publishable
+workspace name, such as `@oai404iao/pi-subagent`. Leave it empty for the normal
+full-batch release. The same selection is enforced during artifact preparation
+and protected publication; it does not change any workspace's release eligibility.
+
+Before dispatch, prepare and review a version PR containing only that package's
+version bump and changelog. Split shared changesets so other packages' pending
+entries remain unconsumed. Use `pnpm run changeset:version`, not manual manifest
+version edits; restore deferred changesets and run `pnpm run changeset:sync`
+before committing. If a pending dependency release generates a new consumer
+changeset for the just-versioned package, retain it for the later batch.
+
+Targeted publication retains the package's existing exact workspace dependency
+pins. Every transitive workspace dependency must already exist on npm at that
+exact version. Dependencies enter the artifact manifest in verification-only
+mode: validate their immutable registry identity, source ancestry and dependency
+contracts, but never publish them or create their tags/GitHub Releases.
+Unreleased dependency source edits are not shipped and are not represented as
+recovery of the current checkout. Missing or mismatched dependencies stop the
+release rather than falling back to publishing them. The selected package itself
+still obeys the ordinary unchanged-payload guard when recovering a published
+version.
+Dependency runtime, optional and peer dependency maps must match their published
+source manifests; a pending dependency-contract change therefore blocks this
+path even when its version number is unchanged. Current npm dist-tags need not
+point to these immutable pinned dependency versions.
+
+The normal release-PR automation may continue updating the deferred full-batch
+version PR. Leave that PR unmerged while preparing and dispatching the targeted
+release.
+
+Local artifact preparation uses `RELEASE_PACKAGE=<exact-name> pnpm run
+release:artifacts`. Dispatch still requires `confirm=publish`, successful
+verification, and approval of the protected `npm-publish` environment.
+
 ## Recovery
 
 - Never overwrite an npm version.

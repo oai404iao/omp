@@ -7,10 +7,16 @@ on:
         description: 'Type "publish" after reviewing the release PR and npm environment'
         required: true
         type: string
+      package:
+        description: "Optional exact workspace package name; blank publishes the full batch"
+        required: false
+        default: ""
+        type: string
 
 # Publication is enabled only after trusted-publisher and environment review.
 env:
   RELEASE_INFRASTRUCTURE_ENABLED: "true"
+  RELEASE_PACKAGE: ${{ inputs.package }}
 
 permissions:
   contents: read
