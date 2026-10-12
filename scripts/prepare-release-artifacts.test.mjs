@@ -17,7 +17,7 @@ function prepareFixture(t, unexpectedFilename) {
   for (const directory of [scripts, bin, join(temporary, "release-locks"), join(temporary, "fixture")]) {
     mkdirSync(directory);
   }
-  for (const file of ["prepare-release-artifacts.mjs", "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs"]) {
+  for (const file of ["prepare-release-artifacts.mjs", "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs", "targeted-release.mjs"]) {
     copyFileSync(join(root, "scripts", file), join(scripts, file));
   }
   writeFileSync(join(temporary, ".gitignore"), "release-artifacts/\ncalls.log\n");

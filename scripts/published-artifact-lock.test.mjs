@@ -84,7 +84,7 @@ test("preparation never repacks a locked published version after an E404 lookup"
   try {
     const scripts = join(temporary, "scripts"), bin = join(temporary, "bin");
     mkdirSync(scripts); mkdirSync(bin); mkdirSync(join(temporary, "release-locks"));
-    for (const file of ["prepare-release-artifacts.mjs", "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs"]) {
+    for (const file of ["prepare-release-artifacts.mjs", "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs", "targeted-release.mjs"]) {
       copyFileSync(join(root, "scripts", file), join(scripts, file));
     }
     const value = publishedArtifacts.find(p => p.name === "@oai404iao/pi-codex-runtime");

@@ -35,7 +35,7 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
     mkdirSync(binaryDirectory);
     const scripts = join(temporaryDirectory, "scripts");
     mkdirSync(scripts);
-    for (const name of ["publish-release-artifacts.mjs", "release-batch.mjs", "release-dependencies.mjs", "release-utils.mjs", "initial-codex-bootstrap.mjs"]) {
+    for (const name of ["publish-release-artifacts.mjs", "release-batch.mjs", "release-dependencies.mjs", "release-utils.mjs", "initial-codex-bootstrap.mjs", "targeted-release.mjs"]) {
       writeFileSync(join(scripts, name), readFileSync(join(root, "scripts", name)));
     }
     mkdirSync(join(temporaryDirectory, "release-locks"));

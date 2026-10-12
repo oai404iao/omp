@@ -4,6 +4,23 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { artifactWorkspaces, publishableWorkspaces, readManifest, workspaces } from "./workspaces.mjs";
 
+test("targeted publication passes the same selection through protected verification and publication", () => {
+  const workflow = parse(readFileSync(new URL("../.github/workflows/publish.yml", import.meta.url), "utf8"));
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.package, {
+    description: "Optional exact workspace package name; blank publishes the full batch",
+    required: false,
+    default: "",
+    type: "string",
+  });
+  assert.equal(workflow.env.RELEASE_PACKAGE, "${{ inputs.package }}");
+  assert.equal(workflow.jobs.publish.environment, "npm-publish");
+  assert.equal(workflow.jobs.publish.needs, "verify");
+  for (const job of Object.values(workflow.jobs)) {
+    assert.equal(job.env?.RELEASE_PACKAGE, undefined);
+    for (const step of job.steps) assert.equal(step.env?.RELEASE_PACKAGE, undefined);
+  }
+});
+
 for (const [directory, name] of [
   ["external-thinking", "pi-external-thinking"],
   ["pi-keep-defaults", "pi-keep-defaults"],

@@ -14,17 +14,27 @@ import {
 import { normalizePackagePath, tarballFacingChangedPaths } from "./recovery-guard.mjs";
 import { artifactWorkspaces, readManifest, registry, root } from "./workspaces.mjs";
 import { assertReleaseDependencies, orderReleaseWorkspaces } from "./release-dependencies.mjs";
+import { targetedReleaseWorkspaces, verifyDependencySource } from "./targeted-release.mjs";
 
 const outputDirectory = resolve(root, "release-artifacts");
 const stagingDirectory = resolve(outputDirectory, ".staging");
 const publicRepository = "https://github.com/oai404iao/omp.git";
 const arguments_ = process.argv.slice(2);
-if (arguments_.some((argument) => argument !== "--include-bootstrap")) {
-  throw new Error("usage: prepare-release-artifacts.mjs [--include-bootstrap]");
+let requestedPackage = process.env.RELEASE_PACKAGE || undefined;
+let includeBootstrap = false;
+for (let index = 0; index < arguments_.length; index += 1) {
+  const argument = arguments_[index];
+  if (argument === "--include-bootstrap") includeBootstrap = true;
+  else if (argument === "--package" && arguments_[index + 1] && !arguments_[index + 1].startsWith("--")) {
+    const value = arguments_[++index];
+    if (requestedPackage && requestedPackage !== value) throw new Error("--package does not match RELEASE_PACKAGE");
+    requestedPackage = value;
+  } else throw new Error("usage: prepare-release-artifacts.mjs [--include-bootstrap] [--package <name>]");
 }
-const includeBootstrap = arguments_.includes("--include-bootstrap");
-assertReleaseDependencies(artifactWorkspaces(includeBootstrap));
-const orderedWorkspaces = orderReleaseWorkspaces(artifactWorkspaces(includeBootstrap));
+if (requestedPackage && includeBootstrap) throw new Error("targeted releases cannot include bootstrap artifacts");
+const selectedWorkspaces = requestedPackage ? targetedReleaseWorkspaces(requestedPackage) : artifactWorkspaces(includeBootstrap);
+assertReleaseDependencies(selectedWorkspaces);
+const orderedWorkspaces = orderReleaseWorkspaces(selectedWorkspaces);
 if (includeBootstrap && process.env.GITHUB_ACTIONS === "true") {
   throw new Error("bootstrap artifacts must be prepared from a reviewed local checkout, not GitHub Actions");
 }
@@ -217,6 +227,20 @@ for (const { name, directory } of orderedWorkspaces) {
   const tag = tagFor(name, manifest.version);
   const localTagCommit = existingTagCommit(tag);
 
+  if (requestedPackage && name !== requestedPackage) {
+    if (!published.exists) throw new Error(`Targeted release dependency must already be published: ${name}@${manifest.version}`);
+    const candidate = {
+      name, version: manifest.version, directory, tag, mode: "verify",
+      integrity: published.integrity, sourceCommit: published.gitHead,
+      distTag: manifest.version.includes("-") ? "next" : "latest",
+      prerelease: manifest.version.includes("-"),
+    };
+    verifyDependencySource(candidate, published, commit, manifest);
+    candidates.push(candidate);
+    console.log(`✓ ${name}@${manifest.version}: verify immutable dependency from ${published.gitHead}`);
+    continue;
+  }
+
   if (published.exists) {
     if (!published.gitHead) {
       throw new Error(
@@ -309,6 +333,7 @@ const releaseManifest = {
   schemaVersion: 1,
   commit,
   registry,
+  requestedPackage: requestedPackage ?? null,
   candidates,
 };
 writeFileSync(

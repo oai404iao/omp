@@ -15,6 +15,7 @@ import {
 import { registry, root } from "./workspaces.mjs";
 import { publishOrderedBatch, validateReleaseBatch, verifyPackedCandidate } from "./release-batch.mjs";
 import { hasInitialBootstrapLatestAlias, isInitialCodexBootstrap } from "./initial-codex-bootstrap.mjs";
+import { verifyDependencySource } from "./targeted-release.mjs";
 
 const [manifestArgument, resultArgument] = process.argv.slice(2);
 if (!manifestArgument || !resultArgument) {
@@ -69,12 +70,19 @@ if (manifest.registry !== registry || !Array.isArray(manifest.candidates)) {
   throw new Error("release artifact manifest is malformed or targets another registry");
 }
 
-const candidates = validateReleaseBatch(manifest.candidates);
+const requestedPackage = process.env.RELEASE_PACKAGE || undefined;
+if ((manifest.requestedPackage ?? undefined) !== requestedPackage) {
+  throw new Error("release artifact requestedPackage does not match RELEASE_PACKAGE");
+}
+const candidates = validateReleaseBatch(manifest.candidates, undefined, undefined, requestedPackage);
 // Validate the entire batch before the first irreversible registry write.
 for (const candidate of candidates) {
   if (candidate.mode === "publish") {
     if (candidate.sourceCommit !== commit) throw new Error(`Publish candidate is not from this checkout: ${candidate.name}`);
     verifyPackedCandidate(candidate, resolve(manifestPath, "..", candidate.filename));
+  }
+  if (candidate.mode === "verify") {
+    verifyDependencySource(candidate, lookupPublishedVersion(candidate.name, candidate.version), commit);
   }
 }
 
@@ -116,6 +124,10 @@ function verifyCandidateTags(candidate) {
 
 function verifyCandidateRegistryState(candidate) {
   const published = lookupCandidateVersion(candidate);
+  if (candidate.mode === "verify") {
+    verifyDependencySource(candidate, published, commit);
+    return;
+  }
   if (!published.exists) {
     throw new RegistryPropagationPending(
       `Dependency release is not registry-visible with the expected identity: ${candidate.name}`,
@@ -201,6 +213,14 @@ const releases = [];
 const tagsToCreate = [];
 const unresolved = [];
 for (const candidate of candidates) {
+  if (candidate.mode === "verify") {
+    try {
+      verifyCandidateRegistryState(candidate);
+    } catch (error) {
+      unresolved.push(String(error.message ?? error));
+    }
+    continue;
+  }
   const candidateUnresolved = [];
   const published = lookupPublishedVersion(candidate.name, candidate.version);
   if (!published.exists) {
@@ -249,7 +269,7 @@ for (const candidate of candidates) {
 const ok =
   unresolved.length === 0
   && publishWarnings.length === 0
-  && releases.length === candidates.length
+  && releases.length === candidates.filter(candidate => candidate.mode !== "verify").length
   && releases.length > 0;
 
 if (ok) {
