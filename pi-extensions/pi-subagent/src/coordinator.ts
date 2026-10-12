@@ -497,7 +497,7 @@ export class SubagentCoordinator implements DashboardSource {
 					parentSession: this.session(record.descriptor.parentPath),
 					modelRuntime: caller.modelRuntime, agentDir: this.agentDir, packageRoot: this.packageRoot,
 					projectTrusted: caller.projectTrusted,
-					tools: createAgentTools(this, () => caller, this.catalog(caller).agents),
+					tools: createAgentTools(this, () => caller, this.catalog(caller).agents, caller.path),
 					hooks: this.hooks(path),
 				});
 				caller.sessionManager = run.runtime.session.sessionManager;
