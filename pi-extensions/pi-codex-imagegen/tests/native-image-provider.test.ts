@@ -6,6 +6,7 @@ import test from "node:test";
 import { convertResponsesMessages } from "@oai404iao/pi-codex-runtime/internal/providers/responses/messages";
 import { processResponsesStream } from "@oai404iao/pi-codex-runtime/internal/providers/responses/stream";
 import { saveOpenAICodexGeneratedImage } from "@oai404iao/pi-codex-imagegen/internal/tools/image-generation/storage";
+import { withCodexSettings } from "../../../tests/codex/support/provider-lifecycle-test-support.js";
 
 async function* asAsyncIterable(events: any[]) {
 	for (const event of events) yield event;
@@ -175,10 +176,11 @@ test("processResponsesStream does not wrap provider-rendered Markdown citations 
 	assert.equal((output.content[0] as any).text, text);
 });
 
-test("saveOpenAICodexGeneratedImage writes generated images under the configured default output dir", async () => {
+test("saveOpenAICodexGeneratedImage writes generated images under the configured default output dir", async () => withCodexSettings({}, async () => {
 	const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "pi-codex-minimal-image-"));
 	const encoded = Buffer.from("png-bytes").toString("base64");
 	try {
+		await fs.mkdir(path.join(cwd, ".pi"));
 		const saved = await saveOpenAICodexGeneratedImage(cwd, { responseId: "resp_123", callId: "ig_456", result: encoded, outputFormat: "png", imageModel: "gpt-image-2" });
 		assert.match(saved.relativePath, /^\.pi[/\\]openai-codex-images[/\\][\dTZ-]+-[a-f0-9]{8}\.png$/);
 		assert.equal(saved.latestRelativePath, path.join(".pi", "openai-codex-images", "latest.png"));
@@ -188,4 +190,4 @@ test("saveOpenAICodexGeneratedImage writes generated images under the configured
 	} finally {
 		await fs.rm(cwd, { recursive: true, force: true });
 	}
-});
+}));

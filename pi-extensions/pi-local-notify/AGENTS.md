@@ -20,8 +20,9 @@ lockfile. Read [README.md](README.md) for supported terminals and manual checks.
   work settle. Read the final assistant from the active `getBranch()`.
   `stop`/`length` show `Ready for input`; `error` shows `Stopped with an error`.
   Do not notify on `agent_end`, `toolUse`, `aborted` or blocking UI prompts.
-- A cancellation during retry wait may leave a final `error`; the settled
-  event does not supply a cancellation reason. Do not claim otherwise.
+  User and custom-message runs use the same completion policy.
+- Suppress notifications when `agent_settled.aborted` is true, even if
+  cancellation during retry wait leaves a final `error` or earlier `stop`.
 - Deduplicate the last notified assistant entry, resetting on `session_start`
   and `session_shutdown`. A synchronous write failure must neither interrupt Pi
   nor mark the entry as notified, so a later attempt remains possible.

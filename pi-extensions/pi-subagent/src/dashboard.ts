@@ -232,7 +232,7 @@ export async function openDashboard(ctx: ExtensionCommandContext, source: Dashbo
 			overlay: true,
 			overlayOptions: {
 				anchor: "center", maxHeight: "88%",
-				// Pi 0.99.1 resolves an options factory once; layout reads this property on resize.
+				// Pi resolves an options factory once; layout reads this property on resize.
 				get width() { return Math.max(1, Math.min(160, Math.floor((terminal?.columns ?? 80) * 0.94))); },
 			},
 		});

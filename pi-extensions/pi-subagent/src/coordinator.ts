@@ -450,6 +450,7 @@ export class SubagentCoordinator implements DashboardSource {
 	hooks(path: string): ExtensionFactory {
 		return pi => {
 			pi.on("before_agent_start", (_event, ctx) => {
+				if (this.active.get(path)?.abort.signal.aborted) return;
 				const message = this.inboxMessage(path, ctx.sessionManager as SessionManager);
 				return message ? { message } : undefined;
 			});
@@ -540,7 +541,8 @@ export class SubagentCoordinator implements DashboardSource {
 							expandPromptTemplates: false, source: "extension",
 							preflightResult: disposition => {
 								if (disposition !== "started") throw new Error(`agent prompt was ${disposition}; task remains pending`);
-								checkSignal(run.abort.signal);
+								// Pi already owns a starting run here. Throwing would bypass
+								// its cleanup; Pi applies a startup abort at agent_start.
 							},
 						});
 						if (!accepted) throw new Error("task envelope was not accepted by the child");

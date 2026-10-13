@@ -1,8 +1,9 @@
 # @oai404iao/pi-telegram-notify
 
-Pi 完成任务、最终停止于错误、或扩展弹出阻塞式交互等待你的回复时，向 Telegram Bot 发送一条通知。
+Pi 执行用户消息触发的任务时，在完成、最终停止于错误、或扩展弹出阻塞式
+交互等待你的回复时，向 Telegram Bot 发送一条通知。
 
-兼容性下限与开发目标：Pi 0.99.1。
+兼容性下限与开发目标：Pi 1.2.0。
 
 通知使用 Telegram MarkdownV2：标签加粗，项目路径使用行内代码，概要保留
 换行和缩进。概要上限从 30 提高到 **3000 UTF-16 单位**（大多数中英文字符
@@ -83,6 +84,10 @@ npm 包名使用 `@oai404iao/pi-telegram-notify`，但配置目录继续使用
 
 ## 触发条件
 
+- **只自动通知用户任务**：`before_agent_start.messageType` 为 `user` 的运行
+  可以发送完成、错误和等待通知。扩展通过自定义消息触发的 `custom` 运行
+  不自动通知，也不沿用上一次用户提示词；空闲时的对话框不发送等待通知。
+  显式测试命令不受此自动通知规则限制。
 - **subagent 不通知**：带有 `pi-subagent/descriptor` 会话标记的 spawn / fork
   子代理不会发送完成、错误、等待回复或测试通知。发送时动态检查标记，
   兼容启动后才写入标记的子会话；普通无 UI 会话和用户手动 fork 不受影响。
@@ -100,10 +105,12 @@ npm 包名使用 `@oai404iao/pi-telegram-notify`，但配置目录继续使用
 因此被阻止、尚未真正打开 UI 的工具调用不会误报等待；标题不包含完整
 问题的自定义 UI 也不再发送原来的详细问题摘要。无 UI 会话不发送等待通知。
 
-“完成/错误”只使用 Pi 0.86.1 的公开 `agent_settled` 事件，并从
+“完成/错误”只使用公开 `agent_settled` 事件，并从
 `ctx.sessionManager.getBranch()` 读取当前 active branch。该事件只在没有
 自动重试、自动压缩或排队 continuation 时触发通知。`toolUse` 和
 `aborted` assistant 消息会被忽略；`agent_end` 不会触发通知。
+`agent_settled.aborted` 为 true 时不发送完成/错误通知，即使取消重试等待
+后最后一条 assistant 仍以 `error` 结束。
 
 通知请求是 best-effort：网络或 Telegram API 失败不会中断 Pi 的任务。
 

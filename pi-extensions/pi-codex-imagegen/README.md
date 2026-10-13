@@ -2,7 +2,7 @@
 
 See the package guide below for release status; source edits do not publish artifacts.
 
-Peer floor and development target: Pi 0.99.1.
+Peer floor and development target: Pi 1.2.0.
 
 Image generation uses standalone Images endpoints and is directly callable,
 including through codemode while active. This does not enable codemode itself.

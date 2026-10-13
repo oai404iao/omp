@@ -4,7 +4,7 @@ See the package guide below for release status; source edits do not publish arti
 It has no Pi extension entry
 and does not automatically register tools or providers.
 
-Peer floor and development target: Pi 0.99.1.
+Peer floor and development target: Pi 1.2.0.
 
 Owns shared Codex authentication/headers, wire identity, settings/catalog,
 Responses replay contracts and the session-scoped composition broker.
@@ -44,7 +44,8 @@ Exact Standard profiles remain for `openai/gpt-6-astra`, `gpt-6-sol` and
 `gpt-6-luna`, independently of the frozen legacy Lite profiles. Their default
 tools are local custom `apply_patch` and `view_image`; remote tool/compaction
 capabilities are not inferred from model names.
-See `provenance/pi-openai-0991-gpt6.json` for the pinned Pi metadata and limits.
+See `provenance/pi-openai-120-gpt6.json` for the current pinned catalog and limits;
+the original `pi-openai-0991-gpt6.json` evidence remains unchanged.
 The global
 `config.json.imageGeneration:false` setting gates image capability derivation
 without replacing the selected model profile. Likewise,

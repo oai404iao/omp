@@ -16,7 +16,7 @@ function renderContext(args: Record<string, unknown>, overrides: Partial<ToolRen
 	return {
 		args, toolCallId: "render-test", invalidate() {}, lastComponent: undefined, state: {}, cwd: "/",
 		executionStarted: true, argsComplete: true, isPartial: false, expanded: false, showImages: false,
-		isError: false, ...overrides,
+		isError: false, durationMs: undefined, outputPad: 1, ...overrides,
 	};
 }
 

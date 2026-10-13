@@ -20,10 +20,17 @@ notification behavior or configuration.
   last assistant on `getBranch()`, not the last message in all session entries.
   `stop` and `length` mean completed; `error` means terminal failure;
   `toolUse` and `aborted` do not notify.
+- Suppress completion/error when `agent_settled.aborted` is true, including
+  cancellation during retry wait that leaves a final `error` or earlier `stop`.
+- Automatic notifications belong only to user-started runs. Track
+  `before_agent_start.messageType`; custom starts clear the prompt summary and
+  suppress completion/error and waiting notifications. Reset run eligibility on
+  settle and session transitions; manual test commands remain explicit sends.
 - Preserve assistant-entry deduplication and reset session state on
   `session_start` and `session_shutdown`.
 - Waiting notifications use native `ui_prompt_start`, its title or fallback,
-  and require `hasUI`. Pi coalesces overlapping dialogs; do not restore
+  and require `hasUI` and an active user-started run. Pi coalesces overlapping
+  dialogs; do not restore
   tool-name timers, questionnaire scraping or `rpiv:ask-user:prompt`.
   `ui_prompt_end` sends nothing.
 - Check all `getEntries()` for `pi-subagent/descriptor` at notification time,

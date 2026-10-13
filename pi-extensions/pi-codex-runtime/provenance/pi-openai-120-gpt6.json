@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/earendil-works/pi",
+    "revision": "06a466935536f8c9bcacb2d5efc0fc021be1bdff",
+    "tag": "v1.2.0",
+    "license": "MIT"
+  },
+  "files": {
+    "packages/ai/scripts/generate-models.ts": {
+      "role": "Current generated OpenAI catalog, including separate chat and classifier operations",
+      "gitBlobSha": "9b962ccc6631c786dd6b1d67bc8355c812c29389",
+      "sha256": "08619c71e480531e5fd3ea0282599d01e3c6414c1bc15d608960e74cd5d832b8"
+    },
+    "packages/ai/src/models.ts": {
+      "role": "Public thinking-level clamp and model operation contracts",
+      "gitBlobSha": "7c9be11bb5587bcc76d1f22ea84f44cad2b2b4bd",
+      "sha256": "c10385291e4e79dc3ea5301629288a35cac354f8a3635c07f9312608c269f573"
+    },
+    "packages/ai/src/api/simple-options.ts": {
+      "role": "Sampling merge contract: defaults, clamped level overrides and request parameters; core uses its local merger with Pi's root-exported clamp",
+      "gitBlobSha": "7d287aa87b5fc716d5920e7c8cc0d6806c69d3c9",
+      "sha256": "f68b3e13a55a72214243b37eb85fa0532b67cfb22ac80ea3434eb5d26ae36616"
+    }
+  },
+  "catalogReference": {
+    "package": "@earendil-works/pi-ai",
+    "version": "1.2.0",
+    "path": "dist/providers/data/openai.json",
+    "sha256": "f4c1ac9f8f84cb9f2a952b0ceec51c90a38b31b4cdf33200e018ece9d408e95f",
+    "fields": ["type", "id", "api", "input", "thinkingLevelMap", "contextWindow", "maxTokens", "compat"]
+  },
+  "models": ["openai/gpt-6.1-sol", "openai/gpt-6-astra", "openai/gpt-6-sol", "openai/gpt-6-luna"],
+  "chatDescriptorSha256": {
+    "gpt-6.1-sol": "6af60b2bc2132b70145d33f9f20d84b8daa0081fae85ee6a67a91f7c9dd9bc37",
+    "gpt-6-astra": "6f7c0bcc861b0a3401bd221a3de8d26712cfa8adb9cdf030898bd18b82036cf7",
+    "gpt-6-sol": "63e004bdeaf94a7953b2ab72e7ccfac5c1a30719dee666bc6633c8fbdc3c59fc",
+    "gpt-6-luna": "e1f2db43056bd5d0b11a7991b463428268a042a3e63795ebd49b5d34042a38fb"
+  },
+  "decisions": [
+    "The four selected chat descriptors are deeply equal to their Pi 0.99.1 counterparts; their hashes use JSON.stringify of the shipped descriptor.",
+    "The complete catalog hash changed because Pi now also supplies openai-decisions classifier data; this does not grant classifier or endpoint capabilities to chat profiles.",
+    "Retain the existing exact-ID profiles and immutable pi-openai-0991-gpt6.json source evidence.",
+    "Pi 1.2.0 is both the supported floor and development target; no older SDK fallback is provided."
+  ],
+  "limits": [
+    "Source/catalog and credential-free fixture evidence only, not real account access, endpoint acceptance or verified Fast pricing.",
+    "No new OpenAI chat profiles, replacement descriptors, hosted tool entitlement or legacy Codex profile is inferred."
+  ],
+  "localImplementations": ["pi-codex-runtime/src/model-catalog/default-models.json"]
+}

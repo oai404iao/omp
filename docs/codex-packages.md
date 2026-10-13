@@ -39,7 +39,7 @@ not by removing tools from the active set. The session transcript retains them
 for tree navigation and resume, and codemode can still call them.
 Unknown or disabled model profiles remain on Pi's native implementation.
 `openai-codex/gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna` have exact Responses
-Lite profiles. Pi 0.99.1 is the package floor; 0.87.1 first supplied the Sol/Luna
+Lite profiles. Pi 1.2.0 is the package floor; 0.87.1 first supplied the Sol/Luna
 descriptors. Core composes a stream
 shim without replacing provider authentication, streams, or models.
 
@@ -206,7 +206,7 @@ and `latest` pointing to their sole initial alpha; that bounded exception is not
 stable-release acceptance. Trusted-publisher configuration is not proof of a
 successful OIDC publish. See [activation evidence](audits/codex-bootstrap-activation.md)
 and [RELEASING.md](../RELEASING.md).
-The public package floor and development target are Pi 0.99.1.
+The public package floor and development target are Pi 1.2.0.
 See
 [Pi compatibility](pi-compatibility.md) for verification commands and limits.
 

@@ -37,7 +37,8 @@ function harness(t: TestContext) {
 		sessionManager: { getBranch: () => branch, getEntries: () => entries },
 		ui: { notify: (message: string) => warnings.push(message) },
 	} as unknown as ExtensionContext;
-	const emit = (event: string) => handlers[event]?.({}, ctx);
+	const emit = (event: string, payload: Record<string, unknown> = {}) =>
+		handlers[event]?.({ type: event, ...(event === "agent_settled" ? { aborted: false } : {}), ...payload }, ctx);
 	const assistant = (id: string, stopReason = "stop") => ({
 		type: "message", id, message: { role: "assistant", stopReason },
 	});
@@ -76,6 +77,34 @@ test("final errors notify without leaking error details; aborted and intermediat
 	h.setBranch([h.assistant("failure", "error")]);
 	h.emit("agent_settled");
 	assert.ok(h.writes[0]!.includes(Buffer.from("project: Stopped with an error").toString("base64")));
+});
+
+test("settled cancellation suppresses leftover error and stop messages, then normal runs notify", (t) => {
+	const h = harness(t);
+	for (const reason of ["error", "stop"]) {
+		h.setBranch([h.assistant(`cancelled-${reason}`, reason)]);
+		h.emit("agent_settled", { aborted: true });
+	}
+	assert.equal(h.writes.length, 0);
+	h.setBranch([h.assistant("normal-error", "error")]);
+	h.emit("agent_settled", { aborted: false });
+	h.setBranch([h.assistant("normal-stop", "stop")]);
+	h.emit("agent_settled", { aborted: false });
+	assert.equal(h.writes.length, 2);
+	assert.ok(h.writes[0]!.includes(Buffer.from("project: Stopped with an error").toString("base64")));
+	assert.ok(h.writes[1]!.includes(Buffer.from("project: Ready for input").toString("base64")));
+});
+
+test("user and custom-message runs retain the same completion policy", (t) => {
+	const h = harness(t);
+	for (const messageType of ["user", "custom"]) {
+		h.emit("before_agent_start", messageType === "user"
+			? { messageType, prompt: "user task" }
+			: { messageType, message: { role: "custom", customType: "test", content: "custom task", display: false, timestamp: 0 } });
+		h.setBranch([h.assistant(messageType)]);
+		h.emit("agent_settled");
+	}
+	assert.equal(h.writes.length, 2);
 });
 
 test("RPC, JSON, print, redirected output, and non-Kitty terminals stay silent", (t) => {

@@ -2,7 +2,7 @@
 
 See the package guide below for release status; source edits do not publish artifacts.
 
-Peer floor and development target: Pi 0.99.1.
+Peer floor and development target: Pi 1.2.0.
 
 `codexRequestExtensions` defaults to `true`. Turning it off preserves Standard
 tool/replay handling but stops generated Codex metadata, separates WS caches,
@@ -49,6 +49,19 @@ explicitly configured. Their legacy `openai-codex` counterparts remain separate.
 
 Both SSE and WebSocket forward parsed provider events through Pi's
 `provider_stream_event` hook before normalization, in stream order.
+
+Standard OpenAI Responses sampling merges Pi model defaults, the clamped Pi
+thinking-level override, then request-level `samplingParams`, with later values
+winning per key. Provider effort names are not sampling override keys.
+Sampling cannot replace the request envelope, tools, identity, authentication,
+cache or protocol controls. `max_output_tokens` requires model support and a
+finite positive value, with a minimum of 16. ChatGPT subscription requests omit
+temperature and output-token caps even when supplied through sampling parameters.
+Lite merges only temperature; other new sampling fields remain unsupported.
+Legacy `openai-codex` sampling behavior is unchanged.
+
+The self-rendered patch and image-view rows honor Pi's `outputPad`, including
+zero-padding layouts. Patch rendering can still be deferred to another renderer.
 
 The request envelope follows Codex `5a314017`: Standard and Lite use developer
 prefix messages with thread-scoped deterministic IDs; Lite emits

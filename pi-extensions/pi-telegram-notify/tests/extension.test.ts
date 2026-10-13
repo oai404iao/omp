@@ -26,7 +26,19 @@ function fakePi() {
 }
 
 async function emit(pi: ReturnType<typeof fakePi>, event: string, ctx: any, payload: Record<string, unknown> = {}): Promise<void> {
-	for (const handler of pi.handlers[event] ?? []) await handler(payload, ctx);
+	for (const handler of pi.handlers[event] ?? []) {
+		await handler({ type: event, ...(event === "agent_settled" ? { aborted: false } : {}), ...payload }, ctx);
+	}
+}
+
+function startUser(pi: ReturnType<typeof fakePi>, ctx: any, prompt = "user task"): Promise<void> {
+	return emit(pi, "before_agent_start", ctx, { messageType: "user", prompt });
+}
+
+function startCustom(pi: ReturnType<typeof fakePi>, ctx: any): Promise<void> {
+	return emit(pi, "before_agent_start", ctx, {
+		messageType: "custom", message: { role: "custom", customType: "test", content: "custom task", display: false, timestamp: 0 },
+	});
 }
 
 function assistantEntry(id: string, stopReason: string, text: string, parentId: string | null = null) {
@@ -91,11 +103,12 @@ test("spawn and fork children never send completion, error, waiting, or test not
 		const branch: unknown[] = [childDescriptor(provider)];
 		const ctx = { ...context(() => branch), ui: { notify() {} } };
 		await emit(pi, "session_start", ctx);
-		await emit(pi, "before_agent_start", ctx, { prompt: "child task" });
 		for (const stopReason of ["stop", "length", "error"]) {
+			await startUser(pi, ctx, "child task");
 			branch.push(assistantEntry(stopReason, stopReason, "child result"));
 			await emit(pi, "agent_settled", ctx);
 		}
+		await startUser(pi, ctx, "child task");
 		await emit(pi, "ui_prompt_start", ctx, { kind: "custom", title: "child question" });
 		await pi.commands["telegram-notify"]!.handler("test", ctx);
 		await pi.commands["telegram-notify:test"]!.handler("", ctx);
@@ -108,6 +121,7 @@ test("checks child descriptors appended after startup at notification time", () 
 	const branch: unknown[] = [];
 	const ctx = context(() => branch);
 	await emit(pi, "session_start", ctx);
+	await startUser(pi, ctx);
 	branch.push(childDescriptor(), assistantEntry("child-final", "stop", "silent child"));
 	await emit(pi, "ui_prompt_start", ctx, { kind: "confirm", title: "child question" });
 	await emit(pi, "agent_settled", ctx);
@@ -115,6 +129,7 @@ test("checks child descriptors appended after startup at notification time", () 
 	await emit(pi, "session_shutdown", ctx);
 	const parentCtx = { ...context(() => [assistantEntry("parent-final", "stop", "parent result")]), hasUI: false };
 	await emit(pi, "session_start", parentCtx);
+	await startUser(pi, parentCtx);
 	await emit(pi, "agent_settled", parentCtx);
 	assert.equal(requests.length, 1, "non-UI parent sessions still notify completion");
 	assert.match(requests[0]!.text, /parent result/);
@@ -125,7 +140,9 @@ test("child identity survives navigation before its descriptor", () => withHarne
 	const entries = [...branch, childDescriptor("fork")];
 	const ctx = { ...context(() => branch, "/work/child", () => entries), ui: { notify() {} } };
 	await emit(pi, "session_start", ctx);
+	await startUser(pi, ctx);
 	await emit(pi, "agent_settled", ctx);
+	await startUser(pi, ctx);
 	await emit(pi, "ui_prompt_start", ctx, { kind: "select", title: "still a child" });
 	await pi.commands["telegram-notify:test"]!.handler("", ctx);
 	assert.equal(requests.length, 0);
@@ -139,11 +156,12 @@ test("agent_settled deduplicates the active-branch assistant and ignores interme
 		...branch, assistantEntry("off-branch", "error", "off-branch failure"),
 	]);
 	await emit(pi, "session_start", ctx);
-	await emit(pi, "before_agent_start", ctx, { prompt: "implement the fix" });
+	await startUser(pi, ctx, "implement the fix");
 	await emit(pi, "agent_end", ctx, { messages: [branch[0]!.message] });
 	assert.equal(requests.length, 0);
 	branch = [...branch, assistantEntry("retry-final", "stop", "active branch result", "retry-error")];
 	await emit(pi, "agent_settled", ctx);
+	await startUser(pi, ctx, "same task");
 	await emit(pi, "agent_settled", ctx);
 	assert.equal(requests.length, 1);
 	assert.match(requests[0]!.text, /\*项目:\* `\/private\/work\/project`/);
@@ -152,13 +170,88 @@ test("agent_settled deduplicates the active-branch assistant and ignores interme
 	assert.doesNotMatch(requests[0]!.text, /temporary provider failure|off-branch failure/);
 	await emit(pi, "session_shutdown", ctx, { reason: "reload" });
 	await emit(pi, "session_start", ctx, { reason: "reload" });
+	await startUser(pi, ctx, "implement the fix");
 	await emit(pi, "agent_settled", ctx);
 	assert.equal(requests.length, 2);
+}));
+
+test("custom-message runs suppress waiting and terminal notifications without retaining the user summary", () => withHarness(async ({ pi, requests }) => {
+	let branch: unknown[] = [];
+	const ctx = { ...context(() => branch), ui: { notify() {} } };
+	await emit(pi, "session_start", ctx);
+	await startUser(pi, ctx, "stale user summary");
+	for (const reason of ["stop", "error"]) {
+		await startCustom(pi, ctx);
+		await emit(pi, "ui_prompt_start", ctx, { kind: "confirm", title: "custom question" });
+		branch = [assistantEntry(`custom-${reason}`, reason, "")];
+		await emit(pi, "agent_settled", ctx);
+	}
+	assert.equal(requests.length, 0);
+	await pi.commands["telegram-notify:test"]!.handler("", ctx);
+	assert.equal(requests.length, 1, "explicit tests remain available after a custom run");
+	await startUser(pi, ctx, "");
+	branch = [assistantEntry("next-user-final", "stop", "")];
+	await emit(pi, "agent_settled", ctx);
+	assert.equal(requests.length, 2);
+	assert.match(requests[1]!.text, /Pi 任务已完成/);
+	assert.doesNotMatch(requests[1]!.text, /stale user summary|custom task/);
+	await emit(pi, "ui_prompt_start", ctx, { kind: "input", title: "idle question" });
+	assert.equal(requests.length, 2, "settlement clears waiting eligibility");
+}));
+
+test("settled cancellation suppresses leftover error and stop messages; following user runs still notify", () => withHarness(async ({ pi, requests }) => {
+	let branch: unknown[] = [];
+	const ctx = context(() => branch);
+	await emit(pi, "session_start", ctx);
+	for (const reason of ["error", "stop"]) {
+		await startUser(pi, ctx, "cancelled task");
+		branch = [assistantEntry(`cancelled-${reason}`, reason, "cancelled result")];
+		await emit(pi, "agent_settled", ctx, { aborted: true });
+		await emit(pi, "ui_prompt_start", ctx, { kind: "input", title: "after cancellation" });
+	}
+	assert.equal(requests.length, 0);
+	await startUser(pi, ctx, "next task");
+	branch = [assistantEntry("normal-final", "stop", "")];
+	await emit(pi, "agent_settled", ctx, { aborted: false });
+	assert.equal(requests.length, 1);
+	assert.match(requests[0]!.text, /next task/);
+	assert.doesNotMatch(requests[0]!.text, /cancelled task|cancelled result/);
+	await startUser(pi, ctx);
+	branch = [assistantEntry("normal-error", "error", "terminal failure")];
+	await emit(pi, "agent_settled", ctx, { aborted: false });
+	assert.equal(requests.length, 2);
+	assert.match(requests[1]!.text, /\*状态:\* 错误/);
+}));
+
+test("session transitions clear automatic notification eligibility and prompt summaries", () => withHarness(async ({ pi, requests }) => {
+	const branch = [assistantEntry("same-final", "stop", "")];
+	const first = context(() => branch, "/work/first");
+	const replacement = context(() => branch, "/work/replacement");
+	await emit(pi, "session_start", first);
+	await emit(pi, "agent_settled", first);
+	await emit(pi, "ui_prompt_start", first, { kind: "input" });
+	await startUser(pi, first, "old task");
+	await emit(pi, "session_start", replacement);
+	await emit(pi, "agent_settled", replacement);
+	await emit(pi, "ui_prompt_start", replacement, { kind: "input" });
+	await startUser(pi, replacement, "interrupted by shutdown");
+	await emit(pi, "session_shutdown", replacement);
+	await emit(pi, "agent_settled", replacement);
+	await emit(pi, "ui_prompt_start", replacement, { kind: "input" });
+	assert.equal(requests.length, 0);
+	await emit(pi, "session_start", replacement);
+	await startUser(pi, replacement, "replacement task");
+	await emit(pi, "agent_settled", replacement);
+	assert.equal(requests.length, 1);
+	assert.match(requests[0]!.text, /`\/work\/replacement`/);
+	assert.match(requests[0]!.text, /replacement task/);
+	assert.doesNotMatch(requests[0]!.text, /old task|interrupted by shutdown/);
 }));
 
 test("native prompt starts notify for all blocking extension dialogs, using title or fallback", () => withHarness(async ({ pi, requests }) => {
 	const ctx = context(() => [], "/work/dialog");
 	await emit(pi, "session_start", ctx);
+	await startUser(pi, ctx);
 	for (const kind of ["select", "confirm", "input", "editor", "custom"]) {
 		await emit(pi, "ui_prompt_start", ctx, { reason: "ui_prompt", kind, title: `  ${kind} title  ` });
 		await emit(pi, "ui_prompt_end", ctx, { reason: "ui_prompt" });
@@ -174,6 +267,7 @@ test("native prompt starts notify for all blocking extension dialogs, using titl
 test("tool preflight and legacy rpiv events no longer guess waiting or duplicate native notifications", () => withHarness(async ({ pi, requests }) => {
 	const ctx = context(() => []);
 	await emit(pi, "session_start", ctx);
+	await startUser(pi, ctx);
 	assert.equal(pi.handlers.tool_call, undefined);
 	assert.equal(pi.handlers.tool_result, undefined);
 	await emit(pi, "tool_call", ctx, { toolName: "ask_user_question", input: { question: "may be blocked" } });
@@ -189,12 +283,14 @@ test("no waiting notification without UI or an active session; replacement uses 
 	const ctx = context(() => []);
 	await emit(pi, "ui_prompt_start", ctx, { kind: "input" });
 	await emit(pi, "session_start", ctx);
+	await startUser(pi, ctx);
 	await emit(pi, "ui_prompt_start", { ...ctx, hasUI: false }, { kind: "input" });
 	await emit(pi, "session_shutdown", ctx);
 	await emit(pi, "ui_prompt_start", ctx, { kind: "input" });
 	assert.equal(requests.length, 0);
 	const replacement = context(() => [], "/work/replacement");
 	await emit(pi, "session_start", replacement);
+	await startUser(pi, replacement);
 	await emit(pi, "ui_prompt_start", replacement, { kind: "input", title: "Replacement" });
 	assert.equal(requests.length, 1);
 	assert.match(requests[0]!.text, /`\/work\/replacement`/);
@@ -220,6 +316,7 @@ test("real Pi runner coalesces overlapping dialogs and closing after shutdown se
 	const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 	try {
 		await runner.emit({ type: "session_start", reason: "startup" });
+		await runner.emitBeforeAgentStart({ messageType: "user", prompt: "user task" }, { cwd: agentDir });
 		const ui = runner.getUIContext();
 		const first = ui.confirm("Outer dialog", "First");
 		const overlapping = ui.confirm("Overlapping dialog", "Second");
@@ -236,6 +333,7 @@ test("real Pi runner coalesces overlapping dialogs and closing after shutdown se
 		await flush();
 		assert.equal(requests.length, 1);
 		await runner.emit({ type: "session_start", reason: "reload" });
+		await runner.emitBeforeAgentStart({ messageType: "user", prompt: "next task" }, { cwd: agentDir });
 		const next = ui.confirm("Next span", "Third");
 		await flush();
 		assert.equal(requests.length, 2);

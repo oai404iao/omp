@@ -37,7 +37,7 @@ isolation or fetch an unlocked replacement.
 
 For Pi compatibility changes, read [docs/pi-compatibility.md](docs/pi-compatibility.md).
 Also run `pnpm run ci:pi-matrix` for those changes.
-The current peer floor and exact development target are both Pi 0.99.1.
+The current peer floor and exact development target are both Pi 1.2.0.
 The matrix snapshots tracked working-tree files: stage new source files before
 running it so they are included. Its floor preparation may access the registry.
 Fixture success does not establish real endpoint access or account entitlement.

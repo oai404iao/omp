@@ -26,6 +26,7 @@ function notifyConfigurationStatus(ctx: ExtensionCommandContext): void {
 export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 	let currentCwd = process.cwd();
 	let lastTaskSummary = "";
+	let userRunActive = false;
 	let lastHandledAssistantEntryId: string | undefined;
 	let sessionContext: ExtensionContext | undefined;
 
@@ -45,6 +46,7 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 		sessionContext = ctx;
 		currentCwd = ctx.cwd;
 		lastTaskSummary = "";
+		userRunActive = false;
 		lastHandledAssistantEntryId = undefined;
 	});
 
@@ -52,28 +54,35 @@ export default function telegramNotifyExtension(pi: ExtensionAPI): void {
 		sessionContext = undefined;
 		currentCwd = process.cwd();
 		lastTaskSummary = "";
+		userRunActive = false;
 		lastHandledAssistantEntryId = undefined;
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
 		currentCwd = ctx.cwd;
-		lastTaskSummary = event.prompt;
+		userRunActive = event.messageType === "user";
+		lastTaskSummary = event.messageType === "user" ? event.prompt : "";
 	});
 
 	pi.on("ui_prompt_start", (event, ctx) => {
-		if (!ctx.hasUI) return;
+		if (!userRunActive || !ctx.hasUI) return;
 		send("waiting", event.title?.trim() || "等待用户回复", ctx.cwd);
 	});
 
-	pi.on("agent_settled", (_event, ctx) => {
+	pi.on("agent_settled", (event, ctx) => {
 		currentCwd = ctx.cwd;
+		const notifyRun = userRunActive;
+		const taskSummary = lastTaskSummary;
+		userRunActive = false;
+		lastTaskSummary = "";
+		if (!notifyRun || event.aborted) return;
 		if (isSubagentSession(ctx.sessionManager.getEntries())) return;
 		const branch = ctx.sessionManager.getBranch();
 		const assistantEntry = lastAssistantMessageEntry(branch);
 		if (!assistantEntry || assistantEntry.id === lastHandledAssistantEntryId) return;
 		lastHandledAssistantEntryId = assistantEntry.id;
 
-		const notification = terminalNotificationFromMessage(assistantEntry.message, lastTaskSummary);
+		const notification = terminalNotificationFromMessage(assistantEntry.message, taskSummary);
 		if (notification) send(notification.status, notification.summary);
 	});
 

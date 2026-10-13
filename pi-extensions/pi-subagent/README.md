@@ -4,7 +4,7 @@ Asynchronous, reusable agent trees for [Pi](https://github.com/earendil-works/pi
 The runtime independently adapts **Codex multi-agent v2**, with ordinary
 plaintext JSON tools rather than encrypted arguments.
 
-Tested Pi floor and development target: **0.99.1**.
+Tested Pi floor and development target: **1.2.0**.
 
 ## Install
 
@@ -176,12 +176,20 @@ Report concrete defects and exact file locations.
 - `tools`: comma-separated ordinary-tool ceiling; `none` grants no ordinary
   tools; `$mutation` chooses active `apply_patch`, otherwise active `edit/write`.
   Omit to use the default child policy, narrowed by any inherited parent ceiling.
+  Names are exact: CLI patterns and `+name`/`-name` modifiers are not supported.
+  The whole-field `all` or `*` retains the omitted-list behavior.
 
 The six collaboration controls are runtime tools retained independently of
 ordinary-tool allowlists; the depth/concurrency checks always apply. Nested
 roles cannot widen a parent's ordinary-tool ceiling. Explicit tool names must
 exist and respect extension activation choices. Callable-only codemode/deferred
 tools are not eagerly declared; discoveries on a child's branch survive resume.
+An explicit ceiling excludes unnamed MCP tools, including tools registered late;
+Pi's CLI exception that preserves MCP outside an allowlist does not apply here.
+Exact MCP names must already be registered during child initialization. MCP
+resource tools (`list_mcp_resources`, `list_mcp_resource_templates`,
+`read_mcp_resource`) require their own exact grants; naming an MCP tool does not
+grant resource access. An omitted ceiling retains the default registry policy.
 
 Extensions are not inherited by default. If enabled, project trust is propagated
 to child resource discovery. Pi-subagent itself is filtered out, and built-in

@@ -1,5 +1,5 @@
-export const piFloor = "0.99.1";
-export const piTarget = "0.99.1";
+export const piFloor = "1.2.0";
+export const piTarget = "1.2.0";
 
 // Both lock-validation roles currently use the same version and artifact evidence.
 export const piFloorArtifacts = [];
