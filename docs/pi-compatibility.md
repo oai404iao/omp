@@ -4,15 +4,43 @@
 
 | Role | Version | Policy |
 | --- | --- | --- |
-| Supported-package floor | 0.99.1 | Every public Pi peer is `>=0.99.1` |
-| Development / target | 0.99.1 | Exact root and workspace dev dependencies |
+| Supported-package floor | 1.2.0 | Every public Pi peer is `>=1.2.0` |
+| Development / target | 1.2.0 | Exact root and workspace dev dependencies |
 
-Pi versions before 0.99.1 are no longer supported by public packages. There is
-no older-SDK fallback. SessionManager remains canonical, including append-only
+Pi versions before 1.2.0, including 0.99.1, are no longer supported by public
+packages. There is no older-SDK fallback. SessionManager remains canonical, including append-only
 context edits.
-See the [upstream changelog](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/CHANGELOG.md).
+See the [upstream changelog](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/CHANGELOG.md).
 The floor role regenerates its projected lock; the target uses the committed lock.
 Both roles now use the same version but retain these distinct lock checks.
+The workspace's release-age exceptions name only the seven exact Pi 1.2.0
+artifacts explicitly selected for this migration. Other supply-chain checks
+and locked integrity hashes remain enabled.
+
+## Pi 1.2 lifecycle and tool contracts
+
+- `before_agent_start` handles user and custom-message runs. Shared identity,
+  prompt tracking and mailbox setup cover both; Telegram automatic notifications
+  are user-run-only and clear stale prompt summaries on custom runs.
+- Both notifiers suppress `agent_settled.aborted`, including cancellation during
+  a retry wait whose final assistant still reports `error`. Local notifications
+  retain custom-run completion behavior.
+- Child role tool references remain exact names or `$mutation`, not Pi CLI
+  patterns or `+name`/`-name` modifiers. Explicit ceilings exclude ungranted MCP
+  tools and resource helpers, including late registration and restored declarations;
+  Pi's default MCP allowlist exception cannot widen a role's permissions.
+- Startup cancellation uses Pi's pending abort rather than throwing from a
+  `started` preflight callback. Undelivered task envelopes remain pending for an
+  explicit follow-up; cancellation does not authorize rolling back context receipts.
+- Standard OpenAI Responses sampling merges model defaults, effective clamped
+  thinking-level overrides and request parameters in that order. Structural
+  request fields remain protected. ChatGPT subscription requests omit temperature
+  and output-token caps; Lite retains only merged temperature.
+- Core self-shell renderers apply `outputPad`. Streams use Pi's
+  `AssistantMessageEventStream`, which owns response duration recording.
+- Native image models, tool renderer resolvers and `reachesTools` do not replace
+  the existing image endpoint/persistence, owned tool implementations or child
+  session permissions. Opaque checkpoints and replay signatures remain preserved.
 
 ## Native codemode integration
 
@@ -63,7 +91,8 @@ allowlists are configurable; explicit unsupported responses disable only the
 affected session/endpoint mode. Neither changes credentials or selects fallback
 implementations. See the [configuration guide](../pi-extensions/pi-codex-runtime/reference/configuration.md).
 
-Pi 0.99.1 supplies the descriptors for the exact OpenAI GPT-6 profiles.
+Pi supplies the descriptors for the exact OpenAI GPT-6 profiles; their chat
+metadata is unchanged between the pinned 0.99.1 and 1.2.0 catalogs.
 `openai/gpt-6.1-sol` inherits `openai/gpt-5.6-sol` defaults: Lite, auto WS/SSE,
 prewarm, standalone web/image, custom patch, native Responses compaction and
 Fast availability (priority, 2x cost multiplier), with `view_image` off. This
@@ -74,7 +103,7 @@ These use Standard SSE, local custom `apply_patch` (verified grammar capability)
 and `view_image` (verified image input). Search, image generation, native
 compaction, prewarm and Fast are not enabled by default. Standard Responses
 reasoning clamps delegate to Pi; descriptors, limits and prices are not replaced.
-The [pinned evidence](../pi-extensions/pi-codex-runtime/provenance/pi-openai-0991-gpt6.json)
+The [current pinned evidence](../pi-extensions/pi-codex-runtime/provenance/pi-openai-120-gpt6.json)
 does not establish real account access or Codex Lite entitlement.
 Unknown IDs remain native; legacy `openai-codex` profiles are frozen and no
 `openai-codex/gpt-6.1-sol` profile is added.
@@ -177,7 +206,7 @@ have already passed.
 ## Limits and known issues
 
 The configured matrix covers Node 22.19.0 and 24.x against both lock-validation
-roles at Pi 0.99.1. It does not claim validation of every future Node or Pi
+roles at Pi 1.2.0. It does not claim validation of every future Node or Pi
 release or execution of remote GitHub jobs. Older audit records describe the
 former 0.84.2/0.85.1 floors and remain historical evidence, not current compatibility.
 There are no real account, billable endpoint, interactive UI or publication tests.

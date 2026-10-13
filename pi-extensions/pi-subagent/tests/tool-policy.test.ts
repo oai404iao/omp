@@ -4,6 +4,7 @@ import {
 	MUTATION_TOOL_GROUP,
 	assertSupportedToolReferences,
 	buildToolCeiling,
+	buildToolExclusions,
 	resolveToolPolicy,
 } from "../src/tool-policy.ts";
 
@@ -93,4 +94,21 @@ test("callability cannot bypass registration or denial", () => {
 	const options = { requested: ["restricted"], active: [], callable: ["restricted"] };
 	assert.throws(() => resolveToolPolicy({ ...options, registered: [] }), /not registered/);
 	assert.throws(() => resolveToolPolicy({ ...options, registered: ["restricted"], denied: ["restricted"] }), /unavailable/);
+});
+
+test("exact ceilings exclude implicit MCP tools and independently grant resource tools", () => {
+	assert.deepEqual(buildToolExclusions(undefined), []);
+	assert.deepEqual(buildToolExclusions(["read", "send_message"]), [
+		"mcp__*", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource",
+	]);
+	assert.deepEqual(buildToolExclusions(["mcp__docs__lookup", "read_mcp_resource"]), [
+		"list_mcp_resources", "list_mcp_resource_templates",
+	]);
+});
+
+test("CLI modifiers and patterns cannot weaken an exact role ceiling", () => {
+	for (const selector of ["read*", "mcp__docs__*", "+codemode", "-write"]) {
+		assert.throws(() => buildToolCeiling({ requested: [selector] }), /unsupported selector.*exact tool names/);
+		assert.throws(() => resolveToolPolicy({ requested: [selector], registered: [], active: [] }), /unsupported selector/);
+	}
 });

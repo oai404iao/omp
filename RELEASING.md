@@ -232,8 +232,8 @@ validating the prepared artifact and published identity; it cannot require a
 release-lock entry that is only added after verified bootstrap. See
 [the correction record](docs/audits/codex-bootstrap-latest.md).
 
-Public and supported-package peer ranges currently require Pi 0.99.1 or
-newer; the exact development target is 0.99.1, with both lock-validation
+Public and supported-package peer ranges currently require Pi 1.2.0 or
+newer; the exact development target is 1.2.0, with both lock-validation
 roles checked by `pnpm run ci:pi-matrix`. Actual SDK resolution is checked, not
 inferred from peer declarations. Update the development baseline, peer ranges,
 lockfile, compatibility notes, and tests together. Do not lower the minimum

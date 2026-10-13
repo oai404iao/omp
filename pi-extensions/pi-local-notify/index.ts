@@ -30,7 +30,8 @@ export default function localNotifyExtension(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => { lastNotifiedEntryId = undefined; });
 
 	// agent_end may still be followed by retries, compaction, or queued work.
-	pi.on("agent_settled", (_event, ctx) => {
+	pi.on("agent_settled", (event, ctx) => {
+		if (event.aborted) return;
 		const entry = ctx.sessionManager.getBranch().findLast(
 			(item) => item.type === "message" && item.message.role === "assistant",
 		);

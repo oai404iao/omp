@@ -89,7 +89,10 @@ export async function fixture(t: TestContext, options: {
 		mkdirSync(join(agentDir, "extensions"), { recursive: true });
 		writeFileSync(join(agentDir, "extensions", "test.js"), options.extension);
 	}
-	const modelRuntime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null });
+	const modelRuntime = await ModelRuntime.create({
+		authPath: join(root, "auth.json"), modelsPath: null,
+		modelsStorePath: join(root, "model-store.json"), allowModelNetwork: false,
+	});
 	const requests: Context[] = [];
 	modelRuntime.registerProvider("scripted", {
 		baseUrl: "http://scripted.invalid", apiKey: "test", api: options.modelApi ?? "openai-responses",

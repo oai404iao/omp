@@ -10,8 +10,8 @@ import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
 
 test("explicit floor/target selection resolves the audited Pi baseline", () => {
   assert.equal(piFloor, piTarget);
-  assert.equal(piVersion("floor"), "0.99.1");
-  assert.equal(piVersion("target"), "0.99.1");
+  assert.equal(piVersion("floor"), "1.2.0");
+  assert.equal(piVersion("target"), "1.2.0");
   assert.throws(() => piVersion("latest"), /Unknown Pi baseline/);
   assert.equal(isPiDependency("@earendil-works/pi-ai"), true);
   assert.equal(isPiDependency("typescript-ast"), false);

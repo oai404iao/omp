@@ -2,6 +2,7 @@ export const MUTATION_TOOL_GROUP = "$mutation";
 
 const TOOL_GROUP_PREFIX = "$";
 const MUTATION_TOOL_CANDIDATES = ["apply_patch", "edit", "write"] as const;
+const MCP_RESOURCE_TOOLS = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"] as const;
 
 export interface ToolPolicyOptions {
 	requested: readonly string[] | undefined;
@@ -19,6 +20,10 @@ function unique(values: Iterable<string>): string[] {
 }
 
 export function assertSupportedToolReferences(tools: readonly string[], field = "tools"): void {
+	const selector = tools.find(tool => tool.includes("*") || tool.startsWith("+") || tool.startsWith("-"));
+	if (selector) {
+		throw new Error(`${field} contains unsupported selector "${selector}"; use exact tool names or ${MUTATION_TOOL_GROUP}`);
+	}
 	const unsupported = tools.find(
 		(tool) => tool.startsWith(TOOL_GROUP_PREFIX) && tool !== MUTATION_TOOL_GROUP,
 	);
@@ -58,6 +63,16 @@ export function buildToolCeiling(options: ToolPolicyOptions): string[] | undefin
 		if (!denied.has(tool)) ceiling.push(tool);
 	}
 	return unique(ceiling);
+}
+
+export function buildToolExclusions(ceiling: readonly string[] | undefined): string[] {
+	if (ceiling === undefined) return [];
+	// Pi keeps MCP tools outside a non-MCP allowlist for discovery. Child ceilings
+	// must instead constrain the registry, including tools registered later.
+	return [
+		...(ceiling.some(tool => tool.startsWith("mcp__")) ? [] : ["mcp__*"]),
+		...MCP_RESOURCE_TOOLS.filter(tool => !ceiling.includes(tool)),
+	];
 }
 
 function resolveMutationTools(registered: Set<string>, active: Set<string>): string[] {

@@ -5,12 +5,17 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { root, workspaces } from "./workspaces.mjs";
-import { isPiDependency, piVersion } from "./pi-baselines.mjs";
+import { isPiDependency, piFloor, piVersion } from "./pi-baselines.mjs";
 
 for (const entry of [{ directory: ".", name: "workspace-root" }, ...workspaces]) {
   const directory = join(root, entry.directory);
   const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
   const require = createRequire(join(directory, "package.json"));
+  for (const [dependency, declared] of Object.entries(manifest.peerDependencies ?? {})) {
+    if (isPiDependency(dependency)) {
+      assert.equal(declared, `>=${piFloor}`, `${entry.name}: supported Pi peer floor`);
+    }
+  }
   for (const [dependency, declared] of Object.entries(manifest.devDependencies ?? {})) {
     if (!isPiDependency(dependency)) continue;
     const expected = piVersion();

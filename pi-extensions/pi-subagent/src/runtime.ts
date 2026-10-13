@@ -6,13 +6,13 @@ import {
 	type AgentSessionRuntime, type CreateAgentSessionRuntimeFactory, type ExtensionFactory,
 	type InlineExtension, type ModelRegistry, type SessionManager, type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { buildToolCeiling, resolveToolPolicy } from "./tool-policy.ts";
+import { buildToolCeiling, buildToolExclusions, resolveToolPolicy } from "./tool-policy.ts";
 import { TOOL_NAMES } from "./schemas.ts";
 import type { AgentDescriptor } from "./types.ts";
 import type { SessionView } from "./providers.ts";
 import { ensureCodexLineage } from "./task-attribution.ts";
 
-// Pi 0.99.1 exposes ModelRegistry in extension contexts, while SDK factories
+// Pi exposes ModelRegistry in extension contexts, while SDK factories
 // accept ModelRuntime. Keep this compatibility boundary isolated here.
 export function runtimeFromRegistry(registry: ModelRegistry): ModelRuntime {
 	for (const value of Object.values(registry as unknown as Record<string, unknown>)) {
@@ -22,7 +22,7 @@ export function runtimeFromRegistry(registry: ModelRegistry): ModelRuntime {
 			typeof (value as ModelRuntime).streamSimple === "function" &&
 			typeof (value as ModelRuntime).getAuth === "function") return value as ModelRuntime;
 	}
-	throw new Error("pi-subagent requires Pi 0.99.1's active ModelRuntime");
+	throw new Error("pi-subagent requires Pi 1.2.0's active ModelRuntime");
 }
 
 export function resolveModel(runtime: ModelRuntime, parent: Model<any> | undefined, override?: string): Model<any> {
@@ -119,7 +119,7 @@ export async function createChildRuntime(options: {
 		const created = await createAgentSessionFromServices({
 			services, sessionManager, sessionStartEvent, model,
 			thinkingLevel: descriptor.thinkingLevel, customTools: options.tools,
-			...(ceiling ? { tools: ceiling } : {}),
+			...(ceiling ? { tools: ceiling, excludeTools: buildToolExclusions(ceiling) } : {}),
 		});
 		return {
 			...created, services,

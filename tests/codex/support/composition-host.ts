@@ -9,6 +9,7 @@ import { normalizeContext, type Context } from "@earendil-works/pi-ai";
 export async function withCompositionDirectory(run: (directory: string) => Promise<void>) {
 	const previous = process.env.PI_CODING_AGENT_DIR;
 	const directory = mkdtempSync(join(tmpdir(), "codex-composition-"));
+	mkdirSync(join(directory, ".pi"));
 	process.env.PI_CODING_AGENT_DIR = directory;
 	try { await run(directory); }
 	finally {

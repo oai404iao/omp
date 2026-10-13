@@ -45,6 +45,7 @@ test("apply_patch renderer updates from a throttled filesystem preview", async (
 		argsComplete: false,
 		expanded: false,
 		isError: false,
+		outputPad: 1,
 		invalidate() { resolvePreview?.(); },
 	};
 	const args = { input: `*** Begin Patch
@@ -83,4 +84,26 @@ test("fallback output remains readable without a custom renderer", async () => {
 	assert.match(tool.description, /Codex patch format/);
 	assert.doesNotMatch(tool.description, /input argument/i);
 	assert.doesNotMatch(tool.promptSnippet, /input argument/i);
+});
+
+test("apply_patch self rendering applies outputPad to cached calls and settled results", () => {
+	const tool = createApplyPatchToolDefinition() as Record<string, any>;
+	const theme = { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text,
+		bold: (text: string) => text };
+	const context = { state: {}, lastComponent: undefined, cwd: process.cwd(), executionStarted: true,
+		expanded: false, isError: false, outputPad: 0 };
+	const call = tool.renderCall(undefined, theme, context);
+	assert.equal(call.render(40).find((line: string) => line.trim()), "apply_patch applying".padEnd(40));
+	context.outputPad = 1;
+	assert.equal(tool.renderCall(undefined, theme, context), call);
+	assert.equal(call.render(40).find((line: string) => line.trim()), " apply_patch applying".padEnd(40));
+	const result = { content: [{ type: "text", text: "Done" }], details: { files: [{ kind: "add", path: "test.txt" }] } };
+	for (const outputPad of [0, 1]) {
+		context.outputPad = outputPad;
+		assert.equal(tool.renderResult(result, {}, theme, context).render(40)[0], `${" ".repeat(outputPad)}Applied`.padEnd(40));
+		assert.equal(call.render(40).find((line: string) => line.trim()), `${" ".repeat(outputPad)}apply_patch applied`.padEnd(40));
+		context.isError = true;
+		assert.equal(tool.renderResult(result, {}, theme, context).render(40)[0], `${" ".repeat(outputPad)}Done`.padEnd(40));
+		context.isError = false;
+	}
 });

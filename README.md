@@ -58,7 +58,7 @@ Requirements:
 
 - Node.js 22.19 or newer
 - pnpm 12.4.1 (pinned by the repository)
-- Pi 0.99.1 peer floor and exact development target.
+- Pi 1.2.0 peer floor and exact development target.
   Full CI verifies both lock-validation roles.
 
 ```bash

@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { getCapabilities, Image, Text, type Component } from "@earendil-works/pi-tui";
+import { Box, getCapabilities, Image, Text, type Component } from "@earendil-works/pi-tui";
 
 import { hasConfiguredModelsLoaded } from "@oai404iao/pi-codex-runtime/internal/activation";
 
@@ -70,28 +70,23 @@ function emptyComponent(): Component {
 	return { invalidate() {}, render: () => [] };
 }
 
-function textComponent(text: string): Component {
-	return new Text(text, 0, 0);
+function textComponent(text: string, outputPad: number): Component {
+	return new Text(text, outputPad, 0);
 }
 
 function viewImageResultComponent(result: any, options: any, theme: any, context: any): Component {
 	if (options?.isPartial) return emptyComponent();
 	const details = result?.details as ValidatedImage | undefined;
 	const imagePart = result?.content?.find?.((part: any) => part?.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string");
-	const header = textComponent(viewImageResultText(details, theme));
+	const header = textComponent(viewImageResultText(details, theme), imagePart ? 0 : context.outputPad);
 	if (!imagePart) return header;
 	const imageTheme = { fallbackColor: (text: string) => theme.fg("dim", text) };
 	const maxHeightCells = options?.expanded ? 28 : 18;
 	const image = new Image(imagePart.data, imagePart.mimeType, imageTheme, { maxWidthCells: 80, maxHeightCells, filename: details?.displayPath });
-	return {
-		invalidate() {
-			header.invalidate();
-			image.invalidate();
-		},
-		render(width: number): string[] {
-			return [...header.render(width), ...image.render(width)];
-		},
-	};
+	const component = new Box(context.outputPad, 0);
+	component.addChild(header);
+	component.addChild(image);
+	return component;
 }
 
 function contextModel(ctx: ExtensionContext): ModelLike | undefined {
@@ -196,7 +191,7 @@ function registerCoreTools(pi: ExtensionAPI, broker: ReturnType<typeof ensureCod
 		},
 		renderCall(args: ViewImageInput, theme: any, context: any) {
 			if (context?.executionStarted && !context?.isPartial) return emptyComponent();
-			return textComponent(viewImageCallText(args, theme));
+			return textComponent(viewImageCallText(args, theme), context.outputPad);
 		},
 		renderResult(result: any, options: any, theme: any, context: any) {
 			return viewImageResultComponent(result, options, theme, context);

@@ -2,7 +2,7 @@
 
 See the package guide below for release status; source edits do not publish artifacts.
 
-Peer floor and development target: Pi 0.99.1.
+Peer floor and development target: Pi 1.2.0.
 
 Global `endpoint_config.webSearch` allowlists are matched against Pi's resolved
 provider/base URL. A denied or explicitly rejected mode is disabled, never

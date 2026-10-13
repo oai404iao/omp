@@ -9,7 +9,7 @@ Composition-only entry for Pi's Codex extensions. It loads:
 
 All three use [`pi-codex-runtime`](../pi-codex-runtime/README.md). Compatible
 duplicate installations are deduplicated by the shared broker.
-Peer floor and development target: Pi 0.99.1.
+Peer floor and development target: Pi 1.2.0.
 
 Use Pi's `openai` provider for API keys or ChatGPT OAuth (`/login openai`).
 `openai-codex` remains deprecated compatibility only. No credentials, model

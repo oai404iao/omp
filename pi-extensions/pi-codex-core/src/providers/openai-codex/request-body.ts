@@ -15,6 +15,22 @@ import { loadModelSettings, type ResolvedCodexModelSettings } from "@oai404iao/p
 import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import { requestPrefix } from "./request-prefix.js";
 
+// Sampling overrides must not change the reviewed request envelope or enable
+// provider capabilities independently of the model profile and authentication.
+const PROTECTED_SAMPLING_KEYS = new Set([
+	"model", "input", "instructions", "prompt", "tools", "tool_choice", "parallel_tool_calls",
+	"reasoning", "reasoning_effort", "reasoning_summary", "text", "response_format",
+	"store", "stream", "stream_options", "include", "service_tier",
+	"prompt_cache_key", "prompt_cache_retention", "prompt_cache_options",
+	"metadata", "client_metadata", "previous_response_id", "generate",
+	"background", "conversation", "truncation", "max_tool_calls", "context_management",
+	"max_tokens", "max_completion_tokens",
+	"additional_tools", "compaction_trigger", "safety_identifier", "user",
+	"apiKey", "api_key", "auth", "authorization", "headers", "baseUrl", "base_url",
+	"url", "endpoint", "provider", "transport", "sessionId", "session_id",
+	"__proto__", "constructor", "prototype",
+]);
+
 export function requestBodyToolOptions(settings: ResolvedCodexModelSettings) {
 	return {
 		modelSettings: settings,
@@ -140,8 +156,9 @@ export function buildRequestBody<TApi extends Api>(
 	if (options?.temperature !== undefined && !chatGPTSignIn) {
 		body.temperature = options.temperature;
 	}
-	if (model.api === "openai-responses" && !lite && !chatGPTSignIn
-		&& (model as Model<"openai-responses">).compat?.supportsMaxOutputTokens !== false && options?.maxTokens) {
+	const supportsMaxOutputTokens = model.api === "openai-responses" && !lite && !chatGPTSignIn
+		&& (model as Model<"openai-responses">).compat?.supportsMaxOutputTokens !== false;
+	if (supportsMaxOutputTokens && options?.maxTokens) {
 		body.max_output_tokens = Math.max(16, options.maxTokens);
 	}
 
@@ -155,6 +172,27 @@ export function buildRequestBody<TApi extends Api>(
 			? clampThinkingLevel(model, options.reasoning)
 			: clampCodexThinkingLevel(model as Model<Api>, options.reasoning)
 		: undefined;
+	if (model.api === "openai-responses") {
+		const samplingLevel = clampThinkingLevel(model, clampedReasoning ?? "off");
+		const sampling = {
+			...model.samplingParams,
+			...model.samplingParamsByThinkingLevel?.[samplingLevel],
+			...options?.samplingParams,
+		};
+		for (const [key, value] of Object.entries(sampling)) {
+			if (PROTECTED_SAMPLING_KEYS.has(key) || /^x[-_]codex[-_]/i.test(key)) continue;
+			// Lite has no reviewed contract for additional free-form sampling fields.
+			if (lite && key !== "temperature") continue;
+			if (key === "temperature" && chatGPTSignIn) continue;
+			if (key === "max_output_tokens") {
+				if (supportsMaxOutputTokens && typeof value === "number" && Number.isFinite(value) && value > 0) {
+					body.max_output_tokens = Math.max(16, value);
+				}
+				continue;
+			}
+			body[key] = value;
+		}
+	}
 	const reasoningEffort = clampedReasoning === "off"
 		? model.thinkingLevelMap?.off ?? undefined : clampedReasoning;
 	if (reasoningEffort !== undefined && model.reasoning) {

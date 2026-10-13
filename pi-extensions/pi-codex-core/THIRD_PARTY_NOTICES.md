@@ -11,6 +11,12 @@ OpenAI ChatGPT request-field compatibility was adapted from MIT-licensed Pi
 temperature omission, and standard output-token compatibility/minimum.
 Authentication and refresh use Pi's public interfaces, not copied OAuth code.
 
+Per-thinking-level sampling precedence adapts MIT-licensed Pi 1.2.0,
+revision `06a466935536f8c9bcacb2d5efc0fc021be1bdff`,
+`packages/ai/src/api/simple-options.ts`. The local merge uses Pi's exported
+thinking-level clamp and adds request-envelope, subscription and Lite guards;
+it does not copy the upstream unrestricted payload assignment.
+
 This package owns core code split from `@oai404iao/pi-codex-minimal-tools`.
 Project material remains Copyright (c) 2026 oai404iao. The composite LICENSE
 and verified Apache license/NOTICE snapshots are retained.

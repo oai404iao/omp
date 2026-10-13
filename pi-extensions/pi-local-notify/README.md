@@ -18,12 +18,13 @@ pi install /home/hisir/Dev/local/omp/pi-extensions/pi-local-notify
 ```
 
 重启 Pi 或执行 `/reload`。不要同时加载其他桌面通知扩展，以免重复通知。
-Pi 兼容性下限为 0.99.1，Node.js 下限为 22.19.0。
+Pi 兼容性下限为 1.2.0，Node.js 下限为 22.19.0。
 
 ## 行为
 
 - 使用公开 `agent_settled` 事件，在自动重试、压缩和排队工作结束后通知；
   成功/长度限制显示 `Ready for input`，最终错误显示 `Stopped with an error`。
+  用户消息和扩展自定义消息触发的运行使用相同完成通知规则。
 - 只显示项目目录名和固定状态，不发送提示词、回答或错误详情；通知只交给
   本机终端，不使用网络服务。但目录名仍会显示在桌面通知中。
 - 普通通知使用 Kitty OSC 99 的 `o=unfocused`：终端有焦点时不弹通知。
@@ -32,8 +33,8 @@ Pi 兼容性下限为 0.99.1，Node.js 下限为 22.19.0。
 - 仅在 Kitty 的交互 TUI 且 stdout 为终端时发送。RPC、JSON、print、
   输出重定向、其他终端以及带 `pi-subagent/descriptor` 标记的子会话不发送。
 - 中间 `agent_end`、以 `aborted` 结束的 assistant 消息、工具继续执行和
-  阻塞式问卷/审批弹窗不发送通知。若在重试等待期间取消，Pi 可能保留最后
-  一个 `error` 消息，此时仍会显示错误通知；公开 settled 事件不提供取消原因。
+  阻塞式问卷/审批弹窗不发送通知。`agent_settled.aborted` 为 true 时也不发送，
+  包括取消重试等待后最后一条 assistant 仍是 `error` 的情况。
 - 同一会话内同一个最终 assistant 消息去重。
 
 ### tmux

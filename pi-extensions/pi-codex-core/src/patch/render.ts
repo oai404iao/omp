@@ -160,6 +160,7 @@ export function createApplyPatchRenderers() {
 	return {
 		renderCall(args: { input?: string } | undefined, theme: any, context: any) {
 			const component = getRenderBox(context.state, context.lastComponent);
+			component.setPaddingX(context.outputPad);
 			if (context.executionStarted && !component.executionStarted) {
 				component.executionStarted = true;
 				if (component.previewTimer) clearTimeout(component.previewTimer);
@@ -183,6 +184,7 @@ export function createApplyPatchRenderers() {
 			details?: { files?: Array<{ kind?: string; path?: string; moveTo?: string }> };
 		}, _options: unknown, theme: any, context: any) {
 			const component = getRenderBox(context.state, context.state.callComponent);
+			component.setPaddingX(context.outputPad);
 			component.settledError = Boolean(context.isError);
 			component.settledSuccess = !context.isError;
 			if (!context.isError && Array.isArray(result.details?.files)) {
@@ -194,8 +196,8 @@ export function createApplyPatchRenderers() {
 			}
 			rebuildCall(component, theme, Boolean(context.expanded));
 			const message = result.content?.filter((item) => item.type === "text").map((item) => item.text ?? "").join("\n") ?? "";
-			if (context.isError) return message ? new Text(theme.fg("error", message), 0, 0) : new Container();
-			return new Text(theme.fg("success", context.expanded && message ? message : "Applied"), 0, 0);
+			if (context.isError) return message ? new Text(theme.fg("error", message), context.outputPad, 0) : new Container();
+			return new Text(theme.fg("success", context.expanded && message ? message : "Applied"), context.outputPad, 0);
 		},
 	};
 }

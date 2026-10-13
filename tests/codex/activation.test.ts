@@ -108,6 +108,8 @@ test("extension registers tool renderers before session_start for resumed transc
 		argsComplete: true,
 		expanded: false,
 		isError: false,
+		durationMs: undefined,
+		outputPad: 1,
 		invalidate() {},
 	}).render(120).join("\n");
 	assert.match(resumedCall, /apply_patch applying/);
