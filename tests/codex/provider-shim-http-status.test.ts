@@ -664,7 +664,7 @@ test("Responses Lite emits the reviewed Codex namespace compatibility serializat
 	);
 	assert.equal(
 		sha256(reservedNamespaces[1]),
-		"d9a89f293ef83431230fb34e047a24c63329be0b5150d59c5d7b3047aeec3a7f",
+		"0f50e9ffc4b12ef5a9e24d1d3b95827e03b7534eaf101f13b8fe5246bc7c905b",
 	);
 });
 
@@ -1099,8 +1099,6 @@ test("native compaction supports Responses compaction only", async () => {
 		webSearchEnabled: false,
 		imageOutputDir: ".pi/openai-codex-images",
 		imageModel: "gpt-image-2",
-		viewImage: false,
-		viewImageWorkspaceOnly: false,
 		applyPatchEnabled: true,
 		deferApplyPatchRendering: false,
 	} as const;

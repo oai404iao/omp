@@ -1,7 +1,7 @@
 import type { CodexMinimalToolsSettings } from "./settings.js";
 import { loadModelSettings } from "./model-catalog/runtime.js";
 
-export const PACKAGE_TOOL_NAMES = ["image_generation", "view_image", "apply_patch", "web_search"] as const;
+export const PACKAGE_TOOL_NAMES = ["image_generation", "apply_patch", "web_search"] as const;
 export type PackageToolName = (typeof PACKAGE_TOOL_NAMES)[number];
 export const NATIVE_MUTATION_TOOL_NAMES = ["edit", "write"] as const;
 
@@ -42,7 +42,6 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	if (!settings.enabled) {
 		return {
 			image_generation: { enabled: false, reason: "package disabled" },
-			view_image: { enabled: false, reason: "package disabled" },
 			apply_patch: { enabled: false, reason: "package disabled" },
 			web_search: { enabled: false, reason: "package disabled" },
 		};
@@ -53,7 +52,6 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	if (!profile || !profile.enabled) {
 		return {
 			image_generation: { enabled: false, reason: "model has no enabled model catalog profile" },
-			view_image: { enabled: false, reason: "model has no enabled model catalog profile" },
 			apply_patch: { enabled: false, reason: "model has no enabled model catalog profile" },
 			web_search: { enabled: false, reason: "model has no enabled model catalog profile" },
 		};
@@ -70,9 +68,6 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 			: imageGeneration === "standalone" && imageInput
 				? { enabled: true, reason: "model profile enables standalone image generation" }
 				: { enabled: false, reason: imageGeneration === false ? "image_generation disabled by model profile" : "model does not advertise image input" },
-		view_image: profile.tools.viewImage && imageInput
-			? { enabled: true, reason: "model profile enables view_image and model accepts image input" }
-			: { enabled: false, reason: !profile.tools.viewImage ? "view_image disabled by model profile" : "model does not advertise image input" },
 		apply_patch: profile.tools.applyPatch === "custom" && !providerShimActive
 			? {
 				enabled: false,

@@ -178,7 +178,7 @@ claim of a stable, OpenAI-supported public API.
 | `web.run` description | `codex-rs/ext/web-search/web_run_description.md`; its local description is byte-for-byte identical |
 | `web.run` parameters | `codex-rs/ext/web-search/src/schema.rs` and `codex-rs/codex-api/src/search.rs` |
 | `image_gen.imagegen` namespace/name/function construction | `codex-rs/ext/image-generation/src/lib.rs`, `codex-rs/ext/image-generation/src/tool.rs`, and `codex-rs/tools/src/responses_api.rs` |
-| `image_gen.imagegen` description | `codex-rs/ext/image-generation/imagegen_description.md`; its local description is byte-for-byte identical |
+| `image_gen.imagegen` description | `codex-rs/ext/image-generation/imagegen_description.md`; local image inspection guidance uses Pi's native `read` tool |
 | `image_gen.imagegen` parameters | `ImagegenArgs` and the schema construction in `codex-rs/ext/image-generation/src/tool.rs` |
 | Responses Lite placement | `codex-rs/tools/src/tool_spec.rs` and `codex-rs/core/src/client.rs` |
 
@@ -187,6 +187,10 @@ The package-published
 upstream blob ID, SHA-256, raw source URL, and local canonical-JSON
 fingerprint. The pinned Cargo manifest and lockfile are included because the
 upstream parameter declarations are generated from Rust types.
+
+The current image description and namespace fingerprints are in
+`provenance/image-generation-native-read.json`; its original source evidence
+remains unchanged in `provenance/openai-codex-5a314017-image-generation.json`.
 
 ## Standalone web search
 

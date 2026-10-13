@@ -23,8 +23,7 @@
         "parallelCalls": true,
         "applyPatch": "custom",
         "webSearch": false,
-        "imageGeneration": false,
-        "viewImage": true
+        "imageGeneration": false
       },
       "compaction": "pi",
       "fast": false
@@ -61,8 +60,7 @@
           "implementation": "standalone",
           "contentTypes": ["text", "image"]
         },
-        "imageGeneration": "standalone",
-        "viewImage": false
+        "imageGeneration": "standalone"
       },
       "compaction": "responses",
       "fast": {
@@ -102,8 +100,7 @@
           "implementation": "hosted",
           "contentTypes": ["text", "image"]
         },
-        "imageGeneration": "standalone",
-        "viewImage": false
+        "imageGeneration": "standalone"
       },
       "compaction": "responses",
       "fast": {
@@ -178,8 +175,7 @@
         "parallelCalls": true,
         "applyPatch": false,
         "webSearch": false,
-        "imageGeneration": "standalone",
-        "viewImage": false
+        "imageGeneration": "standalone"
       },
       "compaction": "pi",
       "fast": false
@@ -221,8 +217,7 @@
           "implementation": "standalone",
           "contentTypes": ["text", "image"]
         },
-        "imageGeneration": "standalone",
-        "viewImage": false
+        "imageGeneration": "standalone"
       },
       "compaction": "responses",
       "fast": false

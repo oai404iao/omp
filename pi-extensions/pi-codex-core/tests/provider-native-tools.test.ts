@@ -29,7 +29,7 @@ test("Codex reserved namespace definitions retain the reviewed Apache compatibil
 	));
 	const webProvenance = provenance.localCompatibilitySerialization.namespaces.web_search;
 	const imageProvenance = JSON.parse(readFileSync(
-		new URL("../../pi-codex-runtime/provenance/openai-codex-5a314017-image-generation.json", import.meta.url),
+		new URL("../../pi-codex-runtime/provenance/image-generation-native-read.json", import.meta.url),
 		"utf8",
 	)).localCompatibilitySerialization.namespaces.image_generation;
 	assert.equal(
@@ -38,7 +38,7 @@ test("Codex reserved namespace definitions retain the reviewed Apache compatibil
 	);
 	assert.equal(
 		sha256(image),
-		"d9a89f293ef83431230fb34e047a24c63329be0b5150d59c5d7b3047aeec3a7f",
+		"0f50e9ffc4b12ef5a9e24d1d3b95827e03b7534eaf101f13b8fe5246bc7c905b",
 	);
 	assert.equal(
 		createHash("sha256").update(web.tools[0]!.description).digest("hex"),
@@ -46,7 +46,7 @@ test("Codex reserved namespace definitions retain the reviewed Apache compatibil
 	);
 	assert.equal(
 		createHash("sha256").update(image.tools[0]!.description).digest("hex"),
-		"ee89dd3b9df94cc8b42b14e48714c68d11d4cd66113853b42ccf9cbd7858af61",
+		"8e9fa72172fcbbf8e4cb80a7c87d6099805e38e75df686699c232b01e2a05853",
 	);
 	assert.equal(sha256(web), webProvenance.canonicalJsonSha256);
 	assert.equal(sha256(web.tools[0]!.parameters), webProvenance.parameters.canonicalJsonSha256);

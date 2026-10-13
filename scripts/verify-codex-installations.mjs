@@ -122,15 +122,15 @@ try {
   }
   const matrix = [
     ["runtime", ["pi-codex-runtime"], [], false],
-    ["core", ["pi-codex-core"], ["apply_patch", "view_image"], true],
+    ["core", ["pi-codex-core"], ["apply_patch"], true],
     ["web", ["pi-codex-web-search"], ["web_search"], false],
     ["image", ["pi-codex-imagegen"], ["image_generation"], false],
-    ["core-web", ["pi-codex-core", "pi-codex-web-search"], ["apply_patch", "view_image", "web_search"], true],
-    ["core-image", ["pi-codex-core", "pi-codex-imagegen"], ["apply_patch", "view_image", "image_generation"], true],
+    ["core-web", ["pi-codex-core", "pi-codex-web-search"], ["apply_patch", "web_search"], true],
+    ["core-image", ["pi-codex-core", "pi-codex-imagegen"], ["apply_patch", "image_generation"], true],
     ["web-image", ["pi-codex-web-search", "pi-codex-imagegen"], ["web_search", "image_generation"], false],
-    ["all", ["pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "view_image", "web_search", "image_generation"], true],
-    ["bundle", ["pi-codex-minimal-tools"], ["apply_patch", "view_image", "web_search", "image_generation"], true],
-    ["duplicate", ["pi-codex-minimal-tools", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "view_image", "web_search", "image_generation"], true],
+    ["all", ["pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "web_search", "image_generation"], true],
+    ["bundle", ["pi-codex-minimal-tools"], ["apply_patch", "web_search", "image_generation"], true],
+    ["duplicate", ["pi-codex-minimal-tools", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "web_search", "image_generation"], true],
   ];
   for (const [label, requested, tools, core] of matrix) {
     const path = install(label, requested);
@@ -142,7 +142,7 @@ try {
   // Physically separate runtime copies, not merely different API wrappers.
   const bundle = join(consumers.get("bundle"), "node_modules", prefix + "pi-codex-minimal-tools/index.ts");
   const web = join(consumers.get("web"), "node_modules", prefix + "pi-codex-web-search/index.ts");
-  const allTools = ["apply_patch", "view_image", "web_search", "image_generation"];
+  const allTools = ["apply_patch", "web_search", "image_generation"];
   runProbes("bundle", [[bundle, web], [web, bundle]], allTools, true);
   console.log(`✓ Codex: ${checks} production tarball/Pi ${piVersion()} combinations; frozen offline pnpm install; no external links or capability leakage`);
 } finally {

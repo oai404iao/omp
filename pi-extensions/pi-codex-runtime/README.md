@@ -38,12 +38,14 @@ Configuration paths remain
 This package ships the canonical schemas and default catalog.
 `openai/gpt-6.1-sol` inherits `openai/gpt-5.6-sol`: Lite, auto WS/SSE, prewarm,
 standalone web/image, custom patch, native compaction and Fast availability
-(priority, 2x cost multiplier), with `view_image` off. This compatibility
+(priority, 2x cost multiplier). This compatibility
 configuration is not evidence of endpoint access or verified Fast pricing.
 Exact Standard profiles remain for `openai/gpt-6-astra`, `gpt-6-sol` and
 `gpt-6-luna`, independently of the frozen legacy Lite profiles. Their default
-tools are local custom `apply_patch` and `view_image`; remote tool/compaction
+tool is local custom `apply_patch`; remote tool/compaction
 capabilities are not inferred from model names.
+Pi's native `read` tool handles local image inspection; model image input and
+standalone image generation remain independent capabilities.
 See `provenance/pi-openai-120-gpt6.json` for the current pinned catalog and limits;
 the original `pi-openai-0991-gpt6.json` evidence remains unchanged.
 The global

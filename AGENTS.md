@@ -47,7 +47,7 @@ Live model tests are separate from CI; do not run them without explicit authoriz
 
 - `pi-codex-runtime` owns shared settings, catalog, identity, broker and replay
   contracts. It is a library, not a Pi extension.
-- `pi-codex-core` owns Responses transport, compaction, patch and image viewing.
+- `pi-codex-core` owns Responses transport, compaction and patch.
   `pi-codex-web-search` and `pi-codex-imagegen` own their respective capabilities.
   Each capability may depend on runtime, not another capability or the bundle.
 - `pi-codex-minimal-tools` is pure composition plus the public

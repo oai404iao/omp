@@ -13,7 +13,7 @@ All package names below have the `@oai404iao/` scope.
 | Package | Installs / owns | Workspace dependencies |
 | --- | --- | --- |
 | `pi-codex-runtime` | Library: auth/headers, identity, catalog/settings, replay contracts, broker | None; no `pi.extensions` |
-| `pi-codex-core` | Responses SSE/WS, prewarm, compaction, apply_patch/view_image, diagnostics and fast commands | runtime |
+| `pi-codex-core` | Responses SSE/WS, prewarm, compaction, apply_patch, diagnostics and fast commands | runtime |
 | `pi-codex-web-search` | web_search, standalone alpha/search, activity/citation capture | runtime only |
 | `pi-codex-imagegen` | image_generation, standalone Images API, background jobs, persistence/preview | runtime only |
 | `pi-codex-minimal-tools` | Pure default composition and public `subagent-inline` re-export | runtime + all three capabilities |
@@ -45,16 +45,18 @@ shim without replacing provider authentication, streams, or models.
 
 `openai/gpt-6.1-sol` explicitly inherits `openai/gpt-5.6-sol` defaults: Lite,
 auto WS/SSE, prewarm, standalone web/image, custom patch, native Responses
-compaction and Fast availability (priority, 2x cost multiplier); `view_image`
-is off. This is a compatibility policy, not verified endpoint access or pricing.
+compaction and Fast availability (priority, 2x cost multiplier).
+This is a compatibility policy, not verified endpoint access or pricing.
 Pi still owns the model's descriptor, authentication and resolved endpoint.
 
 The separate `openai/gpt-6-astra`, `gpt-6-sol` and
 `gpt-6-luna` profiles follow Pi 0.99.1 Standard Responses descriptors. They
-default to SSE, local custom patch and image viewing; remote tools, native
+default to SSE and local custom patch; remote tools, native
 compaction, prewarm and Fast remain off. Their inheritance stays entirely
 within `openai`; no legacy Lite behavior, account entitlement or billing
 multiplier is inferred from similar names.
+
+Local image inspection uses Pi's native `read` tool.
 
 All combinations read the same existing configuration:
 

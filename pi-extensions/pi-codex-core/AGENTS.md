@@ -4,7 +4,7 @@ Provider/transport capability. Does not install web or image generation.
 
 ## Ownership
 
-- `src/index.ts`: core claims, patch/view-image registration and diagnostics.
+- `src/index.ts`: core claims, patch registration and diagnostics.
 - `src/extension/provider-runtime.ts`: provider/session lifecycle; optional effects.
 - `src/extension/startup-prewarm.ts`: cancellation, auth waiters and generation reset.
 - `src/providers/openai-codex/`: request bodies, SSE/WS, continuation, retry, usage.
@@ -25,8 +25,7 @@ Provider/transport capability. Does not install web or image generation.
    grammar asset and transport/apply-patch references under `reference/`.
 6. Patch `prepareLoadout` hides native edit/write declarations only for the
    request; never remove those tools from Pi's active set or saved transcript.
-   Preserve codemode callable access and tree/resume behavior. `view_image`
-   stays model-only so its image reaches the model directly.
+   Preserve codemode callable access and tree/resume behavior.
 
 ## Workflow and verification
 

@@ -96,7 +96,6 @@ test("persisted legacy globals remain explicit overrides of new OpenAI profiles"
 	const settings = loadModelSettings({ provider: "openai", api: "openai-responses", id: "gpt-6.1-sol" });
 	assert(settings.modelProfile?.sources.includes("legacy"));
 	assert.equal(settings.applyPatchEnabled, false);
-	assert.equal(settings.viewImage, false);
 	assert.equal(settings.openaiTransport, "sse");
 	assert.equal(settings.compactionMode, "pi");
 	assert.equal(settings.webSearchImplementation, undefined);

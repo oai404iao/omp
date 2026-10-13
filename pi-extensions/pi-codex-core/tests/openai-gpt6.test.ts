@@ -12,7 +12,7 @@ import { createProviderHarness } from "./support/openai-codex-test-support.js";
 import { DEFAULT_SETTINGS } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
-	test(`${id}: Pi-evidenced Standard profile with only local patch/image-view capabilities`, () =>
+	test(`${id}: Pi-evidenced Standard profile with only local patch capability`, () =>
 		withCodexSettings({}, async cwd => {
 			const model: Model<"openai-responses"> | undefined = getBuiltinModels("openai").find(model => model.id === id);
 			assert(model, "Pi must supply the descriptor");
@@ -37,7 +37,6 @@ for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 			assert.equal(settings.imageGenerationImplementation, undefined);
 			const capabilities = computeToolCapabilities(model, DEFAULT_SETTINGS);
 			assert.equal(capabilities.apply_patch.enabled, true);
-			assert.equal(capabilities.view_image.enabled, true);
 			assert.equal(capabilities.web_search.enabled, false);
 			assert.equal(capabilities.image_generation.enabled, false);
 			for (const reasoning of [undefined, "minimal", "low", "max"] as const) {
@@ -115,7 +114,6 @@ test("GPT-6.1 Sol defaults match the GPT-5.6 Sol Lite capabilities without repla
 		assert.equal(settings.modelProfile?.effective.fast && settings.modelProfile.effective.fast.costMultiplier, 2);
 		const capabilities = computeToolCapabilities(model, DEFAULT_SETTINGS);
 		assert.equal(capabilities.apply_patch.enabled, true);
-		assert.equal(capabilities.view_image.enabled, false);
 		assert.equal(capabilities.web_search.enabled, true);
 		assert.equal(capabilities.image_generation.enabled, true);
 		assert.equal(settings.webSearchImplementation, "standalone");

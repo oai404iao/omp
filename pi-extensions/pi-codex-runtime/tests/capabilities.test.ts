@@ -26,7 +26,7 @@ const openai55 = { provider: "openai", id: "gpt-5.5", input: ["text", "image"] }
 test("tool capabilities come from the exact model profile and input modalities", () => withAgentDir(() => {
 	const codex = computeToolCapabilities(codex55, DEFAULT_SETTINGS);
 	assert.equal(codex.image_generation.enabled, true);
-	assert.equal(codex.view_image.enabled, false);
+	assert.deepEqual(Object.keys(codex), ["image_generation", "apply_patch", "web_search"]);
 	assert.equal(codex.apply_patch.enabled, true);
 	assert.equal(codex.web_search.enabled, true);
 
@@ -143,12 +143,12 @@ test("active tool sync follows the model profile and preserves unrelated tools",
 }));
 
 test("unsupported models remove only package tools", () => withAgentDir(() => {
-	const current = ["read", "edit", "write", "image_generation", "view_image", "apply_patch", "web_search"];
+	const current = ["read", "edit", "write", "image_generation", "apply_patch", "web_search"];
 	const next = computeNextActiveTools(
 		current,
 		{ provider: "anthropic", id: "claude", input: ["text"] },
 		DEFAULT_SETTINGS,
 	);
 	assert.deepEqual(next.activeTools, ["read", "edit", "write"]);
-	assert.deepEqual(next.removed.sort(), ["apply_patch", "image_generation", "view_image", "web_search"].sort());
+	assert.deepEqual(next.removed.sort(), ["apply_patch", "image_generation", "web_search"].sort());
 }));
