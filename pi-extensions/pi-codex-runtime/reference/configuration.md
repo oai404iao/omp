@@ -108,7 +108,6 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
   "imageGeneration": true,
   "imageOutputDir": ".pi/openai-codex-images",
   "imageModel": "gpt-image-2",
-  "viewImageWorkspaceOnly": false,
   "deferApplyPatchRendering": false
 }
 ```
@@ -123,7 +122,6 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `imageGeneration` | Global master switch. Set `false` to omit image tools, `/image-gen`, presentation and standalone requests without changing other model behavior. |
 | `imageOutputDir` | Generated-image output directory. Relative paths resolve from the workspace root. |
 | `imageModel` | Image model used by standalone generation and edits. |
-| `viewImageWorkspaceOnly` | Restrict `view_image` to the workspace. |
 | `deferApplyPatchRendering` | Use Pi's fallback renderer instead of the streaming patch preview. |
 
 The older model-level keys remain readable for one migration version, but are
@@ -259,8 +257,7 @@ the profile enables them.
       "implementation": "hosted",
       "contentTypes": ["text", "image"]
     },
-    "imageGeneration": "standalone",
-    "viewImage": false
+    "imageGeneration": "standalone"
   },
   "compaction": "responses",
   "fast": {
@@ -419,7 +416,7 @@ Astra profile updated from `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`.
 | `o4-mini` | Standard SSE | off | off | off | Pi |
 
 `openai/gpt-6.1-sol` explicitly inherits `openai/gpt-5.6-sol`, including prewarm,
-disabled parallel calls, `view_image: false` and Fast availability with priority
+disabled parallel calls and Fast availability with priority
 service tier and a 2x cost multiplier. This is a configured compatibility
 default, not upstream evidence of Lite entitlement, endpoint access or pricing.
 Pi still supplies its descriptor and authentication. Other GPT-6 profiles and
@@ -428,9 +425,9 @@ legacy `openai-codex` profiles are unchanged.
 The pre-Astra entries include equivalent `openai/...` and
 `openai-codex/...` IDs; the latter switch only the endpoint/auth shape to
 `codex`. The newer OpenAI GPT-6 Standard profiles are independent of legacy
-Lite profiles. They enable local `view_image` based on Pi's image-input metadata
-and custom `apply_patch` based on its explicit grammar-tool capability. They
-do not enable hosted/standalone endpoints, WebSocket, native compaction or Fast.
+Lite profiles. They enable custom `apply_patch` based on Pi's explicit
+grammar-tool capability. They do not enable hosted/standalone endpoints,
+WebSocket, native compaction or Fast.
 See `provenance/pi-openai-0991-gpt6.json`; Pi owns the descriptors and pricing.
 
 ### Migrating from legacy Codex profiles
@@ -496,6 +493,8 @@ default and show deduplicated source hosts; expand the tool row to inspect the
 raw result text.
 
 ## Image Generation
+
+Pi's native `read` tool handles local image inspection for image-capable models.
 
 Set global `config.json.imageGeneration` to `false` to disable the entire
 generation capability. Per-model `tools.imageGeneration:false` disables only
@@ -604,7 +603,6 @@ model override for compatibility:
 | `requestProfile.patchTransport` | `tools.applyPatch` |
 | `apiKeyMode` | Deprecated; ignored outside `openai-codex`. Configure authentication and `api`/`baseUrl` in Pi instead. |
 | `webSearchEnabled` | `tools.webSearch` |
-| `viewImage` | `tools.viewImage` |
 | `applyPatchEnabled` | `tools.applyPatch` |
 | `additionalModelIds` | one exact user catalog entry per model |
 

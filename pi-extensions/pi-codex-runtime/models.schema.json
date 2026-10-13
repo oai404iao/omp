@@ -191,10 +191,6 @@
                 "Do not expose an image-generation tool.",
                 "Expose image_gen.imagegen and call the standalone Codex Images endpoints."
               ]
-            },
-            "viewImage": {
-              "type": "boolean",
-              "description": "Expose the local view_image tool when the Pi model accepts image input."
             }
           }
         },

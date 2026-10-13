@@ -151,7 +151,7 @@ test("standalone image editing can use recent conversation images", async () => 
 			message: {
 				role: "toolResult",
 				toolCallId: "call-1",
-				toolName: "view_image",
+				toolName: "read",
 				content: [{ type: "image", data: imageTwo, mimeType: "image/webp" }],
 				isError: false,
 				timestamp: Date.now(),

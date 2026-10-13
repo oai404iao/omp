@@ -61,7 +61,6 @@ function resolveModelSettings(
 			requestDiagnostics: requestConfigurationDiagnostics(model, baseSettings),
 			imageGeneration: false,
 			webSearchEnabled: false,
-			viewImage: false,
 			applyPatchEnabled: false,
 		};
 	}
@@ -108,7 +107,6 @@ function resolveModelSettings(
 		requestDiagnostics: requestConfigurationDiagnostics(model, baseSettings, effective.responses.endpoint),
 		imageGeneration: imageGenerationImplementation !== undefined,
 		webSearchEnabled: webSearchImplementation !== undefined,
-		viewImage: packageEnabled && effective.tools.viewImage,
 		applyPatchEnabled: packageEnabled && effective.tools.applyPatch !== false,
 		modelProfile,
 		modelProfileHash: modelProfile.profileHash,

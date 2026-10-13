@@ -76,7 +76,7 @@ async function withNativeCodemode(
 		const { session } = await createAgentSession({
 			cwd, agentDir: cwd, modelRuntime, model: modelRuntime.getModel("openai", "gpt-5.6-sol"),
 			resourceLoader: loader, sessionManager: SessionManager.inMemory(cwd), settingsManager,
-			...(!autoEnable ? { tools: ["read", "codemode", "apply_patch", "view_image", "web_search", "image_generation"] } : {}),
+			...(!autoEnable ? { tools: ["read", "codemode", "apply_patch", "web_search", "image_generation"] } : {}),
 		});
 		try {
 			if (!autoEnable) session.setActiveToolsByName(["read", "codemode"]);
@@ -106,8 +106,6 @@ for (const mode of ["on", "only"] as const) for (const autoEnable of [true, fals
 					assert.equal(session.getCallableToolNames().includes(name), autoEnable && exposure === "direct", `${id}/${name}`);
 				}
 				if (!autoEnable) assert.deepEqual(session.getActiveToolNames(), ["read", "codemode"]);
-				assert.equal(session.getToolDefinition("view_image")?.exposure, "model-only");
-				assert(!session.getCallableToolNames().includes("view_image"));
 				const result = await runCode(session, `return ALL_TOOLS.map(tool => tool.name).sort();`);
 				for (const [name, exposure] of [["web_search", webExposure], ["image_generation", imageExposure]] as const) {
 					const expectedActive = autoEnable && (name !== "web_search" || id !== "gpt-4.1");
@@ -146,9 +144,9 @@ for (const mode of ["on", "only"] as const) {
 		}));
 }
 
-test("native codemode receives structured patch/search/image data and forwards images explicitly", () =>
+test("native codemode receives structured patch/search/image data and reads saved images with native read", () =>
 	withNativeCodemode({}, async (session, cwd) => {
-		const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jC1sAAAAASUVORK5CYII=";
+		const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR4AQEFAPr/AP8AAP8FAAH/+lyI0QAAAABJRU5ErkJggg==";
 		const originalFetch = globalThis.fetch;
 		const requests: string[] = [];
 		globalThis.fetch = async input => {
@@ -170,15 +168,18 @@ test("native codemode receives structured patch/search/image data and forwards i
 				if (search.results[0].ref_id !== "ref1") throw new Error("invalid search data");
 				if (!generated.path || !generated.latestPath) throw new Error("missing image paths");
 				image(generated.image);
+				const saved = await tools.read({ path: generated.path });
+				if (saved.type !== "image" || saved.mimeType !== "image/png") throw new Error("invalid native read image: " + JSON.stringify(saved));
+				image(saved);
 				return { summary: patch.summary, output: search.output, path: generated.path };
 			`);
 			assert.equal(readFileSync(join(cwd, "nested.txt"), "utf8"), "hello\n");
 			assert.match(text, /Fixture result \[ref1\]/);
-			assert(result.content.some(block => block.type === "image" && block.data === png));
+			assert.equal(result.content.filter(block => block.type === "image" && block.data === png).length, 2);
 			assert.equal(readFileSync(join(cwd, ".pi", "openai-codex-images", "latest.png")).toString("base64"), png);
 			assert.equal(requests.length, 2);
 			assert.equal(session.messages.filter(message => message.role === "toolResult").length, 1);
-			assert.deepEqual(result.nestedCalls?.calls.map(call => call.name), ["apply_patch", "web_search", "image_generation"]);
+			assert.deepEqual(result.nestedCalls?.calls.map(call => call.name), ["apply_patch", "web_search", "image_generation", "read"]);
 		} finally { globalThis.fetch = originalFetch; }
 	}));
 

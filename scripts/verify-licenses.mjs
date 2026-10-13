@@ -309,7 +309,18 @@ const imageFingerprint = imageProvenance.localCompatibilitySerialization?.namesp
 check(imageFingerprint?.canonicalJsonSha256 === "d9a89f293ef83431230fb34e047a24c63329be0b5150d59c5d7b3047aeec3a7f"
   && imageFingerprint?.parameters?.canonicalJsonSha256 === "8fb5fafe0933c00b7c0e3c1ab0b39fbecec0c71260eff733d438169344f7d23b"
   && imageFingerprint?.description?.sha256 === "ee89dd3b9df94cc8b42b14e48714c68d11d4cd66113853b42ccf9cbd7858af61",
-  "image namespace must retain its current compatibility fingerprint");
+  "image namespace must retain its original compatibility fingerprint");
+
+const imageReadProvenance = JSON.parse(text(
+  `${codexDirectory}/provenance/image-generation-native-read.json`,
+));
+const imageReadFingerprint = imageReadProvenance.localCompatibilitySerialization?.namespaces?.image_generation;
+check(imageReadProvenance.upstreamEvidence === "openai-codex-5a314017-image-generation.json"
+  && imageReadFingerprint?.canonicalJsonSha256 === "0f50e9ffc4b12ef5a9e24d1d3b95827e03b7534eaf101f13b8fe5246bc7c905b"
+  && imageReadFingerprint?.parameters?.canonicalJsonSha256 === imageFingerprint?.parameters?.canonicalJsonSha256
+  && imageReadFingerprint?.description?.sha256 === "8e9fa72172fcbbf8e4cb80a7c87d6099805e38e75df686699c232b01e2a05853"
+  && imageReadFingerprint?.description?.relationship === "modified local inspection guidance",
+  "image namespace native-read adaptation must retain reviewed fingerprints and upstream evidence");
 
 const subagentNotice = text("pi-extensions/pi-subagent/THIRD_PARTY_NOTICES.md");
 const subagentProvenance = JSON.parse(

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "upstreamEvidence": "openai-codex-5a314017-image-generation.json",
+  "localCompatibilitySerialization": {
+    "path": "src/reserved-tools/image-generation.ts",
+    "classification": "modified TypeScript compatibility serialization",
+    "adaptation": "Local image inspection guidance uses Pi's native read tool.",
+    "canonicalization": "SHA-256 of recursively lexicographically sorted JSON object keys; arrays retain their order and no whitespace is emitted.",
+    "namespaces": {
+      "image_generation": {
+        "namespace": "image_gen",
+        "function": "imagegen",
+        "description": {
+          "sourcePath": "codex-rs/ext/image-generation/imagegen_description.md",
+          "relationship": "modified local inspection guidance",
+          "sha256": "8e9fa72172fcbbf8e4cb80a7c87d6099805e38e75df686699c232b01e2a05853"
+        },
+        "parameters": {
+          "relationship": "unchanged compatibility serialization",
+          "canonicalJsonSha256": "8fb5fafe0933c00b7c0e3c1ab0b39fbecec0c71260eff733d438169344f7d23b"
+        },
+        "canonicalJsonSha256": "0f50e9ffc4b12ef5a9e24d1d3b95827e03b7534eaf101f13b8fe5246bc7c905b"
+      }
+    }
+  }
+}

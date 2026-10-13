@@ -50,8 +50,8 @@ and locked integrity hashes remain enabled.
   direct fallback does not change a hosted profile's exposure.
 - Exposure follows model selection without replacing foreign tools or
   overriding `autoEnable: false`. Hosted placeholder results are errors.
-- `apply_patch` stays callable while active. `view_image` stays model-only to
-  deliver image content directly rather than an empty script value.
+- `apply_patch` stays callable while active. Local image inspection uses Pi's
+  native `read` tool.
 - Every subagent tool, including the child's `report`, is model-only.
   `wait_agent` acknowledges completion through a separately persisted tool
   result; a nested-call summary cannot satisfy that contract.
@@ -95,12 +95,12 @@ Pi supplies the descriptors for the exact OpenAI GPT-6 profiles; their chat
 metadata is unchanged between the pinned 0.99.1 and 1.2.0 catalogs.
 `openai/gpt-6.1-sol` inherits `openai/gpt-5.6-sol` defaults: Lite, auto WS/SSE,
 prewarm, standalone web/image, custom patch, native Responses compaction and
-Fast availability (priority, 2x cost multiplier), with `view_image` off. This
+Fast availability (priority, 2x cost multiplier). This
 compatibility policy is not evidence of endpoint access or verified Fast pricing.
 The other profiles remain `openai/gpt-6-astra`, `openai/gpt-6-sol` and
 `openai/gpt-6-luna`.
-These use Standard SSE, local custom `apply_patch` (verified grammar capability)
-and `view_image` (verified image input). Search, image generation, native
+These use Standard SSE and local custom `apply_patch` (verified grammar capability).
+Search, image generation, native
 compaction, prewarm and Fast are not enabled by default. Standard Responses
 reasoning clamps delegate to Pi; descriptors, limits and prices are not replaced.
 The [current pinned evidence](../pi-extensions/pi-codex-runtime/provenance/pi-openai-120-gpt6.json)

@@ -12,7 +12,6 @@ allowlists and explicit session-local rejections are shared through runtime;
 neither selects alternate implementations nor changes Pi authentication.
 
 `apply_patch` remains callable through native codemode while active.
-`view_image` is model-only so image content reaches the model directly.
 Scripts receive patch data as `{ summary, files }`; failures reject rather than
 returning success-shaped data. Normal model-facing text and rendering are unchanged.
 For `tool_result` hooks, Pi passes retained structured data through even with
@@ -28,7 +27,8 @@ on the original model, or navigate before the checkpoint. Other third-party
 `prepareLoadout` implementations are not covered by this built-in-name guard.
 
 Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
-`apply_patch` and `view_image`. Keeps the existing diagnostic/fast command names,
+`apply_patch`. Local image inspection uses Pi's native `read` tool.
+Keeps the existing diagnostic/fast command names,
 including `/codex-minimal-tools` and `/fast`. Unknown models remain native.
 `config.json.fastMode` supplies the default for new sessions. `/fast [on|off|status]`
 changes only the current session and never rewrites that default. Selections
@@ -40,10 +40,10 @@ Pi supplies all descriptors; the extension does not register replacement models.
 `openai/gpt-6.1-sol` inherits the `openai/gpt-5.6-sol` default profile:
 Lite, auto WS/SSE, prewarm, native Responses compaction, custom patch and Fast
 availability (priority, 2x cost multiplier). Standalone web/image tools require
-their capability packages; `view_image` is off, matching GPT-5.6 Sol.
+their capability packages.
 This is a compatibility configuration, not verified endpoint access or pricing.
 The exact `openai/gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna`
-profiles retain Standard SSE with local custom patch and image viewing. Remote
+profiles retain Standard SSE with local custom patch. Remote
 search/image generation, native compaction, prewarm and Fast stay off unless
 explicitly configured. Their legacy `openai-codex` counterparts remain separate.
 
@@ -60,7 +60,7 @@ temperature and output-token caps even when supplied through sampling parameters
 Lite merges only temperature; other new sampling fields remain unsupported.
 Legacy `openai-codex` sampling behavior is unchanged.
 
-The self-rendered patch and image-view rows honor Pi's `outputPad`, including
+The self-rendered patch rows honor Pi's `outputPad`, including
 zero-padding layouts. Patch rendering can still be deferred to another renderer.
 
 The request envelope follows Codex `5a314017`: Standard and Lite use developer
@@ -77,7 +77,7 @@ Native compaction now uses only Responses `compaction_trigger`; the unary
 `/responses/compact` client has been removed. Historical opaque checkpoints
 remain readable and guarded by their original model/profile; an unsupported
 checkpoint is preserved rather than replaced with a placeholder text summary.
-Exact bundled profile hashes from the preceding release have a reviewed
+Exact earlier bundled profile hashes have a reviewed
 old-to-new migration allowlist. Custom, legacy-overridden, unknown, or subsequently
 changed profiles still fail closed rather than bypassing the profile guard.
 

@@ -90,7 +90,7 @@ test("hasConfiguredModelsLoaded detects exact catalog profiles", () => {
 test("extension registers tool renderers before session_start for resumed transcripts", async () => withAgentDir(async () => {
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
-	assert.deepEqual(pi.tools.map((tool) => tool.name).sort(), ["apply_patch", "image_generation", "view_image", "web_search"].sort());
+	assert.deepEqual(pi.tools.map((tool) => tool.name).sort(), ["apply_patch", "image_generation", "web_search"].sort());
 	const applyPatch = pi.tools.find((tool) => tool.name === "apply_patch");
 	assert.equal(typeof applyPatch?.renderCall, "function");
 	assert.equal(typeof applyPatch?.renderResult, "function");
@@ -120,7 +120,7 @@ test("extension registers tool renderers before session_start for resumed transc
 		model: { provider: "anthropic", id: "claude", input: ["text"] },
 		modelRegistry: { getAll: () => [{ provider: "anthropic", id: "claude" }] },
 	});
-	assert.equal(pi.tools.length, 4);
+	assert.equal(pi.tools.length, 3);
 	assert.deepEqual(pi.activeTools, ["read", "bash"]);
 
 	await emit(pi, "model_select", {
@@ -128,7 +128,7 @@ test("extension registers tool renderers before session_start for resumed transc
 		model: { provider: "openai-codex", id: "gpt-5.5", input: ["text", "image"] },
 		modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.5" }] },
 	});
-	assert.equal(pi.tools.length, 4);
+	assert.equal(pi.tools.length, 3);
 	assert.ok(pi.activeTools.includes("read"));
 	assert.ok(pi.activeTools.includes("bash"));
 	assert.equal(pi.activeTools.includes("apply_patch"), true);
@@ -183,7 +183,7 @@ test("user model profiles register a provider-preserving Responses shim", async 
 
 test("active non-OpenAI models remove package tools even when OpenAI models exist in registry", async () => withAgentDir(async () => {
 	const pi = fakePi();
-	pi.setActiveTools(["read", "view_image", "apply_patch", "image_generation", "web_search"]);
+	pi.setActiveTools(["read", "apply_patch", "image_generation", "web_search"]);
 	codexMinimalTools(pi as any);
 
 	await emit(pi, "model_select", {

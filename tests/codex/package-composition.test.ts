@@ -16,15 +16,15 @@ import {
 } from "./support/composition-host.js";
 
 const cases = [
-	{ name: "bundle", factories: [bundle], tools: ["apply_patch", "image_generation", "view_image", "web_search"], core: true },
-	{ name: "core", factories: [core], tools: ["apply_patch", "view_image"], core: true },
+	{ name: "bundle", factories: [bundle], tools: ["apply_patch", "image_generation", "web_search"], core: true },
+	{ name: "core", factories: [core], tools: ["apply_patch"], core: true },
 	{ name: "web", factories: [web], tools: ["web_search"], core: false },
 	{ name: "image", factories: [image], tools: ["image_generation"], core: false },
-	{ name: "core+web", factories: [core, web], tools: ["apply_patch", "view_image", "web_search"], core: true },
-	{ name: "core+image", factories: [core, image], tools: ["apply_patch", "image_generation", "view_image"], core: true },
+	{ name: "core+web", factories: [core, web], tools: ["apply_patch", "web_search"], core: true },
+	{ name: "core+image", factories: [core, image], tools: ["apply_patch", "image_generation"], core: true },
 	{ name: "web+image", factories: [web, image], tools: ["image_generation", "web_search"], core: false },
-	{ name: "all", factories: [core, web, image], tools: ["apply_patch", "image_generation", "view_image", "web_search"], core: true },
-	{ name: "bundle+capabilities", factories: [bundle, core, web, image, bundle], tools: ["apply_patch", "image_generation", "view_image", "web_search"], core: true },
+	{ name: "all", factories: [core, web, image], tools: ["apply_patch", "image_generation", "web_search"], core: true },
+	{ name: "bundle+capabilities", factories: [bundle, core, web, image, bundle], tools: ["apply_patch", "image_generation", "web_search"], core: true },
 ];
 
 for (const scenario of cases) {
@@ -37,9 +37,7 @@ for (const scenario of cases) {
 					assert.deepEqual([...host.tools.keys()].sort(), scenario.tools);
 					assert.equal(host.providers.size, scenario.core ? 2 : 0);
 					await host.emit("session_start");
-					// SOL is explicitly standalone and disables view_image.
-					const enabled = scenario.tools.filter(name => name !== "view_image");
-					for (const name of enabled) assert.ok(host.active().includes(name), `${name} should activate`);
+					for (const name of scenario.tools) assert.ok(host.active().includes(name), `${name} should activate`);
 					assert.ok(host.active().includes("unrelated"));
 					assert(host.active().includes("edit"));
 					assert(host.active().includes("write"));
@@ -147,7 +145,7 @@ test("new/fork clear presentation ownership; shutdown and reload create a fresh 
 			web(api); image(replacement.api()); core(replacement.api());
 			assert.notEqual(getCodexBroker(api), broker);
 			await replacement.emit("session_start");
-			assert.equal(replacement.tools.size, 4);
+			assert.equal(replacement.tools.size, 3);
 			await replacement.emit("session_shutdown");
 		} finally { replacement.dispose(); }
 	}));

@@ -64,7 +64,6 @@ const SAFE_PROFILE: EffectiveModelProfile = {
 		applyPatch: false,
 		webSearch: false,
 		imageGeneration: false,
-		viewImage: false,
 	},
 	compaction: "pi",
 	fast: false,
@@ -210,7 +209,7 @@ function sanitizeProfile(
 		} else {
 			diagnoseUnknownKeys(
 				value.tools,
-				["parallelCalls", "applyPatch", "webSearch", "imageGeneration", "viewImage"],
+				["parallelCalls", "applyPatch", "webSearch", "imageGeneration"],
 				`${path}.tools`,
 				diagnostics,
 			);
@@ -234,8 +233,6 @@ function sanitizeProfile(
 				tools.imageGeneration = false;
 				removedHostedImagePatches.add(result);
 			}
-			if (typeof value.tools.viewImage === "boolean") tools.viewImage = value.tools.viewImage;
-			else if (value.tools.viewImage !== undefined) diagnostics.push(`${path}: tools.viewImage must be boolean`);
 			result.tools = tools;
 		}
 	}
@@ -466,7 +463,6 @@ function legacySettingsRecord(settings: CodexMinimalToolsSettings): JsonRecord {
 		"compactionMode",
 		"requestProfile",
 		"webSearchEnabled",
-		"viewImage",
 		"applyPatchEnabled",
 		"additionalModelIds",
 	] as const) {
@@ -497,7 +493,6 @@ function legacyProfilePatch(
 		"compactionMode",
 		"requestProfile",
 		"webSearchEnabled",
-		"viewImage",
 		"applyPatchEnabled",
 		"additionalModelIds",
 	];
@@ -544,7 +539,6 @@ function legacyProfilePatch(
 			webSearch: settings.webSearchEnabled && hostedTools && oldExtendedToolModel
 				? { ...(existingWebSearch || {}), implementation: "hosted", contentTypes: [...contentTypes] }
 				: false,
-			viewImage: settings.viewImage,
 		},
 		compaction: settings.compactionMode,
 		fast: existing?.fast ?? false,

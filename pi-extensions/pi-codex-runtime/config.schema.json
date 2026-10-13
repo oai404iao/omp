@@ -86,11 +86,6 @@
       "enum": ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"],
       "default": "gpt-image-2"
     },
-    "viewImageWorkspaceOnly": {
-      "type": "boolean",
-      "description": "Reject view_image paths outside the active workspace.",
-      "default": false
-    },
     "deferApplyPatchRendering": {
       "type": "boolean",
       "description": "Use Pi's fallback tool renderer instead of the built-in streaming filesystem preview.",

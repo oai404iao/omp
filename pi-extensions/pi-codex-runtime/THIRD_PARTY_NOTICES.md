@@ -43,6 +43,8 @@ private endpoints; the internal Responses Lite path remains unsupported upstream
 The current image namespace is aligned with Apache-2.0 Codex revision
 `5a3140176e668a2f72f3c098490eb7f7052d9d85`; exact source identifiers and
 fingerprints are in `provenance/openai-codex-5a314017-image-generation.json`.
+Local inspection guidance is adapted to Pi's native `read` tool; current
+fingerprints are in `provenance/image-generation-native-read.json`.
 The older reserved-tools evidence is retained unchanged.
 
 Current request metadata, model verbosity/reasoning defaults, search-history
@@ -53,8 +55,9 @@ blob IDs, SHA-256 hashes, exact model defaults and local adaptation boundaries.
 Pi retains its model descriptors and reviewed transport policy; no upstream
 model instructions, authentication claims or unavailable telemetry are copied.
 
-The descriptions match their respective pinned Codex `web_run_description.md` and
-`imagegen_description.md`; the parameter schemas are derived compatibility
+The web description matches its pinned Codex `web_run_description.md`; the image
+description adapts `imagegen_description.md` as noted above.
+The parameter schemas are derived compatibility
 serializations, not verbatim source copies. Exact upstream paths, hashes and
 canonical-JSON fingerprints are in the reserved-tools provenance record.
 

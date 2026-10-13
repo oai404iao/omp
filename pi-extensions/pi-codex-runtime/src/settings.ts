@@ -18,7 +18,6 @@ export interface CodexGlobalSettings {
 	imageGeneration: boolean;
 	imageOutputDir: string;
 	imageModel: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1";
-	viewImageWorkspaceOnly: boolean;
 	deferApplyPatchRendering: boolean;
 }
 
@@ -30,7 +29,6 @@ export interface CodexMinimalToolsSettings extends CodexGlobalSettings {
 	requestProfile: CodexRequestProfileOverride;
 	apiKeyMode: boolean;
 	webSearchEnabled: boolean;
-	viewImage: boolean;
 	applyPatchEnabled: boolean;
 	additionalModelIds: string[];
 }
@@ -46,7 +44,6 @@ export const DEFAULT_GLOBAL_SETTINGS: Readonly<CodexGlobalSettings> = {
 	imageGeneration: true,
 	imageOutputDir: ".pi/openai-codex-images",
 	imageModel: "gpt-image-2",
-	viewImageWorkspaceOnly: false,
 	deferApplyPatchRendering: false,
 };
 
@@ -59,7 +56,6 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	requestProfile: {},
 	apiKeyMode: false,
 	webSearchEnabled: false,
-	viewImage: false,
 	applyPatchEnabled: true,
 	additionalModelIds: [],
 };
@@ -217,8 +213,6 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		webSearchEnabled: boolSetting(raw, "webSearchEnabled"),
 		imageOutputDir: stringSetting(raw, "imageOutputDir"),
 		imageModel: imageModelSetting(raw),
-		viewImage: boolSetting(raw, "viewImage"),
-		viewImageWorkspaceOnly: boolSetting(raw, "viewImageWorkspaceOnly"),
 		applyPatchEnabled: boolSetting(raw, "applyPatchEnabled"),
 		additionalModelIds: modelIdListSetting(raw),
 		deferApplyPatchRendering: boolSetting(raw, "deferApplyPatchRendering"),

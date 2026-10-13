@@ -71,8 +71,7 @@ A user-added profile that does not inherit anything starts with:
     "parallelCalls": true,
     "applyPatch": false,
     "webSearch": false,
-    "imageGeneration": false,
-    "viewImage": false
+    "imageGeneration": false
   },
   "compaction": "pi",
   "fast": false
@@ -178,6 +177,9 @@ stage. It forces the derived runtime transport to SSE and disables prewarm
 while preserving the profile's configured transport and prewarm values.
 
 ## Image implementations
+
+Pi owns image-input metadata and local image inspection through its native
+`read` tool; the catalog does not configure an image-inspection tool.
 
 Hosted image generation is the Responses `image_generation` tool.
 

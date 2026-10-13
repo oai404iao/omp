@@ -44,7 +44,6 @@ export interface ModelToolsProfilePatch {
 	applyPatch?: false | PatchTransport;
 	webSearch?: false | WebSearchProfile;
 	imageGeneration?: false | "standalone";
-	viewImage?: boolean;
 }
 
 export interface FastModeProfile {
@@ -87,7 +86,6 @@ export interface EffectiveModelToolsProfile {
 	applyPatch: false | PatchTransport;
 	webSearch: false | WebSearchProfile;
 	imageGeneration: false | "standalone";
-	viewImage: boolean;
 }
 
 export interface EffectiveModelProfile {

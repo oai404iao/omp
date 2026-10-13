@@ -3,7 +3,7 @@
 Composition-only entry for Pi's Codex extensions. It loads:
 
 - [`pi-codex-core`](../pi-codex-core/README.md): Responses transport, compaction,
-  `apply_patch`, `view_image` and diagnostics.
+  `apply_patch` and diagnostics.
 - [`pi-codex-web-search`](../pi-codex-web-search/README.md): hosted/standalone search.
 - [`pi-codex-imagegen`](../pi-codex-imagegen/README.md): image generation and display.
 
@@ -19,16 +19,17 @@ overrides outside the legacy provider.
 
 `openai/gpt-6.1-sol` defaults to the same profile as `openai/gpt-5.6-sol`:
 Lite, auto WS/SSE, prewarm, standalone web/image, custom patch, native compaction
-and Fast availability (priority, 2x cost multiplier). `view_image` is off.
+and Fast availability (priority, 2x cost multiplier).
 These defaults do not establish real-account endpoint access or Fast pricing.
 Exact profiles for `openai/gpt-6-astra`, `gpt-6-sol` and
-`gpt-6-luna` retain Standard SSE with local custom patch and image viewing.
+`gpt-6-luna` retain Standard SSE with local custom patch.
 Remote search/image generation, native compaction, prewarm and Fast default
 off. Enable only the implementations you intend to use in the model profile,
 and declare endpoint support separately; allowlists do not enable tools.
 
 Native codemode may call active `apply_patch` and standalone web/image tools.
-Hosted web/image tools and `view_image` remain model-only. The bundle does not
+Hosted web/image tools remain model-only. Local image inspection uses Pi's
+native `read` tool. The bundle does not
 activate codemode or load MCP servers.
 Script results are structured: patch `{ summary, files }`, search
 `{ output, results }`, and image generation `{ path, latestPath?, image }`.

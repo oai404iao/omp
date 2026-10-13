@@ -48,7 +48,7 @@
   ],
   "exceptions": {
     "pi-codex-runtime/src/model-catalog/catalog.ts": {
-      "maxLines": 636,
+      "maxLines": 603,
       "reason": "Existing catalog resolver/schema boundary; split independently from transport relocation."
     }
   }
