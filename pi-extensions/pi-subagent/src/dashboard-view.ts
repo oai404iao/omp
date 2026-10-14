@@ -50,20 +50,17 @@ export function agentDuration(agent: DashboardAgent, now: number): string {
 	return Number.isFinite(total) ? `${agent.durationPartial ? "≥" : ""}${duration(total)}` : "—";
 }
 
-function ago(timestamp: number, now: number): string {
-	return Number.isFinite(timestamp) ? `${duration(now - timestamp)} ago` : "unknown";
-}
-
 const pad = (n: number) => String(n).padStart(2, "0");
 function time(timestamp: number): string {
 	const date = new Date(timestamp);
 	return Number.isFinite(timestamp) ? `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` : "—";
 }
 
-function created(value: string, full = false): string {
-	const stamp = Date.parse(value);
+function created(value: string | number, full = false): string {
+	const stamp = typeof value === "number" ? value : Date.parse(value);
 	if (!Number.isFinite(stamp)) return "—";
 	const date = new Date(stamp);
+	if (!Number.isFinite(date.getTime())) return "—";
 	const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 	const offset = -date.getTimezoneOffset();
 	const zone = `${offset >= 0 ? "+" : "-"}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
@@ -102,6 +99,7 @@ export function dashboardSummary(snapshot: DashboardSnapshot): [string, string] 
 
 export function renderAgentRows(
 	snapshot: DashboardSnapshot, selected: string | undefined, width: number, theme: Theme, now: number,
+	durations?: ReadonlyMap<string, string>,
 ): string[] {
 	if (!snapshot.agents.length) {
 		return ["No subagents in this session.", "", "Use spawn_agent to start a task.", "/subagents catalog shows available roles."]
@@ -120,9 +118,9 @@ export function renderAgentRows(
 		const lines = [
 			first,
 			`  ${dashboardText(agent.topic) || "No task topic available"}`,
-			`  ${usage.available ? cost(usage.cost) : "—"} · ${agentDuration(agent, now)} · ${metric(usage.requests)} req` +
+			`  ${usage.available ? cost(usage.cost) : "—"} · ${durations?.get(agent.path) ?? agentDuration(agent, now)} · ${metric(usage.requests)} req` +
 				` · ${metric(usage.tools)} tools · ${metric(usage.totalTokens)} tok`,
-			theme.fg("muted", `  Created ${created(agent.createdAt)} · ${ago(Date.parse(agent.createdAt), now)}` +
+			theme.fg("muted", `  ${created(agent.createdAt)}` +
 				(agent.dataError ? " · partial data" : "")),
 			"",
 		];
@@ -171,7 +169,6 @@ export function renderAgentDetails(
 			field("Context", `${theme.fg("accent", "█".repeat(used))}${theme.fg("dim", "░".repeat(size - used))} ~${percent.toFixed(0)}%`);
 			field("", `~${count(context.tokens, true)} / ${count(context.contextWindow, true)} tokens`);
 		}
-		field("", `${context.live ? "Updated" : "Snapshot"} ${ago(context.timestamp, now)}`);
 	} else field("Context", "— · no snapshot");
 	field("Cost / time", `${agent.usage.available ? cost(agent.usage.cost) : "—"} · ${agentDuration(agent, now)}` +
 		(agent.durationPartial ? " · partial" : ""));
@@ -196,8 +193,15 @@ export function renderAgentDetails(
 	for (const entry of [...agent.activity].sort((a, b) => b.timestamp - a.timestamp)) {
 		const color = entry.status === "error" ? "error" : entry.status === "success" ? "success" :
 			entry.status === "interrupted" ? "warning" : entry.status === "running" ? "accent" : "muted";
+		const summary = entry.kind === "response" && entry.preview ? "" : dashboardText(entry.summary);
 		lines.push(`${theme.fg("muted", time(entry.timestamp))} ${theme.fg(color, icons[entry.status])} ` +
-			`${dashboardText(entry.label)} ${theme.fg("muted", dashboardText(entry.summary))}`);
+			`${dashboardText(entry.label)}${summary ? ` ${theme.fg("muted", summary)}` : ""}`);
+		if (entry.preview) {
+			const wrapped = wrapTextWithAnsi(dashboardText(entry.preview, true), Math.max(1, width - 2));
+			const preview = wrapped.slice(0, 3);
+			if (wrapped.length > 3) preview[2] = truncateToWidth(preview[2], Math.max(1, width - 3), "") + "…";
+			lines.push(...preview.map(line => `  ${theme.fg("muted", line)}`));
+		}
 	}
 	return lines.map(line => fit(line, width));
 }

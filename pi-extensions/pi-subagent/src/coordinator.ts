@@ -25,7 +25,7 @@ import { createAgentTools } from "./tools.ts";
 import { inboxEnvelope, persistTaskAttribution, taskMessage } from "./task-attribution.ts";
 import { addUsage, emptyUsage, finalAssistantText, finalStopReason, truncateUtf8 } from "./result.ts";
 import { DashboardReader } from "./dashboard-source.ts";
-import type { DashboardSnapshot, DashboardSource } from "./dashboard-types.ts";
+import type { DashboardSnapshot, DashboardSource, TranscriptSnapshot } from "./dashboard-types.ts";
 import { AgentTelemetry } from "./telemetry.ts";
 import {
 	DESCRIPTOR_VERSION, snapshotAgent, type AgentDefinition, type AgentDescriptor, type AgentListItem,
@@ -113,6 +113,20 @@ export class SubagentCoordinator implements DashboardSource {
 			},
 			activeCount: this.activeCount, maxConcurrentAgents: this.settings.maxConcurrentAgents,
 		});
+	}
+
+	getTranscript(path: string, before?: string): TranscriptSnapshot {
+		if (this.closing) return {
+			path, status: "interrupted", entries: [], inheritedCount: 0, closed: true,
+		};
+		return this.dashboardReader.transcript(path, {
+			records: Object.values(this.store?.snapshot.agents ?? {}),
+			rootBranch: this.root?.sessionManager.getBranch() ?? [],
+			live: target => {
+				const run = this.active.get(target);
+				return run?.runtime ? { session: run.runtime.session, telemetry: run.telemetry } : undefined;
+			},
+		}, before);
 	}
 
 	subscribe(listener: () => void): () => void {

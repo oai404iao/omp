@@ -242,7 +242,48 @@ a list/detail layout instead of squeezing both panes together.
 - `Tab`: switch panes; `PgUp`/`PgDn`: scroll the focused pane.
 - `Enter`: open details in the narrow layout; `Esc`: return, then close.
 - With details focused, `Enter` expands or collapses the task preview.
+- `t`: open the selected agent's read-only transcript; `Esc` returns to the
+  dashboard without changing its selection or scroll position.
 - Fullscreen mode also supports mouse selection and scrolling.
+
+Recent activity shows bounded, multiline previews of commands, edits, writes,
+patches, ordinary responses and tool output, including streamed updates.
+Previews are local transcript content: terminal control sequences are removed,
+but secrets inside commands, file contents or output are not automatically
+redacted. Thinking text and opaque replay payloads are not shown.
+The agent list shows creation time as `HH:mm:ss`, without a relative age.
+Its execution durations are sampled when the dashboard opens (or when a new
+agent first appears) and remain fixed until reopening. Status and usage metrics
+still refresh; the details pane retains its live execution duration.
+Context snapshot timestamps are not displayed.
+
+The transcript uses Pi's native message components and tool renderers inside
+the existing dashboard, not another interactive session. Messages retain their
+structured roles and content; there are no extra plugin-generated message
+headings. Built-in tools use their public Pi renderer definitions rather than
+plugin-specific command, code or diff formatting. It follows live output until you
+scroll away. `End` returns to the latest page and resumes following; `p` loads
+the previous history page. `↑`/`↓` or `j`/`k` scroll, and `PgUp`/`PgDn` scroll
+by a page. Pi's configured tool-output expansion shortcut expands or collapses
+tool output; fullscreen mouse clicks can toggle individual tools.
+
+History comes from the child's canonical JSONL branch, including its work
+before compaction. Copied parent history is counted but not mixed into the
+child's work. Large content, pages and the live display cache are bounded and
+identified when truncated. Images and thinking are omitted from this view.
+Recorded edit diffs are displayed without reading today's file to reconstruct
+an old edit. Patch previews that would inspect today's files are disabled.
+While a child runtime is resident, custom tools and messages use its registered
+renderer/resolver chain and Markdown transformers. Unloaded or restarted agents
+use native built-in rendering and Pi's generic fallback for unavailable custom
+renderers; viewing does not reload extensions or reconnect providers to recover
+them. Source details such as output truncation, full-output paths and recorded
+tool durations are preserved for the native renderers.
+Pi does not persist nested tool output: it can be visible while the runtime is
+active, but after unloading or restarting only recorded nested-call metadata
+is available. Viewing never executes tools to recover missing information.
+Opening, closing or paging the transcript does not prompt, interrupt or retain
+a child runtime, change the main session, or write/repair session files.
 
 Statistics are **agent-owned**, excluding copied parent history. The summary
 sums visible child agents once, not the root's mirrored subagent usage.
@@ -261,8 +302,10 @@ Run time sums execution intervals, including tools and in-run waits but excludin
 idle time between tasks. New runs retain separate timing/context metadata;
 older or crash-interrupted runs can have incomplete timing. Unknown values and
 partial history are identified explicitly; opening the dashboard never replays
-work to recover statistics. Recent activity is bounded and shows summaries,
-not thinking text or complete tool arguments/results.
+work to recover statistics. Recent activity retains at most 50 summaries;
+content previews are limited to 240 Unicode characters and a few display
+lines. Use the transcript for more detail rather than treating these previews
+as complete tool arguments or results.
 
 ## Breaking migration
 

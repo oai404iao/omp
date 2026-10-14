@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import { initTheme, type ExtensionCommandContext, type Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TUI_KEYBINDINGS, stripTerminalSequences, visibleWidth, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { DashboardComponent, openDashboard } from "../src/dashboard.ts";
 import { agentDuration, dashboardSummary, dashboardText, renderAgentDetails, renderAgentRows } from "../src/dashboard-view.ts";
-import type { DashboardAgent, DashboardSnapshot, DashboardSource } from "../src/dashboard-types.ts";
+import type { DashboardAgent, DashboardSnapshot, DashboardSource, TranscriptSnapshot } from "../src/dashboard-types.ts";
 
 const now = Date.parse("2026-10-08T10:00:00Z");
 const theme = {
@@ -48,6 +48,7 @@ function harness(initial = snapshot(), options: { rows?: number; mode?: "regular
 	let unsubscribed = 0;
 	let failure = false;
 	let currentTheme = options.theme ?? theme;
+	let currentNow = now;
 	const listeners = new Set<() => void>();
 	const source: DashboardSource = {
 		getSnapshot: () => { reads++; if (failure) throw new Error("Unable to load data"); return state; },
@@ -56,12 +57,16 @@ function harness(initial = snapshot(), options: { rows?: number; mode?: "regular
 	const terminal = { rows: options.rows ?? 45, columns: 160 };
 	const tui = { terminal, mode: options.mode ?? "regular", requestRender: () => { renders++; } };
 	const component = new DashboardComponent({
-		tui, source, theme: () => currentTheme, keybindings: new KeybindingsManager(TUI_KEYBINDINGS), done: () => { closed++; }, now: () => now,
+		tui, source, theme: () => currentTheme,
+		keybindings: new KeybindingsManager({ ...TUI_KEYBINDINGS, "app.tools.expand": { defaultKeys: "ctrl+o" } }),
+		done: () => { closed++; }, now: () => currentNow,
 	});
 	return {
 		component, tui, source,
+		setTranscript(handler: NonNullable<DashboardSource["getTranscript"]>) { source.getTranscript = handler; },
 		emit(next = state) { state = next; for (const listener of listeners) listener(); },
 		setTheme(next: Theme) { currentTheme = next; component.invalidate(); },
+		setNow(next: number) { currentNow = next; },
 		fail() { failure = true; },
 		get reads() { return reads; }, get renders() { return renders; },
 		get closed() { return closed; }, get unsubscribed() { return unsubscribed; },
@@ -73,11 +78,14 @@ test("dashboard renders scoped summary, agent metrics and complete detail semant
 	const state = snapshot([agent(), agent("failed", { status: "errored", error: "Test failure" })]);
 	assert.match(dashboardSummary(state).join("\n"), /2 agents.*1\/4 active.*1 errored/);
 	const row = renderAgentRows(state, "/root/review", 80, theme, now).join("\n");
-	for (const expected of ["/root/review", "reviewer", "Running", "Task review", "~$0.043", "12s", "12 req", "18 tools", "35.2k tok", "Created"]) {
+	for (const expected of ["/root/review", "reviewer", "Running", "Task review", "~$0.043", "12s", "12 req", "18 tools", "35.2k tok"]) {
 		assert(row.includes(expected), expected);
 	}
+	assert.equal(renderAgentRows(state, "/root/review", 80, theme, now)[3].trim(),
+		new Date(state.agents[0].createdAt).toTimeString().slice(0, 8));
+	assert.doesNotMatch(row, /Created|ago/);
 	const detail = renderAgentDetails(state.agents[0], 90, theme, now).join("\n");
-	for (const expected of ["AGENT INFO", "fixture/scripted", "USAGE", "~31%", "Updated 2s ago", "model rounds",
+	for (const expected of ["AGENT INFO", "fixture/scripted", "USAGE", "~31%", "model rounds",
 		"top-level", "Nested tools", "3", "12,400", "2,800", "included in output", "35,200", "RECENT ACTIVITY"]) {
 		assert(detail.includes(expected), expected);
 	}
@@ -85,7 +93,7 @@ test("dashboard renders scoped summary, agent metrics and complete detail semant
 	assert.match(renderAgentDetails(state.agents[1], 90, theme, now).join("\n"), /Error\s+Test failure/);
 });
 
-test("missing and partial values remain unknown, context snapshots show age, reasoning is not added twice", () => {
+test("missing and partial values remain unknown, context timestamps are hidden, reasoning is not added twice", () => {
 	const missing = agent("legacy", {
 		usage: { ...agent().usage, available: false, cost: null }, durationMs: undefined,
 		activeSince: undefined, durationPartial: true, context: undefined, dataError: "Transcript incomplete", activity: [],
@@ -105,11 +113,83 @@ test("missing and partial values remain unknown, context snapshots show age, rea
 	});
 	const partialText = renderAgentDetails(partial, 90, theme, now).join("\n");
 	assert.match(partialText, /waiting for next response/);
-	assert.match(partialText, /Snapshot 1m01s ago/);
+	assert.doesNotMatch(partialText, /(?:Snapshot|Updated) at/);
 	assert.match(partialText, /Price unavailable/);
 	assert.match(partialText, /≥12s · partial/);
 	assert.match(partialText, /Nested tools\s+3 · partial/);
 	assert.match(partialText, /Total\s+35,200/);
+});
+
+test("context timestamps are absent for live and unloaded agents while detail duration still advances", () => {
+	for (const live of [false, true]) {
+		const value = agent("clock", { context: { ...agent().context!, live } });
+		const before = renderAgentDetails(value, 100, theme, now);
+		const after = renderAgentDetails(value, 100, theme, now + 90_000);
+		assert.doesNotMatch([...before, ...after].join("\n"), /(?:Snapshot|Updated) at/);
+		assert.notEqual(agentDuration(value, now), agentDuration(value, now + 90_000));
+	}
+});
+
+test("agent list duration is sampled once per opening despite ticks, completion and new runs", t => {
+	t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+	const value = agent("frozen", { usage: { ...agent().usage, nestedTools: 0, reasoning: undefined } });
+	const h = harness(snapshot([value]), { rows: 30 });
+	try {
+		const listMetric = () => text(h.component).split("\n").find(line => /\breq ·.*\btok\s/.test(line));
+		assert.match(listMetric()!, /· 12s ·/);
+		h.setNow(now + 90_000);
+		t.mock.timers.tick(1000);
+		assert.match(listMetric()!, /· 12s ·/);
+		h.emit(snapshot([{ ...value, status: "completed", activeSince: undefined, durationMs: 102_000,
+			usage: { ...value.usage, requests: 20 } }]));
+		t.mock.timers.tick(40);
+		assert.match(listMetric()!, /· 12s · 20 req/);
+		assert.match(text(h.component), /Completed/);
+		h.emit(snapshot([{ ...value, durationMs: 102_000, activeSince: now + 90_000 },
+			agent("new", { durationMs: 2000, activeSince: now + 85_000 })]));
+		t.mock.timers.tick(40);
+		assert.match(listMetric()!, /· 12s ·/);
+		assert.match(text(h.component), /· 7s ·/);
+		h.setNow(now + 120_000);
+		t.mock.timers.tick(1000);
+		assert.match(listMetric()!, /· 12s ·/);
+		assert.match(text(h.component), /· 7s ·/);
+		const reopened = harness(snapshot([{ ...value, durationMs: 102_000, activeSince: undefined }]));
+		try {
+			assert.match(text(reopened.component), /· 1m42s ·/);
+		} finally { reopened.component.dispose(); }
+	} finally { h.component.dispose(); }
+});
+
+test("activity has bounded multiline content previews and sanitizes control sequences", () => {
+	const value = agent("activity", { activity: [{
+		id: "tool", timestamp: now, kind: "tool", status: "running", label: "bash", summary: "command",
+		preview: "$ pnpm run check\n正在检查🙂\nthird line\nfourth must be omitted\x1b[2J",
+	}] });
+	const lines = renderAgentDetails(value, 80, theme, now);
+	const activity = lines.slice(lines.findIndex(line => line.includes("RECENT ACTIVITY")));
+	assert.match(activity.join("\n"), /\$ pnpm run check/);
+	assert.match(activity.join("\n"), /正在检查🙂/);
+	assert.match(activity.join("\n"), /third line…/);
+	assert.doesNotMatch(activity.join(""), /fourth|[\x00-\x1f]/);
+	for (const width of [1, 12, 40, 80]) {
+		for (const line of renderAgentDetails(value, width, styledTheme, now)) assert(visibleWidth(line) <= width);
+	}
+});
+
+test("Response previews replace repeated heading summaries while legacy summaries remain visible", () => {
+	const value = agent("response", { activity: [{
+		id: "answer", timestamp: now, kind: "response", status: "success", label: "Response",
+		summary: "This answer is visible once", preview: "This answer is visible once",
+	}, {
+		id: "legacy", timestamp: now - 1, kind: "response", status: "success", label: "Response",
+		summary: "Legacy answer without a preview",
+	}] });
+	const lines = renderAgentDetails(value, 100, theme, now);
+	const activity = lines.slice(lines.findIndex(line => line.includes("RECENT ACTIVITY")));
+	assert.equal(activity.join("\n").match(/This answer is visible once/g)?.length, 1);
+	assert.doesNotMatch(activity[1], /This answer/);
+	assert.match(activity.join("\n"), /Response Legacy answer without a preview/);
 });
 
 test("rendering stays within all widths and heights, including CJK, emoji, long tasks and theme invalidation", () => {
@@ -365,4 +445,94 @@ test("openDashboard uses a native responsive overlay and does not open in non-TU
 	ctx.mode = "rpc";
 	await openDashboard(ctx, h.source);
 	assert.equal(calls, 1);
+});
+
+test("transcript opens read-only, reads only outside rendering, restores panes and can reopen", t => {
+	initTheme("dark", false);
+	t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+	const h = harness(snapshot([agent("one"), agent("two")]), { rows: 30 });
+	const reads: { path: string; before?: string }[] = [];
+	let body = "Child answer";
+	let childStatus: TranscriptSnapshot["status"] = "running";
+	h.setTranscript((path, before) => {
+		reads.push({ path, before });
+		return {
+			path, status: childStatus, inheritedCount: 2, before: "previous-raw-entry",
+			entries: [{ id: before ? "earlier" : "latest", timestamp: now, kind: "assistant", status: "success",
+				text: before ? "Earlier child answer" : body }],
+		};
+	});
+	try {
+		text(h.component);
+		h.component.handleInput("j");
+		h.component.handleInput("\t");
+		h.component.handleInput("\x1b[6~");
+		const original = text(h.component);
+		h.component.handleInput("t");
+		assert.deepEqual(reads, [{ path: "/root/two", before: undefined }]);
+		assert.match(text(h.component), /READ ONLY · Following · running · TRANSCRIPT \/root\/two/);
+		assert.match(text(h.component), /Child answer/);
+		assert.equal(reads.length, 1);
+		h.component.invalidate();
+		text(h.component, 80);
+		t.mock.timers.tick(1000);
+		assert.equal(reads.length, 1, "resize, invalidate and clock rendering never fetch transcript");
+		h.component.handleInput("p");
+		assert.equal(reads[1].before, "previous-raw-entry");
+		assert.match(text(h.component), /Earlier child answer/);
+		body = "Updated child answer";
+		childStatus = "completed";
+		h.emit();
+		t.mock.timers.tick(40);
+		assert.match(text(h.component), /Updated child answer/);
+		assert.match(text(h.component), /READ ONLY · History · completed · TRANSCRIPT \/root\/two/);
+		h.component.handleInput("\x1b[F");
+		assert.match(text(h.component), /Following/);
+		h.component.handleInput("\x1b");
+		assert.equal(h.closed, 0);
+		assert.equal(text(h.component), original, "return restores detail scroll and selected agent");
+		h.component.handleInput("t");
+		assert.match(text(h.component), /Updated child answer/);
+		h.emit({ ...snapshot(), closed: true });
+		t.mock.timers.tick(40);
+		t.mock.timers.tick(0);
+		assert.equal(h.closed, 1);
+		assert.equal(h.unsubscribed, 1);
+	} finally { h.component.dispose(); }
+});
+
+test("transcript errors and unsupported sources are safe, fullscreen mouse scrolls and tools expand", () => {
+	initTheme("dark", false);
+	const h = harness(snapshot(), { rows: 30, mode: "fullscreen" });
+	try {
+		text(h.component);
+		h.component.handleInput("t");
+		assert.doesNotMatch(text(h.component), /TRANSCRIPT/);
+		h.setTranscript(() => { throw new Error("\x1b[2JUnavailable"); });
+		h.component.handleInput("t");
+		assert.match(text(h.component), /Unavailable/);
+		assert.doesNotMatch(h.component.render(150).join(""), /\x1b\[2J/);
+		h.component.handleInput("\x1b");
+		const state: TranscriptSnapshot = {
+			path: "/root/review", status: "completed", inheritedCount: 0, entries: [{
+				id: "bash", timestamp: now, kind: "tool", status: "success", toolName: "bash", args: { command: "fixture" },
+				result: { content: [{ type: "text", text: Array.from({ length: 30 }, (_, i) => `result_${i}`).join("\n") }], isError: false },
+			}],
+		};
+		h.setTranscript(() => state);
+		h.component.handleInput("t");
+		h.component.handleInput("\x1b[H");
+		assert.doesNotMatch(text(h.component), /result_24\b/);
+		h.component.handleInput("\x0f"); // Default app.tools.expand: Ctrl+O.
+		h.component.handleInput("\x1b[F");
+		assert.match(text(h.component), /result_24\b/);
+		const mouse: TuiMouseEvent = {
+			type: "wheel", wheelDelta: -2, button: "none", x: 5, y: 8, screenX: 5, screenY: 8,
+			width: 150, height: 26, shift: false, alt: false, ctrl: false,
+		};
+		assert.equal(h.component.handleMouse(mouse)?.handled, true);
+		assert.match(text(h.component), /History/);
+		h.tui.mode = "regular";
+		assert.equal(h.component.handleMouse(mouse), undefined);
+	} finally { h.component.dispose(); }
 });
