@@ -1,8 +1,10 @@
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
-import type { DashboardActivity, DashboardContext } from "./dashboard-types.ts";
+import type { DashboardActivity, DashboardContext, TranscriptEntry } from "./dashboard-types.ts";
 import type { AgentStatus } from "./types.ts";
 import { readRunTelemetry, writeRunTelemetry } from "./telemetry-store.ts";
+import { responseActivity, toolActivity, toolResultActivity } from "./activity-preview.ts";
+import { LiveTranscript } from "./transcript-live.ts";
 
 export const TELEMETRY_CUSTOM_TYPE = "pi-subagent/telemetry-v1";
 export const ACTIVITY_LIMIT = 50;
@@ -32,16 +34,8 @@ export interface RunTelemetryEntry {
 
 /** Never allow transcript text to inject terminal control sequences. */
 export function dashboardText(text: string, limit = 160): string {
-	return Array.from(stripTerminalSequences(text).replace(/[\x00-\x1f\x7f-\x9f]/g, " "))
+	return Array.from(stripTerminalSequences(text.slice(0, Math.max(4096, limit * 2))).replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, " "))
 		.slice(0, limit).join("").trim();
-}
-
-/** Deliberately do not render shell commands, arbitrary arguments or results. */
-export function toolSummary(args: unknown): string {
-	if (!args || typeof args !== "object") return "";
-	const value = args as Record<string, unknown>;
-	const path = value.path ?? value.file_path;
-	return typeof path === "string" ? dashboardText(path) : "";
 }
 
 export class AgentTelemetry {
@@ -50,6 +44,14 @@ export class AgentTelemetry {
 	private readonly tools = new Set<string>();
 	private readonly nestedTools = new Set<string>();
 	private readonly activity = new Map<string, DashboardActivity>();
+	private readonly transcript = new LiveTranscript();
+	private readonly toolInputs = new Map<string, ReturnType<typeof toolActivity>>();
+	private readonly settledTools = new Set<string>();
+	private readonly finishedResponses = new Set<number>();
+	private readonly completedMessages = new WeakSet<object>();
+	private readonly finalizedMessages = new Map<string, WeakRef<object>>();
+	private activeResponse?: { id: string };
+	private streamRefresh?: ReturnType<typeof setTimeout>;
 	private unsubscribe?: () => void;
 	private finished = false;
 	private disposed = false;
@@ -111,7 +113,11 @@ export class AgentTelemetry {
 	private put(item: DashboardActivity): void {
 		this.activity.delete(item.id);
 		this.activity.set(item.id, item);
-		while (this.activity.size > ACTIVITY_LIMIT) this.activity.delete(this.activity.keys().next().value!);
+		while (this.activity.size > ACTIVITY_LIMIT) {
+			const oldest = this.activity.keys().next().value!;
+			this.activity.delete(oldest);
+			this.finalizedMessages.delete(oldest);
+		}
 	}
 
 	private readContext(live: boolean): void {
@@ -123,26 +129,68 @@ export class AgentTelemetry {
 		});
 	}
 
+	private notify(streaming = false): void {
+		if (!streaming) {
+			clearTimeout(this.streamRefresh);
+			this.streamRefresh = undefined;
+			this.safe(this.onChange);
+		} else if (!this.streamRefresh) {
+			this.streamRefresh = setTimeout(() => {
+				this.streamRefresh = undefined;
+				if (!this.disposed && !this.finished) this.safe(this.onChange);
+			}, 100);
+			this.streamRefresh.unref();
+		}
+	}
+
 	private observe(event: AgentSessionEvent): void {
 		if (this.disposed || this.finished) return;
+		this.safe(() => this.transcript.observe(event));
 		const timestamp = Date.now();
-		if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+		let streaming = false;
+		if (event.type === "tool_execution_start" || event.type === "tool_execution_update" || event.type === "tool_execution_end") {
+			if (event.type !== "tool_execution_end" && this.settledTools.has(event.toolCallId)) return;
 			(event.parentToolCallId ? this.nestedTools : this.tools).add(event.toolCallId);
 			const id = `tool:${event.toolCallId}`;
+			if (event.type === "tool_execution_start" || !this.toolInputs.has(id)) {
+				this.toolInputs.set(id, toolActivity(event.toolName, event.type === "tool_execution_end" ? undefined : event.args));
+				while (this.toolInputs.size > ACTIVITY_LIMIT) this.toolInputs.delete(this.toolInputs.keys().next().value!);
+			}
+			const input = this.toolInputs.get(id)!;
+			const content = event.type === "tool_execution_start" ? input :
+				toolResultActivity(input, event.type === "tool_execution_end" ? event.result : event.partialResult,
+					event.type === "tool_execution_end" && event.isError);
 			this.put({
-				id, timestamp, kind: "tool",
-				status: event.type === "tool_execution_start" ? "running" : event.isError ? "error" : "success",
+				id, timestamp: event.type === "tool_execution_update" ? this.activity.get(id)?.timestamp ?? timestamp : timestamp, kind: "tool",
+				status: event.type !== "tool_execution_end" ? "running" : event.isError ? "error" : "success",
 				label: dashboardText(event.toolName, 80),
-				summary: event.type === "tool_execution_start" ? toolSummary(event.args) : this.activity.get(id)?.summary ?? "",
+				...content,
 			});
-		} else if (event.type === "message_end" && event.message.role === "assistant") {
+			if (event.type === "tool_execution_end") this.settledTools.add(event.toolCallId);
+			streaming = event.type === "tool_execution_update";
+		} else if ((event.type === "message_start" || event.type === "message_update" || event.type === "message_end") &&
+			event.message.role === "assistant") {
 			const message = event.message;
-			if (message.stopReason !== "pending") this.put({
-				id: `response:${this.runId}:${this.sequence++}`, timestamp: message.timestamp, kind: "response",
-				status: message.stopReason === "error" ? "error" : message.stopReason === "aborted" ? "interrupted" : "success",
+			if (event.type === "message_end" && (message.stopReason === "pending" || this.completedMessages.has(message))) return;
+			if (event.type === "message_update" && !this.activeResponse && this.finishedResponses.has(message.timestamp)) return;
+			if (!this.activeResponse) this.activeResponse = {
+				id: `response:${this.runId}:${this.sequence++}`,
+			};
+			this.put({
+				id: this.activeResponse.id, timestamp: message.timestamp, kind: "response",
+				status: event.type !== "message_end" ? "running" : message.stopReason === "error" ? "error" :
+					message.stopReason === "aborted" ? "interrupted" : "success",
 				label: "Response",
-				summary: dashboardText(message.content.filter(item => item.type === "text").map(item => item.text).join(" ")),
+				...responseActivity(message),
 			});
+			if (event.type === "message_end") {
+				this.completedMessages.add(message);
+				this.finalizedMessages.set(this.activeResponse.id, new WeakRef(message));
+				this.finishedResponses.add(message.timestamp);
+				while (this.finishedResponses.size > ACTIVITY_LIMIT) this.finishedResponses.delete(this.finishedResponses.keys().next().value!);
+				this.activeResponse = undefined;
+			}
+			streaming = event.type === "message_update";
 		} else if (event.type === "compaction_start" || event.type === "compaction_end") {
 			const lastCompaction = [...this.session.sessionManager.getBranch()].reverse().find(entry => entry.type === "compaction");
 			if (event.type === "compaction_start") {
@@ -165,15 +213,27 @@ export class AgentTelemetry {
 				summary: `Attempt ${event.attempt}`,
 			});
 		} else if (event.type !== "message_end" && event.type !== "entry_appended") return;
-		this.safe(this.onChange);
+		this.notify(streaming);
 	}
+
+	transcriptSnapshot(): TranscriptEntry[] { return this.transcript.snapshot(this.session.sessionManager.getBranch()); }
 
 	snapshot(): TelemetrySnapshot {
 		if (!this.finished && !this.disposed) this.readContext(true);
+		const ids = new Map<object, string>();
+		this.safe(() => {
+			for (const entry of this.session.sessionManager.getBranch?.() ?? []) {
+				if (entry.type === "message" && entry.message.role === "assistant") ids.set(entry.message, entry.id);
+			}
+		});
 		return {
 			runId: this.runId, ...(!this.finished ? { activeSince: this.startedAt } : {}),
 			toolIds: [...this.tools], nestedToolIds: [...this.nestedTools],
-			activity: [...this.activity.values()].map(item => ({ ...item })),
+			activity: [...this.activity.values()].map(item => {
+				const message = this.finalizedMessages.get(item.id)?.deref();
+				const canonical = message && ids.get(message);
+				return { ...item, ...(canonical ? { id: `response:${canonical}` } : {}) };
+			}),
 			...(this.context ? { context: { ...this.context } } : {}),
 			timingPartial: this.timingPartial,
 		};
@@ -182,6 +242,7 @@ export class AgentTelemetry {
 	finish(status: AgentStatus): void {
 		if (this.finished) return;
 		this.finished = true;
+		this.safe(() => this.transcript.finish(status));
 		this.readContext(false);
 		for (const [id, item] of this.activity) {
 			if (item.status === "running") this.activity.set(id, {
@@ -193,12 +254,17 @@ export class AgentTelemetry {
 			durationMs: Math.max(0, performance.now() - this.startedClock), status,
 			...(this.context ? { context: this.context } : {}),
 		});
-		this.safe(this.onChange);
+		this.notify();
 	}
 
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		clearTimeout(this.streamRefresh);
+		this.streamRefresh = undefined;
+		this.transcript.clear();
+		this.toolInputs.clear();
+		this.finalizedMessages.clear();
 		this.safe(() => this.unsubscribe?.());
 		this.unsubscribe = undefined;
 	}

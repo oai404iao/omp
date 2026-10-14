@@ -1,7 +1,9 @@
 import { readFileSync, statSync } from "node:fs";
 import { CURRENT_SESSION_VERSION, SessionManager, type AgentSession, type FileEntry, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { buildDashboardAgent, unavailableDashboardAgent } from "./dashboard-data.ts";
-import type { DashboardSnapshot } from "./dashboard-types.ts";
+import type { DashboardSnapshot, TranscriptSnapshot } from "./dashboard-types.ts";
+import { buildTranscript } from "./transcript-data.ts";
+import { createTranscriptPresentation } from "./transcript-presentation.ts";
 import type { AgentTelemetry } from "./telemetry.ts";
 import { readRunTelemetry } from "./telemetry-store.ts";
 import type { AgentRecord } from "./types.ts";
@@ -9,6 +11,12 @@ import type { AgentRecord } from "./types.ts";
 interface LiveAgent {
 	session: AgentSession;
 	telemetry?: AgentTelemetry;
+}
+
+interface ReaderOptions {
+	records: readonly AgentRecord[];
+	rootBranch: readonly SessionEntry[];
+	live(path: string): LiveAgent | undefined;
 }
 
 function readSession(record: AgentRecord): SessionManager {
@@ -38,6 +46,52 @@ export class DashboardReader {
 
 	clear(): void { this.cold.clear(); this.timings.clear(); }
 
+	private session(record: AgentRecord, live?: LiveAgent): SessionManager {
+		if (live) {
+			this.cold.delete(record.sessionFile);
+			return live.session.sessionManager;
+		}
+		const stat = statSync(record.sessionFile);
+		const signature = `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+		let cached = this.cold.get(record.sessionFile);
+		if (!cached || cached.signature !== signature) {
+			cached = { signature, manager: readSession(record) };
+			this.cold.set(record.sessionFile, cached);
+		}
+		return cached.manager;
+	}
+
+	transcript(path: string, options: ReaderOptions, before?: string): TranscriptSnapshot {
+		const records = new Map(options.records.map(record => [record.descriptor.path, record]));
+		const record = records.get(path);
+		const unavailable = (error: string): TranscriptSnapshot => ({
+			path, status: record?.status ?? "interrupted", entries: [], inheritedCount: 0, error,
+		});
+		if (!record) return unavailable("Agent is not in the current tree.");
+		const seen = new Set<string>();
+		const visible = (target: AgentRecord): boolean => {
+			if (seen.has(target.descriptor.path)) return false;
+			seen.add(target.descriptor.path);
+			const parentPath = target.descriptor.parentPath;
+			const parent = records.get(parentPath);
+			if (parentPath !== "/root" && (!parent || !visible(parent))) return false;
+			const branch = parentPath === "/root" ? options.rootBranch :
+				this.session(parent!, options.live(parentPath)).getBranch();
+			return branch.some(entry => entry.id === target.descriptor.anchorId);
+		};
+		try {
+			if (!visible(record)) return unavailable("Agent is not visible on the current canonical branch.");
+			const live = options.live(path);
+			const manager = this.session(record, live);
+			return {
+				...buildTranscript(record, manager.getBranch(), live?.telemetry?.transcriptSnapshot(), before),
+				presentation: createTranscriptPresentation(record.descriptor.cwd, live?.session),
+			};
+		} catch (error) {
+			return unavailable(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	private timing(sessionFile: string): ReturnType<typeof readRunTelemetry> {
 		try {
 			const stat = statSync(`${sessionFile}.telemetry.json`);
@@ -53,10 +107,7 @@ export class DashboardReader {
 		}
 	}
 
-	read(options: {
-		records: readonly AgentRecord[];
-		rootBranch: readonly SessionEntry[];
-		live(path: string): LiveAgent | undefined;
+	read(options: ReaderOptions & {
 		activeCount: number;
 		maxConcurrentAgents: number;
 	}): DashboardSnapshot {
@@ -70,21 +121,9 @@ export class DashboardReader {
 			if (memo instanceof Error) throw memo;
 			if (memo) return memo;
 			try {
-				const live = options.live(path);
-				if (live) {
-					this.cold.delete(record.sessionFile);
-					sessions.set(path, live.session.sessionManager);
-					return live.session.sessionManager;
-				}
-				const stat = statSync(record.sessionFile);
-				const signature = `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
-				let cached = this.cold.get(record.sessionFile);
-				if (!cached || cached.signature !== signature) {
-					cached = { signature, manager: readSession(record) };
-					this.cold.set(record.sessionFile, cached);
-				}
-				sessions.set(path, cached.manager);
-				return cached.manager;
+				const manager = this.session(record, options.live(path));
+				sessions.set(path, manager);
+				return manager;
 			} catch (cause) {
 				const error = cause instanceof Error ? cause : new Error(String(cause));
 				sessions.set(path, error);

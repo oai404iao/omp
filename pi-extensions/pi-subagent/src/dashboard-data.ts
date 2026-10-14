@@ -2,7 +2,8 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { Usage } from "@earendil-works/pi-ai";
 import type { DashboardActivity, DashboardAgent, DashboardContext, DashboardUsage } from "./dashboard-types.ts";
 import { DESCRIPTOR_CUSTOM_TYPE, MESSAGE_CUSTOM_TYPE } from "./store.ts";
-import { ACTIVITY_LIMIT, dashboardText, TELEMETRY_CUSTOM_TYPE, toolSummary, type RunTelemetryEntry, type TelemetrySnapshot } from "./telemetry.ts";
+import { ACTIVITY_LIMIT, dashboardText, TELEMETRY_CUSTOM_TYPE, type RunTelemetryEntry, type TelemetrySnapshot } from "./telemetry.ts";
+import { responseActivity, toolActivity, toolResultActivity } from "./activity-preview.ts";
 import type { AgentRecord } from "./types.ts";
 
 function emptyUsage(available: boolean): DashboardUsage {
@@ -168,7 +169,10 @@ function activityAndTask(
 ) {
 	const activity = new Map<string, DashboardActivity>();
 	const responseTimes = new Set<number>();
+	const responseIds = new Set<string>();
 	const completedTools = new Set<string>();
+	const finalizedTopTools = new Set<string>();
+	const toolInputs = new Map<string, ReturnType<typeof toolActivity>>();
 	let task: string | undefined;
 	let hasDeliveredTask = false;
 	let context: DashboardContext | undefined;
@@ -223,28 +227,36 @@ function activityAndTask(
 		const message = entry.message;
 		if (message.role === "assistant" && message.stopReason !== "pending") {
 			responseTimes.add(message.timestamp);
+			responseIds.add(`response:${entry.id}`);
 			put({
 				id: `response:${entry.id}`, timestamp: message.timestamp, kind: "response",
 				status: message.stopReason === "error" ? "error" : message.stopReason === "aborted" ? "interrupted" : "success",
 				label: "Response",
-				summary: dashboardText(message.content.filter(block => block.type === "text").map(block => block.text).join(" ")),
+				...responseActivity(message),
 			});
-			for (const block of message.content) if (block.type === "toolCall") put({
-				id: `tool:${block.id}`, timestamp: message.timestamp, kind: "tool",
-				status: live?.toolIds.includes(block.id) ? "running" : "interrupted",
-				label: dashboardText(block.name, 80), summary: toolSummary(block.arguments),
-			});
+			for (const block of message.content) if (block.type === "toolCall") {
+				const id = `tool:${block.id}`;
+				const content = toolActivity(block.name, block.arguments);
+				toolInputs.set(id, content);
+				while (toolInputs.size > ACTIVITY_LIMIT) toolInputs.delete(toolInputs.keys().next().value!);
+				put({ id, timestamp: message.timestamp, kind: "tool",
+					status: live?.toolIds.includes(block.id) ? "running" : "interrupted",
+					label: dashboardText(block.name, 80), ...content });
+			}
 		} else if (message.role === "toolResult") {
 			const id = `tool:${message.toolCallId}`;
 			completedTools.add(id);
+			finalizedTopTools.add(id);
 			put({ id, timestamp: message.timestamp, kind: "tool", status: message.isError ? "error" : "success",
-				label: dashboardText(message.toolName, 80), summary: activity.get(id)?.summary ?? "" });
+				label: dashboardText(message.toolName, 80),
+				...toolResultActivity(toolInputs.get(id) ?? { summary: "" }, message, message.isError) });
+			toolInputs.delete(id);
 			for (const call of message.nestedCalls?.calls ?? []) {
 				if (call.status !== "unfinished") completedTools.add(`tool:${call.id}`);
 				put({
 					id: `tool:${call.id}`, timestamp: message.timestamp, kind: "tool",
 					status: call.status === "ok" ? "success" : call.status === "error" ? "error" : "interrupted",
-					label: dashboardText(call.name, 80), summary: toolSummary(call.arguments),
+					label: dashboardText(call.name, 80), ...toolActivity(call.name, call.arguments),
 				});
 			}
 		}
@@ -275,8 +287,14 @@ function activityAndTask(
 		}
 	}
 	for (const item of live?.activity ?? []) {
-		if (item.kind === "response" && responseTimes.has(item.timestamp)) continue;
-		if (item.kind === "tool" && item.status === "running" && completedTools.has(item.id)) continue;
+		if (item.kind === "response" && (responseIds.has(item.id) ||
+			(item.status !== "running" && responseTimes.has(item.timestamp)))) continue;
+		if (item.kind === "tool" && finalizedTopTools.has(item.id)) continue;
+		if (item.kind === "tool" && completedTools.has(item.id)) {
+			const completed = activity.get(item.id);
+			if (completed) put({ ...completed, preview: item.preview ?? completed.preview });
+			continue;
+		}
 		put({ ...item });
 	}
 	if (task === undefined && !hasDeliveredTask) task = record.mailbox.find(message => message.kind === "task")?.text;

@@ -81,7 +81,8 @@ test("tool phases and nested tools are deduplicated, activity and summaries are 
 	assert.equal(snapshot.activity.filter(item => item.id === "tool:59").length, 1);
 	assert.equal(snapshot.activity.find(item => item.id === "tool:59")?.summary, "file59");
 	assert.equal(snapshot.activity.find(item => item.id === "tool:nested")?.status, "error");
-	assert.equal(JSON.stringify(snapshot).includes("SECRET"), false);
+	assert.equal(snapshot.activity.find(item => item.id === "tool:nested")?.preview, "SECRET");
+	assert.equal(snapshot.activity.find(item => item.id === "tool:59")?.preview, "› SECRET");
 	assert.equal(JSON.stringify(snapshot).includes("do not show"), false);
 	snapshot.activity[0]!.summary = "mutated externally";
 	assert.equal(f.telemetry.snapshot().activity.some(item => item.summary === "mutated externally"), false);
@@ -181,4 +182,84 @@ test("successful consecutive compactions use their durable entry IDs instead of 
 		assert.equal(activities.some(item => item.id === `compaction:${id}`), true);
 		assert.equal(activities.every(item => item.status === "success"), true);
 	}
+});
+
+test("assistant streams update one bounded row, coalesce changes, and finalize immediately", t => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const f = fixture();
+	const pending = { ...assistant(""), timestamp: 123, stopReason: "pending" as const };
+	f.emit({ type: "message_start", message: pending });
+	assert.equal(f.changes, 1);
+	for (let n = 0; n < 10; n++) {
+		const message = { ...pending, content: [{ type: "text" as const, text: `line ${n}\n${"🙂".repeat(500)}` }] };
+		f.emit({ type: "message_update", message,
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "line", partial: message } });
+	}
+	assert.equal(f.changes, 1);
+	assert.equal(f.telemetry.snapshot().activity.length, 1);
+	assert.equal(Array.from(f.telemetry.snapshot().activity[0]!.preview!).length, 240);
+	t.mock.timers.tick(100);
+	assert.equal(f.changes, 2);
+	const final = { ...pending, stopReason: "stop" as const, content: [{ type: "text" as const, text: "final\nanswer" }] };
+	f.emit({ type: "message_end", message: final });
+	assert.equal(f.changes, 3);
+	const row = f.telemetry.snapshot().activity[0]!;
+	assert.equal(row.preview, "final\nanswer");
+	assert.equal(row.status, "success");
+	f.emit({ type: "message_end", message: final });
+	f.emit({ type: "message_update", message: pending,
+		assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "late", partial: pending } });
+	assert.equal(f.changes, 3);
+	assert.deepEqual(f.telemetry.snapshot().activity, [row]);
+	f.telemetry.dispose();
+});
+
+test("tool streams replace output, preserve input, finalize authoritatively and cancel timers", t => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const f = fixture();
+	const start = { type: "tool_execution_start" as const, toolCallId: "stream", toolName: "bash", args: { command: "pnpm check", secret: "HIDDEN" } };
+	f.emit(start);
+	for (const text of ["first", "first\nsecond"]) f.emit({
+		...start, type: "tool_execution_update", partialResult: { content: [{ type: "text", text }] },
+	});
+	assert.equal(f.changes, 1);
+	assert.equal(f.telemetry.snapshot().activity[0]!.preview, "$ pnpm check\n› first\nsecond");
+	f.emit({ type: "tool_execution_end", toolCallId: "stream", toolName: "bash", isError: false,
+		result: { content: [{ type: "text", text: "done" }] } });
+	assert.equal(f.changes, 2);
+	assert.equal(f.telemetry.snapshot().activity[0]!.preview, "$ pnpm check\n› done");
+	f.emit({ ...start, type: "tool_execution_update", partialResult: { content: [{ type: "text", text: "late" }] } });
+	t.mock.timers.tick(100);
+	assert.equal(f.changes, 2);
+	assert.equal(f.telemetry.snapshot().activity.length, 1);
+	assert.deepEqual(f.telemetry.snapshot().toolIds, ["stream"]);
+	f.telemetry.dispose();
+	const unfinished = fixture();
+	unfinished.emit(start);
+	unfinished.emit({ ...start, type: "tool_execution_update", partialResult: { content: [] } });
+	unfinished.telemetry.finish("interrupted");
+	const count = unfinished.changes;
+	t.mock.timers.tick(100);
+	assert.equal(unfinished.changes, count);
+	assert.equal(unfinished.telemetry.snapshot().activity[0]!.status, "interrupted");
+	unfinished.telemetry.dispose();
+	const disposed = fixture();
+	disposed.emit(start);
+	disposed.emit({ ...start, type: "tool_execution_update", partialResult: { content: [] } });
+	disposed.telemetry.dispose();
+	t.mock.timers.tick(100);
+	assert.equal(disposed.changes, 1);
+});
+
+test("finalized response IDs follow persisted entries without retaining messages or merging same-ms responses", () => {
+	const f = fixture();
+	for (const text of ["first", "second"]) {
+		const message = { ...assistant(text), timestamp: 123 };
+		f.emit({ type: "message_start", message: { ...message, stopReason: "pending" } });
+		const id = f.manager.appendMessage(message);
+		f.emit({ type: "message_end", message });
+		assert(f.telemetry.snapshot().activity.some(item => item.id === `response:${id}`));
+	}
+	assert.equal(f.telemetry.snapshot().activity.length, 2);
+	f.telemetry.dispose();
 });

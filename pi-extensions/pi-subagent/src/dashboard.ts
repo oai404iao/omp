@@ -1,12 +1,13 @@
 import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, ScrollView, type Component, type TUI, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import type { DashboardSnapshot, DashboardSource } from "./dashboard-types.ts";
-import { AGENT_ROW_HEIGHT, dashboardSummary, dashboardText, fit, renderAgentDetails, renderAgentRows } from "./dashboard-view.ts";
+import { AGENT_ROW_HEIGHT, agentDuration, dashboardSummary, dashboardText, fit, renderAgentDetails, renderAgentRows } from "./dashboard-view.ts";
+import { TranscriptView } from "./transcript-view.ts";
 
 export interface DashboardOptions {
 	tui: Pick<TUI, "requestRender" | "mode"> & { terminal: Pick<TUI["terminal"], "rows" | "columns"> };
 	theme: () => Theme;
-	keybindings: Pick<KeybindingsManager, "matches">;
+	keybindings: Pick<KeybindingsManager, "matches"> & Partial<Pick<KeybindingsManager, "getKeys">>;
 	source: DashboardSource;
 	done: () => void;
 	now?: () => number;
@@ -33,12 +34,14 @@ export class DashboardComponent implements Component {
 	private details: ScrollView;
 	private revealSelection = true;
 	private taskExpanded = false;
+	private transcript?: TranscriptView;
+	private readonly durations = new Map<string, string>();
 
 	constructor(private readonly options: DashboardOptions) {
 		this.now = options.now ?? Date.now;
 		const content = (render: (width: number) => string[]): Component => ({ render, invalidate() {} });
 		this.list = new ScrollView(content(width =>
-			renderAgentRows(this.snapshot, this.selectedPath, width, options.theme(), this.now())));
+			renderAgentRows(this.snapshot, this.selectedPath, width, options.theme(), this.now(), this.durations)));
 		this.details = new ScrollView(content(width =>
 			renderAgentDetails(this.selectedAgent, width, options.theme(), this.now(), this.taskExpanded)));
 		try {
@@ -57,6 +60,7 @@ export class DashboardComponent implements Component {
 			this.refresh = undefined;
 			if (this.disposed) return;
 			this.readSnapshot();
+			this.readTranscript();
 			this.options.tui.requestRender();
 		}, 40);
 		this.refresh.unref();
@@ -64,6 +68,11 @@ export class DashboardComponent implements Component {
 	private readSnapshot(): void {
 		try {
 			const snapshot = this.options.source.getSnapshot();
+			const sampledAt = this.now();
+			for (const agent of snapshot.agents) {
+				// One opening owns one duration sample; live metrics/status still refresh.
+				if (!this.durations.has(agent.path)) this.durations.set(agent.path, agentDuration(agent, sampledAt));
+			}
 			const before = this.selectedPath;
 			const beforeIndex = this.snapshot.agents.findIndex(agent => agent.path === before);
 			this.snapshot = snapshot;
@@ -77,6 +86,36 @@ export class DashboardComponent implements Component {
 			// Pi mounts custom() via a Promise; closing in a microtask can precede that mount.
 			if (snapshot.closed && !this.closeTimer) this.closeTimer = setTimeout(() => this.finish(), 0);
 		} catch (error) { this.snapshot = { ...this.snapshot, error: this.errorText(error) }; }
+	}
+
+	private readTranscript(previous = false, resume = false): void {
+		const view = this.transcript;
+		if (!view?.path || !this.options.source.getTranscript) return;
+		try {
+			const snapshot = this.options.source.getTranscript(view.path, previous ? view.before : undefined);
+			if (resume) view.resume(snapshot);
+			else view.update(snapshot, previous);
+			if (snapshot.closed) this.closeTranscript();
+		} catch (error) {
+			view.update({ path: view.path, status: "errored", entries: [], inheritedCount: 0, error: this.errorText(error) });
+		}
+	}
+
+	private openTranscript(): void {
+		if (!this.selectedPath || !this.options.source.getTranscript) return;
+		const view = new TranscriptView(this.options.tui, this.options.theme);
+		try {
+			view.update(this.options.source.getTranscript(this.selectedPath));
+			this.transcript = view;
+		} catch (error) {
+			view.update({ path: this.selectedPath, status: "errored", entries: [], inheritedCount: 0, error: this.errorText(error) });
+			this.transcript = view;
+		}
+	}
+
+	private closeTranscript(): void {
+		this.transcript?.dispose();
+		this.transcript = undefined;
 	}
 
 	private finish(): void {
@@ -93,10 +132,12 @@ export class DashboardComponent implements Component {
 		clearTimeout(this.closeTimer);
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
+		this.closeTranscript();
 	}
 	invalidate(): void {
 		this.list.invalidate();
 		this.details.invalidate();
+		this.transcript?.invalidate();
 	}
 
 	private select(index: number): void {
@@ -112,9 +153,29 @@ export class DashboardComponent implements Component {
 	handleInput(data: string): void {
 		if (this.disposed) return;
 		const matches = (action: Parameters<KeybindingsManager["matches"]>[1]) => this.options.keybindings.matches(data, action);
+		if (this.transcript) {
+			if (matches("tui.select.cancel") || matchesKey(data, "escape")) this.closeTranscript();
+			else if (matchesKey(data, "end")) this.readTranscript(false, true);
+			else if (data === "p") {
+				if (this.transcript.before) {
+					this.readTranscript(true);
+					this.transcript?.scrollToStart();
+				}
+			} else if (matchesKey(data, "home")) this.transcript.scrollToStart();
+			else if (matches("app.tools.expand")) this.transcript.toggleTools();
+			else if (matches("tui.select.pageUp") || matches("tui.select.pageDown")) {
+				this.transcript.scrollBy((matches("tui.select.pageUp") ? -1 : 1) * Math.max(1, this.bodyHeight - 1));
+			} else if (matches("tui.select.up") || matches("tui.select.down") || data === "j" || data === "k") {
+				this.transcript.scrollBy(matches("tui.select.up") || data === "k" ? -1 : 1);
+			} else return;
+			this.options.tui.requestRender();
+			return;
+		}
 		if (matches("tui.select.cancel") || matchesKey(data, "escape")) {
 			if (this.narrow && this.pane === "details") this.pane = "agents";
 			else { this.finish(); return; }
+		} else if (data === "t") {
+			this.openTranscript();
 		} else if (matchesKey(data, "tab")) {
 			this.pane = this.pane === "agents" ? "details" : "agents";
 		} else if (matches("tui.select.confirm")) {
@@ -138,6 +199,13 @@ export class DashboardComponent implements Component {
 		if (this.disposed || this.options.tui.mode !== "fullscreen" ||
 			event.y < this.bodyTop || event.y >= this.bodyTop + this.bodyHeight ||
 			event.x < 1 || event.x >= this.width - 1) return;
+		if (this.transcript) {
+			if (event.type === "wheel") this.transcript.scrollBy(event.wheelDelta ?? 0);
+			else if (event.type === "click" && event.button === "left") {
+				if (!this.transcript.toggleAt(event.y - this.bodyTop)) return;
+			} else return;
+			return { handled: true, render: true };
+		}
 		const pane = this.narrow ? this.pane : event.x <= this.leftWidth ? "agents" : "details";
 		if (event.type === "wheel") {
 			this.pane = pane;
@@ -173,7 +241,7 @@ export class DashboardComponent implements Component {
 		const height = Math.max(1, Math.min(this.options.tui.terminal.rows, Math.floor(this.options.tui.terminal.rows * 0.88)));
 		const narrow = width - 2 < 110;
 		const bodyHeight = width < 24 || height < 10 ? 0 : height - 8;
-		if (width !== this.width || narrow !== this.narrow || bodyHeight !== this.bodyHeight) {
+		if (!this.transcript && (width !== this.width || narrow !== this.narrow || bodyHeight !== this.bodyHeight)) {
 			this.revealSelection = true;
 		}
 		this.width = width;
@@ -196,7 +264,11 @@ export class DashboardComponent implements Component {
 		];
 		this.bodyTop = 5;
 		const title = (text: string, active: boolean) => theme.fg(active ? "accent" : "muted", `${active ? "›" : " "} ${text}`);
-		if (this.narrow) {
+		if (this.transcript) {
+			rows.push(row(title("READ ONLY · " + (this.transcript.isFollowing ? "Following" : "History") +
+				` · ${dashboardText(this.transcript.status ?? "unknown")} · TRANSCRIPT ${dashboardText(this.transcript.path ?? "")}`, true)));
+			for (const line of this.transcript.viewport(inner - 2, this.bodyHeight)) rows.push(row(` ${line} `));
+		} else if (this.narrow) {
 			rows.push(row(title(this.pane === "agents" ? "AGENTS" : "DETAILS", true)));
 			const view = this.pane === "agents" ? this.list : this.details;
 			for (const line of this.viewport(view, inner - 2, this.bodyHeight, this.pane === "agents" && this.revealSelection)) {
@@ -211,11 +283,13 @@ export class DashboardComponent implements Component {
 			const right = this.viewport(this.details, rightWidth - 2, this.bodyHeight);
 			for (let i = 0; i < this.bodyHeight; i++) rows.push(row(` ${left[i]} ${border("│")} ${right[i]} `));
 		}
-		if (!this.narrow || this.pane === "agents") this.revealSelection = false;
+		if (!this.transcript && (!this.narrow || this.pane === "agents")) this.revealSelection = false;
 		rows.push(border(`├${"─".repeat(inner)}┤`));
-		const hint = this.narrow ? this.pane === "agents" ? "↑↓/jk Select · Enter Details · PgUp/Dn Scroll · Esc Close" :
-			"↑↓/jk Scroll · Enter Task · PgUp/Dn Page · Esc Back" :
-			"↑↓/jk Navigate · Tab Focus · Enter Task · PgUp/Dn Scroll · Esc Close";
+		const toolKey = this.options.keybindings.getKeys?.("app.tools.expand").join("/") || "Tool key";
+		const hint = this.transcript ? `↑↓/jk Scroll · p Earlier · End Follow · ${toolKey} Tools · Esc Back` :
+			this.narrow ? this.pane === "agents" ? "↑↓/jk Select · Enter Details · t Transcript · Esc Close" :
+				"↑↓/jk Scroll · Enter Task · t Transcript · Esc Back" :
+				"↑↓/jk Navigate · Tab Focus · Enter Task · t Transcript · PgUp/Dn Scroll · Esc Close";
 		rows.push(row(theme.fg("muted", ` ${hint}`)));
 		rows.push(border(`╰${"─".repeat(inner)}╯`));
 		return rows;

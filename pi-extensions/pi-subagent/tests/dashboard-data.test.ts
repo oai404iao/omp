@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolCall, Usage } from "@earendil-works/pi-ai";
 import { DEFAULT_SETTINGS } from "../src/config.ts";
 import { buildDashboardAgent, unavailableDashboardAgent } from "../src/dashboard-data.ts";
 import { DESCRIPTOR_CUSTOM_TYPE, MESSAGE_CUSTOM_TYPE } from "../src/store.ts";
@@ -174,7 +174,7 @@ test("context uses live SDK state or last persisted snapshot, preserving unknown
 	assert.deepEqual(buildDashboardAgent(record(), session.getEntries(), live({ context: unknown })).context, unknown);
 });
 
-test("recent activity is bounded, merges tool phases and excludes arguments, results and thinking", () => {
+test("recent activity is bounded, merges semantic input/results and excludes thinking", () => {
 	const session = manager();
 	for (let n = 0; n < 70; n++) session.appendMessage(assistant(`response ${n}`, n));
 	session.appendMessage({
@@ -191,7 +191,9 @@ test("recent activity is bounded, merges tool phases and excludes arguments, res
 	assert.equal(data.activity.length, 50);
 	assert.equal(data.activity.filter(item => item.id === "tool:bash").length, 1);
 	assert.equal(data.activity[0]!.status, "success");
-	assert.equal(JSON.stringify(data.activity).includes("private"), false);
+	assert.equal(data.activity[0]!.preview, "$ SECRET=private run\n› private result");
+	assert.equal(JSON.stringify(data.activity).includes("private thinking"), false);
+	assert.equal(data.activity.find(item => item.kind === "response")?.preview, "Requested bash");
 });
 
 test("ordinary and completion deliveries expose only safe counts alongside tasks", () => {
@@ -279,4 +281,45 @@ test("sidecar context stays branch-local, compaction invalidates stale snapshots
 	assert.equal(active.activity.filter(item => item.kind === "compaction").length, 1);
 	session.branch(start);
 	assert.equal(buildDashboardAgent(record(), session.getEntries(), undefined, session.getBranch(), records).context, undefined);
+});
+
+test("cold semantic previews match inputs/results and finalized receipts override stale live content", () => {
+	const session = manager();
+	const calls: ToolCall[] = [
+		{ type: "toolCall" as const, id: "write", name: "write", arguments: { path: "a.ts", content: "export const a = 1;\n", secret: "HIDDEN" } },
+		{ type: "toolCall" as const, id: "edit", name: "edit", arguments: { path: "b.ts", edits: [{ oldText: "before", newText: "after" }] } },
+		{ type: "toolCall" as const, id: "patch", name: "apply_patch", arguments: { input: "*** Begin Patch\n*** Add File: c.ts\n+export const c = 1;\n*** End Patch" } },
+	];
+	session.appendMessage({ ...assistant("", 10), content: calls, stopReason: "toolUse" });
+	for (const call of calls) session.appendMessage({
+		role: "toolResult", toolCallId: call.id, toolName: call.name, isError: false, timestamp: 20,
+		content: [{ type: "text", text: "Saved" }],
+	});
+	const stale = live({ activity: [
+		{ id: "tool:write", timestamp: 30, kind: "tool", status: "running", label: "write", summary: "stale", preview: "stale" },
+		{ id: "tool:edit", timestamp: 30, kind: "tool", status: "error", label: "edit", summary: "stale", preview: "stale" },
+	] });
+	const data = buildDashboardAgent(record(), session.getEntries(), stale);
+	assert.equal(data.usage.tools, 3);
+	assert.equal(data.usage.requests, 1);
+	const row = (id: string) => data.activity.find(item => item.id === `tool:${id}`)!;
+	assert.equal(row("write").summary, "a.ts");
+	assert.equal(row("write").preview, "export const a = 1;\n› Saved");
+	assert.equal(row("edit").preview, "- before\n+ after\n› Saved");
+	assert.match(row("patch").summary, /Add File: c.ts/);
+	assert.equal(row("patch").preview, "+export const c = 1;\n› Saved");
+	assert(data.activity.filter(item => item.kind === "tool").every(item => item.status === "success"));
+	assert(!JSON.stringify(data.activity).includes("HIDDEN"));
+	assert(!JSON.stringify(data.activity).includes("stale"));
+});
+
+test("pending responses with a same-ms timestamp remain visible without affecting finalized request totals", () => {
+	const session = manager();
+	session.appendMessage(assistant("finalized", 123));
+	const current = live({ activity: [
+		{ id: "response:live:1", timestamp: 123, kind: "response", status: "running", label: "Response", summary: "stream", preview: "stream" },
+	] });
+	const data = buildDashboardAgent(record(), session.getEntries(), current);
+	assert.equal(data.activity.filter(item => item.kind === "response").length, 2);
+	assert.equal(data.usage.requests, 1);
 });
