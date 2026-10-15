@@ -189,6 +189,7 @@ const publishWarnings = publishOrderedBatch(candidates, {
         "publish",
         tarballPath,
         "--ignore-scripts",
+        "--dry-run=false",
         "--access",
         "public",
         "--provenance",
@@ -200,8 +201,11 @@ const publishWarnings = publishOrderedBatch(candidates, {
       { cwd: root, encoding: "utf8" },
     );
     if (published.status !== 0) {
-      throw new Error((published.stderr || published.stdout).trim());
+      throw new Error((published.stderr || published.stdout || published.error?.message || "npm publish failed").trim());
     }
+    // Keep npm's receipt visible; exit zero alone does not establish a registry write.
+    if (published.stdout) process.stdout.write(published.stdout);
+    if (published.stderr) process.stderr.write(published.stderr);
   },
   verify(candidate) {
     if (candidate.mode === "publish") verifyNewlyPublishedCandidate(candidate);
