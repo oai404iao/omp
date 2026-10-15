@@ -1,4 +1,5 @@
 import { closeSync, existsSync, fsyncSync, openSync, writeFileSync } from "node:fs";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { buildSessionProjection, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ForkTurns } from "./types.ts";
@@ -231,4 +232,34 @@ export function persistPreparedSession(session: SessionManager): SessionManager 
 		try { fsyncSync(fd); } finally { closeSync(fd); }
 	}
 	return SessionManager.open(path);
+}
+
+export class SelectionPersistenceError extends Error {
+	constructor(cause: unknown) {
+		super("failed to persist child execution profile selection", { cause });
+		this.name = "SelectionPersistenceError";
+	}
+}
+
+/** Explicit SDK options select the model but do not record switches on existing
+ * sessions. Keep Pi's selection records aligned without rebuilding history or
+ * treating a virtual model's physical assistant response as its selection.
+ */
+export function recordChildSelection(
+	session: SessionManager,
+	model: { provider: string; id: string },
+	thinking: ThinkingLevel,
+): void {
+	try {
+		const branch = session.getBranch().reverse();
+		const selected = branch.find(entry => entry.type === "model_change");
+		if (!selected || selected.provider !== model.provider || selected.modelId !== model.id) {
+			session.appendModelChange(model.provider, model.id);
+		}
+		const level = branch.find(entry => entry.type === "thinking_level_change");
+		if (!level || level.thinkingLevel !== thinking) session.appendThinkingLevelChange(thinking);
+		persistPreparedSession(session);
+	} catch (cause) {
+		throw new SelectionPersistenceError(cause);
+	}
 }

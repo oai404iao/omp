@@ -6,6 +6,7 @@ export type AgentScope = "user" | "project" | "both";
 export type AgentSource = "user" | "project";
 export type ForkTurns = "all" | "none";
 export type AgentStatus = "pending_init" | "running" | "completed" | "interrupted" | "errored";
+export type AgentLifecycle = "open" | "closing" | "closed";
 export type SubagentStopReason = "completed" | "aborted" | "error" | "max-tokens";
 
 export interface SubagentSettings {
@@ -36,6 +37,8 @@ export interface SpawnInput {
 	message: string;
 	fork_turns?: ForkTurns;
 	agent_type?: string;
+	model?: string;
+	thinking?: ThinkingLevel;
 }
 
 export interface AgentDescriptor {
@@ -63,6 +66,8 @@ export interface MailMessage {
 	text: string;
 	createdAt: string;
 	runId?: string;
+	canceledAt?: string;
+	canceledBy?: string;
 	codexTurnAttribution?: { parentTurnId?: string; rootTurnId?: string };
 }
 
@@ -70,6 +75,12 @@ export interface AgentRecord {
 	descriptor: AgentDescriptor;
 	sessionFile: string;
 	status: AgentStatus;
+	lifecycle: AgentLifecycle;
+	closeRequestedAt?: string;
+	closedAt?: string;
+	closedBy?: string;
+	/** Actual pair from the latest successful response, never inferred from selection. */
+	lastResponse?: { model: string; thinking?: ThinkingLevel };
 	runId?: string;
 	error?: string;
 	mailbox: MailMessage[];
@@ -80,6 +91,11 @@ export interface AgentRecord {
 export interface AgentListItem {
 	agent_name: string;
 	agent_status: AgentStatus;
+	lifecycle: AgentLifecycle;
+	/** Selected configuration, including virtual models. */
+	model: string;
+	thinking: ThinkingLevel;
+	last_response?: { model: string; thinking?: ThinkingLevel };
 }
 
 export interface WaitResult {

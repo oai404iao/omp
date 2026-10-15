@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import fs, { existsSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { prepareChildSession, persistPreparedSession } from "../src/providers.ts";
+import { prepareChildSession, persistPreparedSession, recordChildSelection, SelectionPersistenceError } from "../src/providers.ts";
 import { assistant, tempRoot } from "./support/fixture.ts";
 
 for (const fork of ["all", "none"] as const) {
@@ -81,4 +82,64 @@ test("setup-only child JSONL is materialized before publication and can append n
 test("ephemeral parents are rejected for both fork policies", () => {
 	const parent = SessionManager.inMemory();
 	for (const fork of ["all", "none"] as const) assert.throws(() => prepareChildSession(parent, parent.getSessionDir(), fork), /persisted/);
+});
+
+test("selection switches append Pi records without replacing history or adopting a routed response", t => {
+	const root = tempRoot(t);
+	const session = SessionManager.create(root, join(root, "sessions"));
+	session.appendMessage({ role: "user", content: "retain this", timestamp: 1 });
+	session.appendMessage(assistant("retain answer"));
+	const original = structuredClone(session.getEntries());
+	recordChildSelection(session, { provider: "router", id: "auto" }, "high");
+	session.appendMessage({ ...assistant("physical response"), thinkingLevel: "off" });
+	const before = session.getEntries().length;
+	recordChildSelection(session, { provider: "router", id: "auto" }, "high");
+	assert.equal(session.getEntries().length, before);
+	recordChildSelection(session, { provider: "other", id: "reasoner" }, "low");
+	assert.deepEqual(session.getEntries().slice(0, original.length), original);
+	assert.deepEqual(session.getBranch().filter(entry => entry.type === "model_change")
+		.map(entry => [entry.provider, entry.modelId]), [["router", "auto"], ["other", "reasoner"]]);
+	assert.deepEqual(session.getBranch().filter(entry => entry.type === "thinking_level_change")
+		.map(entry => entry.thinkingLevel), ["high", "low"]);
+	assert.match(JSON.stringify(session.buildSessionContext().messages), /retain this.*retain answer.*physical response/);
+	const reopened = SessionManager.open(session.getSessionFile()!);
+	assert.deepEqual(reopened.getEntries(), session.getEntries());
+});
+
+test("selection append and sync failures use the specific persistence error marker", t => {
+	const root = tempRoot(t);
+	const session = SessionManager.create(root, join(root, "sessions"));
+	const appendFailure = new Error("append failed");
+	t.mock.method(session, "appendModelChange", () => { throw appendFailure; });
+	assert.throws(() => recordChildSelection(session, { provider: "router", id: "auto" }, "high"),
+		error => error instanceof SelectionPersistenceError && error.cause === appendFailure);
+	t.mock.restoreAll();
+	persistPreparedSession(session);
+	const syncFailure = new Error("fsync failed");
+	t.mock.method(fs, "fsyncSync", () => { throw syncFailure; });
+	syncBuiltinESMExports();
+	try {
+		assert.throws(() => recordChildSelection(session, { provider: "router", id: "auto" }, "high"),
+			error => error instanceof SelectionPersistenceError && error.cause === syncFailure);
+	} finally {
+		t.mock.restoreAll();
+		syncBuiltinESMExports();
+	}
+});
+
+test("reopening after a partial selection append repairs it from the authoritative descriptor", t => {
+	const root = tempRoot(t);
+	const session = SessionManager.create(root, join(root, "sessions"));
+	session.appendMessage({ role: "user", content: "retain history", timestamp: 1 });
+	recordChildSelection(session, { provider: "old", id: "model" }, "off");
+	t.mock.method(session, "appendThinkingLevelChange", () => { throw new Error("thinking append failed"); });
+	assert.throws(() => recordChildSelection(session, { provider: "new", id: "model" }, "high"),
+		SelectionPersistenceError);
+	t.mock.restoreAll();
+	const reopened = SessionManager.open(session.getSessionFile()!);
+	recordChildSelection(reopened, { provider: "old", id: "model" }, "off");
+	const repaired = SessionManager.open(session.getSessionFile()!);
+	assert.equal(repaired.getBranch().filter(entry => entry.type === "model_change").at(-1)?.provider, "old");
+	assert.equal(repaired.getBranch().filter(entry => entry.type === "thinking_level_change").at(-1)?.thinkingLevel, "off");
+	assert.match(JSON.stringify(repaired.buildSessionContext().messages), /retain history/);
 });

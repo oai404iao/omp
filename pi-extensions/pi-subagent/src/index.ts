@@ -8,6 +8,7 @@ import { createAgentTools } from "./tools.ts";
 import { MESSAGE_CUSTOM_TYPE } from "./store.ts";
 import { renderAgentMessage } from "./render.ts";
 import { openDashboard } from "./dashboard.ts";
+import { independentTreeContext } from "./tree-context.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -44,10 +45,12 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => initialize(ctx));
 	pi.on("session_tree", (_event, ctx) => initialize(ctx));
 	pi.on("session_shutdown", async () => { await coordinator?.shutdown(); });
-	pi.on("before_agent_start", (_event, ctx) => {
+	pi.on("before_agent_start", (event, ctx) => {
 		if (!coordinator) return;
 		coordinator.rootCaller(ctx);
 		const message = coordinator.inboxMessage("/root", ctx.sessionManager as SessionManager);
+		const treeContext = independentTreeContext(ctx.sessionManager as SessionManager);
+		if (treeContext) event.systemPromptOptions.sections.subagent_tree = treeContext;
 		return message ? { message } : undefined;
 	});
 	pi.on("turn_end", (event, ctx) =>
@@ -87,7 +90,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				`Active child runs: ${controller.activeCount}/${controller.settings.maxConcurrentAgents}`,
 				`Agent definitions: ${controller.getUserAgentsDir()}`,
 				formatAgentCatalog(catalog.agents),
-				controller.list(caller).agents.map(agent => `${agent.agent_name} [${agent.agent_status}]`).join("\n"),
+				controller.list(caller).agents.map(agent =>
+					`${agent.agent_name} [${agent.agent_status}; ${agent.lifecycle}] · Selected: ${agent.model} / ${agent.thinking}`).join("\n"),
 				...catalog.diagnostics,
 			].join("\n\n"), "info");
 		},

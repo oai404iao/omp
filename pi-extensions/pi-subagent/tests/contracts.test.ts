@@ -5,16 +5,16 @@ import { test } from "node:test";
 import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../src/config.ts";
 import {
-	FollowupTaskParameters, InterruptParameters, ListAgentsParameters, SendMessageParameters,
+	CloseParameters, CloseOutput, FollowupOutput, SpawnOutput, ListOutput, FollowupTaskParameters, InterruptParameters, ListAgentsParameters, SendMessageParameters,
 	TOOL_DESCRIPTIONS, TOOL_NAMES, WaitAgentParameters, spawnAgentParameters,
 } from "../src/schemas.ts";
 import { resolveTaskPath, taskPath, pathMatches } from "../src/task-path.ts";
 import { ExecutionLimiter, AgentOperationQueue } from "../src/scheduler.ts";
 import { deferred } from "./support/fixture.ts";
 
-test("six-tool contract: plaintext closed schemas, required fields, defaults, no legacy aliases", () => {
-	assert.deepEqual(TOOL_NAMES, ["spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents"]);
-	const schemas = [spawnAgentParameters([]), SendMessageParameters, FollowupTaskParameters, WaitAgentParameters, InterruptParameters, ListAgentsParameters];
+test("seven-tool contract: plaintext closed schemas, required fields, defaults, no legacy aliases", () => {
+	assert.deepEqual(TOOL_NAMES, ["spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "close_agent", "list_agents"]);
+	const schemas = [spawnAgentParameters([]), SendMessageParameters, FollowupTaskParameters, WaitAgentParameters, InterruptParameters, CloseParameters, ListAgentsParameters];
 	for (const schema of schemas) assert.equal(JSON.parse(JSON.stringify(schema)).additionalProperties, false);
 	assert(Value.Check(schemas[0]!, { task_name: "review", message: "task" }));
 	assert(!Value.Check(schemas[0]!, { task_name: "bad-name", message: "task" }));
@@ -34,13 +34,34 @@ test("six-tool contract: plaintext closed schemas, required fields, defaults, no
 	assert(!Value.Check(WaitAgentParameters, { timeout_ms: 3600001 }));
 	assert(!Value.Check(WaitAgentParameters, { targets: ["worker"] }));
 	assert.doesNotMatch(JSON.stringify(schemas), /encrypted|fork_context|completed_turns|runtimeMode/);
-	assert.equal(Object.keys(TOOL_DESCRIPTIONS).length, 6);
+	assert.equal(Object.keys(TOOL_DESCRIPTIONS).length, 7);
 	assert.equal(createHash("sha256").update(JSON.stringify(TOOL_NAMES.map((name, index) => ({
 		name, description: TOOL_DESCRIPTIONS[name], parameters: schemas[index],
-	})))).digest("hex"), "794afdeffa38a8756c8a275db26a258dd53959be4484692609edb92e842b745f",
-	"Approved six-tool description/schema snapshot changed; review the complete contract before updating.");
+	})))).digest("hex"), "848708d7eab348c43a6f88c52442d2c0d5356dde1393c8851ca4d91f9b268a54",
+	"Approved seven-tool description/schema snapshot changed; review the complete contract before updating.");
 });
 
+test("execution profiles, lifecycle and pagination public contracts reject unsupported aliases and values", () => {
+	for (const schema of [spawnAgentParameters([]), FollowupTaskParameters]) {
+		const base = schema === FollowupTaskParameters ? { target: "review", message: "task" } : { task_name: "review", message: "task" };
+		for (const thinking of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+			assert(Value.Check(schema, { ...base, model: "provider/model", thinking }));
+		}
+		assert(!Value.Check(schema, { ...base, thinking: "extra" }));
+		assert(!Value.Check(schema, { ...base, reasoning_effort: "high" }));
+	}
+	assert(Value.Check(CloseParameters, { target: "/root/review" }));
+	assert(!Value.Check(CloseParameters, { target: "review", recursive: false }));
+	assert(Value.Check(ListAgentsParameters, { include_closed: true, limit: 200, cursor: "opaque" }));
+	for (const limit of [0, 201, 1.5]) assert(!Value.Check(ListAgentsParameters, { limit }));
+	assert(Value.Check(SpawnOutput, { task_name: "/root/review", model: "p/m", thinking: "low" }));
+	assert(Value.Check(FollowupOutput, { accepted: true, model: "p/m", thinking: "low" }));
+	assert(Value.Check(CloseOutput, { accepted: true, target: "/root/review", lifecycle: "closing", affected_count: 1 }));
+	assert(Value.Check(ListOutput, { agents: [{
+		agent_name: "/root/review", agent_status: "completed", lifecycle: "closed", model: "virtual/auto", thinking: "high",
+		last_response: { model: "physical/model" },
+	}], next_cursor: "opaque" }));
+});
 test("agent_type uses the same catalog snapshot without embedding role bodies", () => {
 	const role = { name: "reviewer", description: "Review", systemPrompt: "PRIVATE_ROLE_BODY", source: "user" as const, filePath: "/agents/reviewer.md" };
 	const schema = spawnAgentParameters([role]);

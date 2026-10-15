@@ -77,7 +77,9 @@ const STATUS: Record<DashboardAgent["status"], { text: string; color: ThemeColor
 
 function status(agent: DashboardAgent, theme: Theme): string {
 	const value = STATUS[agent.status];
-	return theme.fg(value.color, value.text);
+	return theme.fg(value.color, value.text) +
+		(agent.lifecycle === "closed" ? theme.fg("muted", " · Closed") :
+			agent.lifecycle === "closing" ? theme.fg("warning", " · Closing") : "");
 }
 
 export function dashboardSummary(snapshot: DashboardSnapshot): [string, string] {
@@ -99,15 +101,16 @@ export function dashboardSummary(snapshot: DashboardSnapshot): [string, string] 
 
 export function renderAgentRows(
 	snapshot: DashboardSnapshot, selected: string | undefined, width: number, theme: Theme, now: number,
-	durations?: ReadonlyMap<string, string>,
+	durations?: ReadonlyMap<string, string>, filter?: "open" | "closed",
 ): string[] {
 	if (!snapshot.agents.length) {
+		if (filter) return [fit(theme.fg("muted", `No ${filter} subagents in this session.`), width)];
 		return ["No subagents in this session.", "", "Use spawn_agent to start a task.", "/subagents catalog shows available roles."]
 			.map(line => fit(theme.fg("muted", line), width));
 	}
 	return snapshot.agents.flatMap(agent => {
 		const picked = agent.path === selected;
-		const label = STATUS[agent.status].text;
+		const label = dashboardText(status(agent, theme));
 		const typeWidth = Math.min(14, Math.max(0, Math.floor(width / 5)));
 		const pathWidth = Math.max(1, width - visibleWidth(label) - typeWidth - 6);
 		const path = tail(dashboardText(agent.path), pathWidth);
@@ -151,7 +154,10 @@ export function renderAgentDetails(
 	plainField("Path", agent.path);
 	field("Type", `${dashboardText(agent.type)} · ${status(agent, theme)}`);
 	plainField("Parent", agent.parentPath);
-	plainField("Model", `${agent.model} · ${agent.thinkingLevel}`);
+	plainField("Selected", `${agent.model} · ${agent.thinkingLevel}`);
+	plainField("Last response", agent.lastResponse ?
+		`${agent.lastResponse.model} · ${agent.lastResponse.thinking ?? "thinking unavailable"}` : "Unavailable");
+	plainField("Lifecycle", agent.lifecycle);
 	field("Created", created(agent.createdAt, true));
 	field("Task", dashboardText(agent.task || agent.topic, true) || "—", taskExpanded ? Infinity : 3);
 	if (agent.error) field("Error", theme.fg("error", dashboardText(agent.error, true)));

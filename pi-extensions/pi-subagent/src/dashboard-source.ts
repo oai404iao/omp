@@ -19,7 +19,7 @@ interface ReaderOptions {
 	live(path: string): LiveAgent | undefined;
 }
 
-function readSession(record: AgentRecord): SessionManager {
+export function readSession(record: AgentRecord): SessionManager {
 	// SessionManager.open() may initialize empty files or migrate old ones.
 	// Validate a private copy, then use the SDK's explicitly non-persistent loader.
 	const entries: FileEntry[] = readFileSync(record.sessionFile, "utf8").split("\n")
@@ -167,18 +167,23 @@ export class DashboardReader {
 		};
 		visit("/root");
 		const agents = ordered.map(record => {
+			const live = options.live(record.descriptor.path);
+			const selected = live ? {
+				...(live.session.model ? { model: `${live.session.model.provider}/${live.session.model.id}` } : {}),
+				thinkingLevel: live.session.thinkingLevel,
+			} : {};
 			try {
 				const manager = session(record);
 				const timing = this.timing(record.sessionFile);
 				const agent = buildDashboardAgent(record, manager.getEntries(),
-					options.live(record.descriptor.path)?.telemetry?.snapshot(), manager.getBranch(), timing.records);
+					live?.telemetry?.snapshot(), manager.getBranch(), timing.records);
 				if (timing.error) {
 					agent.dataError = `Run timing unavailable: ${timing.error}`;
 					agent.durationPartial = true;
 				}
-				return agent;
+				return { ...agent, ...selected };
 			} catch (error) {
-				return unavailableDashboardAgent(record, error instanceof Error ? error.message : String(error));
+				return { ...unavailableDashboardAgent(record, error instanceof Error ? error.message : String(error)), ...selected };
 			}
 		});
 		return {

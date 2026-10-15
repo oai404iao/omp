@@ -11,7 +11,8 @@ The Pi implementation has its own TypeScript runtime, persistence format,
 plaintext schemas/descriptions and SDK lifecycle integration; no Rust source
 file is copied. Changes from the reference include removal of encrypted
 arguments, canonical completed-context inheritance, transcript receipts,
-registered-agent listing and omission of durable sleep. See
+registered-agent listing, permanent subtree closure as a seventh control,
+and omission of durable sleep. See
 [`provenance/openai-codex-551bd409-multi-agent-v2.json`](provenance/openai-codex-551bd409-multi-agent-v2.json)
 for immutable source hashes and the exact license/notice identifiers.
 

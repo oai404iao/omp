@@ -1,5 +1,6 @@
 import { relative, resolve } from "node:path";
-import { getCurrentTools, type Model } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { clampThinkingLevel, getCurrentTools, getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import {
 	createAgentSessionFromServices, createAgentSessionRuntime, createAgentSessionServices,
 	createCodemodeExtension, createToolSearchExtension, ModelRuntime, SettingsManager,
@@ -9,8 +10,10 @@ import {
 import { buildToolCeiling, buildToolExclusions, resolveToolPolicy } from "./tool-policy.ts";
 import { TOOL_NAMES } from "./schemas.ts";
 import type { AgentDescriptor } from "./types.ts";
-import type { SessionView } from "./providers.ts";
+import { recordChildSelection, SelectionPersistenceError, type SessionView } from "./providers.ts";
 import { ensureCodexLineage } from "./task-attribution.ts";
+
+export { SelectionPersistenceError } from "./providers.ts";
 
 // Pi exposes ModelRegistry in extension contexts, while SDK factories
 // accept ModelRuntime. Keep this compatibility boundary isolated here.
@@ -43,9 +46,58 @@ export function resolveModel(runtime: ModelRuntime, parent: Model<any> | undefin
 	return matches[0]!;
 }
 
+export async function resolveExecutionProfile(
+	runtime: ModelRuntime,
+	fallbackModel: Model<any> | undefined,
+	fallbackThinking: ThinkingLevel,
+	explicit: { model?: string; thinking?: ThinkingLevel } = {},
+): Promise<{ model: Model<any>; thinking: ThinkingLevel }> {
+	if (explicit.model !== undefined && (typeof explicit.model !== "string" || !explicit.model.trim())) {
+		throw new Error("model must be a nonempty string");
+	}
+	const resolved = resolveModel(runtime, fallbackModel, explicit.model);
+	// A catalog entry (or a stale caller model) is not proof of current registration
+	// and usable auth. Pi's availability check also applies provider model filters.
+	const model = runtime.getModel(resolved.provider, resolved.id);
+	if (!model || !(await runtime.getAvailable(model.provider)).some(candidate => candidate.id === model.id)) {
+		throw new Error(`model unavailable: ${resolved.provider}/${resolved.id}; check registration and credentials`);
+	}
+	if (explicit.thinking !== undefined && !getSupportedThinkingLevels(model).includes(explicit.thinking)) {
+		throw new Error(`thinking level ${explicit.thinking} is unsupported for ${model.provider}/${model.id}`);
+	}
+	return { model, thinking: clampThinkingLevel(model, explicit.thinking ?? fallbackThinking) };
+}
+
 function inside(parent: string, child: string): boolean {
 	const path = relative(resolve(parent), resolve(child));
 	return path === "" || (!path.startsWith("..") && !path.startsWith("/"));
+}
+
+/** Pi writes initial selection records inside the SDK factory, before our
+ * explicit mirror. Mark only those public append failures, not other startup
+ * errors, and restore the manager's original method descriptors immediately.
+ */
+async function withSelectionPersistence<T>(session: SessionManager, create: () => Promise<T>): Promise<T> {
+	const restore: Array<() => void> = [];
+	try {
+		for (const key of ["appendModelChange", "appendThinkingLevelChange"] as const) {
+			const descriptor = Object.getOwnPropertyDescriptor(session, key);
+			const append = session[key] as (...args: string[]) => string;
+			Object.defineProperty(session, key, {
+				configurable: true, writable: true, value: (...args: string[]) => {
+					try { return append.apply(session, args); }
+					catch (cause) { throw new SelectionPersistenceError(cause); }
+				},
+			});
+			restore.push(() => {
+				if (descriptor) Object.defineProperty(session, key, descriptor);
+				else Reflect.deleteProperty(session, key);
+			});
+		}
+		return await create();
+	} finally {
+		for (const reset of restore.reverse()) reset();
+	}
 }
 
 export async function createChildRuntime(options: {
@@ -86,6 +138,14 @@ export async function createChildRuntime(options: {
 		throw new Error("openAIIdentity requires @oai404iao/pi-codex-minimal-tools/subagent-inline", { cause });
 	}
 	factories.push(
+		{ name: "pi-subagent-context", factory: pi => {
+			pi.on("before_agent_start", (event, ctx) => {
+				const selected = ctx.model ?? model;
+				event.systemPromptOptions.sections.subagent_runtime =
+					`You are agent ${descriptor.path}. Your parent is ${descriptor.parentPath}. ` +
+					`Selected model: ${selected.provider}/${selected.id}. Thinking level: ${pi.getThinkingLevel()}.`;
+			});
+		} },
 		{ name: "pi-subagent-v2", factory: options.hooks },
 		{ name: "codemode", factory: createCodemodeExtension({ models: false }), builtin: true, replaceable: true },
 		{ name: "tool-search", factory: createToolSearchExtension(), builtin: true, replaceable: true },
@@ -116,11 +176,11 @@ export async function createChildRuntime(options: {
 				}),
 			},
 		});
-		const created = await createAgentSessionFromServices({
+		const created = await withSelectionPersistence(sessionManager, () => createAgentSessionFromServices({
 			services, sessionManager, sessionStartEvent, model,
 			thinkingLevel: descriptor.thinkingLevel, customTools: options.tools,
 			...(ceiling ? { tools: ceiling, excludeTools: buildToolExclusions(ceiling) } : {}),
-		});
+		}));
 		return {
 			...created, services,
 			diagnostics: [
@@ -136,6 +196,7 @@ export async function createChildRuntime(options: {
 		const errors = runtime.diagnostics.filter(diagnostic => diagnostic.type === "error");
 		if (errors.length) throw new Error(errors.map(error => error.message).join("; "));
 		await runtime.session.bindExtensions({ mode: "print" });
+		recordChildSelection(runtime.session.sessionManager, runtime.session.model ?? model, runtime.session.thinkingLevel);
 		const registered = runtime.session.getAllTools();
 		const restored = new Set(getCurrentTools(runtime.session.sessionManager.buildSessionContext().messages).map(tool => tool.name));
 		const policy = resolveToolPolicy({

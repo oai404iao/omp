@@ -21,7 +21,7 @@ const styledTheme = {
 function agent(name = "review", overrides: Partial<DashboardAgent> = {}): DashboardAgent {
 	return {
 		path: `/root/${name}`, parentPath: "/root", type: "reviewer", model: "fixture/scripted",
-		thinkingLevel: "high", createdAt: new Date(now - 120_000).toISOString(), status: "running",
+		thinkingLevel: "high", lifecycle: "open", createdAt: new Date(now - 120_000).toISOString(), status: "running",
 		topic: `Task ${name}`, task: `Review ${name} carefully.`,
 		usage: {
 			available: true, input: 12400, output: 2800, cacheRead: 20000, cacheWrite: 0,
@@ -91,6 +91,58 @@ test("dashboard renders scoped summary, agent metrics and complete detail semant
 	}
 	assert(detail.indexOf("new tool") < detail.indexOf("old response"));
 	assert.match(renderAgentDetails(state.agents[1], 90, theme, now).join("\n"), /Error\s+Test failure/);
+});
+
+test("details distinguish selection, physical response and lifecycle without inferred thinking", () => {
+	const value = agent("physical", {
+		model: "virtual/router", thinkingLevel: "high", lifecycle: "closing",
+		lastResponse: { model: "actual/small" },
+	});
+	const detail = renderAgentDetails(value, 100, theme, now).join("\n");
+	assert.match(detail, /Selected\s+virtual\/router · high/);
+	assert.match(detail, /Last response\s+actual\/small · thinking unavailable/);
+	assert.match(detail, /Lifecycle\s+closing/);
+	assert.match(detail, /Running · Closing/);
+	assert.match(renderAgentDetails(agent(), 100, theme, now).join("\n"), /Last response\s+Unavailable/);
+	assert.match(renderAgentDetails(agent("closed", { lifecycle: "closed" }), 100, theme, now).join("\n"), /Running · Closed/);
+});
+
+test("Open includes closing; Closed filter is read-only, refreshes and retains transcript access", t => {
+	initTheme("dark", false);
+	t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+	const values = [agent("one"), agent("closing", { lifecycle: "closing" }),
+		agent("archived", { lifecycle: "closed", status: "completed" })];
+	const h = harness(snapshot(values), { rows: 40 });
+	const transcripts: string[] = [];
+	h.setTranscript(path => {
+		transcripts.push(path);
+		return { path, status: "completed", inheritedCount: 0, entries: [] };
+	});
+	try {
+		assert.match(text(h.component), /AGENTS · Open/);
+		assert.match(text(h.component), /\/root\/closing/);
+		assert.doesNotMatch(text(h.component), /\/root\/archived/);
+		h.component.handleInput("j");
+		assert.match(text(h.component), /› \/root\/closing/);
+		h.component.handleInput("f");
+		assert.match(text(h.component), /AGENTS · Closed/);
+		assert.match(text(h.component), /› \/root\/archived/);
+		assert.doesNotMatch(text(h.component), /\/root\/closing/);
+		h.component.handleInput("t");
+		assert.deepEqual(transcripts, ["/root/archived"]);
+		h.component.handleInput("\x1b");
+		assert.match(text(h.component), /› \/root\/archived/);
+		h.component.handleInput("f");
+		assert.match(text(h.component), /› \/root\/one/);
+		h.emit(snapshot(values.map(value => ({ ...value, lifecycle: "closed" }))));
+		t.mock.timers.tick(40);
+		assert.match(text(h.component), /No open subagents/);
+		assert.match(text(h.component), /Select an agent/);
+		h.component.handleInput("f");
+		assert.match(text(h.component), /› \/root\/one/);
+		assert.equal(h.closed, 0, "filtering must not close the dashboard or control agents");
+		assert.equal(h.reads, 2, "filter changes must not fetch or mutate source state");
+	} finally { h.component.dispose(); }
 });
 
 test("missing and partial values remain unknown, context timestamps are hidden, reasoning is not added twice", () => {

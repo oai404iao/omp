@@ -18,7 +18,7 @@ Restart Pi or `/reload`. No presets or configuration files are automatically
 written. A configured agent catalog is optional: without one, `spawn_agent`
 uses the default child policy and inherits the caller's model/reasoning level.
 
-## Six model-facing tools
+## Seven model-facing tools
 
 Root and children use the same definitions. All are `model-only`, not callable
 through codemode or nested tool execution. Schemas, descriptions and output
@@ -27,12 +27,13 @@ schemas live in [`src/schemas.ts`](src/schemas.ts); handlers are shared in
 
 | Tool | Input | Behavior / result |
 | --- | --- | --- |
-| `spawn_agent` | `task_name`, `message`; optional `fork_turns`, `agent_type` | Starts a child asynchronously; returns `{task_name:"/root/name"}` after task acceptance, not completion. |
+| `spawn_agent` | `task_name`, `message`; optional `fork_turns`, `agent_type`, `model`, `thinking` | Starts a child asynchronously; returns `{task_name:"/root/name",model,thinking}` after task acceptance, not completion. |
 | `send_message` | `target`, `message` | Queues plaintext communication; returns `{accepted:true}`. Does not start an idle agent. |
-| `followup_task` | `target`, `message` | Gives an existing non-root agent more work; starts an idle target or delivers at a running target's safe boundary. Returns acceptance, not an answer. |
+| `followup_task` | `target`, `message`; optional `model`, `thinking` | Gives an existing non-root agent more work; starts an idle target or delivers at a running target's safe boundary. Returns `{accepted:true,model,thinking}`, not an answer. |
 | `wait_agent` | optional `timeout_ms` | Waits for the caller's mailbox activity or steered user input. Returns `{message,timed_out}`, never message bodies. |
 | `interrupt_agent` | `target` | Requests cancellation of the current run; returns `{previous_status}`. No deletion or recursive interruption. Root and self cannot be interrupted. |
-| `list_agents` | optional `path_prefix` | Lists `{agents:[{agent_name,agent_status}]}` in this root tree, including unloaded reusable agents. Does not resume them. |
+| `close_agent` | `target` | Permanently closes the target **and its entire structural subtree**. Only structural ancestors may close; never root, self or siblings. Returns `{accepted:true,target,lifecycle,affected_count}`, not a guarantee that cancellation has finished. |
+| `list_agents` | optional `path_prefix`, `include_closed`, `limit`, `cursor` | Lists `{agents:[{agent_name,agent_status,lifecycle,model,thinking,last_response?}],next_cursor?}` in this root tree without resuming agents. Closed records are hidden by default. |
 
 Example sequence:
 
@@ -54,6 +55,69 @@ Give the same agent another task:
 
 The last call is `followup_task`, **not** another `send_message`. It already
 contains the task; there is no enqueue-then-start protocol.
+
+### Execution selections
+
+`model` uses the existing resolver; prefer full `provider/model-id`. Unqualified
+IDs retain compatibility matching, but unknown or ambiguous selections fail.
+`thinking` accepts exactly `off`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+`max`; there is no `reasoning_effort` alias.
+
+Each spawn field resolves independently: explicit call value, then configured
+role value, then the caller's current selection. Follow-up fields resolve from
+explicit values, then the **target's saved selection**. Accepted overrides are
+sticky across later tasks and cold resume; role defaults and the follow-up
+initiator's model do not replace them. Role, system prompt, tool ceiling and
+history remain unchanged. Selection changes use Pi's session records, not a
+new conversation or global model defaults.
+
+A running target accepts omitted or effectively identical configuration at its
+normal safe boundary. A different configuration fails with
+`PROFILE_CHANGE_REQUIRES_IDLE` before enqueueing the task or changing selection.
+Wait for idle and explicitly submit again; there is no hot switching, implicit
+interruption or deferred configuration queue.
+
+Before accepting a selection, registration, Pi model availability and configured
+credentials are checked. Explicit unsupported thinking fails instead of silently
+clamping; inherited and role levels use Pi normalization, and acceptance reports
+the effective value. This local preflight does **not** prove endpoint access or
+account entitlement. Runtime errors remain normal recorded failures.
+Task and selection admission share one atomic control snapshot. A selection-record
+write failure before task receipt rolls back that admission without removing
+independently accepted mail or closure audit. Partial append-only Pi selection
+records remain traces; the saved control selection repairs them on the next
+explicit run, without rebuilding history.
+
+All `model`/`thinking` results are the **selected pair**, including virtual model
+selections. Optional `last_response:{model,thinking?}` reports the latest successful
+physical response from Pi records, not the next route. It is omitted without
+such a response; absent actual thinking is not inferred. Every child run also
+receives authoritative runtime context with its canonical path, structural
+parent path and selected pair.
+
+### Closing and listing
+
+Lifecycle (`open` → `closing` → `closed`) is independent of execution status.
+Closing publishes a durable subtree-wide barrier before requesting interruption:
+new user messages, follow-ups, children and execution starts are blocked. It
+becomes closed only after execution exits and runtimes dispose. Repeated closing
+is idempotent; names and identities remain reserved and cannot be reactivated.
+`interrupt_agent` still affects only one current run, and automatic unloading
+still leaves an open identity reusable.
+
+Transcripts, unread mail, canceled tasks, closure actor/timestamps and completion
+outboxes remain available for audit. Internal completions addressed to a closed
+structural parent remain there (or in a durable outbox under mailbox pressure);
+they neither wake it nor redirect to root. Closure cannot undo tool side effects
+and is **not disk cleanup**. There is no TTL, automatic closing/deletion, history
+GC or open/total-agent quota; `maxConcurrentAgents` still bounds active runs.
+
+Lists default to 50 entries (`limit:1..200`) in stable path order. Use
+`include_closed:true` for closed records and pass `next_cursor` back as `cursor`
+with the same filters. Invalid/cross-tree cursors fail. Pagination does not
+freeze a live tree, start or recover runtimes, or insert root again on every page.
+Canonical branch filtering and `path_prefix` still apply, including to closed
+records: branch visibility is not lifecycle openness.
 
 ### Paths and history
 
@@ -147,6 +211,22 @@ independent tree. Session switch, `/tree`, shutdown and reload drain the old
 controller before replacing it. No cross-process coordination is provided:
 never control the same tree from multiple Pi processes.
 
+Both `/fork` and `/clone` create a new root session ID and independent tree
+containing only `/root`; copied history does not copy agent identities, mailboxes,
+runs or pending tasks. Pi 1.2.0 implements `/clone` through
+`fork(leafId,{position:"at"})`, not a clone-specific event. Copied tree markers
+and `parentSession` do not grant old-tree control. Before a new tree runs,
+authoritative English context explains that old paths belong to the old tree and
+delegation must spawn new agents. It is identity/header-based, not dependent on
+the session event reason, and does not rewrite or repeatedly append copied history.
+An independent process branching history does not stop the original process.
+
+Switching sessions interrupts and drains, but does not permanently close old
+identities. Resuming restores open identities without replaying unfinished work.
+`/tree` navigation similarly drains and honors canonical registration anchors;
+returning to a branch does not execute pending work. Closure is tree-level durable
+control state and is not undone by returning to earlier messages.
+
 Persistent parent sessions are required for delegation; there is no
 `--no-session` foreground fallback.
 
@@ -179,7 +259,7 @@ Report concrete defects and exact file locations.
   Names are exact: CLI patterns and `+name`/`-name` modifiers are not supported.
   The whole-field `all` or `*` retains the omitted-list behavior.
 
-The six collaboration controls are runtime tools retained independently of
+The seven collaboration controls are runtime tools retained independently of
 ordinary-tool allowlists; the depth/concurrency checks always apply. Nested
 roles cannot widen a parent's ordinary-tool ceiling. Explicit tool names must
 exist and respect extension activation choices. Callable-only codemode/deferred
@@ -244,7 +324,13 @@ a list/detail layout instead of squeezing both panes together.
 - With details focused, `Enter` expands or collapses the task preview.
 - `t`: open the selected agent's read-only transcript; `Esc` returns to the
   dashboard without changing its selection or scroll position.
+- `f`: switch the read-only Open (including closing) / Closed lifecycle filter.
+  Closed histories remain inspectable; there are no management or delete buttons.
 - Fullscreen mode also supports mouse selection and scrolling.
+
+Lifecycle is shown separately from execution status. Details label the selected
+model/thinking separately from the last successful physical response; virtual
+model dispatch is historical information, not a prediction of the next request.
 
 Recent activity shows bounded, multiline previews of commands, edits, writes,
 patches, ordinary responses and tool output, including streamed updates.
@@ -325,6 +411,11 @@ Descriptor v4 and earlier are not migrated or resumed. Old transcripts,
 configuration and preset files are left untouched. Current descriptors are v5;
 the new tree-store format is independently versioned. Package versioning is
 handled through Changesets, not by labeling this protocol “package version 2”.
+Tree-store v1 and descriptor v5 remain supported. Missing lifecycle in earlier
+v1 records explicitly means `open`; new optional closure/response audit fields
+may be absent. A recovered `closing` subtree is completed as closed only with
+no resident execution; unfinished runs remain interrupted, never replayed.
+No unsupported descriptor is silently migrated, and old traces are not deleted.
 
 ## Upstream reference and development
 

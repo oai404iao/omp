@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { getCurrentSystemPrompt, type Context } from "@earendil-works/pi-ai";
 import { test, type TestContext } from "node:test";
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -94,4 +95,69 @@ test("a Responses grandchild follows main Fast through an unloaded non-Responses
 	const saved = child.getEntries().find(entry => entry.type === "custom" && entry.customType === FAST_MODE_CUSTOM_TYPE);
 	assert.equal(saved?.type, "custom");
 	if (saved?.type === "custom") assert.equal((saved.data as any).rootSessionId, f.manager.getSessionId());
+});
+
+test("virtual selections survive physical responses and profile switches keep history, context and root Fast", async t => {
+	const observations: Array<{ prompt: string; fast: boolean; context: Context }> = [];
+	const f = await fixture(t, {
+		settings: { openAIIdentity: true, inheritExtensions: false },
+		reply: context => {
+			const child = SessionManager.open(f.coordinator.treeStore.record("/root/worker").sessionFile);
+			observations.push({
+				prompt: getCurrentSystemPrompt(context.messages), fast: sessionFastMode(child.getSessionId(), false),
+				context: structuredClone(context),
+			});
+			return `physical answer ${observations.length}`;
+		},
+	});
+	const routes: string[] = [];
+	f.modelRuntime.registerVirtualModel({
+		provider: "router", id: "auto", name: "Auto", thinkingLevels: ["low", "high"],
+		route: request => {
+			routes.push(request.thinkingLevel);
+			return { model: f.model, thinkingLevel: "off" };
+		},
+	});
+	const selected = f.modelRuntime.getModel("router", "auto")!;
+	const caller: AgentCaller = { ...f.caller, model: selected, thinkingLevel: "high" };
+	const setFast = rootFastMode(t, f.manager);
+	setFast(true);
+	await f.coordinator.spawn(caller, { task_name: "worker", message: "中文任务", fork_turns: "none" });
+	await f.idle();
+	const first = f.coordinator.treeStore.record("/root/worker");
+	const sessionFile = first.sessionFile;
+	const sessionId = SessionManager.open(sessionFile).getSessionId();
+	assert.deepEqual(first.descriptor.model, { provider: "router", id: "auto" });
+	assert.equal(first.descriptor.thinkingLevel, "high");
+	assert.match(observations[0]!.prompt, /You are agent \/root\/worker\. Your parent is \/root\./);
+	assert.match(observations[0]!.prompt, /Selected model: router\/auto\. Thinking level: high\./);
+	setFast(false);
+	await f.coordinator.followup(f.caller, "worker", "switch to physical", undefined, { model: "scripted/echo" });
+	await f.idle();
+	assert.match(observations[1]!.prompt, /Selected model: scripted\/echo\. Thinking level: off\./);
+	assert.match(JSON.stringify(observations[1]!.context.messages), /中文任务.*physical answer 1/);
+	setFast(true);
+	await f.coordinator.followup(f.caller, "worker", "switch back", undefined, { model: "router/auto", thinking: "high" });
+	await f.idle();
+	assert.match(observations[2]!.prompt, /Selected model: router\/auto\. Thinking level: high\./);
+	assert.deepEqual(observations.map(value => value.fast), [true, false, true]);
+	assert.deepEqual(routes, ["high", "high"]);
+	const record = f.coordinator.treeStore.record("/root/worker");
+	assert.equal(record.sessionFile, sessionFile);
+	const child = SessionManager.open(sessionFile);
+	assert.equal(child.getSessionId(), sessionId);
+	assert.deepEqual(child.getBranch().filter(entry => entry.type === "model_change")
+		.map(entry => `${entry.provider}/${entry.modelId}`), ["router/auto", "scripted/echo", "router/auto"]);
+	const responses = child.getBranch().filter(entry => entry.type === "message" && entry.message.role === "assistant");
+	assert.equal(responses.length, 3);
+	for (const entry of responses) {
+		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+		assert.equal(entry.message.provider, "scripted");
+		assert.equal(entry.message.model, "echo");
+		assert.equal(entry.message.thinkingLevel, "off");
+	}
+	assert.deepEqual(record.descriptor.model, { provider: "router", id: "auto" });
+	assert.equal(record.descriptor.thinkingLevel, "high");
+	assert.equal(caller.model, selected);
+	assert.equal(caller.thinkingLevel, "high");
 });

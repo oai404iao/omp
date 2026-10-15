@@ -36,9 +36,10 @@ function resultText(tool: ToolDefinition, result: ToolResult, args: Record<strin
 		.render(160).join("\n");
 }
 
-test("all six tools render Type while keeping model-facing results and output schemas unchanged", async t => {
+test("all seven tools render Type with matching model-facing results and output schemas", async t => {
 	const f = await fixture(t);
 	const tools = createAgentTools(f.coordinator, () => f.caller, f.coordinator.catalog(f.caller).agents);
+	const pair = { model: `${f.model.provider}/${f.model.id}`, thinking: "off" };
 	const results: Array<{ name: string; value: ToolResult; type?: string }> = [];
 	async function execute(name: string, args: Record<string, unknown>, expected: Record<string, unknown>, type?: string) {
 		const tool = toolNamed(tools, name);
@@ -62,13 +63,13 @@ test("all six tools render Type while keeping model-facing results and output sc
 		return value;
 	}
 	await execute("spawn_agent", { task_name: "named", agent_type: "scout", message: "Inspect", fork_turns: "none" },
-		{ task_name: "/root/named" }, "scout");
+		{ task_name: "/root/named", ...pair }, "scout");
 	await f.idle();
 	await execute("spawn_agent", { task_name: "plain", message: "Inspect", fork_turns: "none" },
-		{ task_name: "/root/plain" }, "default");
+		{ task_name: "/root/plain", ...pair }, "default");
 	await f.idle();
 	await execute("send_message", { target: "named", message: "More context" }, { accepted: true }, "scout");
-	await execute("followup_task", { target: "/root/named", message: "Continue" }, { accepted: true }, "scout");
+	await execute("followup_task", { target: "/root/named", message: "Continue" }, { accepted: true, ...pair }, "scout");
 	await f.idle();
 	await execute("interrupt_agent", { target: "plain" }, { previous_status: "completed" }, "default");
 	const waitExpected = { ...await f.coordinator.wait(f.caller) };
@@ -85,10 +86,12 @@ test("all six tools render Type while keeping model-facing results and output sc
 	}
 	assert.doesNotMatch(callText(toolNamed(tools, "list_agents"), {}), /Type:/);
 	assert.deepEqual(Object.keys((toolNamed(tools, "list_agents").outputSchema as any).properties.agents.items.properties),
-		["agent_name", "agent_status"]);
+		["agent_name", "agent_status", "lifecycle", "model", "thinking", "last_response"]);
 	assert.equal(resultText(toolNamed(tools, "list_agents"), {
 		content: listed.content, details: listExpected,
 	}), listText, "Legacy details should resolve Types from the live identity store");
+	await execute("close_agent", { target: "plain" },
+		{ accepted: true, target: "/root/plain", lifecycle: "closed", affected_count: 1 }, "default");
 
 	// Replay serialized results after detaching the session: metadata must not depend on live state or current args.
 	const detached = createAgentTools(() => { throw new Error("controller unavailable"); },
@@ -122,7 +125,7 @@ test("target Types resolve canonical and caller-relative identities without star
 	const childTools = createAgentTools(f.coordinator, () => { throw new Error("render attached child"); }, [], parent.path);
 	const requests = f.requests.length;
 	const snapshot = structuredClone(f.coordinator.treeStore.snapshot);
-	for (const name of ["send_message", "followup_task", "interrupt_agent"]) {
+	for (const name of ["send_message", "followup_task", "interrupt_agent", "close_agent"]) {
 		for (const target of ["parent/nested", "/root/parent/nested"]) {
 			assert.match(callText(toolNamed(rootTools, name), { target }), /Type: empty/);
 		}
@@ -170,7 +173,7 @@ test("legacy, unknown, error and partial tool rows render safely without live co
 		() => { throw new Error("must not attach"); }, []);
 	assert.match(callText(toolNamed(tools, "spawn_agent"), { task_name: "job" }), /Type: default/);
 	assert.match(callText(toolNamed(tools, "spawn_agent"), { task_name: "job", agent_type: "scout" }), /Type: scout/);
-	for (const name of ["send_message", "followup_task", "interrupt_agent"]) {
+	for (const name of ["send_message", "followup_task", "interrupt_agent", "close_agent"]) {
 		const tool = toolNamed(tools, name);
 		assert.match(callText(tool, { target: "missing" }), /Type: unknown/);
 		for (const text of ['{"accepted":true}', "Error: target missing", '{"partial"', "null", ""]) {

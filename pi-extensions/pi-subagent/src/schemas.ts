@@ -3,7 +3,7 @@ import type { AgentDefinition } from "./types.ts";
 import { formatAgentToolCatalog } from "./agents.ts";
 
 export const TOOL_NAMES = [
-	"spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents",
+	"spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "close_agent", "list_agents",
 ] as const;
 export const DEFAULT_WAIT_AGENT_TIMEOUT_MS = 120_000;
 export const MIN_WAIT_AGENT_TIMEOUT_MS = 10_000;
@@ -15,7 +15,7 @@ export const TOOL_DESCRIPTIONS = {
 
 Parent conversation history is inherited by default through the latest completed turn. Set fork_turns to "none" for a fresh conversation and provide all necessary context in message.
 
-Optionally select a configured agent_type. Otherwise, use the default child policy and inherit the caller's model and reasoning level. Child tools remain subject to the effective tool policy and delegation depth limit.
+Optionally select a configured agent_type, model (prefer provider/model-id), and thinking level. Each explicit execution field overrides the role's field, which otherwise inherits the caller's current selection. Responses report the effective selected pair, not a virtual model's future physical route. Child tools remain subject to the effective tool policy and delegation depth limit.
 
 The child can exchange messages with agents in the same root tree. Its final result is automatically queued to its parent without starting an idle parent turn. Use followup_task to give the same agent more work.`,
 	send_message: `Queue a plaintext message for an existing agent in the current root tree, including your parent or a sibling. Running agents receive messages at safe conversation boundaries. Idle agents retain messages until their next turn.
@@ -23,7 +23,9 @@ The child can exchange messages with agents in the same root tree. Its final res
 This tool does not start a new turn, interrupt work, or wait for a reply. Use followup_task when you want an idle agent to perform more work.`,
 	followup_task: `Give an existing non-root agent a plaintext follow-up task. If the agent is idle, start a new turn using its existing conversation and pending messages. If it is running, deliver the task at a safe conversation boundary without interrupting its work.
 
-A task arriving after the current run stops accepting input is retained for a subsequent run. This tool returns after acceptance, not after task completion. It cannot start a turn on /root.`,
+A task arriving after the current run stops accepting input is retained for a subsequent run. Optional model and thinking override the target's saved selection persistently; omitted fields keep that selection, not the caller's or role's current defaults. A different configuration requires an idle target (PROFILE_CHANGE_REQUIRES_IDLE); identical configuration can be delivered while running. This changes execution configuration only, not role, prompt or permissions.
+
+This tool returns after acceptance, not after task completion. It cannot start a turn on /root or reactivate a closing/closed agent.`,
 	wait_agent: `Wait for activity in your own mailbox, including agent messages and completion notifications. Return immediately if input is already pending. New user input steered into the active turn also ends the wait.
 
 This tool does not wait for a selected agent, return message contents, consume messages, or start another agent. Message contents are delivered separately into your conversation at a safe boundary.
@@ -34,9 +36,12 @@ Values below ${MIN_WAIT_AGENT_TIMEOUT_MS} ms are raised to ${MIN_WAIT_AGENT_TIME
 	interrupt_agent: `Request interruption of an agent's current run and return its previously observed status. The agent keeps its identity, conversation, and undelivered messages and remains available for follow-up tasks.
 
 An idle agent is not started. This tool does not delete the agent, recursively interrupt descendants, or guarantee that cancellation has finished when it returns. You cannot interrupt yourself or /root.`,
+	close_agent: `Permanently close a target and its entire structural subtree, canceling unfinished work while retaining identity, history, mail and audit records. Only the target's structural parent or ancestors may close it; you cannot close yourself, /root, or a sibling.
+
+Returns acceptance, not confirmation that cancellation has finished. Closing blocks new messages, tasks and children immediately; closed identities cannot be reactivated or their names reused. Repeated closure is idempotent. Closure is not disk cleanup and cannot roll back tool side effects.`,
 	list_agents: `List agents registered in the current root tree, including agents whose idle runtimes have been unloaded. Optionally filter by a canonical or caller-relative task-path prefix.
 
-Returns agent paths and execution statuses. This tool does not start or resume agents and does not return their conversation contents.`,
+Returns agent paths, execution status, lifecycle and selected model/thinking; optional last_response is the most recent successful physical response, not a prediction of the next route. Closed agents are hidden by default; include_closed includes them. Results use stable bounded pagination (limit defaults to 50, range 1..200); pass next_cursor as cursor with the same filters for the next page. Cursors are bound to this tree and filters. This tool does not start or resume agents and does not return their conversation contents.`,
 } as const;
 
 const objectOptions = { additionalProperties: false } as const;
@@ -46,9 +51,17 @@ const target = () => Type.String({
 const message = (description: string) => Type.String({
 	minLength: 1, maxLength: MAX_MESSAGE_CHARS, pattern: "\\S", description,
 });
+export const ThinkingSchema = Type.Union(
+	["off", "minimal", "low", "medium", "high", "xhigh", "max"].map(value => Type.Literal(value)),
+);
+const executionParameters = {
+	model: Type.Optional(Type.String({ minLength: 1, description: "Selected model; prefer full provider/model-id. Unknown or ambiguous models are rejected." })),
+	thinking: Type.Optional(ThinkingSchema),
+};
 
 export function spawnAgentParameters(agents: readonly AgentDefinition[]) {
 	const properties = {
+		...executionParameters,
 		task_name: Type.String({
 			minLength: 1, maxLength: 64, pattern: "^[a-z0-9_]+$",
 			description: "Unique direct-child name. 'root' is reserved.",
@@ -75,6 +88,7 @@ export const SendMessageParameters = Type.Object({
 	target: target(), message: message("Plaintext message to deliver."),
 }, objectOptions);
 export const FollowupTaskParameters = Type.Object({
+	...executionParameters,
 	target: target(), message: message("Plaintext instructions for the follow-up task."),
 }, objectOptions);
 export const WaitAgentParameters = Type.Object({
@@ -84,19 +98,36 @@ export const WaitAgentParameters = Type.Object({
 	})),
 }, objectOptions);
 export const InterruptParameters = Type.Object({ target: target() }, objectOptions);
+export const CloseParameters = Type.Object({ target: target() }, objectOptions);
 export const ListAgentsParameters = Type.Object({
 	path_prefix: Type.Optional(Type.String({
 		minLength: 1, description: "Optional task-path prefix without a trailing slash.",
 	})),
+	include_closed: Type.Optional(Type.Boolean({ default: false })),
+	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, default: 50 })),
+	cursor: Type.Optional(Type.String({ minLength: 1, description: "Opaque next_cursor from the preceding page with the same filters." })),
 }, objectOptions);
 
 export const AgentStatusSchema = Type.Union(
 	["pending_init", "running", "completed", "interrupted", "errored"].map(value => Type.Literal(value)),
 );
-export const SpawnOutput = Type.Object({ task_name: Type.String() }, objectOptions);
+export const LifecycleSchema = Type.Union(["open", "closing", "closed"].map(value => Type.Literal(value)));
+const selectedPair = { model: Type.String(), thinking: ThinkingSchema };
+const lastResponse = Type.Optional(Type.Object({
+	model: Type.String(), thinking: Type.Optional(ThinkingSchema),
+}, objectOptions));
+export const SpawnOutput = Type.Object({ task_name: Type.String(), ...selectedPair }, objectOptions);
 export const AcceptedOutput = Type.Object({ accepted: Type.Literal(true) }, objectOptions);
+export const FollowupOutput = Type.Object({ accepted: Type.Literal(true), ...selectedPair }, objectOptions);
+export const CloseOutput = Type.Object({
+	accepted: Type.Literal(true), target: Type.String(), lifecycle: LifecycleSchema, affected_count: Type.Integer({ minimum: 1 }),
+}, objectOptions);
 export const WaitOutput = Type.Object({ message: Type.String(), timed_out: Type.Boolean() }, objectOptions);
 export const InterruptOutput = Type.Object({ previous_status: AgentStatusSchema }, objectOptions);
 export const ListOutput = Type.Object({
-	agents: Type.Array(Type.Object({ agent_name: Type.String(), agent_status: AgentStatusSchema }, objectOptions)),
+	agents: Type.Array(Type.Object({
+		agent_name: Type.String(), agent_status: AgentStatusSchema, lifecycle: LifecycleSchema,
+		...selectedPair, last_response: lastResponse,
+	}, objectOptions)),
+	next_cursor: Type.Optional(Type.String()),
 }, objectOptions);

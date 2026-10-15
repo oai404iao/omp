@@ -16,8 +16,11 @@ export function renderAgentCall(
 		`\n${theme.fg("muted", `${name === "wait_agent" ? "Caller Type" : "Type"}: ${type ?? "unknown"}`)}`;
 	const timeout = name === "wait_agent" && typeof args.timeout_ms === "number" ?
 		`\n${theme.fg("muted", `Timeout: ${args.timeout_ms} ms`)}` : "";
+	const selection = [typeof args.model === "string" ? `model: ${args.model}` : "",
+		typeof args.thinking === "string" ? `thinking: ${args.thinking}` : ""].filter(Boolean).join(" · ");
 	const message = typeof args.message === "string" ? args.message.replace(/\s+/g, " ").slice(0, 160) : "";
-	return new Text(heading + metadata + timeout + (message ? `\n${theme.fg("muted", message)}` : ""), 0, 0);
+	return new Text(heading + metadata + timeout + (selection ? `\n${theme.fg("muted", selection)}` : "") +
+		(message ? `\n${theme.fg("muted", message)}` : ""), 0, 0);
 }
 
 export function renderAgentResult(
@@ -29,9 +32,12 @@ export function renderAgentResult(
 	try {
 		const value = JSON.parse(text);
 		if (Array.isArray(value.agents)) {
-			display = value.agents.map((agent: { agent_name: string; agent_status: string }) =>
-				`${agent.agent_name} [${agent.agent_status}] · Type: ${details.agentTypes?.[agent.agent_name] ?? "unknown"}`).join("\n");
-		} else if (typeof value.task_name === "string") display = `Started ${value.task_name}`;
+			display = value.agents.map((agent: { agent_name: string; agent_status: string; lifecycle?: string; model?: string; thinking?: string }) =>
+				`${agent.agent_name} [${agent.agent_status}${agent.lifecycle ? `; ${agent.lifecycle}` : ""}] · Type: ${details.agentTypes?.[agent.agent_name] ?? "unknown"}` +
+				(agent.model ? ` · Selected: ${agent.model} / ${agent.thinking}` : "")).join("\n") +
+				(value.next_cursor ? "\nMore agents available (next_cursor in result)." : "");
+		} else if (typeof value.task_name === "string") display = `Started ${value.task_name}` +
+			(value.model ? `\nSelected: ${value.model} / ${value.thinking}` : "");
 	} catch { /* Partial results need not be JSON. */ }
 	if (details.agentType) display = `${callerType ? "Caller Type" : "Type"}: ${details.agentType}\n${display}`;
 	const lines = display.split("\n");
