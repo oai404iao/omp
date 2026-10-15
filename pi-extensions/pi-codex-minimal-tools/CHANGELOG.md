@@ -1,5 +1,13 @@
 # @oai404iao/pi-codex-minimal-tools
 
+## 5.1.1
+
+### Patch Changes
+
+- 64cc7e5: Update exact workspace dependency pins for the pending dependency releases.
+- Updated dependencies
+  - @oai404iao/pi-codex-tools@0.1.0
+
 ## 5.1.0
 
 ### Minor Changes
