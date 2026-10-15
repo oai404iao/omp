@@ -179,7 +179,8 @@ if (args[2] === "version") {
 function bootstrapCandidate(name = "@oai404iao/pi-codex-runtime") {
   const version = "0.1.0-alpha.1";
   return { ...candidate(name), version, tag: `${name}@${version}`, distTag: "next", prerelease: true,
-    sourceCommit: "32ba01f3c08b7fd63d09e9b2373cf081c4525533" };
+    sourceCommit: name === "@oai404iao/pi-codex-tools"
+      ? "b9deaba6ba07d87c048e474b2ddc977f3bd2b442" : "32ba01f3c08b7fd63d09e9b2373cf081c4525533" };
 }
 
 test("full-batch publisher fixture ignores the caller's release selection", () => {
@@ -199,56 +200,59 @@ function bootstrapOptions(value) {
   return {
     locked: { [`${value.name}@${value.version}`]: { gitHead: value.sourceCommit, integrity: value.integrity } },
     distTags: { [value.name]: { next: value.version, latest: value.version } },
-    versions: { [value.name]: [value.version] },
+    versions: { [value.name]: value.name === "@oai404iao/pi-codex-tools"
+      ? ["0.0.0-stage", value.version] : [value.version] },
   };
 }
 
-test("reviewed initial bootstrap recovery accepts the registry-required latest alias without modifying tags", () => {
-  const runtime = bootstrapCandidate();
-  const bundle = { ...candidate("@oai404iao/consumer"), mode: "publish" };
-  const { process, result, calls } = runPublisher([bundle, runtime], undefined, {
-    ...bootstrapOptions(runtime), dependencies: { [bundle.name]: { [runtime.name]: runtime.version } },
-  });
-  assert.equal(process.status, 0, process.stderr);
-  assert.equal(result.ok, true);
-  assert.doesNotMatch(calls, /^npm publish .*pi-codex-runtime\.tgz/m);
-  assert.doesNotMatch(calls, /^npm dist-tag/m);
-  assert.ok(calls.indexOf(`npm view ${runtime.name} versions`) < calls.indexOf("npm publish "));
-});
-
-for (const failure of ["stable-history", "missing-lock", "wrong-lock", "wrong-source", "later-alpha", "wrong-next", "malformed-history", "lookup-error", "unapproved-package", "existing-bundle"]) {
-  test(`bootstrap latest alias rejects ${failure} before publishing consumers`, () => {
-    const runtime = bootstrapCandidate(failure === "unapproved-package" ? "@oai404iao/other-package" : undefined);
-    if (failure === "existing-bundle") {
-      runtime.name = "@oai404iao/pi-codex-minimal-tools";
-      runtime.version = "1.4.1-alpha.0";
-      runtime.tag = `${runtime.name}@${runtime.version}`;
-    }
-    if (failure === "wrong-source") runtime.sourceCommit = commit;
-    if (failure === "later-alpha") {
-      runtime.version = "0.1.0-alpha.2";
-      runtime.tag = `${runtime.name}@${runtime.version}`;
-    }
-    const options = bootstrapOptions(runtime);
-    if (failure === "stable-history") options.versions[runtime.name].unshift("0.0.1");
-    if (failure === "missing-lock") options.locked = {};
-    if (failure === "wrong-lock") options.locked[`${runtime.name}@${runtime.version}`].integrity = "sha512-wrong";
-    if (failure === "wrong-next") options.distTags[runtime.name].next = "0.1.0-alpha.0";
-    if (failure === "malformed-history") options.versions[runtime.name] = { bad: true };
-    if (failure === "lookup-error") options.versions[runtime.name] = "lookup-error";
-    if (failure === "existing-bundle") options.versions[runtime.name].unshift("1.4.0");
+for (const name of ["@oai404iao/pi-codex-runtime", "@oai404iao/pi-codex-tools"]) {
+  test(`reviewed ${name} recovery accepts the initial latest alias without republishing or modifying tags`, () => {
+    const value = bootstrapCandidate(name);
     const bundle = { ...candidate("@oai404iao/consumer"), mode: "publish" };
-    const { process, result, calls } = runPublisher([runtime, bundle], undefined, {
-      ...options, dependencies: { [bundle.name]: { [runtime.name]: runtime.version } },
+    const { process, result, calls } = runPublisher([bundle, value], undefined, {
+      ...bootstrapOptions(value), dependencies: { [bundle.name]: { [value.name]: value.version } },
     });
-    if (failure === "wrong-lock") assert.notEqual(process.status, 0);
-    else {
-      assert.equal(process.status, 0, process.stderr);
-      assert.equal(result.ok, false);
-    }
-    assert.doesNotMatch(calls, /^npm publish /m);
-    assert.doesNotMatch(calls, /^git tag /m);
+    assert.equal(process.status, 0, process.stderr);
+    assert.equal(result.ok, true);
+    assert.doesNotMatch(calls, /^npm publish .*pi-codex-(runtime|tools)\.tgz/m);
+    assert.doesNotMatch(calls, /^npm dist-tag/m);
+    assert.ok(calls.indexOf(`npm view ${value.name} versions`) < calls.indexOf("npm publish "));
   });
+
+  for (const failure of ["stable-history", "missing-lock", "wrong-lock", "wrong-source", "later-alpha", "wrong-next", "malformed-history", "lookup-error", "unapproved-package", "existing-bundle"]) {
+    test(`${name} bootstrap latest alias rejects ${failure} before publishing consumers`, () => {
+      const value = bootstrapCandidate(failure === "unapproved-package" ? "@oai404iao/other-package" : name);
+      if (failure === "existing-bundle") {
+        value.name = "@oai404iao/pi-codex-minimal-tools";
+        value.version = "1.4.1-alpha.0";
+        value.tag = `${value.name}@${value.version}`;
+      }
+      if (failure === "wrong-source") value.sourceCommit = commit;
+      if (failure === "later-alpha") {
+        value.version = "0.1.0-alpha.2";
+        value.tag = `${value.name}@${value.version}`;
+      }
+      const options = bootstrapOptions(value);
+      if (failure === "stable-history") options.versions[value.name].unshift("0.0.1");
+      if (failure === "missing-lock") options.locked = {};
+      if (failure === "wrong-lock") options.locked[`${value.name}@${value.version}`].integrity = "sha512-wrong";
+      if (failure === "wrong-next") options.distTags[value.name].next = "0.1.0-alpha.0";
+      if (failure === "malformed-history") options.versions[value.name] = { bad: true };
+      if (failure === "lookup-error") options.versions[value.name] = "lookup-error";
+      if (failure === "existing-bundle") options.versions[value.name].unshift("1.4.0");
+      const bundle = { ...candidate("@oai404iao/consumer"), mode: "publish" };
+      const { process, result, calls } = runPublisher([value, bundle], undefined, {
+        ...options, dependencies: { [bundle.name]: { [value.name]: value.version } },
+      });
+      if (failure === "wrong-lock") assert.notEqual(process.status, 0);
+      else {
+        assert.equal(process.status, 0, process.stderr);
+        assert.equal(result.ok, false);
+      }
+      assert.doesNotMatch(calls, /^npm publish /m);
+      assert.doesNotMatch(calls, /^git tag /m);
+    });
+  }
 }
 
 test("partial reconciliation does not create local tags", { skip: process.platform === "win32" }, () => {

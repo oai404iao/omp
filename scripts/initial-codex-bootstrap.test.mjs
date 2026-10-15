@@ -30,3 +30,27 @@ test("bootstrap alias is not a general prerelease/latest exemption", () => {
     assert.equal(hasInitialBootstrapLatestAlias(candidate, value, [candidate.version]), false);
   }
 });
+
+test("tools initial alias is bound to its reviewed source and exact staged-placeholder history", () => {
+  const tools = { ...candidate, name: "@oai404iao/pi-codex-tools",
+    sourceCommit: "b9deaba6ba07d87c048e474b2ddc977f3bd2b442" };
+  const history = ["0.0.0-stage", tools.version];
+  assert.equal(hasInitialBootstrapLatestAlias(tools, tags, history), true);
+  assert.equal(hasInitialBootstrapLatestAlias(tools, tags, [...history].reverse()), true);
+  assert.equal(hasInitialBootstrapLatestAlias(candidate, tags, history), false);
+  for (const override of [
+    { sourceCommit: candidate.sourceCommit }, { sourceCommit: "0".repeat(40) },
+    { name: candidate.name }, { name: "@oai404iao/pi-codex-imagegen" },
+    { name: "@oai404iao/pi-codex-minimal-tools" }, { version: "0.1.0-alpha.2" },
+    { version: "0.1.0" }, { prerelease: false }, { distTag: "latest" },
+  ]) assert.equal(isInitialCodexBootstrap({ ...tools, ...override }), false);
+  for (const versions of [undefined, {}, [], [tools.version], ["0.0.0-stage"],
+    [tools.version, "0.1.0-alpha.2"], ["0.0.1", tools.version],
+    [tools.version, tools.version], ["0.0.0-stage", tools.version, "0.1.0-alpha.2"]]) {
+    assert.equal(hasInitialBootstrapLatestAlias(tools, tags, versions), false);
+  }
+  for (const value of [undefined, {}, { latest: tools.version },
+    { next: "0.1.0-alpha.0", latest: tools.version }, { next: tools.version, latest: "0.1.0" }]) {
+    assert.equal(hasInitialBootstrapLatestAlias(tools, value, history), false);
+  }
+});

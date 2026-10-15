@@ -12,6 +12,12 @@ import {
 
 const publishedArtifacts = [
   {
+    name: "@oai404iao/pi-codex-tools",
+    version: "0.1.0-alpha.1",
+    gitHead: "b9deaba6ba07d87c048e474b2ddc977f3bd2b442",
+    integrity: "sha512-JVp6//UJsdANPVdEGDLeBLHn7CM/hfFsq0O0vR7BicrUBQHiBJL93ziPJAYdKD5BrlkAMvizsCgkgwwMkV2/pw==",
+  },
+  {
     name: "@oai404iao/pi-codex-minimal-tools",
     version: "1.3.0",
     gitHead: "596d799c6f7db3508b6d46bb05cdca6ea9e3b716",

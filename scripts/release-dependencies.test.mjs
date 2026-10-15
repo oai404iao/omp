@@ -33,9 +33,9 @@ test("the compatibility bundle cannot exclude its activated dependencies", () =>
   assert.throws(() => assertReleaseDependencies([bundle]), /outside this artifact batch.*pi-codex-runtime/);
 });
 
-test("the four verified Codex packages enter guarded batches", () => {
-  const names = ["runtime", "core", "web-search", "imagegen"].map(name => `@oai404iao/pi-codex-${name}`);
-  assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap").map(e => e.name), ["@oai404iao/pi-codex-tools"]);
+test("the verified Codex packages, including tools, enter dependency-complete guarded batches", () => {
+  const names = ["runtime", "core", "tools", "web-search", "imagegen"].map(name => `@oai404iao/pi-codex-${name}`);
+  assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap"), []);
   for (const name of names) {
     const entry = workspaces.find(e => e.name === name);
     assert.equal(entry.releaseStatus, "publishable");
@@ -43,11 +43,8 @@ test("the four verified Codex packages enter guarded batches", () => {
     assert.ok(artifactWorkspaces().some(e => e.name === name));
     assert.ok(artifactWorkspaces(true).some(e => e.name === name));
   }
-  assert.equal(artifactWorkspaces().length, 7);
-  const tools = workspaces.find(e => e.name === "@oai404iao/pi-codex-tools");
-  assert.equal(tools.releaseStatus, "bootstrap");
-  assert.equal(readManifest(tools.directory).private, false);
-  assert.throws(() => assertReleaseDependencies(artifactWorkspaces()), /outside this artifact batch:.*pi-codex-tools/);
+  assert.equal(artifactWorkspaces().length, 8);
+  assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces()));
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces(true)));
 });
 
