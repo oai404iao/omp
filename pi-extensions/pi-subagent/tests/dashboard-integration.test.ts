@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { deferred, fixture, waitUntil } from "./support/fixture.ts";
+import { deferred, fixture, stream, usage, waitUntil } from "./support/fixture.ts";
 
 test("dashboard observes live work without affecting it and retains own usage after unload/restart", async t => {
 	const finish = deferred<string>();
@@ -32,6 +32,8 @@ test("dashboard observes live work without affecting it and retains own usage af
 	assert.equal(notifications, before);
 	const completed = f.coordinator.getSnapshot().agents[0]!;
 	assert.equal(completed.status, "completed");
+	assert.equal(completed.lifecycle, "open");
+	assert.deepEqual(completed.lastResponse, { model: "scripted/echo", thinking: "off" });
 	assert.equal(completed.usage.requests, 1);
 	assert.equal(completed.usage.totalTokens, 2); // Not the inherited root's two tokens.
 	assert.equal(completed.usage.cost, null); // Fixture has no meaningful price.
@@ -47,7 +49,74 @@ test("dashboard observes live work without affecting it and retains own usage af
 	assert.deepEqual(restored.usage, completed.usage);
 	assert.equal(restored.durationMs, completed.durationMs);
 	assert.equal(restored.context?.timestamp, completed.context?.timestamp);
+	assert.deepEqual(restored.lastResponse, completed.lastResponse);
 	assert.equal(f.requests.length, 1);
+});
+
+test("dashboard selected profile follows live extension changes before descriptor settlement", async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, {
+		settings: { inheritExtensions: true },
+		extension: `export default function(pi) {
+			pi.on("before_agent_start", async (_event, ctx) => {
+				const model = ctx.modelRegistry.find("profiles", "selected");
+				if (!model || !await pi.setModel(model)) throw new Error("fixture model unavailable");
+				pi.setThinkingLevel("high");
+			});
+		}`,
+	});
+	f.modelRuntime.registerProvider("profiles", {
+		baseUrl: "http://scripted.invalid", apiKey: "test", api: "openai-responses",
+		models: [{
+			id: "selected", name: "Selected", reasoning: true, input: ["text"],
+			cost: usage.cost, contextWindow: 100000, maxTokens: 1000,
+		}],
+		streamSimple: (model, context, options) => {
+			f.requests.push(structuredClone(context));
+			return stream(model, finish.promise, options?.signal);
+		},
+	});
+	await f.coordinator.spawn(f.caller, { task_name: "changed", message: "Wait with changed selection" });
+	await waitUntil(() => f.requests.length === 1);
+	const descriptor = f.coordinator.treeStore.record("/root/changed").descriptor;
+	assert.deepEqual(descriptor.model, { provider: "scripted", id: "echo" });
+	assert.equal(descriptor.thinkingLevel, "off");
+	const running = f.coordinator.getSnapshot().agents[0]!;
+	assert.equal(running.model, "profiles/selected");
+	assert.equal(running.thinkingLevel, "high");
+	assert.equal(running.lastResponse, undefined, "selection cannot invent a physical response");
+	finish.resolve("Done");
+	await f.idle();
+	const unloaded = f.coordinator.getSnapshot().agents[0]!;
+	assert.equal(unloaded.model, "profiles/selected");
+	assert.equal(unloaded.thinkingLevel, "high");
+});
+
+test("closed unloaded agents remain canonically visible with transcript and physical response after restart", async t => {
+	const f = await fixture(t);
+	const anchor = f.manager.getLeafId()!;
+	await f.coordinator.spawn(f.caller, { task_name: "archived", message: "Keep this work readable" });
+	await f.idle();
+	const before = f.coordinator.getSnapshot().agents[0]!;
+	const transcript = f.coordinator.getTranscript("/root/archived");
+	assert(transcript.entries.length > 0);
+	assert.equal(transcript.error, undefined);
+	f.coordinator.close(f.caller, "archived");
+	const closed = f.coordinator.getSnapshot().agents[0]!;
+	assert.equal(closed.lifecycle, "closed");
+	assert.deepEqual(closed.usage, before.usage);
+	assert.deepEqual(closed.lastResponse, { model: "scripted/echo", thinking: "off" });
+	assert.deepEqual(f.coordinator.getTranscript("/root/archived").entries, transcript.entries);
+	await f.restart();
+	const restored = f.coordinator.getSnapshot().agents[0]!;
+	assert.equal(restored.lifecycle, "closed");
+	assert.deepEqual(restored.lastResponse, closed.lastResponse);
+	assert.deepEqual(restored.usage, before.usage);
+	assert.deepEqual(f.coordinator.getTranscript("/root/archived").entries, transcript.entries);
+	assert.equal(f.requests.length, 1, "reading closed history never loads work");
+	f.manager.branch(anchor);
+	assert.deepEqual(f.coordinator.getSnapshot().agents, []);
+	assert.match(f.coordinator.getTranscript("/root/archived").error!, /canonical branch/);
 });
 
 test("dashboard topic advances on delivered follow-up, not queued mail", async t => {

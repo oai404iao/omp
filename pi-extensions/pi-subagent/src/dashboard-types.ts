@@ -1,4 +1,4 @@
-import type { AgentStatus } from "./types.ts";
+import type { AgentRecord, AgentStatus } from "./types.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { MarkdownTransformer, MessageRenderer, ToolRenderers } from "@earendil-works/pi-coding-agent";
 
@@ -44,6 +44,8 @@ export interface DashboardAgent {
 	type: string;
 	model: string;
 	thinkingLevel: string;
+	lifecycle: AgentRecord["lifecycle"];
+	lastResponse?: AgentRecord["lastResponse"];
 	createdAt: string;
 	status: AgentStatus;
 	topic: string;

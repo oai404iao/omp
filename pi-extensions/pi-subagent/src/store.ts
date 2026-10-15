@@ -31,9 +31,12 @@ function validateState(value: unknown, id: string, rootSessionId: string): asser
 	}
 	const statuses = new Set(["pending_init", "running", "completed", "interrupted", "errored"]);
 	for (const [path, record] of Object.entries(state.agents)) {
+		// Tree v1 predates lifecycle: absence alone means a reusable open agent.
+		if (record.lifecycle === undefined) record.lifecycle = "open";
 		if (resolveTaskPath("/root", path) !== path || path === "/root" ||
 			record.descriptor?.version !== DESCRIPTOR_VERSION || record.descriptor.path !== path ||
 			!statuses.has(record.status) || typeof record.sessionFile !== "string" ||
+			!["open", "closing", "closed"].includes(record.lifecycle) ||
 			!Array.isArray(record.mailbox) || !record.descriptor.anchorId ||
 			path.slice(0, path.lastIndexOf("/")) !== record.descriptor.parentPath) {
 			throw new Error(`unsupported or corrupt subagent descriptor: ${path}`);
@@ -109,10 +112,10 @@ export class TreeStore {
 		this.update(state => enqueueInState(state, message));
 	}
 	acknowledge(path: string, ids: ReadonlySet<string>): void {
-		if (!this.mailbox(path).some(message => ids.has(message.id))) return;
+		if (!this.mailbox(path).some(message => ids.has(message.id) && !message.canceledAt)) return;
 		this.update(state => {
-			if (path === "/root") state.rootMailbox = state.rootMailbox.filter(message => !ids.has(message.id));
-			else state.agents[path]!.mailbox = state.agents[path]!.mailbox.filter(message => !ids.has(message.id));
+			if (path === "/root") state.rootMailbox = state.rootMailbox.filter(message => message.canceledAt || !ids.has(message.id));
+			else state.agents[path]!.mailbox = state.agents[path]!.mailbox.filter(message => message.canceledAt || !ids.has(message.id));
 		});
 	}
 }
@@ -127,4 +130,15 @@ export function enqueueInState(state: TreeState, message: MailMessage): void {
 		throw new Error(`mailbox capacity reached for ${message.to}`);
 	}
 	mailbox.push(message);
+}
+
+/** Recheck against the draft at each publication point, not a stale snapshot. */
+export function assertAgentOpen(state: Readonly<TreeState>, path: string): void {
+	let current = path;
+	while (current !== "/root") {
+		const record = state.agents[current];
+		if (!record) throw new Error(`unknown agent: ${current}`);
+		if (record.lifecycle !== "open") throw new Error(`agent is ${record.lifecycle}: ${current}`);
+		current = record.descriptor.parentPath;
+	}
 }

@@ -9,7 +9,7 @@ import {
 import { discoverAgents, type AgentDiscoveryResult } from "./agents.ts";
 import { DEFAULT_SETTINGS } from "./config.ts";
 import { prepareChildSession, persistPreparedSession } from "./providers.ts";
-import { createChildRuntime, resolveModel, runtimeFromRegistry } from "./runtime.ts";
+import { createChildRuntime, resolveExecutionProfile, runtimeFromRegistry, SelectionPersistenceError } from "./runtime.ts";
 import { AgentOperationQueue, ExecutionLimiter } from "./scheduler.ts";
 import {
 	DEFAULT_WAIT_AGENT_TIMEOUT_MS, MAX_MESSAGE_CHARS, MAX_WAIT_AGENT_TIMEOUT_MS,
@@ -17,14 +17,14 @@ import {
 } from "./schemas.ts";
 import {
 	DESCRIPTOR_CUSTOM_TYPE, MAX_PENDING_BYTES, MESSAGE_CUSTOM_TYPE, REGISTRATION_CUSTOM_TYPE, TREE_CUSTOM_TYPE,
-	TREE_VERSION, TreeStore, enqueueInState,
+	TREE_VERSION, TreeStore, assertAgentOpen, enqueueInState,
 } from "./store.ts";
 import { pathMatches, resolveTaskPath, ROOT_TASK_PATH, taskPath } from "./task-path.ts";
 import { buildToolCeiling } from "./tool-policy.ts";
 import { createAgentTools } from "./tools.ts";
 import { inboxEnvelope, persistTaskAttribution, taskMessage } from "./task-attribution.ts";
 import { addUsage, emptyUsage, finalAssistantText, finalStopReason, truncateUtf8 } from "./result.ts";
-import { DashboardReader } from "./dashboard-source.ts";
+import { DashboardReader, readSession } from "./dashboard-source.ts";
 import type { DashboardSnapshot, DashboardSource, TranscriptSnapshot } from "./dashboard-types.ts";
 import { AgentTelemetry } from "./telemetry.ts";
 import {
@@ -54,6 +54,7 @@ interface ActiveRun {
 	restartAfterInterrupt: boolean;
 	restartAfterBoundary: boolean;
 	phase: "initializing" | "executing" | "disposing";
+	lastResponse?: AgentRecord["lastResponse"];
 	done: Promise<void>;
 }
 
@@ -169,6 +170,10 @@ export class SubagentCoordinator implements DashboardSource {
 						record.status = "interrupted";
 						record.error = "Previous process ended before this run settled. Submit a follow-up to continue.";
 					}
+					if (record.lifecycle === "closing") {
+						record.lifecycle = "closed";
+						record.closedAt = new Date().toISOString();
+					}
 				}
 			});
 			this.reconcile(ROOT_TASK_PATH, manager);
@@ -206,21 +211,38 @@ export class SubagentCoordinator implements DashboardSource {
 		if (!existsSync(file)) throw new Error(`agent session is unavailable: ${path} (${file})`);
 		return SessionManager.open(file);
 	}
+	private readOnlySession(path: string): SessionManager {
+		if (path === ROOT_TASK_PATH) return this.rootCaller().sessionManager;
+		return this.active.get(path)?.runtime?.session.sessionManager ?? readSession(this.treeStore.record(path));
+	}
 	private visible(path: string): boolean {
 		if (path === ROOT_TASK_PATH) return true;
 		const record = this.treeStore.snapshot.agents[path];
 		if (!record || !this.visible(record.descriptor.parentPath)) return false;
-		return this.session(record.descriptor.parentPath).getBranch().some(entry => entry.id === record.descriptor.anchorId);
+		try {
+			return this.readOnlySession(record.descriptor.parentPath).getBranch().some(entry => entry.id === record.descriptor.anchorId);
+		} catch { return false; }
 	}
 	private resolve(caller: AgentCaller, target: string): string {
 		this.assertOpen();
 		if (!this.visible(caller.path)) throw new Error("caller is not on this tree's active branch");
+		assertAgentOpen(this.treeStore.snapshot, caller.path);
 		const path = resolveTaskPath(caller.path, target);
 		if (!this.visible(path)) throw new Error(`unknown agent on the current branch: ${path}`);
 		return path;
 	}
+	private selectedProfile(path: string): { model: { provider: string; id: string }; thinkingLevel: ThinkingLevel } {
+		const session = this.active.get(path)?.runtime?.session;
+		const descriptor = this.treeStore.record(path).descriptor;
+		return {
+			model: session?.model ?? descriptor.model,
+			thinkingLevel: session?.thinkingLevel ?? descriptor.thinkingLevel,
+		};
+	}
 
-	async spawn(caller: AgentCaller, input: SpawnInput, signal?: AbortSignal): Promise<{ task_name: string }> {
+	async spawn(caller: AgentCaller, input: SpawnInput, signal?: AbortSignal): Promise<{
+		task_name: string; model: string; thinking: ThinkingLevel;
+	}> {
 		this.assertOpen();
 		this.treeStore;
 		validateMessage(input.message);
@@ -234,6 +256,7 @@ export class SubagentCoordinator implements DashboardSource {
 			this.assertOpen();
 			checkSignal(signal);
 			if (!this.visible(caller.path)) throw new Error("caller is not on the active branch");
+			assertAgentOpen(this.treeStore.snapshot, caller.path);
 			if (this.treeStore.snapshot.agents[path]) throw new Error(`task name already used in this tree: ${path}`);
 			const release = this.limiter.acquire();
 			let transferred = false;
@@ -253,28 +276,57 @@ export class SubagentCoordinator implements DashboardSource {
 						if (forbidden.length) throw new Error(`agent_type exceeds parent's tool ceiling: ${forbidden.join(", ")}`);
 					} else agent.tools = [...caller.tools];
 				}
-				const model = resolveModel(caller.modelRuntime, caller.model, agent.model);
+				const profile = await resolveExecutionProfile(caller.modelRuntime, caller.model,
+					agent.thinking ?? caller.thinkingLevel, {
+						model: input.model !== undefined ? input.model : agent.model, thinking: input.thinking,
+					});
+				this.assertOpen();
+				checkSignal(signal);
+				assertAgentOpen(this.treeStore.snapshot, caller.path);
+				const model = profile.model;
 				const session = prepareChildSession(caller.sessionManager, this.treeStore.sessionDirectory, input.fork_turns ?? "all");
 				const anchorId = caller.sessionManager.appendCustomEntry(REGISTRATION_CUSTOM_TYPE, { treeId: this.treeStore.snapshot.id, path });
 				const descriptor: AgentDescriptor = {
 					version: DESCRIPTOR_VERSION, id: uuidv7(), path, parentPath: caller.path, depth: caller.depth + 1,
 					cwd: caller.sessionManager.getCwd(), createdAt: new Date().toISOString(),
-					agent, model: { provider: model.provider, id: model.id }, thinkingLevel: agent.thinking ?? caller.thinkingLevel,
+					agent, model: { provider: model.provider, id: model.id }, thinkingLevel: profile.thinking,
 					forkTurns: input.fork_turns ?? "all", settings: { ...this.settings }, anchorId,
 				};
 				session.appendCustomEntry(DESCRIPTOR_CUSTOM_TYPE, descriptor);
 				session.appendSessionInfo(`[subagent] ${path}`);
 				const persisted = persistPreparedSession(session);
 				this.treeStore.update(state => {
+					assertAgentOpen(state, caller.path);
 					state.agents[path] = {
-						descriptor, sessionFile: persisted.getSessionFile()!, status: "pending_init",
+						descriptor, sessionFile: persisted.getSessionFile()!, status: "pending_init", lifecycle: "open",
 						mailbox: [task],
 					};
 				});
 				this.dashboardChanged();
 				transferred = true;
-				await this.start(path, caller, persisted, release, signal);
-				return { task_name: path };
+				try { await this.start(path, caller, persisted, release, signal); }
+				catch (error) {
+					if (error instanceof SelectionPersistenceError) {
+						await this.active.get(path)?.done;
+						this.treeStore.update(state => {
+							const record = state.agents[path]!;
+							// No prompt receipt exists for this typed initialization failure.
+							// Retain transcript/registration traces, and any concurrent close audit.
+							const pristine = record.mailbox.length === 1 && record.mailbox[0]?.id === task.id &&
+								!record.outbox?.length && !Object.keys(state.agents).some(candidate =>
+									candidate !== path && pathMatches(candidate, path));
+							if (record.lifecycle === "open" && pristine) delete state.agents[path];
+							else {
+								record.status = record.lifecycle === "open" ? "errored" : "interrupted";
+								record.error = errorText(error);
+								if (record.lifecycle === "open") record.mailbox = record.mailbox.filter(message => message.id !== task.id);
+							}
+						});
+					}
+					throw error;
+				}
+				const effective = this.selectedProfile(path);
+				return { task_name: path, model: `${effective.model.provider}/${effective.model.id}`, thinking: effective.thinkingLevel };
 			} finally {
 				if (!transferred) release();
 			}
@@ -285,36 +337,84 @@ export class SubagentCoordinator implements DashboardSource {
 		checkSignal(signal);
 		validateMessage(text);
 		const path = this.resolve(caller, target);
-		this.treeStore.enqueue(this.message(caller.path, path, "message", text));
+		this.treeStore.update(state => {
+			assertAgentOpen(state, caller.path);
+			assertAgentOpen(state, path);
+			enqueueInState(state, this.message(caller.path, path, "message", text));
+		});
 		this.wake(path, "mailbox");
 		return { accepted: true };
 	}
 
-	async followup(caller: AgentCaller, target: string, text: string, signal?: AbortSignal): Promise<{ accepted: true }> {
+	async followup(caller: AgentCaller, target: string, text: string, signal?: AbortSignal,
+		profile?: { model?: string; thinking?: ThinkingLevel }): Promise<{
+			accepted: true; model: string; thinking: ThinkingLevel;
+		}> {
 		validateMessage(text);
 		const path = this.resolve(caller, target);
 		if (path === ROOT_TASK_PATH) throw new Error("followup_task cannot start /root");
 		const task = taskMessage(this.pi, caller.path, path, text, caller.sessionManager.getSessionId());
+		// Initialization owns the operation queue until prompt acceptance. Profile
+		// changes must fail while busy, rather than waiting there until it goes idle.
+		if (this.active.has(path) && (profile?.model !== undefined || profile?.thinking !== undefined)) {
+			const selected = this.selectedProfile(path);
+			const requested = await resolveExecutionProfile(caller.modelRuntime,
+				caller.modelRuntime.getModel(selected.model.provider, selected.model.id), selected.thinkingLevel, profile);
+			this.resolve(caller, path);
+			assertAgentOpen(this.treeStore.snapshot, path);
+			const configured = this.selectedProfile(path);
+			if (this.active.has(path) && (requested.model.provider !== configured.model.provider ||
+				requested.model.id !== configured.model.id || requested.thinking !== configured.thinkingLevel)) {
+				throw Object.assign(new Error("PROFILE_CHANGE_REQUIRES_IDLE: agent is busy; retry profile changes once idle"),
+					{ code: "PROFILE_CHANGE_REQUIRES_IDLE" });
+			}
+		}
 		return this.operations.run(path, async () => {
 			this.assertOpen();
 			checkSignal(signal);
 			this.resolve(caller, path);
+			assertAgentOpen(this.treeStore.snapshot, path);
 			if (this.treeStore.record(path).descriptor.agent.source === "project" && !this.rootCaller().projectTrusted) {
 				throw new Error("resuming a project-defined agent requires project trust");
 			}
+			const descriptor = this.selectedProfile(path);
+			const resolved = await resolveExecutionProfile(caller.modelRuntime,
+				caller.modelRuntime.getModel(descriptor.model.provider, descriptor.model.id),
+				descriptor.thinkingLevel, profile);
+			this.assertOpen();
+			checkSignal(signal);
+			this.resolve(caller, path);
+			assertAgentOpen(this.treeStore.snapshot, path);
+			const configured = this.selectedProfile(path);
+			const changed = (profile?.model !== undefined || profile?.thinking !== undefined) &&
+				(resolved.model.provider !== configured.model.provider ||
+				resolved.model.id !== configured.model.id || resolved.thinking !== configured.thinkingLevel);
 			let current = this.active.get(path);
+			if (current && changed) throw Object.assign(
+				new Error("PROFILE_CHANGE_REQUIRES_IDLE: agent is busy; retry profile changes once idle"),
+				{ code: "PROFILE_CHANGE_REQUIRES_IDLE" },
+			);
 			if (current?.phase === "disposing") {
 				await current.done;
 				this.assertOpen();
 				checkSignal(signal);
+				this.resolve(caller, path);
+				assertAgentOpen(this.treeStore.snapshot, path);
 				current = undefined;
 			}
 			if (current) {
-				this.treeStore.enqueue(task);
+				this.treeStore.update(state => {
+					assertAgentOpen(state, caller.path);
+					assertAgentOpen(state, path);
+					enqueueInState(state, task);
+				});
 				if (current.abort.signal.aborted) current.restartAfterInterrupt = true;
 				if (!current.accepting) current.restartAfterBoundary = true;
 				this.wake(path, "mailbox");
-				return { accepted: true as const };
+				return {
+					accepted: true as const, model: `${configured.model.provider}/${configured.model.id}`,
+					thinking: configured.thinkingLevel,
+				};
 			}
 			this.flushOutboxes();
 			if ((this.treeStore.record(path).outbox?.length ?? 0) >= 256) throw new Error("parent mailbox is full; collect pending results before starting more work");
@@ -323,10 +423,39 @@ export class SubagentCoordinator implements DashboardSource {
 			try {
 				const session = this.session(path);
 				this.reconcile(path, session);
-				this.treeStore.enqueue(task);
+				const previous = structuredClone(this.treeStore.record(path));
+				this.treeStore.update(state => {
+					assertAgentOpen(state, caller.path);
+					assertAgentOpen(state, path);
+					enqueueInState(state, task);
+					const record = state.agents[path]!;
+					record.descriptor.model = { provider: resolved.model.provider, id: resolved.model.id };
+					record.descriptor.thinkingLevel = resolved.thinking;
+				});
 				transferred = true;
-				await this.start(path, caller, session, release, signal);
-				return { accepted: true as const };
+				try { await this.start(path, caller, session, release, signal); }
+				catch (error) {
+					if (error instanceof SelectionPersistenceError) {
+						await this.active.get(path)?.done;
+						this.treeStore.update(state => {
+							const record = state.agents[path]!;
+							record.descriptor = previous.descriptor;
+							record.status = record.lifecycle === "open" ? previous.status : "interrupted";
+							if (previous.runId === undefined) delete record.runId;
+							else record.runId = previous.runId;
+							if (previous.error === undefined) delete record.error;
+							else record.error = previous.error;
+							// A close racing this failure owns cancellation metadata.
+							if (record.lifecycle === "open") record.mailbox = record.mailbox.filter(message => message.id !== task.id);
+						});
+					}
+					throw error;
+				}
+				const selected = this.selectedProfile(path);
+				return {
+					accepted: true as const, model: `${selected.model.provider}/${selected.model.id}`,
+					thinking: selected.thinkingLevel,
+				};
 			} finally { if (!transferred) release(); }
 		});
 	}
@@ -346,22 +475,142 @@ export class SubagentCoordinator implements DashboardSource {
 		return { previous_status };
 	}
 
-	list(caller: AgentCaller, prefix?: string): { agents: AgentListItem[] } {
+	close(caller: AgentCaller, target: string): {
+		accepted: true; target: string; lifecycle: AgentRecord["lifecycle"]; affected_count: number;
+	} {
+		const path = this.resolve(caller, target);
+		if (path === ROOT_TASK_PATH || path === caller.path || !pathMatches(path, caller.path)) {
+			throw new Error("close_agent requires a non-root structural descendant; cannot close yourself or siblings");
+		}
+		const paths = Object.keys(this.treeStore.snapshot.agents).filter(candidate => pathMatches(candidate, path));
+		const now = new Date().toISOString();
+		// Publish a subtree-wide durable barrier before touching any runtime. In-flight
+		// spawn/profile preflights must recheck their ancestors before publication.
+		this.treeStore.update(state => {
+			assertAgentOpen(state, caller.path);
+			for (const target of paths) {
+				const record = state.agents[target]!;
+				if (record.lifecycle !== "open") continue;
+				record.lifecycle = "closing";
+				record.closeRequestedAt = now;
+				record.closedBy = caller.path;
+				for (const message of record.mailbox) {
+					if (message.kind === "task" && !message.canceledAt) {
+						message.canceledAt = now;
+						message.canceledBy = caller.path;
+					}
+				}
+			}
+		});
+		for (const target of paths) {
+			const run = this.active.get(target);
+			if (run) {
+				run.accepting = false;
+				run.restartAfterInterrupt = false;
+				run.restartAfterBoundary = false;
+				run.abort.abort(new Error(`closed by ${caller.path}`));
+				void run.runtime?.session.abort().catch(error => this.reportError(target, error));
+			}
+			this.wake(target, "shutdown");
+		}
+		this.finishClosures();
+		this.dashboardChanged();
+		return {
+			accepted: true, target: path, lifecycle: this.treeStore.record(path).lifecycle, affected_count: paths.length,
+		};
+	}
+
+	private finishClosures(): void {
+		if (!this.store) return;
+		const settled = Object.entries(this.store.snapshot.agents).filter(([path, record]) =>
+			record.lifecycle === "closing" && ![...this.active.keys()].some(active => pathMatches(active, path)));
+		if (!settled.length) return;
+		this.store.update(state => {
+			for (const [path] of settled) {
+				state.agents[path]!.lifecycle = "closed";
+				state.agents[path]!.closedAt = new Date().toISOString();
+			}
+		});
+	}
+
+	private latestResponse(path: string): AgentRecord["lastResponse"] {
+		const record = this.treeStore.record(path);
+		try {
+			const branch = this.readOnlySession(path).getBranch();
+			const boundary = branch.findIndex(entry => entry.type === "custom" &&
+				entry.customType === DESCRIPTOR_CUSTOM_TYPE &&
+				(entry.data as { id?: string } | undefined)?.id === record.descriptor.id);
+			if (boundary >= 0) {
+				for (let index = branch.length - 1; index > boundary; index--) {
+					const entry = branch[index]!;
+					if (entry.type !== "message" || entry.message.role !== "assistant" ||
+						!["stop", "length", "toolUse", "deferred"].includes(entry.message.stopReason)) continue;
+					return {
+						model: `${entry.message.provider}/${entry.message.model}`,
+						...(entry.message.thinkingLevel ? { thinking: entry.message.thinkingLevel } : {}),
+					};
+				}
+				return undefined;
+			}
+		} catch { /* Unreadable transcripts retain the last known durable response metadata. */ }
+		return this.active.get(path)?.lastResponse ?? record.lastResponse;
+	}
+
+	list(caller: AgentCaller, prefix?: string, options: {
+		include_closed?: boolean; limit?: number; cursor?: string;
+	} = {}): { agents: AgentListItem[]; next_cursor?: string } {
 		this.assertOpen();
+		if (!this.visible(caller.path)) throw new Error("caller is not on this tree's active branch");
+		const limit = options.limit ?? 50;
+		if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new Error("limit must be an integer between 1 and 200");
+		if (options.include_closed !== undefined && typeof options.include_closed !== "boolean") throw new Error("include_closed must be a boolean");
 		const filter = prefix === undefined ? ROOT_TASK_PATH : resolveTaskPath(caller.path, prefix);
+		const binding = JSON.stringify([this.store?.snapshot.id ?? null, caller.path, filter, options.include_closed ?? false]);
+		let after = "";
+		if (options.cursor !== undefined) {
+			try {
+				if (typeof options.cursor !== "string" || options.cursor.length > 8192) throw new Error();
+				const decoded = Buffer.from(options.cursor, "base64url").toString("utf8");
+				const value = JSON.parse(decoded);
+				if (!Array.isArray(value) || value.length !== 2 || value[0] !== binding ||
+					typeof value[1] !== "string" || Buffer.from(decoded).toString("base64url") !== options.cursor ||
+					resolveTaskPath(ROOT_TASK_PATH, value[1]) !== value[1] || !pathMatches(value[1], filter)) throw new Error();
+				after = value[1];
+			} catch { throw new Error("invalid or mismatched list_agents cursor"); }
+		}
+		const root = this.rootCaller();
 		const agents: AgentListItem[] = [{
 			agent_name: ROOT_TASK_PATH, agent_status: this.rootRunning ? "running" : "completed",
+			lifecycle: "open", model: root.model ? `${root.model.provider}/${root.model.id}` : "unavailable",
+			thinking: root.thinkingLevel,
 		}];
 		if (this.store) {
 			for (const [path, record] of Object.entries(this.store.snapshot.agents)) {
-				if (this.visible(path)) agents.push({ agent_name: path, agent_status: record.status });
+				const selected = this.selectedProfile(path);
+				if (this.visible(path) && (options.include_closed || record.lifecycle !== "closed")) agents.push({
+					agent_name: path, agent_status: record.status, lifecycle: record.lifecycle,
+					model: `${selected.model.provider}/${selected.model.id}`,
+					thinking: selected.thinkingLevel,
+				});
 			}
 		}
-		return { agents: agents.filter(agent => pathMatches(agent.agent_name, filter)).sort((a, b) => a.agent_name.localeCompare(b.agent_name)) };
+		const remaining = agents.filter(agent => pathMatches(agent.agent_name, filter) && agent.agent_name > after)
+			.sort((a, b) => a.agent_name < b.agent_name ? -1 : a.agent_name > b.agent_name ? 1 : 0);
+		const page = remaining.slice(0, limit).map(agent => {
+			const response = agent.agent_name === ROOT_TASK_PATH ? undefined : this.latestResponse(agent.agent_name);
+			return response ? { ...agent, last_response: response } : agent;
+		});
+		return {
+			agents: page,
+			...(remaining.length > limit ? {
+				next_cursor: Buffer.from(JSON.stringify([binding, page.at(-1)!.agent_name])).toString("base64url"),
+			} : {}),
+		};
 	}
 
 	wait(caller: AgentCaller, timeout = DEFAULT_WAIT_AGENT_TIMEOUT_MS, signal?: AbortSignal, hasInput = () => false): Promise<WaitResult> {
 		this.assertOpen();
+		assertAgentOpen(this.treeStore.snapshot, caller.path);
 		checkSignal(signal);
 		if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > MAX_WAIT_AGENT_TIMEOUT_MS) {
 			throw new Error(`timeout_ms must be an integer between 0 and ${MAX_WAIT_AGENT_TIMEOUT_MS}`);
@@ -412,7 +661,8 @@ export class SubagentCoordinator implements DashboardSource {
 	notifyInput(path: string): void { this.wake(path, "input"); }
 
 	private pendingMessages(path: string): readonly MailMessage[] {
-		return this.treeStore.mailbox(path).filter(message => this.visible(message.from));
+		if (path !== ROOT_TASK_PATH && this.treeStore.record(path).lifecycle !== "open") return [];
+		return this.treeStore.mailbox(path).filter(message => !message.canceledAt && this.visible(message.from));
 	}
 
 	/** Receipts live with the actual context message, not with wait tool results. */
@@ -432,7 +682,7 @@ export class SubagentCoordinator implements DashboardSource {
 				for (const id of receipt.messageIds) ids.add(id);
 			}
 		}
-		if (!this.store.mailbox(path).some(message => ids.has(message.id))) return;
+		if (!this.store.mailbox(path).some(message => ids.has(message.id) && !message.canceledAt)) return;
 		const fd = openSync(file, "r");
 		try { fsyncSync(fd); } finally { closeSync(fd); }
 		this.store.acknowledge(path, ids);
@@ -507,12 +757,16 @@ export class SubagentCoordinator implements DashboardSource {
 		run.done = (async () => {
 			try {
 				checkSignal(run.abort.signal);
+				assertAgentOpen(this.treeStore.snapshot, initiator.path);
+				assertAgentOpen(this.treeStore.snapshot, path);
 				run.runtime = await createChildRuntime({
 					descriptor: record.descriptor, sessionManager: manager,
 					parentSession: this.session(record.descriptor.parentPath),
 					modelRuntime: caller.modelRuntime, agentDir: this.agentDir, packageRoot: this.packageRoot,
 					projectTrusted: caller.projectTrusted,
-					tools: createAgentTools(this, () => caller, this.catalog(caller).agents, caller.path),
+					tools: createAgentTools(this, ctx => ({
+						...caller, model: ctx.model, thinkingLevel: ctx.thinkingLevel ?? "off",
+					}), this.catalog(caller).agents, caller.path),
 					hooks: this.hooks(path),
 				});
 				caller.sessionManager = run.runtime.session.sessionManager;
@@ -526,6 +780,7 @@ export class SubagentCoordinator implements DashboardSource {
 					const originalEntries = new Set(session.sessionManager.getEntries().map(entry => entry.id));
 					run.accepting = true;
 					this.treeStore.update(state => {
+						assertAgentOpen(state, path);
 						const agent = state.agents[path]!;
 						agent.status = "running"; agent.runId = runId; delete agent.error;
 						if (session.model) agent.descriptor.model = { provider: session.model.provider, id: session.model.id };
@@ -540,6 +795,14 @@ export class SubagentCoordinator implements DashboardSource {
 					// only once the task envelope enters that operation; otherwise an
 					// immediate interrupt can race Pi resetting its abort controller.
 					const unsubscribe = session.subscribe(event => {
+						if (event.type === "message_end" && event.message.role === "assistant" &&
+							["stop", "length", "toolUse", "deferred"].includes(event.message.stopReason)) {
+							run.lastResponse = {
+								model: `${event.message.provider}/${event.message.model}`,
+								...(event.message.thinkingLevel ? { thinking: event.message.thinkingLevel } : {}),
+							};
+							this.dashboardChanged();
+						}
 						if (event.type !== "message_end" || event.message.role !== "custom" ||
 							event.message.customType !== MESSAGE_CUSTOM_TYPE) return;
 						const details = event.message.details as { treeId?: string } | undefined;
@@ -583,12 +846,19 @@ export class SubagentCoordinator implements DashboardSource {
 								entry.type === "usage" ? entry.model : model.id, entry.usage, runId);
 						}
 					}
-					this.settle(path, runId, status, output || (status === "errored" ? `Agent stopped: ${stop}` : "(no output)"));
+					const response = [...messages].reverse().find(message => message.role === "assistant" &&
+						["stop", "length", "toolUse", "deferred"].includes(message.stopReason));
+					this.settle(path, runId, status, output || (status === "errored" ? `Agent stopped: ${stop}` : "(no output)"),
+						response?.role === "assistant" ? {
+							model: `${response.provider}/${response.model}`,
+							...(response.thinkingLevel ? { thinking: response.thinkingLevel } : {}),
+						} : undefined);
 					this.pi.events.emit("pi-subagent:turn-end", { taskPath: path, runId, status });
 					if (!accepted) throw failure ?? new Error(`agent failed before prompt acceptance (${status})`);
 					// A task accepted after the last boundary gets a fresh run. Retain the
 					// permit between runs so an accepted task cannot later lose admission.
-					if (this.closing || (status === "errored" && !run.restartAfterBoundary) ||
+					if (this.closing || this.treeStore.record(path).lifecycle !== "open" ||
+						(status === "errored" && !run.restartAfterBoundary) ||
 						(run.abort.signal.aborted && !run.restartAfterInterrupt) ||
 						!this.pendingMessages(path).some(message => message.kind === "task")) break;
 					run.abort = new AbortController();
@@ -598,7 +868,7 @@ export class SubagentCoordinator implements DashboardSource {
 			} catch (error) {
 				if (!accepted) reject(error);
 				const record = this.treeStore.record(path);
-				if (record.status === "running" || record.status === "pending_init") {
+				if (!(error instanceof SelectionPersistenceError) && (record.status === "running" || record.status === "pending_init")) {
 					run.telemetry?.finish(run.abort.signal.aborted ? "interrupted" : "errored");
 					this.settle(path, record.runId ?? uuidv7(), run.abort.signal.aborted ? "interrupted" : "errored", errorText(error));
 				}
@@ -614,6 +884,7 @@ export class SubagentCoordinator implements DashboardSource {
 				try { await run.runtime?.dispose(); } catch (error) { this.reportError(path, error); }
 				if (this.active.get(path) === run) this.active.delete(path);
 				release();
+				this.finishClosures();
 				this.dashboardChanged();
 			}
 		})();
@@ -622,7 +893,8 @@ export class SubagentCoordinator implements DashboardSource {
 		return acceptance;
 	}
 
-	private settle(path: string, runId: string, status: AgentRecord["status"], output: string): void {
+	private settle(path: string, runId: string, status: AgentRecord["status"], output: string,
+		lastResponse?: AgentRecord["lastResponse"]): void {
 		const record = this.treeStore.record(path);
 		const session = this.active.get(path)?.runtime?.session;
 		const cap = Math.min(record.descriptor.settings.maxOutputBytes, 128 * 1024);
@@ -632,6 +904,7 @@ export class SubagentCoordinator implements DashboardSource {
 		this.treeStore.update(state => {
 			const agent = state.agents[path]!;
 			agent.status = status;
+			if (lastResponse) agent.lastResponse = lastResponse;
 			if (session?.model) agent.descriptor.model = { provider: session.model.provider, id: session.model.id };
 			if (session) agent.descriptor.thinkingLevel = session.thinkingLevel;
 			if (status === "errored") agent.error = output;
@@ -655,7 +928,9 @@ export class SubagentCoordinator implements DashboardSource {
 						enqueueInState(state, message);
 						state.agents[path]!.outbox = state.agents[path]!.outbox?.filter(entry => entry.id !== message.id);
 					});
-					this.wake(message.to, "mailbox");
+					if (message.to === ROOT_TASK_PATH || this.store.record(message.to).lifecycle === "open") {
+						this.wake(message.to, "mailbox");
+					}
 				} catch (error) {
 					if (!errorText(error).startsWith("mailbox capacity reached")) this.reportError(path, error);
 					break;

@@ -151,6 +151,10 @@ test("tool catalog describes only effective agents without exposing their prompt
 	writeAgent(join(agentDir, "agents"), "worker", "User description");
 	writeAgent(join(project, ".pi", "agents"), "worker", '"Project\\n  description"');
 	const discovery = discoverAgents({ cwd: project, agentDir, scope: "both", projectTrusted: true });
-	assert.equal(formatAgentToolCatalog(discovery.agents), "\n\nAvailable agents:\n- worker: Project description");
+	assert.equal(formatAgentToolCatalog(discovery.agents),
+		"\n\nAvailable agents:\n- worker: Project description [model: inherit caller selection; thinking: inherit caller selection]");
+	const configured = { ...discovery.agents[0]!, model: "provider/selected", thinking: "high" as const, systemPrompt: "PRIVATE_BODY" };
+	assert.match(formatAgentToolCatalog([configured]), /model: provider\/selected; thinking: high/);
+	assert.doesNotMatch(formatAgentToolCatalog([configured]), /PRIVATE_BODY/);
 	assert.equal(formatAgentToolCatalog([]), "\n\nAvailable agents:\n(no agents)");
 });

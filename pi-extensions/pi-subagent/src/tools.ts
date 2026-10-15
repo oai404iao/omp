@@ -2,7 +2,7 @@ import { defineTool, type ExtensionContext, type ToolDefinition } from "@earendi
 import type { AgentCaller, SubagentCoordinator } from "./coordinator.ts";
 import type { AgentDefinition, AgentListItem, SpawnInput } from "./types.ts";
 import {
-	AcceptedOutput, FollowupTaskParameters, InterruptOutput, InterruptParameters, ListAgentsParameters,
+	AcceptedOutput, CloseOutput, CloseParameters, FollowupOutput, FollowupTaskParameters, InterruptOutput, InterruptParameters, ListAgentsParameters,
 	ListOutput, SendMessageParameters, SpawnOutput, TOOL_DESCRIPTIONS, WaitAgentParameters, WaitOutput,
 	spawnAgentDescription, spawnAgentParameters,
 } from "./schemas.ts";
@@ -76,10 +76,17 @@ export function createAgentTools(
 		}),
 		defineTool({
 			...common, ...rendering("followup_task"), name: "followup_task", label: "Follow-up Task",
-			description: TOOL_DESCRIPTIONS.followup_task, parameters: FollowupTaskParameters, outputSchema: AcceptedOutput,
+			description: TOOL_DESCRIPTIONS.followup_task, parameters: FollowupTaskParameters, outputSchema: FollowupOutput,
 			execute: async (_id, params, signal, _update, ctx) =>
-				result(await getController().followup(caller(ctx), params.target, params.message, signal),
+				result(await getController().followup(caller(ctx), params.target, params.message, signal,
+					params as Pick<SpawnInput, "model" | "thinking">),
 					{ agentType: agentType(params.target) }),
+		}),
+		defineTool({
+			...common, ...rendering("close_agent"), name: "close_agent", label: "Close Agent",
+			description: TOOL_DESCRIPTIONS.close_agent, parameters: CloseParameters, outputSchema: CloseOutput,
+			execute: async (_id, params, _signal, _update, ctx) =>
+				result(getController().close(caller(ctx), params.target), { agentType: agentType(params.target) }),
 		}),
 		defineTool({
 			...common, ...rendering("wait_agent"), name: "wait_agent", label: "Wait Agent",
@@ -98,7 +105,8 @@ export function createAgentTools(
 			...common, ...rendering("list_agents"), name: "list_agents", label: "List Agents",
 			description: TOOL_DESCRIPTIONS.list_agents, parameters: ListAgentsParameters, outputSchema: ListOutput,
 			execute: async (_id, params, _signal, _update, ctx) => {
-				const value = { agents: getController().list(caller(ctx), params.path_prefix).agents.map(agent => ({ ...agent })) };
+				const page = getController().list(caller(ctx), params.path_prefix, params);
+				const value = { ...page, agents: page.agents.map(agent => ({ ...agent })) };
 				return result(value, {
 					agentTypes: Object.fromEntries(value.agents.map(agent => [agent.agent_name, agentType(agent.agent_name)])),
 				});

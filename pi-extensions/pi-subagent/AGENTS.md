@@ -9,7 +9,7 @@ and publication boundaries.
 
 - `index.ts` is the published entry point; `src/index.ts` registers tools,
   session hooks, message rendering and `/subagents`.
-- `src/schemas.ts` owns the six public tool contracts; `src/tools.ts` shares
+- `src/schemas.ts` owns the seven public tool contracts; `src/tools.ts` shares
   their handlers between root and children.
 - `src/coordinator.ts` owns tree identity, admission, mailboxes and lifecycle;
   `src/scheduler.ts` owns execution limits and per-agent operation serialization.
@@ -23,7 +23,7 @@ and publication boundaries.
 
 ## Async v2 contracts
 
-- Keep root and child definitions identical and `model-only`: the six controls
+- Keep root and child definitions identical and `model-only`: the seven controls
   are not callable through codemode or nested tool execution. Do not restore
   retired tools, arguments or synchronous completion responses.
 - Spawn and follow-up return acceptance, not completion. `send_message` queues

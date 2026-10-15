@@ -27,7 +27,7 @@ function record(): AgentRecord {
 			model: { provider: "fixture", id: "fixture" }, thinkingLevel: "high", forkTurns: "all",
 			settings: DEFAULT_SETTINGS, anchorId: "anchor",
 		},
-		sessionFile: "/unused.jsonl", status: "completed", mailbox: [],
+		sessionFile: "/unused.jsonl", status: "completed", lifecycle: "open", mailbox: [],
 	};
 }
 function manager(agent = record()) {
@@ -59,6 +59,46 @@ test("statistics exclude inherited history using the matching descriptor identit
 	assert.equal(data.activity.some(item => item.summary === "inherited"), false);
 	assert.equal(data.durationPartial, true);
 	assert.equal(data.durationMs, undefined);
+});
+
+test("selected model and thinking stay independent from successful physical responses", () => {
+	const agent = record();
+	agent.descriptor.model = { provider: "virtual", id: "router" };
+	const session = SessionManager.inMemory();
+	session.appendMessage({ ...assistant("inherited"), model: "parent" });
+	session.appendCustomEntry(DESCRIPTOR_CUSTOM_TYPE, agent.descriptor);
+	const boundary = session.getLeafId()!;
+	assert.equal(buildDashboardAgent(agent, session.getEntries()).lastResponse, undefined);
+	session.appendMessage({ ...assistant("physical"), provider: "actual", model: "small", thinkingLevel: "low" });
+	let data = buildDashboardAgent(agent, session.getEntries());
+	assert.equal(data.model, "virtual/router");
+	assert.equal(data.thinkingLevel, "high");
+	assert.deepEqual(data.lastResponse, { model: "actual/small", thinking: "low" });
+	for (const stopReason of ["pending", "error", "aborted"] as const) {
+		session.appendMessage({ ...assistant(stopReason), model: stopReason, stopReason });
+	}
+	data = buildDashboardAgent(agent, session.getEntries());
+	assert.deepEqual(data.lastResponse, { model: "actual/small", thinking: "low" });
+	session.appendMessage({ ...assistant("no actual thinking"), provider: "actual", model: "large", stopReason: "toolUse" });
+	data = buildDashboardAgent(agent, session.getEntries());
+	assert.deepEqual(data.lastResponse, { model: "actual/large" });
+	assert.equal(data.thinkingLevel, "high", "missing response thinking must never use selected thinking");
+	session.branch(boundary);
+	session.appendMessage({ ...assistant("canonical"), provider: "actual", model: "canonical" });
+	assert.deepEqual(buildDashboardAgent(agent, session.getEntries(), undefined, session.getBranch()).lastResponse,
+		{ model: "actual/canonical" });
+});
+
+test("closed records retain lifecycle, selected settings and durable last response when unavailable", () => {
+	const agent = record();
+	agent.lifecycle = "closed";
+	agent.lastResponse = { model: "actual/physical", thinking: "low" };
+	const data = unavailableDashboardAgent(agent, "Missing file");
+	assert.equal(data.lifecycle, "closed");
+	assert.equal(data.model, "fixture/fixture");
+	assert.equal(data.thinkingLevel, "high");
+	assert.deepEqual(data.lastResponse, agent.lastResponse);
+	assert.notEqual(data.lastResponse, agent.lastResponse);
 });
 
 test("owned accounting includes auxiliary and tool usage once, and reasoning is an output subset", () => {

@@ -311,6 +311,8 @@ export function unavailableDashboardAgent(record: AgentRecord, error: string): D
 	return {
 		path: descriptor.path, parentPath: descriptor.parentPath, type: descriptor.agent.name,
 		model: `${descriptor.model.provider}/${descriptor.model.id}`, thinkingLevel: descriptor.thinkingLevel,
+		lifecycle: record.lifecycle,
+		...(record.lastResponse ? { lastResponse: { ...record.lastResponse } } : {}),
 		createdAt: descriptor.createdAt, status: record.status, topic: "Task unavailable", task: "",
 		...(record.error ? { error: dashboardText(record.error, 2048) } : {}),
 		dataError: dashboardText(error, 512), usage: emptyUsage(false), durationPartial: true, activity: [],
@@ -329,8 +331,18 @@ export function buildDashboardAgent(
 	const current = ownedEntries(record, branch) ?? [];
 	const boundaryId = entries[entries.length - owned.length - 1]!.id;
 	const { dataError: _, ...base } = unavailableDashboardAgent(record, "");
+	// Physical response identity is independent of the selected (possibly virtual)
+	// model. Only this agent's successful canonical responses provide evidence.
+	const response = [...current].reverse().find(entry => entry.type === "message" &&
+		entry.message.role === "assistant" &&
+		["stop", "length", "toolUse", "deferred"].includes(entry.message.stopReason));
+	const message = response?.type === "message" && response.message.role === "assistant" ? response.message : undefined;
 	return {
 		...base, usage: usageTotals(owned, live),
+		lastResponse: message ? {
+			model: `${message.provider}/${message.model}`,
+			...(message.thinkingLevel !== undefined ? { thinking: message.thinkingLevel } : {}),
+		} : undefined,
 		...(persistedRecords ? durations(owned, persistedRecords, boundaryId, live) : legacyDurations(owned, live)),
 		...activityAndTask(record, current, live, persistedRecords, boundaryId),
 	};

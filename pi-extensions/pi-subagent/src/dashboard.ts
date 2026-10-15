@@ -17,6 +17,7 @@ export interface DashboardOptions {
 export class DashboardComponent implements Component {
 	private snapshot: DashboardSnapshot = { agents: [], activeCount: 0, maxConcurrentAgents: 0 };
 	private selectedPath?: string;
+	private filter: "open" | "closed" = "open";
 	private pane: "agents" | "details" = "agents";
 	private narrow = true;
 	private width = 0;
@@ -41,7 +42,8 @@ export class DashboardComponent implements Component {
 		this.now = options.now ?? Date.now;
 		const content = (render: (width: number) => string[]): Component => ({ render, invalidate() {} });
 		this.list = new ScrollView(content(width =>
-			renderAgentRows(this.snapshot, this.selectedPath, width, options.theme(), this.now(), this.durations)));
+			renderAgentRows(this.filteredSnapshot, this.selectedPath, width, options.theme(), this.now(), this.durations,
+				this.snapshot.agents.length || this.filter === "closed" ? this.filter : undefined)));
 		this.details = new ScrollView(content(width =>
 			renderAgentDetails(this.selectedAgent, width, options.theme(), this.now(), this.taskExpanded)));
 		try {
@@ -52,7 +54,22 @@ export class DashboardComponent implements Component {
 		this.clock.unref();
 	}
 
-	private get selectedAgent() { return this.snapshot.agents.find(agent => agent.path === this.selectedPath); }
+	private get agents() {
+		return this.snapshot.agents.filter(agent => this.filter === "closed" ?
+			agent.lifecycle === "closed" : agent.lifecycle !== "closed");
+	}
+	private get filteredSnapshot(): DashboardSnapshot { return { ...this.snapshot, agents: this.agents }; }
+	private get selectedAgent() { return this.agents.find(agent => agent.path === this.selectedPath); }
+	private reconcileSelection(beforeIndex: number): void {
+		const agents = this.agents;
+		if (!agents.some(agent => agent.path === this.selectedPath)) {
+			this.selectedPath = agents[0]?.path;
+			this.details.scrollToStart();
+			this.taskExpanded = false;
+			this.revealSelection = true;
+		}
+		if (agents.findIndex(agent => agent.path === this.selectedPath) !== beforeIndex) this.revealSelection = true;
+	}
 	private errorText(error: unknown): string { return dashboardText(error instanceof Error ? error.message : String(error)); }
 	private queueRefresh(): void {
 		if (this.disposed || this.refresh) return;
@@ -73,16 +90,9 @@ export class DashboardComponent implements Component {
 				// One opening owns one duration sample; live metrics/status still refresh.
 				if (!this.durations.has(agent.path)) this.durations.set(agent.path, agentDuration(agent, sampledAt));
 			}
-			const before = this.selectedPath;
-			const beforeIndex = this.snapshot.agents.findIndex(agent => agent.path === before);
+			const beforeIndex = this.agents.findIndex(agent => agent.path === this.selectedPath);
 			this.snapshot = snapshot;
-			if (!snapshot.agents.some(agent => agent.path === before)) this.selectedPath = snapshot.agents[0]?.path;
-			if (before !== this.selectedPath) {
-				this.details.scrollToStart();
-				this.taskExpanded = false;
-				this.revealSelection = true;
-			}
-			if (snapshot.agents.findIndex(agent => agent.path === this.selectedPath) !== beforeIndex) this.revealSelection = true;
+			this.reconcileSelection(beforeIndex);
 			// Pi mounts custom() via a Promise; closing in a microtask can precede that mount.
 			if (snapshot.closed && !this.closeTimer) this.closeTimer = setTimeout(() => this.finish(), 0);
 		} catch (error) { this.snapshot = { ...this.snapshot, error: this.errorText(error) }; }
@@ -141,7 +151,8 @@ export class DashboardComponent implements Component {
 	}
 
 	private select(index: number): void {
-		const agent = this.snapshot.agents[Math.max(0, Math.min(this.snapshot.agents.length - 1, index))];
+		const agents = this.agents;
+		const agent = agents[Math.max(0, Math.min(agents.length - 1, index))];
 		if (!agent) return;
 		if (agent.path !== this.selectedPath) {
 			this.details.scrollToStart();
@@ -176,6 +187,11 @@ export class DashboardComponent implements Component {
 			else { this.finish(); return; }
 		} else if (data === "t") {
 			this.openTranscript();
+		} else if (data === "f") {
+			this.filter = this.filter === "open" ? "closed" : "open";
+			this.reconcileSelection(-1);
+			this.list.scrollToStart();
+			this.revealSelection = true;
 		} else if (matchesKey(data, "tab")) {
 			this.pane = this.pane === "agents" ? "details" : "agents";
 		} else if (matches("tui.select.confirm")) {
@@ -189,7 +205,7 @@ export class DashboardComponent implements Component {
 		} else if (matches("tui.select.up") || matches("tui.select.down") || data === "j" || data === "k") {
 			const direction = matches("tui.select.up") || data === "k" ? -1 : 1;
 			if (this.pane === "agents") {
-				this.select(this.snapshot.agents.findIndex(agent => agent.path === this.selectedPath) + direction);
+				this.select(this.agents.findIndex(agent => agent.path === this.selectedPath) + direction);
 			} else this.details.scrollBy(direction);
 		} else return;
 		this.options.tui.requestRender();
@@ -224,7 +240,7 @@ export class DashboardComponent implements Component {
 		const lines = view.render(width);
 		view.updateLayout(lines.length, height, () => { if (!this.disposed) this.options.tui.requestRender(); });
 		if (reveal) {
-			const index = this.snapshot.agents.findIndex(agent => agent.path === this.selectedPath);
+			const index = this.agents.findIndex(agent => agent.path === this.selectedPath);
 			const start = Math.max(0, index) * AGENT_ROW_HEIGHT;
 			if (start < view.scrollTop) view.scrollTo(start);
 			else if (start + AGENT_ROW_HEIGHT - 1 > view.scrollTop + height) {
@@ -264,12 +280,13 @@ export class DashboardComponent implements Component {
 		];
 		this.bodyTop = 5;
 		const title = (text: string, active: boolean) => theme.fg(active ? "accent" : "muted", `${active ? "›" : " "} ${text}`);
+		const agentsTitle = `AGENTS · ${this.filter === "open" ? "Open" : "Closed"} · f Filter`;
 		if (this.transcript) {
 			rows.push(row(title("READ ONLY · " + (this.transcript.isFollowing ? "Following" : "History") +
 				` · ${dashboardText(this.transcript.status ?? "unknown")} · TRANSCRIPT ${dashboardText(this.transcript.path ?? "")}`, true)));
 			for (const line of this.transcript.viewport(inner - 2, this.bodyHeight)) rows.push(row(` ${line} `));
 		} else if (this.narrow) {
-			rows.push(row(title(this.pane === "agents" ? "AGENTS" : "DETAILS", true)));
+			rows.push(row(title(this.pane === "agents" ? agentsTitle : "DETAILS", true)));
 			const view = this.pane === "agents" ? this.list : this.details;
 			for (const line of this.viewport(view, inner - 2, this.bodyHeight, this.pane === "agents" && this.revealSelection)) {
 				rows.push(row(` ${line} `));
@@ -277,7 +294,7 @@ export class DashboardComponent implements Component {
 		} else {
 			this.leftWidth = Math.floor((inner - 1) * 0.55);
 			const rightWidth = inner - 1 - this.leftWidth;
-			rows.push(row(fit(title("AGENTS", this.pane === "agents"), this.leftWidth) +
+			rows.push(row(fit(title(agentsTitle, this.pane === "agents"), this.leftWidth) +
 				border("│") + fit(title("DETAILS", this.pane === "details"), rightWidth)));
 			const left = this.viewport(this.list, this.leftWidth - 2, this.bodyHeight, this.revealSelection);
 			const right = this.viewport(this.details, rightWidth - 2, this.bodyHeight);

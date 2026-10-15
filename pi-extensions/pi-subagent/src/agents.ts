@@ -151,11 +151,15 @@ export function discoverAgents(options: AgentDiscoveryOptions): AgentDiscoveryRe
 
 export function formatAgentCatalog(agents: AgentDefinition[]): string {
 	if (agents.length === 0) return "(no agents)";
-	return agents.map((agent) => `${agent.name} (${agent.source}) — ${agent.description}`).join("\n");
+	return agents.map((agent) => `${agent.name} (${agent.source}) — ${agent.description} [${roleSelection(agent)}]`).join("\n");
+}
+
+function roleSelection(agent: AgentDefinition): string {
+	return `model: ${agent.model ?? "inherit caller selection"}; thinking: ${agent.thinking ?? "inherit caller selection"}`;
 }
 
 export function formatAgentToolCatalog(agents: readonly AgentDefinition[]): string {
 	return "\n\nAvailable agents:\n" + (agents.length === 0
 		? "(no agents)"
-		: agents.map((agent) => `- ${agent.name}: ${agent.description.replace(/\s+/g, " ").trim()}`).join("\n"));
+		: agents.map((agent) => `- ${agent.name}: ${agent.description.replace(/\s+/g, " ").trim()} [${roleSelection(agent)}]`).join("\n"));
 }

@@ -20,7 +20,7 @@ function record(): AgentRecord {
 			model: { provider: "fixture", id: "fixture" }, thinkingLevel: "off", forkTurns: "all",
 			settings: DEFAULT_SETTINGS, anchorId: "anchor",
 		},
-		sessionFile: "/unused", status: "completed", mailbox: [],
+		sessionFile: "/unused", status: "completed", lifecycle: "open", mailbox: [],
 	};
 }
 function session() {

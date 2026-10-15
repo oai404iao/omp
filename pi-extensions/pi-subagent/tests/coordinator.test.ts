@@ -12,7 +12,9 @@ import { deferred, fixture, waitUntil } from "./support/fixture.ts";
 test("spawn accepts before completion, persists identity and final result, unloads runtime", async t => {
 	const finish = deferred<string>();
 	const f = await fixture(t, { reply: () => finish.promise });
-	assert.deepEqual(await f.coordinator.spawn(f.caller, { task_name: "review", message: "Review it" }), { task_name: "/root/review" });
+	assert.deepEqual(await f.coordinator.spawn(f.caller, { task_name: "review", message: "Review it" }), {
+		task_name: "/root/review", model: "scripted/echo", thinking: "off",
+	});
 	const record = f.coordinator.treeStore.record("/root/review");
 	assert(existsSync(record.sessionFile));
 	assert.equal(record.status, "running");
