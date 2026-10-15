@@ -42,18 +42,56 @@ test("wire-off WebSocket frames have no generated metadata and do not share enha
 		} finally { closeProviderWebSocketSessions(); await server.close(); }
 	}));
 
-test("wire-off refuses Lite before network side effects", () =>
-	withCodexSettings({ codexRequestExtensions: false, webSocketEnabled: false }, async cwd => {
+for (const lite of [false, true]) for (const extensions of [false, true]) test(`SSE format lite=${lite}, enhancements=${extensions}`, () =>
+	withCodexSettings({ codexRequestExtensions: extensions, webSocketEnabled: false }, async cwd => {
 		const harness = createProviderHarness({ cwd });
 		let requests = 0;
 		const message = await harness.providers.openai.streamSimple({
-			...responsesModel, provider: "openai", api: "openai-responses", id: "gpt-5.6-sol",
-		}, { messages: [], tools: [] }, {
-			apiKey: "fixture", fetch: async () => { requests++; throw new Error("unexpected"); },
+			...responsesModel, provider: "openai", api: "openai-responses", id: lite ? "gpt-5.6-sol" : "gpt-5.5",
+			baseUrl: "https://fixture.invalid/v1",
+		}, { systemPrompt: "RULE", messages: [], tools: [{ name: "fixture", description: "fixture", parameters: { type: "object" } }] }, {
+			apiKey: "sk-fixture", sessionId: "format-test", fetch: async (url: unknown, init?: RequestInit) => {
+				requests++;
+				assert.equal(String(url), "https://fixture.invalid/v1/responses");
+				const headers = new Headers(init?.headers);
+				assert.equal(headers.get("authorization"), "Bearer sk-fixture");
+				assert.equal(headers.get("x-openai-internal-codex-responses-lite"), lite ? "true" : null);
+				assert.equal(headers.has("x-codex-turn-metadata"), extensions);
+				const body = JSON.parse(String(init?.body));
+				assert.equal(Boolean(body.client_metadata), extensions);
+				assert.equal(body.reasoning?.context, lite ? "all_turns" : undefined);
+				assert.equal(body.parallel_tool_calls, !lite);
+				assert.equal(body.tools === undefined, lite);
+				const declarations = lite ? body.input[0].tools[0].tools : body.tools;
+				assert.equal(declarations[0].name, "fixture");
+				assert.equal(body.input[lite ? 1 : 0].role, "developer");
+				return new Response(successEvents("format").map(event => `data: ${JSON.stringify(event)}\n\n`).join(""));
+			},
 		}).result();
-		assert.equal(message.stopReason, "error");
-		assert.match(message.errorMessage, /Lite requires/);
-		assert.equal(requests, 0);
+		assert.equal(message.stopReason, "stop", message.errorMessage);
+		assert.equal(requests, 1);
+	}));
+
+for (const lite of [false, true]) for (const extensions of [false, true]) test(`WebSocket format lite=${lite}, enhancements=${extensions}`, () =>
+	withCodexSettings({ codexRequestExtensions: extensions }, async cwd => {
+		const server = await startWebSocketServer([() => successEvents("format-ws")]);
+		try {
+			const harness = createProviderHarness({ cwd });
+			const result = await harness.providers.openai.streamSimple({
+				...responsesModel, provider: "openai", api: "openai-responses", id: lite ? "gpt-5.6-sol" : "gpt-5.5", baseUrl: server.url,
+			}, { tools: [{ name: "fixture", description: "fixture", parameters: { type: "object" } }], messages: [] }, {
+				apiKey: "sk-fixture", sessionId: "format-ws", maxRetries: 0, transport: "websocket",
+			}).result();
+			assert.equal(result.stopReason, "stop", result.errorMessage);
+			const body = server.requests[0];
+			assert.equal(body.client_metadata?.ws_request_header_x_openai_internal_codex_responses_lite, lite ? "true" : undefined, JSON.stringify(body));
+			assert.equal(Boolean(body.client_metadata?.turn_id), extensions);
+			assert.equal(body.tools === undefined, lite);
+			assert.equal(body.reasoning?.context, lite ? "all_turns" : undefined);
+			assert.equal(body.parallel_tool_calls, !lite);
+			assert.equal(server.handshakes[0].headers.authorization, "Bearer sk-fixture");
+			assert.equal(Boolean(server.handshakes[0].headers["x-codex-turn-metadata"]), extensions);
+		} finally { closeProviderWebSocketSessions(); await server.close(); }
 	}));
 
 test("fresh-session opaque replay is checked again after authentication resolves a denied endpoint", () =>

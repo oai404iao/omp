@@ -69,7 +69,7 @@ for (const [name, install] of [["core", core], ["bundle", bundle]] as const) {
 					signal: new AbortController().signal,
 				}, host.ctx);
 				assert.deepEqual(compactResult, { cancel: true }, "Pi text compaction must not replace opaque history");
-				assert.match(notifications.at(-1)!, /Cannot replace an opaque native checkpoint/);
+				assert.match(notifications.at(-1)!, /Opaque checkpoint preserved/);
 				assert.deepEqual(session.getBranch(), branch, "the encrypted checkpoint must remain intact");
 
 				const result = await host.providers.get("openai-codex").streamSimple(

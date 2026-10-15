@@ -65,10 +65,14 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	return {
 		image_generation: !settings.imageGeneration
 			? { enabled: false, reason: "image generation disabled by global setting" }
-			: imageGeneration === "standalone" && imageInput
+			: imageGeneration === "standalone" && !modelSettings.imageGeneration
+				? { enabled: false, reason: "image generation disabled by endpoint policy" }
+				: imageGeneration === "standalone" && imageInput
 				? { enabled: true, reason: "model profile enables standalone image generation" }
 				: { enabled: false, reason: imageGeneration === false ? "image_generation disabled by model profile" : "model does not advertise image input" },
-		apply_patch: profile.tools.applyPatch === "custom" && !providerShimActive
+		apply_patch: !settings.applyPatch
+			? { enabled: false, reason: "apply_patch disabled by global setting" }
+			: profile.tools.applyPatch === "custom" && !providerShimActive
 			? {
 				enabled: false,
 				reason: "custom apply_patch requires an OpenAI Responses provider shim API",
@@ -79,7 +83,11 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 				enabled: false,
 				reason: "apply_patch disabled by model profile",
 			},
-		web_search: webSearch && (webSearch.implementation === "standalone" || providerShimActive)
+		web_search: !settings.webSearch
+			? { enabled: false, reason: "web_search disabled by global setting" }
+			: modelSettings.endpointDisabledWebSearch
+				? { enabled: false, reason: "web_search disabled by endpoint policy" }
+				: webSearch && (webSearch.implementation === "standalone" || providerShimActive)
 			? { enabled: true, reason: `model profile enables ${webSearch.implementation} web search` }
 			: {
 				enabled: false,

@@ -3,17 +3,19 @@
   "packageDependencies": {
     "@oai404iao/pi-codex-runtime": [],
     "@oai404iao/pi-codex-core": ["@oai404iao/pi-codex-runtime"],
-    "@oai404iao/pi-codex-web-search": ["@oai404iao/pi-codex-runtime"],
-    "@oai404iao/pi-codex-imagegen": ["@oai404iao/pi-codex-runtime"],
+    "@oai404iao/pi-codex-tools": ["@oai404iao/pi-codex-runtime"],
+    "@oai404iao/pi-codex-web-search": ["@oai404iao/pi-codex-tools"],
+    "@oai404iao/pi-codex-imagegen": ["@oai404iao/pi-codex-tools"],
     "@oai404iao/pi-codex-minimal-tools": [
       "@oai404iao/pi-codex-runtime", "@oai404iao/pi-codex-core",
-      "@oai404iao/pi-codex-web-search", "@oai404iao/pi-codex-imagegen"
+      "@oai404iao/pi-codex-tools"
     ]
   },
   "sourceRoots": [
     "pi-codex-minimal-tools",
     "pi-codex-runtime/src",
     "pi-codex-core/src",
+    "pi-codex-tools/src",
     "pi-codex-web-search/src",
     "pi-codex-imagegen/src"
   ],
@@ -21,6 +23,7 @@
     "@oai404iao/pi-codex-minimal-tools": "pi-codex-minimal-tools",
     "@oai404iao/pi-codex-runtime": "pi-codex-runtime",
     "@oai404iao/pi-codex-core": "pi-codex-core",
+    "@oai404iao/pi-codex-tools": "pi-codex-tools",
     "@oai404iao/pi-codex-web-search": "pi-codex-web-search",
     "@oai404iao/pi-codex-imagegen": "pi-codex-imagegen"
   },
@@ -28,9 +31,15 @@
   "forbidden": [
     { "from": "pi-codex-runtime/src/", "to": "pi-codex-minimal-tools/" },
     { "from": "pi-codex-runtime/src/", "to": "pi-codex-core/src/" },
+    { "from": "pi-codex-runtime/src/", "to": "pi-codex-tools/src/" },
     { "from": "pi-codex-runtime/src/", "to": "pi-codex-web-search/src/" },
     { "from": "pi-codex-runtime/src/", "to": "pi-codex-imagegen/src/" },
     { "from": "pi-codex-core/src/", "to": "pi-codex-minimal-tools/" },
+    { "from": "pi-codex-core/src/", "to": "pi-codex-tools/src/" },
+    { "from": "pi-codex-tools/src/", "to": "pi-codex-core/src/" },
+    { "from": "pi-codex-tools/src/", "to": "pi-codex-minimal-tools/" },
+    { "from": "pi-codex-tools/src/", "to": "pi-codex-web-search/" },
+    { "from": "pi-codex-tools/src/", "to": "pi-codex-imagegen/" },
     { "from": "pi-codex-core/src/", "to": "pi-codex-web-search/src/" },
     { "from": "pi-codex-core/src/", "to": "pi-codex-imagegen/src/" },
     { "from": "pi-codex-web-search/src/", "to": "pi-codex-minimal-tools/" },
@@ -43,6 +52,7 @@
   ],
   "forbiddenReachable": [
     { "from": "pi-codex-core/src/extension/provider-runtime.ts", "to": "pi-codex-imagegen/src/" },
+    { "from": "pi-codex-core/src/extension/provider-runtime.ts", "to": "pi-codex-tools/" },
     { "from": "pi-codex-core/src/extension/provider-runtime.ts", "to": "pi-codex-web-search/src/" },
     { "from": "pi-codex-core/src/extension/provider-runtime.ts", "to": "pi-codex-minimal-tools/" }
   ],

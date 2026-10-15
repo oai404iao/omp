@@ -3,6 +3,12 @@
 Responses Lite is a different request envelope selected by Codex model
 metadata. It is not merely Standard Responses with fewer optional fields.
 
+In this extension format selection is independent of `codexRequestExtensions`,
+transport selection and compaction generation. Turning optional Codex request
+enhancements off leaves the mandatory Lite transformation and HTTP/WS signals
+below intact; it does not change credentials, endpoint, client identity or force WS.
+Endpoint capability declarations can reject a selected format/transport.
+
 The analyzed implementation treats Lite as internal Codex transport behavior.
 It uses an internal request header and a special `additional_tools` input item,
 so it must not be enabled for arbitrary public or proxy Responses endpoints

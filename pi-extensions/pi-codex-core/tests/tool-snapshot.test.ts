@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ExtensionAPI, ToolDefinition, ToolLoadout } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getCodexBroker } from "@oai404iao/pi-codex-runtime/internal/broker";
 import { resetCodexWireState } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
-import { createApplyPatchToolDefinition } from "../src/tools/apply-patch.js";
+import { createApplyPatchToolDefinition, patchToolProtocols } from "./support/patch-tool-fixture.js";
 import { activeToolSnapshot, hasProjectedToolLoadout } from "../src/extension/tool-snapshot.js";
 import { startupPrewarmSnapshot } from "../src/extension/prewarm-snapshot.js";
 import { createStartupPrewarmLifecycle } from "../src/extension/startup-prewarm.js";
@@ -30,27 +30,11 @@ function patchFixture() {
 	} as unknown as ExtensionAPI;
 	const broker = getCodexBroker(pi);
 	broker.tools.set("apply_patch", { registered: true, exposure: "direct", register() {} });
-	broker.ownedTools.set("apply_patch", { parameters: patch.parameters, description: patch.description as string });
+	broker.ownedTools.set("apply_patch", {
+		parameters: patch.parameters, description: patch.description as string, protocol: patchToolProtocols.get("apply_patch"),
+	});
 	return { pi, tools, handlers, broker, setActive(names: string[]) { active = names; } };
 }
-
-test("apply_patch loadout hides only selected edit/write declarations without mutating tools", () => {
-	const patch = createApplyPatchToolDefinition({ deferRendering: true });
-	const prepare = patch.prepareLoadout as NonNullable<ToolDefinition["prepareLoadout"]>;
-	for (const names of [
-		["read", "edit", "write", "apply_patch", "custom_edit"],
-		["write", "read", "apply_patch"],
-		["read", "apply_patch", "custom_edit"],
-	]) {
-		const declared = Object.freeze(names.map(name => Object.freeze({ name })));
-		const loadout = { declared, callable: declared, registered: declared } as unknown as ToolLoadout;
-		assert.deepEqual(prepare(loadout), { hiddenDeclarations: names.filter(name => name === "edit" || name === "write") });
-		assert.deepEqual(loadout.declared.map(tool => tool.name), names);
-		assert.equal(loadout.callable, declared);
-		assert.equal(loadout.registered, declared);
-	}
-	assert.equal(prepare({ declared: [{ name: "edit" }, { name: "write" }] } as unknown as ToolLoadout), undefined);
-});
 
 test("owned active patch snapshots match its declaration projection and preserve selection", () => {
 	const fixture = patchFixture();

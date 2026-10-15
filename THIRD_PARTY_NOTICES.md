@@ -6,25 +6,26 @@ following components retain their own licenses and attribution.
 ## OpenAI Codex
 
 Implementation ownership belongs to
-`pi-codex-core` (patch grammar/adaptations) and `pi-codex-runtime`
+`pi-codex-tools` (patch grammar/adaptations and tool clients), `pi-codex-core`
+(Responses engine) and `pi-codex-runtime`
 (`src/reserved-tools/{web-search,image-generation,types}.ts` and serialization).
 The bundle is composition-only; private forwards and asset mirrors are removed.
-All four owners retain reviewed Apache license/NOTICE and provenance snapshots;
+The implementation owners retain reviewed Apache license/NOTICE and provenance snapshots;
 their package-specific composite licenses and notices describe local ownership.
 
 The owner packages include material from
 [OpenAI Codex](https://github.com/openai/codex), analyzed at revision
 [`eb9dceba1a2e658142a456c5898836774835616b`](https://github.com/openai/codex/commit/eb9dceba1a2e658142a456c5898836774835616b).
 
-- Core's `src/providers/codex-apply-patch.lark` is an exact snapshot of
+- Tools' `src/providers/codex-apply-patch.lark` is an exact snapshot of
   `codex-rs/core/src/tools/handlers/apply_patch.lark` at that revision.
-- Core's `src/patch/parser.ts` and `src/patch/apply.ts` are substantially modified
+- Tools' `src/patch/parser.ts` and `src/patch/apply.ts` are substantially modified
   TypeScript adaptations of the apply-patch parsing and matching behavior
   analyzed at
   [`03bb3b12367397e14a8facc2e018d645ff4d8e83`](https://github.com/openai/codex/commit/03bb3b12367397e14a8facc2e018d645ff4d8e83).
 - Owner `reference/` documentation contains protocol analysis based on both
   revisions, indexed in `pi-codex-runtime/reference/source-map.md` and
-  `pi-codex-core/reference/apply-patch-behavior.md`.
+  `pi-codex-tools/reference/apply-patch-behavior.md`.
 - Runtime's `src/codex-reserved-tools.ts` is a modified TypeScript compatibility
   serialization of the pinned Codex `web.run` and
   `image_gen.imagegen` namespace-tool construction. Its two descriptions

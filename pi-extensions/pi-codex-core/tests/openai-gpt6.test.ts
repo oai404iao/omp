@@ -3,7 +3,7 @@ import test from "node:test";
 import { clampThinkingLevel, type AssistantMessage, type Model, type Tool } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { buildRequestBody, requestBodyToolOptions } from "../src/providers/openai-codex/request-body.js";
-import { createApplyPatchToolDefinition } from "../src/tools/apply-patch.js";
+import { createApplyPatchToolDefinition, patchToolProtocols } from "./support/patch-tool-fixture.js";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { computeToolCapabilities } from "@oai404iao/pi-codex-runtime/internal/capabilities";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
@@ -44,7 +44,7 @@ for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 					systemPrompt: "RULE", messages: [{ role: "user", content: "hello", timestamp: 1 }],
 					tools: [createApplyPatchToolDefinition() as unknown as Tool],
 				}, resolveCodexRequestProfile(settings.requestProfile), {
-					...requestBodyToolOptions(settings), reasoning, ownsNativeTool: () => true,
+					...requestBodyToolOptions(settings), reasoning, ownsNativeTool: () => true, toolProtocols: patchToolProtocols,
 				});
 				const effort: string | undefined = reasoning === undefined ? settings.modelProfile?.effective.responses.defaultReasoningEffort
 					: model.thinkingLevelMap?.[clampThinkingLevel(model, reasoning)] ?? undefined;
@@ -63,7 +63,7 @@ for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 		withCodexSettings({ codexRequestExtensions: false }, async cwd => {
 			const model: Model<"openai-responses"> | undefined = getBuiltinModels("openai").find(model => model.id === id);
 			assert(model);
-			const harness = createProviderHarness({ cwd });
+			const harness = createProviderHarness({ cwd, getToolProtocols: () => patchToolProtocols });
 			for (const apiKey of ["sk-fixture", "chatgpt-fixture"]) {
 				let requests = 0;
 				const message: AssistantMessage = await harness.providers.openai.streamSimple(model, {
@@ -126,7 +126,7 @@ test("GPT-6.1 Sol Lite custom patch calls decode and replay on the default enhan
 	withCodexSettings({}, async cwd => {
 		const model: Model<"openai-responses"> | undefined = getBuiltinModels("openai").find(model => model.id === "gpt-6.1-sol");
 		assert(model);
-		const harness = createProviderHarness({ cwd });
+		const harness = createProviderHarness({ cwd, getToolProtocols: () => patchToolProtocols });
 		const tools = [createApplyPatchToolDefinition()];
 		const patch = "*** Begin Patch\n*** Add File: fixture.txt\n+fixture\n*** End Patch";
 		const item = { type: "custom_tool_call", id: "ct_fixture", call_id: "call_fixture", name: "apply_patch", input: patch };

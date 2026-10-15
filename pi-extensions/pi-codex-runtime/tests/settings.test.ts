@@ -70,6 +70,40 @@ test("configPath points to extensions/pi-codex-minimal-tools/config.json", () =>
 	});
 });
 
+test("global tool gates load independently without becoming legacy profile overrides", () => withAgentDir(agentDir => {
+	writeConfig(agentDir, { applyPatch: false, webSearch: false, imageGeneration: false });
+	const base = loadSettings();
+	assert.equal(base.applyPatch, false);
+	assert.equal(base.webSearch, false);
+	assert.equal(base.imageGeneration, false);
+	const resolved = loadModelSettings({ provider: "openai", id: "gpt-5.6-sol", api: "openai-responses" }, undefined, base);
+	assert.deepEqual(resolved.modelProfile?.sources, ["bundled"]);
+	assert.equal(resolved.modelProfile?.effective.tools.applyPatch, "custom");
+	assert.equal(resolved.applyPatchEnabled, false);
+	assert.equal(resolved.webSearchEnabled, false);
+	assert.equal(resolved.imageGeneration, false);
+	assert.equal(resolved.requestProfile.responsesMode, "lite");
+	assert.equal(resolved.openaiTransport, "auto");
+	assert.equal(resolved.compactionMode, "responses");
+	writeConfig(agentDir, { applyPatch: "false", webSearch: null });
+	assert.equal(loadSettings().applyPatch, true);
+	assert.equal(loadSettings().webSearch, true);
+}));
+
+test("global tool gates intersect legacy settings without changing their precedence", () => withAgentDir(agentDir => {
+	writeConfig(agentDir, { applyPatch: false, webSearch: false, applyPatchEnabled: true, webSearchEnabled: true });
+	const resolved = loadModelSettings({ provider: "openai", id: "gpt-5.5", api: "openai-responses" });
+	assert.ok(resolved.modelProfile?.sources.includes("legacy"));
+	assert.equal(resolved.modelProfile?.effective.tools.applyPatch, "function");
+	assert.equal(resolved.modelProfile?.effective.tools.webSearch && resolved.modelProfile.effective.tools.webSearch.implementation, "hosted");
+	assert.equal(resolved.applyPatchEnabled, false);
+	assert.equal(resolved.webSearchEnabled, false);
+	writeConfig(agentDir, { applyPatch: true, webSearch: true, applyPatchEnabled: false, webSearchEnabled: false });
+	const legacyDisabled = loadModelSettings({ provider: "openai", id: "gpt-5.5", api: "openai-responses" });
+	assert.equal(legacyDisabled.applyPatchEnabled, false);
+	assert.equal(legacyDisabled.webSearchEnabled, false);
+}));
+
 test("settingsDiagnostics reports malformed config.json", () => {
 	withAgentDir((agentDir) => {
 		writeConfig(agentDir, "{");

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/openai/codex",
+    "revision": "40eac3ce8a0c10cbcb9db910d529355eb2f8fc09",
+    "license": "Apache-2.0"
+  },
+  "files": {
+    "codex-rs/models-manager/models.json": {
+      "role": "Exact Sol/Luna model capabilities: Lite, freeform patch, summary none, WebSocket preference, standalone web selection",
+      "gitBlobSha": "8fd2c078f857aa9e12ee2b74131e539d3ead520f",
+      "sha256": "0178d235c589a31abd6ed0ea1e870935dc5819240eb0e813e178d3ebedf534f4"
+    },
+    "codex-rs/core/src/client.rs": {
+      "role": "Lite disables parallel_tool_calls despite the model's parallel capability",
+      "sha256": "0d590b240bdbfeafacbe597a02e4bdce467f8850d597814f214184dfb89ee510"
+    },
+    "codex-rs/core/src/tools/spec_plan.rs": {
+      "role": "Lite excludes hosted web/image; standalone image remains gated by provider, feature and account capabilities",
+      "sha256": "8dfa01644163e4826021815d064444ec12799aeaf8f7a952ec6289319f2fd36e"
+    }
+  },
+  "catalogReference": {
+    "package": "@earendil-works/pi-ai",
+    "version": "0.87.1",
+    "path": "dist/providers/data/openai-codex.json",
+    "sha256": "4bb30a26d1b40e1f67c9f24891fca0ce25b030bc4cbbb529be78608cd4466fdf",
+    "fields": ["api", "input", "thinkingLevelMap", "contextWindow", "maxTokens", "compat"]
+  },
+  "models": ["openai-codex/gpt-6-sol", "openai-codex/gpt-6-luna"],
+  "limits": [
+    "Source and fixture verification, not real account or endpoint acceptance.",
+    "Pi owns model descriptors and effort mappings; no ultra, context-window or pricing override.",
+    "Fast mode disabled: no verified Codex billing multiplier.",
+    "Public API 30m cache TTL is not evidence for a Codex Lite wire parameter.",
+    "Standalone tools retain existing explicit configuration and account gates."
+  ],
+  "localImplementations": [
+    "pi-codex-runtime/src/model-catalog/default-models.json",
+    "pi-codex-minimal-tools/src/model-catalog/default-models.json"
+  ]
+}

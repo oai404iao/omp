@@ -1,4 +1,34 @@
 import { APPROX_BYTES_PER_TOKEN, CODEX_MAX_RETAINED_AGENT_MESSAGE_TOKENS, CODEX_RETAINED_MESSAGE_TOKEN_BUDGET } from "../../providers/openai-codex/constants.js";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
+
+export function syntheticNativeAssistant(
+	output: readonly unknown[],
+	model: Model<Api>,
+	timestamp: number,
+): AssistantMessage {
+	return {
+		role: "assistant",
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		content: output.map((item) => ({
+			type: "thinking",
+			thinking: "",
+			thinkingSignature: JSON.stringify(item),
+			redacted: true,
+		})) as AssistantMessage["content"],
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+		timestamp,
+	};
+}
 
 export function compactionItems(output: unknown): unknown[] {
 	if (!Array.isArray(output)) throw new Error("OpenAI native compaction response omitted output");

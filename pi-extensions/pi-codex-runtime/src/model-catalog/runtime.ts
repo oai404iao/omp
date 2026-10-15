@@ -23,6 +23,7 @@ export interface ResolvedCodexModelSettings extends CodexMinimalToolsSettings {
 	modelProfile?: ResolvedModelProfile;
 	modelProfileHash?: string;
 	providerShimActive?: boolean;
+	opaqueReplayAllowed?: boolean;
 	webSearchImplementation?: "hosted" | "standalone";
 	imageGenerationImplementation?: "standalone";
 	fastServiceTier?: string;
@@ -70,7 +71,7 @@ function resolveModelSettings(
 	const providerShimActive = packageEnabled
 		&& effective.responses.providerShim
 		&& supportsCodexResponsesApi(model);
-	const configuredWebSearchImplementation = effective.tools.webSearch
+	const configuredWebSearchImplementation = baseSettings.webSearch && effective.tools.webSearch
 		? effective.tools.webSearch.implementation
 		: undefined;
 	const configuredImageGenerationImplementation = baseSettings.imageGeneration
@@ -107,7 +108,8 @@ function resolveModelSettings(
 		requestDiagnostics: requestConfigurationDiagnostics(model, baseSettings, effective.responses.endpoint),
 		imageGeneration: imageGenerationImplementation !== undefined,
 		webSearchEnabled: webSearchImplementation !== undefined,
-		applyPatchEnabled: packageEnabled && effective.tools.applyPatch !== false,
+		applyPatchEnabled: packageEnabled && baseSettings.applyPatch && effective.tools.applyPatch !== false
+			&& (effective.tools.applyPatch !== "custom" || providerShimActive),
 		modelProfile,
 		modelProfileHash: modelProfile.profileHash,
 		webSearchImplementation,
@@ -138,6 +140,9 @@ export function applyEndpointPolicy(
 ): ResolvedCodexModelSettings {
 	const settings = { ...resolved, requestDiagnostics: [...resolved.requestDiagnostics] };
 	settings.fastMode = sessionFastMode(sessionId, settings.fastMode);
+	settings.opaqueReplayAllowed = Boolean(settings.providerShimActive
+		&& endpointDeclares(settings.endpoint_config, model ?? {}, "compaction.responses")
+		&& !endpointWasRejected(model ?? {}, sessionId, "compaction.responses"));
 	const allows = (capability: EndpointCapability): boolean => {
 		if (endpointDeclares(settings.endpoint_config, model ?? {}, capability)
 			&& !endpointWasRejected(model ?? {}, sessionId, capability)) return true;
@@ -156,17 +161,24 @@ export function applyEndpointPolicy(
 	if (settings.compactionMode !== "pi" && !allows(`compaction.${settings.compactionMode}`)) {
 		settings.compactionMode = "pi";
 	}
-	if (!settings.codexRequestExtensions) {
-		if (!settings.modelProfileHash?.endsWith(":wire-off")) settings.modelProfileHash = `${settings.modelProfileHash ?? "native"}:wire-off`;
-		if (settings.requestProfile.responsesMode === "lite" && settings.providerShimActive) {
-			settings.requestBlockedReason = "Responses Lite requires codexRequestExtensions:true. Select a Standard profile or re-enable the setting.";
-			settings.requestDiagnostics.push(settings.requestBlockedReason);
+	if (settings.providerShimActive) {
+		const mode = settings.requestProfile.responsesMode ?? "standard";
+		if (!allows(`responsesMode.${mode}`)) {
+			settings.opaqueReplayAllowed = false;
+			settings.requestBlockedReason ??= `Responses ${mode} is disabled for this endpoint; select an explicitly supported profile.`;
 			settings.openaiWebSocketPrewarm = false;
 		}
-		if (settings.compactionMode !== "pi") {
-			settings.requestDiagnostics.push("Native compaction is disabled by codexRequestExtensions:false; existing opaque checkpoints are protected.");
-			settings.compactionMode = "pi";
+		const websocketAllowed = allows("transport.websocket");
+		if (!websocketAllowed) settings.openaiWebSocketPrewarm = false;
+		if (settings.openaiTransport === "auto" && !websocketAllowed) settings.openaiTransport = "sse";
+		const transport = settings.openaiTransport === "sse" ? "sse" : settings.openaiTransport === "auto" ? undefined : "websocket";
+		if (transport && !(transport === "websocket" ? websocketAllowed : allows("transport.sse"))) {
+			settings.requestBlockedReason ??= `Responses ${transport} transport is disabled for this endpoint; select an explicitly supported transport.`;
+			settings.openaiWebSocketPrewarm = false;
 		}
+	}
+	if (!settings.codexRequestExtensions && !settings.modelProfileHash?.endsWith(":wire-off")) {
+		settings.modelProfileHash = `${settings.modelProfileHash ?? "native"}:wire-off`;
 	}
 	settings.requestProfile = { ...settings.requestProfile,
 		supportsHostedTools: settings.webSearchImplementation === "hosted" };

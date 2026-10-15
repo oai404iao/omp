@@ -101,6 +101,49 @@ test("persisted legacy globals remain explicit overrides of new OpenAI profiles"
 	assert.equal(settings.webSearchImplementation, undefined);
 }));
 
+test("compaction-only global overrides preserve every other effective profile field", () => withAgentDir(agentDir => {
+	mkdirSync(join(configPath(agentDir), ".."), { recursive: true });
+	for (const model of [
+		{ provider: "openai", api: "openai-responses", id: "gpt-5.5" },
+		{ provider: "openai", api: "openai-responses", id: "gpt-6.1-sol" },
+		{ provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.6-sol" },
+	]) {
+		writeFileSync(configPath(agentDir), "{}");
+		const original = loadModelSettings(model);
+		for (const compactionMode of ["responses", "pi", "responses"] as const) {
+			writeFileSync(configPath(agentDir), JSON.stringify({ compactionMode }));
+			const resolved = loadModelSettings(model);
+			assert.deepEqual(resolved.modelProfile!.effective, { ...original.modelProfile!.effective, compaction: compactionMode });
+			assert.deepEqual(resolved.requestProfile, original.requestProfile);
+			assert.equal(resolved.responsesEndpoint, original.responsesEndpoint);
+			assert.equal(resolved.openaiTransport, original.openaiTransport);
+			assert.equal(resolved.openaiWebSocketPrewarm, original.openaiWebSocketPrewarm);
+			assert.equal(resolved.webSearchImplementation, original.webSearchImplementation);
+			assert.equal(resolved.imageGenerationImplementation, original.imageGenerationImplementation);
+			assert.equal(resolved.applyPatchEnabled, original.applyPatchEnabled);
+			assert.equal(resolved.compactionMode, compactionMode);
+			assert.equal(resolved.opaqueReplayAllowed, true);
+			if (compactionMode === "responses") assert.equal(resolved.modelProfileHash, original.modelProfileHash);
+			else assert.notEqual(resolved.modelProfileHash, original.modelProfileHash);
+		}
+	}
+}));
+
+test("compaction alongside other legacy keys retains the prior full legacy projection", () => withAgentDir(agentDir => {
+	mkdirSync(join(configPath(agentDir), ".."), { recursive: true });
+	for (const [model, legacy] of [
+		[{ provider: "openai", id: "gpt-6.1-sol" }, { webSearchEnabled: false }],
+		[{ provider: "openai-codex", id: "gpt-5.6-sol" }, { apiKeyMode: false }],
+	] as const) {
+		writeFileSync(configPath(agentDir), JSON.stringify({ ...legacy, compactionMode: "responses" }));
+		const resolved = loadModelSettings(model);
+		assert.equal(resolved.requestProfile.responsesMode, "standard");
+		assert.equal(resolved.openaiTransport, "sse");
+		assert.equal(resolved.compactionMode, "responses");
+		assert.equal(resolved.webSearchImplementation, undefined);
+	}
+}));
+
 test("bundled profiles expose independent Standard and Lite Codex capabilities", () => withAgentDir(() => {
 	const standard = resolveModelProfile(
 		{ provider: "openai", id: "gpt-5.5" },
@@ -209,6 +252,23 @@ test("global WebSocket gate preserves the model profile while forcing SSE", () =
 	assert.equal(settings.compactionMode, "responses");
 }));
 
+test("endpoint transport policy never switches an explicitly selected transport", () => withAgentDir(agentDir => {
+	for (const transport of ["sse", "websocket", "websocket-cached"] as const) {
+		writeModels(agentDir, { version: 1, models: [{ id: "openai/gpt-5.5", responses: { transport } }] });
+		const settings = loadModelSettings(
+			{ provider: "openai", id: "gpt-5.5", api: "openai-responses", baseUrl: "https://fixture.invalid/v1" },
+			undefined, { ...DEFAULT_SETTINGS, endpoint_config: [
+				{ provider: "openai", baseUrl: "https://fixture.invalid/v1", transport: transport === "sse" ? ["websocket"] : ["sse"] },
+			] },
+		);
+		assert.equal(settings.openaiTransport, transport);
+		assert.match(settings.requestBlockedReason!, /transport is disabled/);
+		assert.equal(settings.openaiWebSocketPrewarm, false);
+		assert.equal(settings.webSearchEnabled, true);
+		assert.equal(settings.compactionMode, "responses");
+	}
+}));
+
 test("user entries deep-override bundled profiles by exact provider/model id", () => withAgentDir((agentDir) => {
 	writeModels(agentDir, {
 		version: 1,
@@ -307,6 +367,22 @@ test("global package disable keeps the model profile visible but disables derive
 	assert.equal(settings.fastServiceTier, undefined);
 }));
 
+test("global tool enables and legacy compatibility settings cannot reactivate disabled model profiles", () => withAgentDir(agentDir => {
+	writeModels(agentDir, { version: 1, models: [{ id: "openai/gpt-5.5", enabled: false }] });
+	const settings = loadModelSettings(
+		{ provider: "openai", id: "gpt-5.5", api: "openai-responses" }, undefined,
+		{ ...DEFAULT_SETTINGS, webSearchEnabled: true, applyPatch: true, webSearch: true },
+	);
+	assert.equal(settings.providerShimActive, false);
+	assert.equal(settings.applyPatchEnabled, false);
+	assert.equal(settings.webSearchEnabled, false);
+	assert.equal(settings.imageGeneration, false);
+	writeFileSync(configPath(agentDir), JSON.stringify({ compactionMode: "pi" }));
+	const disabled = resolveModelProfile({ provider: "openai", id: "gpt-5.5" });
+	assert.equal(disabled?.effective.enabled, false);
+	assert.equal(loadModelSettings({ provider: "openai", id: "gpt-5.5" }).providerShimActive, false);
+}));
+
 test("profiles without the provider shim retain standalone and function tools but disable wire-only features", () => withAgentDir((agentDir) => {
 	writeModels(agentDir, {
 		version: 1,
@@ -340,6 +416,17 @@ test("profiles without the provider shim retain standalone and function tools bu
 	assert.equal(profile.effective.fast, false);
 	assert.ok(profile.diagnostics.some((line) => line.includes("native compaction requires responses.providerShim")));
 	assert.ok(profile.diagnostics.some((line) => line.includes("Fast service tiers require responses.providerShim")));
+	const resolved = loadModelSettings(
+		{ provider: "custom", id: "no-shim", api: "openai-completions", baseUrl: "https://fixture.invalid/v1" },
+		undefined, { ...DEFAULT_SETTINGS, endpoint_config: [
+			{ provider: "custom", baseUrl: "https://fixture.invalid/v1", responsesMode: [], transport: [], compaction: [] },
+		] },
+	);
+	assert.equal(resolved.requestBlockedReason, undefined);
+	assert.equal(resolved.webSearchImplementation, "standalone");
+	assert.equal(resolved.imageGenerationImplementation, "standalone");
+	assert.equal(resolved.applyPatchEnabled, true);
+	assert.equal(resolved.opaqueReplayAllowed, false);
 }));
 
 test("Lite normalization rejects hosted tools but preserves remote compaction", () => withAgentDir((agentDir) => {

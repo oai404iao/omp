@@ -3,7 +3,7 @@ import { type CodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/c
 import { createCodexReservedNamespaceTool } from "@oai404iao/pi-codex-runtime/internal/codex-reserved-tools";
 import { resolveCodexRequestIdentity, type CodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { type ReasoningSummary } from "@oai404iao/pi-codex-runtime/internal/model-catalog/types";
-import { createCodexApplyPatchCustomTool } from "../codex-apply-patch-tool.js";
+import type { ToolProtocol } from "@oai404iao/pi-codex-runtime/internal/broker";
 import { convertResponsesMessages } from "@oai404iao/pi-codex-runtime/internal/providers/responses/messages";
 import { convertResponsesTools } from "@oai404iao/pi-codex-runtime/internal/providers/responses/tools";
 import { responseGrammarProperties, supportsGrammar } from "@oai404iao/pi-codex-runtime/internal/providers/responses/grammar";
@@ -51,6 +51,17 @@ export function ensureWebSearchDetailsIncluded(body: ResponsesBody): void {
 	if (missing.length > 0) body.include = [...include, ...missing];
 }
 
+export function requestGrammarProperties(
+	body: { tools?: unknown; input?: unknown }, tools: Context["tools"],
+	protocols?: ReadonlyMap<string, ToolProtocol>,
+): ReadonlyMap<string, string> {
+	const properties = new Map(responseGrammarProperties(body, tools, true));
+	for (const [name, protocol] of protocols ?? []) {
+		if (properties.has(name)) properties.set(name, protocol.inputProperty);
+	}
+	return properties;
+}
+
 export function buildRequestBody<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
@@ -62,11 +73,9 @@ export function buildRequestBody<TApi extends Api>(
 		requestIdentity?: CodexRequestIdentity;
 		codexRequestExtensions?: boolean;
 		removeWebSearch?: boolean;
+		toolProtocols?: ReadonlyMap<string, ToolProtocol>;
 	},
 ): ResponsesBody {
-	if (options?.codexRequestExtensions === false && profile.responsesMode === "lite") {
-		throw new Error("Responses Lite requires codexRequestExtensions:true.");
-	}
 	const requestIdentity = options?.codexRequestExtensions === false ? undefined : options?.requestIdentity ?? resolveCodexRequestIdentity(
 		options?.sessionId,
 		options?.metadata as Record<string, unknown> | undefined,
@@ -78,10 +87,11 @@ export function buildRequestBody<TApi extends Api>(
 	const capabilities = settings.modelProfile?.effective.responses;
 	const tools = context.tools && context.tools.length > 0
 		? convertResponsesTools(context.tools, { strict: null, supportsOpenAIGrammarTools: supportsGrammar(model) }).map((tool) =>
-			profile.patchTransport === "custom" && tool.type === "function" && tool.name === "apply_patch" ? createCodexApplyPatchCustomTool() : tool)
+			profile.patchTransport === "custom" && tool.type === "function" && options?.toolProtocols?.has(tool.name)
+				? { ...options.toolProtocols.get(tool.name)!.customTool } : tool)
 		: [];
 	const messages = convertResponsesMessages(model, context, new Set([...CODEX_TOOL_CALL_PROVIDERS, model.provider]), {
-		includeSystemPrompt: false, grammarToolInputProperties: responseGrammarProperties({ tools }, context.tools, true),
+		includeSystemPrompt: false, grammarToolInputProperties: requestGrammarProperties({ tools }, context.tools, options?.toolProtocols),
 	});
 	const lite = profile.responsesMode === "lite";
 	const liteTools = (): unknown[] => {
@@ -132,7 +142,7 @@ export function buildRequestBody<TApi extends Api>(
 		include: ["reasoning.encrypted_content"],
 		prompt_cache_key: options?.cacheRetention === "none" ? undefined : requestIdentity?.sessionId ?? options?.sessionId,
 		tool_choice: "auto",
-		parallel_tool_calls: profile.supportsParallelTools,
+		parallel_tool_calls: profile.responsesMode !== "lite" && profile.supportsParallelTools,
 	};
 	if (capabilities?.supportsVerbosity) {
 		const verbosity = (options as { textVerbosity?: string } | undefined)?.textVerbosity ?? capabilities.defaultVerbosity;

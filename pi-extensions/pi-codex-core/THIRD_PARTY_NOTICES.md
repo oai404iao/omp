@@ -35,15 +35,10 @@ MIT-licensed `@earendil-works/pi-ai@0.85.1` catalog. Exact source and tarball
 identifiers are recorded in
 `provenance/openai-codex-ddea03ad-astra.json`.
 
-The substantially modified TypeScript apply-patch adaptations and grammar are
-under `src/patch/` and `src/providers/`; retain their source modification notices.
-`src/providers/codex-apply-patch.lark` is an exact copy of
-`codex-rs/core/src/tools/handlers/apply_patch.lark` at the pinned protocol revision.
-The parser and executor adapt `codex-rs/apply-patch/src/{parser,streaming_parser,
-seek_sequence,lib}.rs` and the core apply-patch handlers at the compatibility
-revision. Local changes include virtual-state preflight, symlink/overwrite
-checks, serialized mutation, rollback, CRLF preservation and preview integration.
-The included Apache-2.0 terms and upstream NOTICE apply to that material.
+Patch adaptations and the exact grammar asset now belong to `pi-codex-tools`,
+which retains their source modification notices, Apache-2.0 terms and upstream
+NOTICE. Core retains transport-related attribution and historical provenance;
+the provenance paths do not imply current ownership of the moved patch code.
 The internal Responses Lite transport is an unsupported compatibility boundary.
 
 See `pi-codex-runtime/reference/source-map.md` in the repository for the pinned

@@ -12,6 +12,8 @@ import { resolveResponsesUrl, resolveResponsesWebSocketUrl } from "../../provide
 import { websocketHttpFallbackSessions } from "../../providers/openai-codex/websocket-session.js";
 import { requestCodexCompactionTrigger } from "./http.js";
 import { requestCodexCompactionTriggerWebSocket } from "./websocket.js";
+import { allowsTransport, requestTransport } from "../../providers/openai-codex/endpoint-policy.js";
+import { reportEndpointFailure } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 
 export async function requestCodexCompactionTriggerWithTransport(
 	model: Model<Api>,
@@ -30,10 +32,11 @@ export async function requestCodexCompactionTriggerWithTransport(
 		maxRetryDelayMs?: number;
 	},
 ): Promise<unknown> {
-	const transport = options.settings.openaiTransport;
+	const transport = requestTransport(options.settings, model, options.sessionId);
 	const responsesMode = resolveCodexRequestProfile(options.settings.requestProfile).responsesMode;
 	const sseUrl = resolveResponsesUrl(model.baseUrl, options.settings.responsesEndpoint);
 	const requestMetadata: WebSocketRequestMetadata = {
+		codexRequestExtensions: options.settings.codexRequestExtensions,
 		...(options.sessionId ? { sessionId: options.sessionId } : {}),
 		...(options.requestIdentity?.threadId
 			? { threadId: options.requestIdentity.threadId }
@@ -46,16 +49,19 @@ export async function requestCodexCompactionTriggerWithTransport(
 			? { identity: options.requestIdentity }
 			: {}),
 	};
-	if (transport === "sse") {
-		return requestCodexCompactionTrigger(
-			sseUrl,
-			headers.sse,
-			withSseRequestMetadata(body, requestMetadata),
-			options.signal,
-			options.sessionId,
-			model.provider,
-		);
-	}
+	const sseRequest = async () => {
+		if (!allowsTransport(options.settings, model, options.sessionId, "sse")) throw new Error("Responses SSE is disabled for this endpoint.");
+		try {
+			return await requestCodexCompactionTrigger(
+				sseUrl, headers.sse, withSseRequestMetadata(body, requestMetadata), options.signal,
+				options.settings.codexRequestExtensions ? options.sessionId : undefined, model.provider,
+			);
+		} catch (error) {
+			if (!options.signal?.aborted) reportEndpointFailure(model, options.sessionId, [`responsesMode.${responsesMode}`, "transport.sse"], error);
+			throw error;
+		}
+	};
+	if (transport === "sse") return sseRequest();
 
 	const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, options.settings.responsesEndpoint);
 	const fallbackKey = webSocketFallbackKey(
@@ -69,14 +75,7 @@ export async function requestCodexCompactionTriggerWithTransport(
 		&& fallbackKey
 		&& websocketHttpFallbackSessions.has(fallbackKey)
 	) {
-		return requestCodexCompactionTrigger(
-			sseUrl,
-			headers.sse,
-			withSseRequestMetadata(body, requestMetadata),
-			options.signal,
-			options.sessionId,
-			model.provider,
-		);
+		return sseRequest();
 	}
 
 	const maxRetries = Math.min(
@@ -102,8 +101,9 @@ export async function requestCodexCompactionTriggerWithTransport(
 			);
 		} catch (error) {
 			if (options.signal?.aborted) throw new Error("Request was aborted");
+			reportEndpointFailure(model, options.sessionId, [`responsesMode.${responsesMode}`, "transport.websocket"], error);
 			const upgradeRejected = isWebSocketUpgradeRejectedError(error);
-			if (transport === "auto" && upgradeRejected) {
+			if (transport === "auto" && upgradeRejected && allowsTransport(options.settings, model, options.sessionId, "sse")) {
 				if (fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
 				break;
 			}
@@ -117,12 +117,5 @@ export async function requestCodexCompactionTriggerWithTransport(
 		}
 	}
 
-	return requestCodexCompactionTrigger(
-		sseUrl,
-		headers.sse,
-		withSseRequestMetadata(body, requestMetadata),
-		options.signal,
-		options.sessionId,
-		model.provider,
-	);
+	return sseRequest();
 }

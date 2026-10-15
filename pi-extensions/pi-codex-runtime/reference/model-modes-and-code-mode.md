@@ -35,7 +35,7 @@ Model metadata serializes this as:
 ```
 
 When selected, the direct apply-patch spec is the custom + Lark grammar tool
-described in [apply-patch-protocols.md](../../pi-codex-core/reference/apply-patch-protocols.md). There is no
+described in [apply-patch-protocols.md](../../pi-codex-tools/reference/apply-patch-protocols.md). There is no
 function or public built-in variant in this Codex enum at the analyzed commit.
 
 ## Direct tool exposure

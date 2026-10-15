@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import type { Api, AssistantMessage, Context, Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, Context, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import { getCurrentSystemMessage, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import type {
 	CompactionEntry,
@@ -11,7 +11,7 @@ import type {
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
-import { sanitizeNativeCompactionOutput } from "./adapter/compaction/checkpoint.js";
+import { sanitizeNativeCompactionOutput, syntheticNativeAssistant } from "./adapter/compaction/checkpoint.js";
 import { requestOpenAINativeCompaction } from "./adapter/compaction/request.js";
 import { normalizeNativeCompactionToolPairs } from "./adapter/compaction/tool-pairs.js";
 export { normalizeNativeCompactionToolPairs } from "./adapter/compaction/tool-pairs.js";
@@ -132,35 +132,6 @@ function matchesModelIdentity(
 	if (value.provider !== model.provider || value.model !== model.id || value.api !== model.api) return false;
 	if (!value.profileHash) return true;
 	return matchesCheckpointProfile(resolveModelProfile(model as ModelLike), value.profileHash);
-}
-
-function syntheticNativeAssistant(
-	output: readonly unknown[],
-	model: Model<Api>,
-	timestamp: number,
-): AssistantMessage {
-	return {
-		role: "assistant",
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		content: output.map((item) => ({
-			type: "thinking",
-			thinking: "",
-			thinkingSignature: JSON.stringify(item),
-			redacted: true,
-		})) as AssistantMessage["content"],
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-		timestamp,
-	};
 }
 
 function withoutCompactionSummary(messages: PiMessages): PiMessages {
@@ -300,11 +271,12 @@ export function registerNativeCompaction(
 		const settings = loadModelSettings(knownEndpointModel(ctx.model ?? {}, ctx.sessionManager.getSessionId()), ctx.cwd, undefined, ctx.sessionManager.getSessionId());
 		const branch = ctx.sessionManager.getBranch();
 		const checkpoint = latestNativeCompactionEntry(branch);
-		const retainNone = checkpoint?.entry.details?.version === 4;
 		try {
-			if (checkpoint && (!settings.codexRequestExtensions || !settings.enabled || settings.compactionMode === "pi")) throw new Error("Opaque checkpoint preserved. Restore its native compaction profile/endpoint and codexRequestExtensions, or navigate before compaction.");
-			if (!retainNone && (!settings.enabled || settings.compactionMode === "pi")) return undefined;
-			if (retainNone && !settings.enabled) throw new Error("Native checkpoint replay is disabled. Re-enable its original model/profile or navigate before compaction.");
+			if (!checkpoint) return undefined;
+			if (!settings.opaqueReplayAllowed || settings.requestBlockedReason || !ctx.model
+				|| !matchesModelIdentity(checkpoint.entry.details!, ctx.model as Model<Api>)) {
+				throw new Error("Opaque checkpoint preserved. Restore its original model/profile and replay endpoint capability, or navigate before compaction.");
+			}
 			const messages = applyNativeCompactionContext(
 				event.messages as PiMessages, branch, ctx.model as Model<Api> | undefined, true,
 			);
@@ -323,6 +295,11 @@ export function registerNativeCompaction(
 		const settings = loadModelSettings(knownEndpointModel(model ?? {}, ctx.sessionManager?.getSessionId?.()), ctx.cwd, undefined, ctx.sessionManager?.getSessionId?.());
 		const mode = settings.compactionMode;
 		const nativeCheckpoint = latestNativeCompactionEntry(event.branchEntries);
+		if (nativeCheckpoint && (!settings.opaqueReplayAllowed || settings.requestBlockedReason || !model
+			|| !matchesModelIdentity(nativeCheckpoint.entry.details!, model))) {
+			ctx.ui.notify("Opaque checkpoint preserved. Restore its original model/profile and replay endpoint capability, or navigate before compaction.", "warning");
+			return { cancel: true };
+		}
 		if (!settings.enabled || mode === "pi" || !model || !settings.modelProfile?.effective.enabled) {
 			if (!nativeCheckpoint) return undefined;
 			ctx.ui.notify("Cannot replace an opaque native checkpoint with a placeholder summary. Restore its original model/profile and native compaction, or navigate before compaction.", "warning");
@@ -351,6 +328,7 @@ export function registerNativeCompaction(
 			if (hasProjectedToolLoadout(pi)) throw new Error("Tool projection changed while preparing native compaction.");
 			const output = await requestOpenAINativeCompaction(model, context, {
 				ownsNativeTool: providerController?.ownsNativeTool,
+				getToolProtocols: providerController?.getToolProtocols,
 				mode,
 				apiKey: auth.apiKey ?? "",
 				headers: auth.headers,
@@ -382,7 +360,7 @@ export function registerNativeCompaction(
 						provider: model.provider,
 						model: model.id,
 						api: model.api,
-						profileHash: settings.modelProfileHash,
+						profileHash: settings.modelProfile?.profileHash,
 						output,
 					} satisfies NativeCompactionDetails,
 				},

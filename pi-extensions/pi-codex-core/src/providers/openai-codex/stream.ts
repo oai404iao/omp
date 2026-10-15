@@ -7,7 +7,7 @@ import { applyFastModeServiceTier } from "../../fast-mode.js";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { rewriteNativeOpenAiTools, type NativeToolRewriteOptions } from "../../provider-native-tools.js";
 import { collectHistoricalCitationSources, collectWebSearchCitationSources } from "@oai404iao/pi-codex-runtime/internal/providers/responses/citations";
-import { responseGrammarProperties } from "@oai404iao/pi-codex-runtime/internal/providers/responses/grammar";
+import type { ToolProtocolSnapshot } from "@oai404iao/pi-codex-runtime/internal/broker";
 import { webSocketFallbackKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";
 import type { ProviderStreamEffects } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/stream-effects";
@@ -16,19 +16,20 @@ import { applyConfiguredResponsesFeatureHeaders, buildSSEHeaders, buildWebSocket
 import { withResponsesLiteWebSocketMetadata } from "./lite.js";
 import { assertSuccessfulOutput, createErrorMessage, createInitialAssistantMessage } from "./message.js";
 import { proxyDispatcherForUrl } from "./proxy.js";
-import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOptions } from "./request-body.js";
+import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOptions, requestGrammarProperties } from "./request-body.js";
 import { getLatestUserText } from "./request-context.js";
 import { createCodexRequestId, createPiTurnId, withSseRequestMetadata } from "./request-metadata.js";
 import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, isWebSocketUpgradeRejectedError, sleep, sseMaxRetries, sseRetryDelayMs, webSocketRetryDelayMs, webSocketStreamMaxRetries } from "./retry.js";
 import { fetchWithResponseHeaderTimeout, parseSSE, responseHeaderTimeoutMsFromOptions } from "./sse.js";
-import { type ProviderTransport, type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
+import { type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { resolveResponsesUrl, resolveResponsesWebSocketUrl } from "./urls.js";
 import { finalizeUsage, withRequestServiceTier } from "./usage.js";
 import { websocketHttpFallbackSessions } from "./websocket-session.js";
 import { processWebSocketStream } from "./websocket-stream.js";
 import { prepareSseBody } from "./request-compression.js";
-import { assertOpaqueReplayAllowed, reportHostedFailure } from "./endpoint-policy.js";
+import { allowsTransport, assertOpaqueReplayAllowed, reportHostedFailure, requestTransport } from "./endpoint-policy.js";
 import { rememberResolvedEndpoint } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
+import type { EndpointCapability } from "@oai404iao/pi-codex-runtime/internal/endpoint-config";
 
 export function createCodexStream<TApi extends Api>(
 	model: Model<TApi>,
@@ -36,6 +37,7 @@ export function createCodexStream<TApi extends Api>(
 	options: SimpleStreamOptions | undefined,
 	deps: ProviderStreamEffects & Pick<NativeToolRewriteOptions, "ownsNativeTool"> & {
 		getCurrentCwd: () => string;
+		getToolProtocols?: ToolProtocolSnapshot;
 		configuredModel?: Model<Api>;
 		getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
 		getStartupPrewarm?: (sessionId: string, model: Model<Api>) => Promise<void> | undefined;
@@ -50,6 +52,7 @@ export function createCodexStream<TApi extends Api>(
 		const webSearchCitationSources = collectWebSearchCitationSources(model, context);
 		const historicalCitationSources = collectHistoricalCitationSources(model, context);
 		let sentBody: ResponsesBody | undefined;
+		const requestCapabilities: EndpointCapability[] = [];
 
 		try {
 			const apiKey = options?.apiKey ?? "";
@@ -63,6 +66,8 @@ export function createCodexStream<TApi extends Api>(
 			const settings = loadModelSettings(model, requestCwd, undefined, options?.sessionId);
 			if (settings.requestBlockedReason) throw new Error(settings.requestBlockedReason);
 			const requestProfile = resolveCodexRequestProfile(settings.requestProfile);
+			requestCapabilities.push(`responsesMode.${requestProfile.responsesMode}`);
+			const toolProtocols = deps.getToolProtocols?.(context.tools);
 			if (
 				!settings.enabled
 				|| !settings.modelProfile?.effective.enabled
@@ -87,6 +92,7 @@ export function createCodexStream<TApi extends Api>(
 					...requestBodyToolOptions(settings),
 					requestIdentity,
 					ownsNativeTool: deps.ownsNativeTool,
+					toolProtocols,
 				}),
 				settings,
 				model,
@@ -110,16 +116,12 @@ export function createCodexStream<TApi extends Api>(
 			ensureWebSearchDetailsIncluded(body);
 			assertOpaqueReplayAllowed(body, settings);
 			sentBody = body;
-			const grammarToolInputProperties = responseGrammarProperties(body, context.tools);
+			const grammarToolInputProperties = requestGrammarProperties(body, context.tools, toolProtocols);
 
 			const websocketSessionId = requestIdentity?.sessionId ?? options?.sessionId;
 			const websocketThreadId = requestIdentity?.threadId ?? options?.sessionId;
-			const websocketTurnId = requestIdentity?.turnId
-				|| deps.getCurrentTurnId?.(options?.sessionId)
-				|| createPiTurnId();
-			const websocketRequestId = websocketThreadId
-				|| websocketSessionId
-				|| createCodexRequestId();
+			const websocketTurnId = requestIdentity?.turnId || deps.getCurrentTurnId?.(options?.sessionId) || createPiTurnId();
+			const websocketRequestId = websocketThreadId || websocketSessionId || createCodexRequestId();
 			const websocketRequestMetadata: WebSocketRequestMetadata = {
 				codexRequestExtensions: settings.codexRequestExtensions,
 				...(options?.sessionId ? { sessionId: options.sessionId } : {}),
@@ -165,15 +167,8 @@ export function createCodexStream<TApi extends Api>(
 			)?.transformHeaders;
 			const bodyJson = JSON.stringify(withSseRequestMetadata(body, websocketRequestMetadata));
 			const responseHeaderTimeoutMs = responseHeaderTimeoutMsFromOptions(options);
-			const configuredTransport: ProviderTransport = settings.openaiTransport;
-			// Pi exposes a session transport setting through stream options. When
-			// the global gate permits WebSocket, explicit non-auto values override
-			// the model profile.
-			const transport: ProviderTransport = !settings.webSocketEnabled
-				? "sse"
-				: options?.transport && options.transport !== "auto"
-					? options.transport
-					: configuredTransport;
+			const configuredTransport = settings.openaiTransport;
+			const transport = requestTransport(settings, model, options?.sessionId, options?.transport);
 
 			const websocketUrl = resolveResponsesWebSocketUrl(model.baseUrl, endpoint);
 			const fallbackKey = webSocketFallbackKey(
@@ -188,6 +183,7 @@ export function createCodexStream<TApi extends Api>(
 				&& websocketHttpFallbackSessions.has(fallbackKey);
 
 			if (transport !== "sse" && !sessionFellBackToHttp) {
+				requestCapabilities.push("transport.websocket");
 				if (transformHeaders) {
 					websocketHeaders = providerHeadersToHeaders(
 						await transformHeaders(
@@ -242,6 +238,7 @@ export function createCodexStream<TApi extends Api>(
 							transport === "auto"
 							&& !websocketStarted
 							&& upgradeRejected
+							&& allowsTransport(settings, model, options?.sessionId, "sse")
 						) {
 							if (fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
 							appendAssistantMessageDiagnostic(
@@ -284,6 +281,8 @@ export function createCodexStream<TApi extends Api>(
 			}
 
 			let response: Response | undefined;
+			if (!allowsTransport(settings, model, options?.sessionId, "sse")) throw new Error("Responses SSE is disabled for this endpoint.");
+			requestCapabilities.splice(1, requestCapabilities.length, "transport.sse");
 			let lastError: Error | undefined;
 			const sseUrl = resolveResponsesUrl(model.baseUrl, endpoint);
 			const sseDispatcher = options?.fetch ? undefined : await proxyDispatcherForUrl(sseUrl, options?.env);
@@ -321,7 +320,7 @@ export function createCodexStream<TApi extends Api>(
 					}
 
 					const errorText = await response.text();
-					const rejected = !options?.signal?.aborted && reportHostedFailure(model, options?.sessionId, body, { status: response.status, responseBody: errorText }, deps.ownsNativeTool);
+					const rejected = !options?.signal?.aborted && reportHostedFailure(model, options?.sessionId, body, { status: response.status, responseBody: errorText }, deps.ownsNativeTool, requestCapabilities);
 					if (!rejected && attempt < maxRetries && isRetryableError(response.status, errorText)) {
 						await sleep(sseRetryDelayMs(attempt, options, headersToRecord(response.headers)), options?.signal);
 						continue;
@@ -385,7 +384,7 @@ export function createCodexStream<TApi extends Api>(
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			if (!options?.signal?.aborted && !(error instanceof ProviderStreamEventCallbackError)) reportHostedFailure(model, options?.sessionId, sentBody, error, deps.ownsNativeTool);
+			if (!options?.signal?.aborted && !(error instanceof ProviderStreamEventCallbackError)) reportHostedFailure(model, options?.sessionId, sentBody, error, deps.ownsNativeTool, requestCapabilities);
 			stream.push({
 				type: "error",
 				reason: (options?.signal?.aborted ? "aborted" : "error") as "aborted" | "error",

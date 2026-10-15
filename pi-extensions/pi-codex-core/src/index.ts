@@ -27,9 +27,8 @@ import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
 
 import { configPath, loadSettings, settingsDiagnostics } from "@oai404iao/pi-codex-runtime/internal/settings";
 
-import { createApplyPatchToolDefinition } from "./tools/apply-patch.js";
-
-import { addPackageTool, ensureCodexServices } from "@oai404iao/pi-codex-runtime";
+import { ensureCodexServices } from "@oai404iao/pi-codex-runtime";
+import { ownsRegisteredTool, snapshotOwnedToolProtocols } from "@oai404iao/pi-codex-runtime/internal/tool-activation";
 
 import { registerResponsesProviderRuntime } from "./extension/provider-runtime.js";
 
@@ -121,39 +120,33 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 	});
 }
 
-function registerCoreTools(pi: ExtensionAPI, broker: ReturnType<typeof ensureCodexServices>): void {
-	const patch = createApplyPatchToolDefinition({
-		deferRendering: loadSettings().deferApplyPatchRendering,
-	});
-	const parameters = { ...(patch.parameters as object) };
-	pi.registerTool({ ...patch, parameters } as never);
-	broker.ownedTools.set("apply_patch", { parameters, description: patch.description as string });
-}
-
-
 export default function codexCore(pi: ExtensionAPI): void {
 	const broker = ensureCodexServices(pi);
 	if (!broker.claim("package:core")) return;
-	const ownsNativeTool = (name: "web_search" | "image_generation") => broker.tools.has(name);
+	const ownsNativeTool = (name: "web_search" | "image_generation") => ownsRegisteredTool(pi, broker, name);
+	const getToolProtocols = (tools?: Parameters<typeof snapshotOwnedToolProtocols>[2]) => snapshotOwnedToolProtocols(pi, broker, tools);
 	let currentCwd = process.cwd();
 	pi.on("session_start", (_event, ctx) => { currentCwd = ctx.cwd; });
 	pi.on("model_select", (_event, ctx) => { currentCwd = ctx.cwd; });
 	if (loadSettings(currentCwd).enabled) {
-		const controller = registerResponsesProviderRuntime(pi, { getCurrentCwd: () => currentCwd, ownsNativeTool }, {
+		const controller = registerResponsesProviderRuntime(pi, { getCurrentCwd: () => currentCwd, ownsNativeTool, getToolProtocols }, {
 			// Shared services own presentation hooks even when core is absent.
 			clear() {}, flush() {}, scheduleFlush() {}, registerRenderers() {},
 			streamEffects: () => broker.presentation.streamEffects(),
 		});
 		broker.coreEnabled = true;
+		broker.engine = {
+			customTools: true, hostedWebSearch: true,
+			supports(model) {
+				const settings = loadModelSettings(model, currentCwd);
+				return !broker.closed && settings.enabled && settings.providerShimActive === true
+					&& settings.modelProfile?.effective.enabled === true
+					&& (model.api === "openai-responses" || model.api === "openai-codex-responses")
+					&& !settings.requestBlockedReason;
+			},
+		};
 		registerNativeCompaction(pi, controller);
 	}
-	let registered = false;
-	const register = () => {
-		if (registered) return;
-		registerCoreTools(pi, broker);
-		registered = true;
-	};
-	addPackageTool(broker, "apply_patch", register);
 	registerDiagnosticCommand(pi);
 	registerFastMode(pi);
 

@@ -9,7 +9,7 @@
     "codexRequestExtensions": {
       "type": "boolean",
       "default": true,
-      "description": "Allow plugin-generated Codex wire identity, metadata, Lite and native compaction. False preserves Standard tools and Pi authentication; Lite requests and opaque checkpoint mode changes are blocked."
+      "description": "Allow plugin-generated Codex wire identity and optional request metadata. Responses mode, transport, tools and native compaction remain independently controlled by model profiles and endpoint capabilities."
     },
     "endpoint_config": {
       "type": "array",
@@ -22,6 +22,14 @@
         "properties": {
           "provider": { "type": "string", "minLength": 1 },
           "baseUrl": { "type": "string", "format": "uri", "pattern": "^https?://" },
+          "responsesMode": {
+            "type": "array", "uniqueItems": true,
+            "items": { "enum": ["standard", "lite"] }
+          },
+          "transport": {
+            "type": "array", "uniqueItems": true,
+            "items": { "enum": ["sse", "websocket"] }
+          },
           "webSearch": {
             "type": "array", "uniqueItems": true,
             "items": { "enum": ["hosted", "standalone"] }
@@ -67,6 +75,16 @@
       "type": "boolean",
       "description": "Fast mode default for new sessions. /fast changes only the current session; subagents follow the main agent. Only profiles declaring a Fast service tier are affected.",
       "default": false
+    },
+    "applyPatch": {
+      "type": "boolean",
+      "description": "Global apply-patch master switch. false disables package patch tools and patch-specific behavior without changing Responses mode or other capabilities.",
+      "default": true
+    },
+    "webSearch": {
+      "type": "boolean",
+      "description": "Global web-search master switch. false disables hosted and standalone search without changing Responses mode or other capabilities.",
+      "default": true
     },
     "imageGeneration": {
       "type": "boolean",

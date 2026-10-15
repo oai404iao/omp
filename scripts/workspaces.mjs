@@ -13,6 +13,7 @@ export const workspaces = [
   },
   { name: "@oai404iao/pi-codex-runtime", directory: "pi-extensions/pi-codex-runtime", releaseStatus: "publishable", kind: "library" },
   { name: "@oai404iao/pi-codex-core", directory: "pi-extensions/pi-codex-core", releaseStatus: "publishable" },
+  { name: "@oai404iao/pi-codex-tools", directory: "pi-extensions/pi-codex-tools", releaseStatus: "blocked" },
   { name: "@oai404iao/pi-codex-web-search", directory: "pi-extensions/pi-codex-web-search", releaseStatus: "publishable" },
   { name: "@oai404iao/pi-codex-imagegen", directory: "pi-extensions/pi-codex-imagegen", releaseStatus: "publishable" },
   {

@@ -5,7 +5,7 @@ import type { ProviderStreamEffects } from "@oai404iao/pi-codex-runtime/internal
 import type { StreamEventShape } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { convertResponsesMessages } from "@oai404iao/pi-codex-runtime/internal/providers/responses/messages";
 import { decodeWebSearchActivityTextSignature } from "@oai404iao/pi-codex-runtime/internal/providers/responses/signatures";
-import { createWebSearchCapture } from "@oai404iao/pi-codex-web-search/internal/tools/web-search/capture";
+import { createWebSearchCapture } from "@oai404iao/pi-codex-tools/internal/tools/web-search/capture";
 import { captureContext, deferred, responsesModel } from "./support/provider-lifecycle-test-support.js";
 
 const image = Object.freeze({ type: "image_generation_call", id: "ig_one", status: "completed", result: "cG5n" });

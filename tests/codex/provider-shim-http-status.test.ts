@@ -6,8 +6,9 @@ import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { buildCodexCompactionCheckpoint } from "@oai404iao/pi-codex-core/internal/adapter/compaction/checkpoint";
-import { buildWebSearchStatusText, extractWebSearchProgress, mergeWebSearchActivity, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE } from "@oai404iao/pi-codex-web-search/internal/tools/web-search/activity";
+import { buildWebSearchStatusText, extractWebSearchProgress, mergeWebSearchActivity, WEB_SEARCH_ACTIVITY_MESSAGE_TYPE } from "@oai404iao/pi-codex-tools/internal/tools/web-search/activity";
 import { requestOpenAINativeCompaction } from "@oai404iao/pi-codex-core/internal/adapter/compaction/request";
+import { fixtureToolProtocols } from "./support/tool-protocols.js";
 import { withHttpStatusPrefix } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/errors";
 import { withResponsesLiteWebSocketMetadata } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/lite";
 import { decodeWebSearchActivityTextSignature } from "@oai404iao/pi-codex-runtime/internal/providers/responses/signatures";
@@ -720,6 +721,7 @@ test("Responses Lite native compaction preserves the envelope and refuses the re
 		apiKey: "plain-api-key",
 		sessionId: "lite-session",
 		settings,
+		getToolProtocols: () => fixtureToolProtocols,
 	});
 	await assert.rejects(requestOpenAINativeCompaction(model, context, {
 		mode: "responses-compact" as any,
@@ -1008,6 +1010,7 @@ test("user catalog entries enable the Responses shim for custom providers bound 
 test("normal OpenAI requests do not compact inline inside a tool turn", async () => {
 	writeSettings({
 		compactionMode: "responses",
+		webSocketEnabled: false,
 	});
 	const provider = createProviderHarness().providers.openai;
 	let requestBody: any;
@@ -1034,7 +1037,7 @@ test("normal OpenAI requests do not compact inline inside a tool turn", async ()
 	);
 	const result = await stream.result();
 
-	assert.equal(result.stopReason, "stop");
+	assert.equal(result.stopReason, "stop", result.errorMessage);
 	assert.equal("context_management" in requestBody, false);
 });
 

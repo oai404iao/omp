@@ -69,7 +69,7 @@ export async function requestCodexCompactionTriggerWebSocket(
 					countWebSocketEvents(parseWebSocket(socket, signal), () => {
 						eventCount++;
 					}),
-					requestMetadata.sessionId,
+					requestMetadata.codexRequestExtensions === false ? undefined : requestMetadata.sessionId,
 				),
 			);
 			if (signal?.aborted) {

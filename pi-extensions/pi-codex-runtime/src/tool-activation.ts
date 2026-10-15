@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { hasConfiguredModelsLoaded } from "./activation.js";
-import { getCodexBroker, type CodexBroker } from "./broker.js";
+import { getCodexBroker, type CodexBroker, type ToolProtocolSnapshot } from "./broker.js";
 import {
 	computeToolCapabilities, PACKAGE_TOOL_NAMES,
 	type PackageToolName,
@@ -25,6 +25,24 @@ export function ownsRegisteredTool(pi: ExtensionAPI, broker: CodexBroker, name: 
 	expected.identity ??= identity;
 	if (expected.identity !== identity) expected.replaced = true;
 	return !expected.replaced;
+}
+
+export function snapshotOwnedToolProtocols(
+	pi: ExtensionAPI, broker: CodexBroker, tools?: Parameters<ToolProtocolSnapshot>[0],
+): ReturnType<ToolProtocolSnapshot> {
+	const snapshot = new Map();
+	for (const [name, owned] of broker.ownedTools) {
+		if (!owned.protocol || !ownsRegisteredTool(pi, broker, name)) continue;
+		const tool = tools?.find(item => item.name === name);
+		if (tools && (!tool || tool.description !== owned.description
+			|| JSON.stringify(tool.parameters) !== JSON.stringify(owned.parameters))) continue;
+		snapshot.set(name, {
+			...owned.protocol,
+			customTool: structuredClone(owned.protocol.customTool),
+			hiddenTools: owned.protocol.hiddenTools && [...owned.protocol.hiddenTools],
+		});
+	}
+	return snapshot;
 }
 
 function enableDefinitions(broker: CodexBroker) {
@@ -90,9 +108,20 @@ export function ensureCodexServices(pi: ExtensionAPI): CodexBroker {
 					owned.exposure = exposure;
 				}
 			}
-			const hostedWithoutCore = !broker.coreEnabled && name === "web_search" && model.webSearchImplementation === "hosted";
+			const engineAvailable = broker.engine?.supports(requestModel) === true;
+			const hostedWithoutCore = name === "web_search" && model.webSearchImplementation === "hosted"
+				&& !(engineAvailable && broker.engine?.hostedWebSearch);
+			const customWithoutCore = name === "apply_patch" && model.requestProfile.patchTransport === "custom"
+				&& !(engineAvailable && broker.engine?.customTools);
 			const endpointEnabled = name === "web_search" ? model.webSearchEnabled : name === "image_generation" ? model.imageGeneration : true;
-			const desired = available && owned.registered && capabilities[name].enabled && !hostedWithoutCore && endpointEnabled;
+			const desired = available && owned.registered && capabilities[name].enabled && !hostedWithoutCore && !customWithoutCore && endpointEnabled;
+			if (available && capabilities[name].enabled && (hostedWithoutCore || customWithoutCore) && !quiet) {
+				const diagnostic = `${name} requires an active Responses engine supporting ${hostedWithoutCore ? "hosted search" : "custom tools"} for the current model; no alternate implementation was selected.`;
+				if (!warned.has(diagnostic)) {
+					warned.add(diagnostic);
+					ctx.ui?.notify?.(diagnostic, "warning");
+				}
+			}
 			if (!desired) active.delete(name);
 			else if (settings.autoEnable) active.add(name);
 		}

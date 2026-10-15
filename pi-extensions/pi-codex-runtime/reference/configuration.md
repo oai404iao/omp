@@ -105,6 +105,8 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
   "autoEnable": true,
   "webSocketEnabled": true,
   "fastMode": false,
+  "applyPatch": true,
+  "webSearch": true,
   "imageGeneration": true,
   "imageOutputDir": ".pi/openai-codex-images",
   "imageModel": "gpt-image-2",
@@ -119,14 +121,17 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `autoEnable` | Add supported package tools automatically. |
 | `webSocketEnabled` | Global Responses WebSocket master switch. Set `false` to force SSE and disable WebSocket prewarm for every model profile. |
 | `fastMode` | Default for new sessions; `/fast` saves a session-only selection. Subagents follow the main agent on subsequent requests. Only profiles with `fast` are affected. |
+| `applyPatch` | Global package patch switch. Set `false` to omit patch registration, execution and native-mutation declaration hiding without changing other capabilities. |
+| `webSearch` | Global search switch. Set `false` to omit hosted and standalone search without changing other capabilities. |
 | `imageGeneration` | Global master switch. Set `false` to omit image tools, `/image-gen`, presentation and standalone requests without changing other model behavior. |
 | `imageOutputDir` | Generated-image output directory. Relative paths resolve from the workspace root. |
 | `imageModel` | Image model used by standalone generation and edits. |
 | `deferApplyPatchRendering` | Use Pi's fallback renderer instead of the streaming patch preview. |
 
 The older model-level keys remain readable for one migration version, but are
-deprecated and no longer appear in `config.schema.json`. `imageGeneration` is
-the exception: it remains the supported global master switch. See
+deprecated and no longer appear in `config.schema.json`. The independent
+`applyPatch`, `webSearch` and `imageGeneration` switches are global gates, not
+legacy model overrides. See
 [Legacy migration](#legacy-migration).
 
 ### Per-Model Catalog
@@ -300,6 +305,8 @@ These are global keys in
     {
       "provider": "openai",
       "baseUrl": "https://api.openai.com/v1",
+      "responsesMode": ["standard"],
+      "transport": ["sse", "websocket"],
       "webSearch": ["hosted"],
       "imageGeneration": ["standalone"],
       "compaction": ["responses"]
@@ -314,31 +321,31 @@ endpoint supports these capabilities. There are no automatic capability probes.
 ### Codex request extensions
 
 `codexRequestExtensions` defaults to `true` for upgrade compatibility. With
-`false`, Standard requests keep authentication, custom/function tools, hosted
-tool parsing/persistence and standalone execution, but stop generating:
+`false`, requests keep authentication, the configured Standard/Lite envelope,
+transport, custom/function tools, hosted tool parsing/persistence, standalone
+execution and native compaction, but stop generating optional enhancements:
 
 - Codex thread/window/turn/subagent headers and `client_metadata`;
 - installation/turn metadata and Codex UUID replacements for the prompt-cache
   key (requests use Pi's session ID instead);
-- Lite headers, namespace envelopes and remote-compaction enhancements;
 - Codex `originator` defaults on the modern
   `openai-responses` route. Legacy protocol-required headers and WebSocket
   negotiation headers remain.
 
-Standard standalone tools retain their ordinary function declarations rather
-than being rewritten to Codex reserved namespaces. Explicit user headers and
+Lite headers, namespace envelopes and compaction payloads remain when their
+independent mode/capability is enabled. Explicit user headers and
 payload metadata are not removed. Internal session/subagent identity records
 are retained; the switch controls request emission, not historical data deletion.
 Switching the flag separates WebSocket/prewarm cache identities.
 
 This is **not** a switch to Pi's entire native stream implementation. The
-plugin still handles its tools, replay, display and storage. A Lite profile
-cannot silently become Standard: requests fail with a configuration explanation
-until you select a Standard profile or re-enable the flag. Native compaction is
-disabled while the flag is off. Without a native checkpoint Pi can use text
-compaction; existing opaque checkpoints (all supported versions) are preserved
-and blocked from incompatible replay or recompaction. Restore the original
-profile/endpoint settings or navigate before the checkpoint.
+plugin still handles its tools, replay, display and storage. Endpoint mode,
+transport and compaction declarations are checked separately; the metadata
+switch never silently changes Lite to Standard or disables native compaction.
+Existing opaque checkpoints (all supported versions) remain bound to their
+original profile and wire settings. Restore those settings or navigate before
+the checkpoint when they are incompatible. Selecting Pi text compaction controls
+new summaries, not whether an otherwise compatible opaque checkpoint can replay.
 
 ### Endpoint declarations
 
@@ -353,6 +360,8 @@ Each optional capability list is an allowlist:
 
 | Key | Allowed values |
 | --- | --- |
+| `responsesMode` | `"standard"`, `"lite"` |
+| `transport` | `"sse"`, `"websocket"` (`websocket-cached` uses `"websocket"`) |
 | `webSearch` | `"hosted"`, `"standalone"` |
 | `imageGeneration` | `"standalone"` |
 | `compaction` | `"responses"` |
@@ -367,6 +376,10 @@ choosing the implementation in the model profile. For example, allowing only
 standalone search while the profile selects hosted disables search; it does
 not switch to standalone. Denying native compaction never converts an existing
 opaque checkpoint to a text placeholder.
+Denied Responses modes and explicit transports fail with configuration errors;
+they are not silently changed. `auto` may use SSE when WebSocket is denied,
+but only when SSE is permitted. Runtime rejection of one mode or transport does
+not disable another mode, tool or compaction capability.
 
 Authentication is resolved lazily, with no extra login/refresh probes just to
 draw the tool list. Until a request supplies its actual endpoint, tool projection
@@ -474,6 +487,9 @@ does not establish that a particular account can access these endpoints.
 
 ## Web Search
 
+Set global `config.json.webSearch:false` to disable both implementations.
+This does not alter per-model selection or other capabilities.
+
 `tools.webSearch` supports two implementations:
 
 - `hosted`: rewrites the Pi placeholder to Responses
@@ -556,6 +572,14 @@ system/tool state. Replay requires the same provider, model, API and effective
 profile hash. If these change, restore the original configuration or navigate
 before compaction: an opaque checkpoint's placeholder is not a usable text summary.
 
+Generation policy is not replay identity: changing only `compaction` from
+`responses` to `pi` remains compatible. Optional Codex request metadata may also
+be switched off without losing replay; the exact legacy `:wire-off` cache suffix
+is normalized and new checkpoints use the unsuffixed catalog hash. All remaining
+effective profile fields must match (or use an explicitly reviewed historical
+bundled migration). Unknown custom hashes and model/provider/API changes still
+fail closed.
+
 Legacy checkpoints still replay unchanged canonical contexts. If an earlier
 context handler transforms a legacy checkpoint, continuation stops rather than
 guessing its boundary or restoring filtered content. Run `/compact` on the
@@ -564,6 +588,9 @@ Treat sessions containing native compaction as sensitive data; older extension
 versions cannot replay v4 checkpoints.
 
 ## Apply Patch
+
+Set global `config.json.applyPatch:false` to disable package patch behavior.
+Pi's selected native mutation tools then keep their ordinary declarations.
 
 When `apply_patch` activates, its `prepareLoadout` hook hides the model-facing
 declarations of selected Pi `edit` and `write` tools. It does not deactivate
@@ -584,7 +611,7 @@ pi --model anthropic/claude-opus-5-5 --tools read,bash,edit,write,codemode
 The executor supports Codex `@@ class/function` contexts, ordered update
 chunks, `*** Move to:`, `*** End of File`, fuzzy matching, CRLF preservation,
 and atomic verification before writes. See
-[`apply-patch-behavior.md`](../../pi-codex-core/reference/apply-patch-behavior.md).
+[`apply-patch-behavior.md`](../../pi-codex-tools/reference/apply-patch-behavior.md).
 
 ## Legacy Migration
 
@@ -607,9 +634,15 @@ model override for compatibility:
 | `additionalModelIds` | one exact user catalog entry per model |
 
 Move these values to extension `models.json`; legacy projection is intended
-only as a transition path. `imageGeneration` is no longer a legacy projection:
-it is the supported global gate, while per-model selection stays in
-`tools.imageGeneration`.
+only as a transition path. Global `applyPatch`, `webSearch` and
+`imageGeneration` gates are applied after legacy and catalog resolution.
+They cannot enable a disabled/unknown model or a profile-disabled tool.
+Legacy `applyPatchEnabled` and `webSearchEnabled` retain their profile-override
+precedence; new global gates can only further disable those results.
+When `compactionMode` is the only legacy profile setting, it overrides only
+compaction generation policy; Responses mode, transport and tools stay unchanged.
+Configurations with other legacy profile settings retain the full compatibility
+projection until migrated.
 
 ## Protocol Reference
 

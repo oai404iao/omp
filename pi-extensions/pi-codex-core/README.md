@@ -4,19 +4,16 @@ See the package guide below for release status; source edits do not publish arti
 
 Peer floor and development target: Pi 1.2.0.
 
-`codexRequestExtensions` defaults to `true`. Turning it off preserves Standard
-tool/replay handling but stops generated Codex metadata, separates WS caches,
-blocks Lite requests and disables native compaction. Existing opaque checkpoints
+`codexRequestExtensions` defaults to `true`. Turning it off preserves
+tool/replay handling but stops generated optional Codex metadata and separates WS
+caches. Standard/Lite format, transport and native compaction stay independent;
+mandatory Lite and compaction signals remain. Existing opaque checkpoints
 are preserved and cannot silently become text summaries. Endpoint capability
 allowlists and explicit session-local rejections are shared through runtime;
 neither selects alternate implementations nor changes Pi authentication.
 
-`apply_patch` remains callable through native codemode while active.
-Scripts receive patch data as `{ summary, files }`; failures reject rather than
-returning success-shaped data. Normal model-facing text and rendering are unchanged.
-For `tool_result` hooks, Pi passes retained structured data through even with
-`isError: true`; a policy that requires script rejection must also replace
-`content` without supplying `structuredContent`.
+Core installs no tools. Add [`pi-codex-tools`](../pi-codex-tools/README.md) for
+patch, search and images, or use the `pi-codex-minimal-tools` compatibility bundle.
 
 While native `codemode` or `tool_search` is active, speculative WebSocket
 prewarm is skipped because Pi does not expose the final `prepareLoadout` tool
@@ -26,8 +23,8 @@ recompaction is refused: disable both orchestration tools and retry `/compact`
 on the original model, or navigate before the checkpoint. Other third-party
 `prepareLoadout` implementations are not covered by this built-in-name guard.
 
-Installs model-profiled Responses SSE/WebSocket transport, prewarm, compaction,
-`apply_patch`. Local image inspection uses Pi's native `read` tool.
+Installs model-profiled Responses SSE/WebSocket transport, prewarm and compaction.
+Local image inspection uses Pi's native `read` tool.
 Keeps the existing diagnostic/fast command names,
 including `/codex-minimal-tools` and `/fast`. Unknown models remain native.
 `config.json.fastMode` supplies the default for new sessions. `/fast [on|off|status]`
@@ -39,11 +36,11 @@ without Fast support remain unaffected. Edit the config to change the default.
 Pi supplies all descriptors; the extension does not register replacement models.
 `openai/gpt-6.1-sol` inherits the `openai/gpt-5.6-sol` default profile:
 Lite, auto WS/SSE, prewarm, native Responses compaction, custom patch and Fast
-availability (priority, 2x cost multiplier). Standalone web/image tools require
-their capability packages.
+availability (priority, 2x cost multiplier). Patch and standalone web/image tools
+require the tools package.
 This is a compatibility configuration, not verified endpoint access or pricing.
 The exact `openai/gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna`
-profiles retain Standard SSE with local custom patch. Remote
+profiles retain Standard SSE with support for tools-owned custom patch. Remote
 search/image generation, native compaction, prewarm and Fast stay off unless
 explicitly configured. Their legacy `openai-codex` counterparts remain separate.
 
@@ -59,9 +56,6 @@ finite positive value, with a minimum of 16. ChatGPT subscription requests omit
 temperature and output-token caps even when supplied through sampling parameters.
 Lite merges only temperature; other new sampling fields remain unsupported.
 Legacy `openai-codex` sampling behavior is unchanged.
-
-The self-rendered patch rows honor Pi's `outputPad`, including
-zero-padding layouts. Patch rendering can still be deferred to another renderer.
 
 The request envelope follows Codex `5a314017`: Standard and Lite use developer
 prefix messages with thread-scoped deterministic IDs; Lite emits
@@ -82,35 +76,20 @@ old-to-new migration allowlist. Custom, legacy-overridden, unknown, or subsequen
 changed profiles still fail closed rather than bypassing the profile guard.
 
 Depends only on the shared runtime and its transport libraries; it does not
-install web-search or image-generation clients/presentation. Protocol replay of
-old web/image items does not enable their endpoints.
+install patch, search or image clients/presentation. Protocol replay of old
+web/image items does not enable their endpoints.
 
 Grammar-capable models support generic constrained-sampling tools through both
 Standard/Lite SSE and WebSocket, including canonical arguments and JSON/grammar
-history switching. `apply_patch` remains a direct Pi tool.
-
-`apply_patch` participates in Pi's native per-file mutation queues across its
-whole read/modify/write window. Multi-file locks follow canonical target order.
-Use one consistent path for each target within a patch: distinct paths aliasing
-the same file are rejected before mutation, including hardlinks, aliases through
-directory symlinks and move destinations. Existing targets also use device/inode
-snapshots for alias and replacement checks, without changing native path-based
-lock keys or lock ordering. Repeated actions on the same path remain valid.
-Unresolvable identities or identity changes while waiting fail closed; retry
-with stable paths rather than bypassing the queue.
-
-These queues coordinate participating tools, not arbitrary filesystem writers.
-Pi uses lexical keys for nonexistent files, so separate invocations creating a
-new file through different directory aliases do not have guaranteed shared
-locking. Separate calls through different hardlinks likewise do not share a
-native queue. Use consistent paths across tools as well; concurrent directory/symlink
-replacement is not an atomic filesystem isolation guarantee.
+history switching. Tools contribute their custom declarations and input-property
+mapping through ownership-validated broker descriptors; core does not load their
+grammar, executor or renderer.
 
 Uses the existing
 `<agentDir>/extensions/pi-codex-minimal-tools/{config,models}.json` configuration
 and Pi authentication. Set global `config.json.webSocketEnabled` to `false` to
-force SSE and disable WebSocket prewarm across profiles. Add matching web/image
-capability packages when needed; the broker deduplicates cooperating
+force SSE and disable WebSocket prewarm across profiles. Add the tools package
+when needed; the broker deduplicates cooperating
 installations. Mixed runtime versions fail.
 
 `./internal/*` is implementation wiring, not a stable public API.
@@ -125,7 +104,5 @@ pnpm run test:codex-packages
 Owner regressions and transport fixtures are in `tests/`. Protocol references:
 [Standard Responses](reference/responses-standard.md),
 [Responses Lite](reference/responses-lite.md),
-[patch protocols](reference/apply-patch-protocols.md) and
-[patch behavior](reference/apply-patch-behavior.md).
-The [patch rendering example](assets/apply-patch-rendering.png) is a repository
-asset, not part of the runtime tarball.
+[patch protocols](../pi-codex-tools/reference/apply-patch-protocols.md) and
+[patch behavior](../pi-codex-tools/reference/apply-patch-behavior.md).

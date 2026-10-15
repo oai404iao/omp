@@ -13,7 +13,7 @@ import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
 
 // This integration probe is intentionally pinned to the workspace Pi floor.
 const prefix = "@oai404iao/";
-const names = ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools"];
+const names = ["pi-codex-runtime", "pi-codex-core", "pi-codex-tools", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools"];
 const manifests = new Map(names.map(name => [prefix + name, readManifest(`pi-extensions/${name}`)]));
 // pnpm may choose another store when the OS temporary directory is on a
 // different filesystem. Offline fixtures must reuse the root install's store.
@@ -62,11 +62,12 @@ function install(label, requested) {
   mkdirSync(path);
   const included = closure(requested);
   const expected = new Set([...requested, "pi-codex-runtime"]);
+  if (requested.some(name => ["pi-codex-web-search", "pi-codex-imagegen"].includes(name))) expected.add("pi-codex-tools");
   if (requested.includes("pi-codex-minimal-tools")) {
-    for (const name of ["pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"]) expected.add(name);
+    for (const name of ["pi-codex-core", "pi-codex-tools"]) expected.add(name);
   }
   assert.deepEqual([...included].sort(), [...expected].map(name => prefix + name).sort(),
-    "a capability dependency would reinstall an unrequested capability");
+    "the installed dependency closure must match unified tools and compatibility entries");
   const consumer = isolatedConsumerLock(`fixture-${label}`, included, manifests, packed,
     readPnpmLock(join(root, "pnpm-lock.yaml")));
   writeFileSync(join(path, "package.json"), JSON.stringify(consumer.manifest));
@@ -122,13 +123,15 @@ try {
   }
   const matrix = [
     ["runtime", ["pi-codex-runtime"], [], false],
-    ["core", ["pi-codex-core"], ["apply_patch"], true],
+    ["core", ["pi-codex-core"], [], true],
+    ["tools", ["pi-codex-tools"], ["apply_patch", "web_search", "image_generation"], false],
+    ["core-tools", ["pi-codex-core", "pi-codex-tools"], ["apply_patch", "web_search", "image_generation"], true],
     ["web", ["pi-codex-web-search"], ["web_search"], false],
     ["image", ["pi-codex-imagegen"], ["image_generation"], false],
-    ["core-web", ["pi-codex-core", "pi-codex-web-search"], ["apply_patch", "web_search"], true],
-    ["core-image", ["pi-codex-core", "pi-codex-imagegen"], ["apply_patch", "image_generation"], true],
+    ["core-web", ["pi-codex-core", "pi-codex-web-search"], ["web_search"], true],
+    ["core-image", ["pi-codex-core", "pi-codex-imagegen"], ["image_generation"], true],
     ["web-image", ["pi-codex-web-search", "pi-codex-imagegen"], ["web_search", "image_generation"], false],
-    ["all", ["pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "web_search", "image_generation"], true],
+    ["all", ["pi-codex-core", "pi-codex-tools", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "web_search", "image_generation"], true],
     ["bundle", ["pi-codex-minimal-tools"], ["apply_patch", "web_search", "image_generation"], true],
     ["duplicate", ["pi-codex-minimal-tools", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "web_search", "image_generation"], true],
   ];
@@ -137,8 +140,19 @@ try {
     const entries = requested.flatMap(name =>
       (manifests.get(prefix + name).pi?.extensions ?? []).map(entry => join(path, "node_modules", prefix + name, entry)));
     runProbes(label, entries.length > 1 ? [entries, [...entries].reverse()] : [entries], tools, core);
-    if (!["bundle", "web"].includes(label)) rmSync(path, { recursive: true, force: true });
+    if (!["bundle", "web", "tools"].includes(label)) rmSync(path, { recursive: true, force: true });
   }
+  const configDirectory = join(process.env.PI_CODING_AGENT_DIR, "extensions", "pi-codex-minimal-tools");
+  mkdirSync(configDirectory, { recursive: true });
+  const toolsEntry = join(consumers.get("tools"), "node_modules", prefix + "pi-codex-tools/index.ts");
+  for (let mask = 0; mask < 7; mask++) {
+    const enabled = [Boolean(mask & 1), Boolean(mask & 2), Boolean(mask & 4)];
+    writeFileSync(join(configDirectory, "config.json"), JSON.stringify({
+      applyPatch: enabled[0], webSearch: enabled[1], imageGeneration: enabled[2],
+    }));
+    runProbes("tools", [[toolsEntry]], ["apply_patch", "web_search", "image_generation"].filter((_, index) => enabled[index]), false);
+  }
+  writeFileSync(join(configDirectory, "config.json"), "{}");
   // Physically separate runtime copies, not merely different API wrappers.
   const bundle = join(consumers.get("bundle"), "node_modules", prefix + "pi-codex-minimal-tools/index.ts");
   const web = join(consumers.get("web"), "node_modules", prefix + "pi-codex-web-search/index.ts");

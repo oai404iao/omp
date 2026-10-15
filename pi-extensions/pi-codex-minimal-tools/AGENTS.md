@@ -8,11 +8,11 @@ Wire behavior and its references belong to the implementation owners, not here.
 
 ## Layout and ownership
 
-- `index.ts`: composition of the three capability factories.
+- `index.ts`: composition of the core and tools factories.
 - `subagent-inline.ts`: supported public re-export of runtime's identity-only API.
 - No `src/`, tests, schemas, assets, provenance or protocol references here.
-- Runtime owns configuration/schema/catalog/replay; core owns transport/patch;
-  web-search and imagegen own their clients/presentation.
+- Runtime owns configuration/schema/catalog/replay; core owns transport;
+  tools owns patch, search, images and presentation.
 - Owner tests live in their package's `tests/`; cross-package tests and neutral
   fixtures live in root `tests/codex/`.
 - The reference index and source map are in `pi-codex-runtime/reference/`.
@@ -38,7 +38,7 @@ sockets, restore environment/fetch/timers, and reset identity state.
 
 1. Preserve the public default and `./subagent-inline` exports. Do not rebuild
    private compatibility facades or duplicate owner resources.
-2. Keep four exact owner dependencies; the broker deduplicates compatible
+2. Keep three exact owner dependencies; the broker deduplicates compatible
    installations. Factory order and lifecycle changes need composition tests.
 3. Existing configuration paths retain the `pi-codex-minimal-tools` directory name.
 4. Tarballs have an explicit six-file allowlist checked by root pack validation.

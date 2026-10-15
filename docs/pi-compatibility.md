@@ -36,7 +36,7 @@ and locked integrity hashes remain enabled.
   thinking-level overrides and request parameters in that order. Structural
   request fields remain protected. ChatGPT subscription requests omit temperature
   and output-token caps; Lite retains only merged temperature.
-- Core self-shell renderers apply `outputPad`. Streams use Pi's
+- Tools' patch self-shell renderers apply `outputPad`. Streams use Pi's
   `AssistantMessageEventStream`, which owns response duration recording.
 - Native image models, tool renderer resolvers and `reachesTools` do not replace
   the existing image endpoint/persistence, owned tool implementations or child

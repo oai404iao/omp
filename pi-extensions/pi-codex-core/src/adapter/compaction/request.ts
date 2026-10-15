@@ -15,12 +15,14 @@ import { requestCodexCompactionTriggerWithTransport } from "./transport.js";
 import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import type { CodexMinimalToolsSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
 import { rememberResolvedEndpoint, reportEndpointFailure } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
+import type { ToolProtocolSnapshot } from "@oai404iao/pi-codex-runtime/internal/broker";
 
 async function requestNativeCompaction(
 	model: Model<Api>,
 	context: Context,
 	options: {
 		ownsNativeTool?: NativeToolOwnership;
+		getToolProtocols?: ToolProtocolSnapshot;
 		mode: "responses";
 		apiKey: string;
 		headers?: ProviderHeaders;
@@ -45,6 +47,7 @@ async function requestNativeCompaction(
 	if (!hasCodexRequestAuth({ modelHeaders: model.headers, auth })) {
 		throw new Error(`No request authentication for provider: ${model.provider}`);
 	}
+	if (settings.requestBlockedReason) throw new Error(settings.requestBlockedReason);
 	if (settings.compactionMode === "pi" || settings.compactionMode !== options.mode) {
 		throw new Error("native compaction is disabled by the current model profile");
 	}
@@ -54,13 +57,14 @@ async function requestNativeCompaction(
 		auth,
 		endpoint: settings.responsesEndpoint,
 	});
-	let requestIdentity = resolveCodexRequestIdentity(
+	let requestIdentity = !settings.codexRequestExtensions ? undefined : resolveCodexRequestIdentity(
 		options.sessionId,
 		options.turnId ? { turn_id: options.turnId } : undefined,
 		"compaction",
 	);
 	let body = applyFastModeServiceTier(buildRequestBody(model, context, profile, {
 		ownsNativeTool: options.ownsNativeTool,
+		toolProtocols: options.getToolProtocols?.(context.tools),
 		...requestBodyToolOptions(settings),
 		apiKey: options.apiKey,
 		headers: options.headers,

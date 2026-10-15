@@ -83,6 +83,39 @@ test("global image gate disables only image generation", () => withAgentDir(() =
 	assert.equal(capabilities.web_search.enabled, true);
 }));
 
+test("all global tool-gate combinations preserve protocol and unrelated capabilities", () => withAgentDir(() => {
+	const model = { provider: "openai", id: "gpt-5.6-sol", api: "openai-responses", input: ["text", "image"] };
+	for (const applyPatch of [false, true]) {
+		for (const webSearch of [false, true]) {
+			for (const imageGeneration of [false, true]) {
+				const base = { ...DEFAULT_SETTINGS, applyPatch, webSearch, imageGeneration };
+				const capabilities = computeToolCapabilities(model, base);
+				assert.equal(capabilities.apply_patch.enabled, applyPatch);
+				assert.equal(capabilities.web_search.enabled, webSearch);
+				assert.equal(capabilities.image_generation.enabled, imageGeneration);
+				const resolved = loadModelSettings(model, undefined, base);
+				assert.deepEqual(resolved.modelProfile?.sources, ["bundled"]);
+				assert.equal(resolved.requestProfile.responsesMode, "lite");
+				assert.equal(resolved.openaiTransport, "auto");
+				assert.equal(resolved.compactionMode, "responses");
+				assert.equal(resolved.applyPatchEnabled, applyPatch);
+				assert.equal(resolved.webSearchEnabled, webSearch);
+				assert.equal(resolved.imageGeneration, imageGeneration);
+			}
+		}
+	}
+}));
+
+test("endpoint tool denial is reflected in capability projection without disabling local patch", () => withAgentDir(() => {
+	const model = { ...openai55, api: "openai-responses", baseUrl: "https://fixture.invalid/v1" };
+	const capabilities = computeToolCapabilities(model, { ...DEFAULT_SETTINGS, endpoint_config: [
+		{ provider: model.provider, baseUrl: model.baseUrl, webSearch: [], imageGeneration: [] },
+	] });
+	assert.equal(capabilities.apply_patch.enabled, true);
+	assert.equal(capabilities.web_search.enabled, false);
+	assert.equal(capabilities.image_generation.enabled, false);
+}));
+
 test("legacy model settings remain a one-version compatibility override", () => withAgentDir(() => {
 	const disabledPatch = computeToolCapabilities(openai55, {
 		...DEFAULT_SETTINGS,

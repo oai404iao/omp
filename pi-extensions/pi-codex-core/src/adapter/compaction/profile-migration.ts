@@ -1,4 +1,5 @@
 import type { ResolvedModelProfile } from "@oai404iao/pi-codex-runtime/internal/model-catalog/types";
+import { createHash } from "node:crypto";
 
 // Exact bundled hashes at 7edbf751, after 5a314017 alignment, and after catalog cleanup.
 // Pin both ends: future profile changes require a fresh compatibility review.
@@ -35,9 +36,29 @@ const reviewedProfiles: Record<string, readonly [string, string, string]> = {
 	"openai-codex/gpt-5.3-codex": ["1dcd3a7974c50447", "d1a459d86fc49595", "bb47ddcde46a5735"],
 };
 
+function profileDigest(value: unknown): string {
+	const stable = (item: unknown): unknown => {
+		if (Array.isArray(item)) return item.map(stable);
+		if (!item || typeof item !== "object") return item;
+		return Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, stable(entry)]));
+	};
+	return createHash("sha256").update(JSON.stringify(stable(value))).digest("hex").slice(0, 16);
+}
+
 export function matchesCheckpointProfile(profile: ResolvedModelProfile | undefined, hash: string): boolean {
 	if (!profile) return false;
+	// The wire-off suffix belongs to transport cache isolation, not checkpoint identity.
+	if (/^[a-f0-9]{16}:wire-off$/.test(hash)) hash = hash.slice(0, -":wire-off".length);
 	if (profile.profileHash === hash) return true;
+	// Generation policy may change without changing any replay-affecting profile field.
+	if (profile.effective.compaction === "pi" && profile.profileHash === profileDigest(profile.effective)) {
+		profile = {
+			...profile,
+			profileHash: profileDigest({ ...profile.effective, compaction: "responses" }),
+			sources: profile.sources.filter(source => source !== "legacy"),
+		};
+		if (profile.profileHash === hash) return true;
+	}
 	if (profile.sources.length !== 1 || profile.sources[0] !== "bundled") return false;
 	const reviewed = reviewedProfiles[profile.id];
 	if (!reviewed) return false;

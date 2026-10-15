@@ -125,7 +125,7 @@ test("extension registers tool renderers before session_start for resumed transc
 
 	await emit(pi, "model_select", {
 		cwd: process.cwd(),
-		model: { provider: "openai-codex", id: "gpt-5.5", input: ["text", "image"] },
+		model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5", input: ["text", "image"] },
 		modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.5" }] },
 	});
 	assert.equal(pi.tools.length, 3);
@@ -202,7 +202,7 @@ test("apply_patch follows model profiles without changing selected edit/write to
 
 	await emit(pi, "model_select", {
 		cwd: process.cwd(),
-		model: { provider: "openai", id: "gpt-5.5", input: ["text"] },
+		model: { provider: "openai", api: "openai-responses", id: "gpt-5.5", input: ["text"] },
 		modelRegistry: { getAll: () => [{ provider: "openai", id: "gpt-5.5", input: ["text"] }] },
 	});
 	assert.deepEqual(pi.activeTools, ["read", "edit", "write", "apply_patch", "web_search"]);
@@ -270,7 +270,7 @@ test("additionalModelIds enables apply_patch and web_search for an exact custom 
 
 	const ctx = {
 		cwd: process.cwd(),
-		model: { provider: "openai", id: "deepseek-v4-flash", input: ["text"] },
+		model: { provider: "openai", api: "openai-responses", id: "deepseek-v4-flash", input: ["text"] },
 		modelRegistry: { getAll: () => [{ provider: "openai", id: "deepseek-v4-flash", input: ["text"] }] },
 	};
 	await emit(pi, "model_select", ctx);

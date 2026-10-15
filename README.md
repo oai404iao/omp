@@ -12,7 +12,7 @@ Gitea remote is retained as a migration backup.
 
 ## Packages
 
-All seven pnpm workspace packages use the `@oai404iao` npm scope. Scope naming does
+All pnpm workspace packages use the `@oai404iao` npm scope. Scope naming does
 not change the private/public eligibility below.
 
 | Package manifest (checkout version) | Release track |
@@ -22,6 +22,7 @@ not change the private/public eligibility below.
 | [`@oai404iao/pi-telegram-notify`](pi-extensions/pi-telegram-notify/package.json) | guarded |
 | [`@oai404iao/pi-codex-runtime`](pi-extensions/pi-codex-runtime/package.json) | guarded |
 | [`@oai404iao/pi-codex-core`](pi-extensions/pi-codex-core/package.json) | guarded |
+| [`@oai404iao/pi-codex-tools`](pi-extensions/pi-codex-tools/package.json) | private / blocked |
 | [`@oai404iao/pi-codex-web-search`](pi-extensions/pi-codex-web-search/package.json) | guarded |
 | [`@oai404iao/pi-codex-imagegen`](pi-extensions/pi-codex-imagegen/package.json) | guarded |
 
@@ -32,6 +33,12 @@ The new packages' initial `latest` aliases do not make them stable; use explicit
 `@next` or exact alpha versions. Do not mix new capabilities with an old monolith.
 See [Codex composition](docs/codex-packages.md) for package boundaries and
 [bootstrap activation](docs/audits/codex-bootstrap-activation.md) for evidence and remaining gates.
+
+The new tools workspace consolidates patch/search/image implementations. Core
+alone no longer installs patch; load tools as well, or keep the compatibility
+bundle. Tools remains private/blocked: consumers' future release batches are
+intentionally blocked until separately authorized bootstrap and activation.
+Existing package eligibility and immutable registry artifacts are unchanged.
 
 `pi-subagent` now uses a breaking, asynchronous Codex multi-agent v2 runtime:
 seven plaintext tools, reusable agent trees and context-delivered mailboxes.

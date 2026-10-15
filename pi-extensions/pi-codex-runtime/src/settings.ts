@@ -15,6 +15,8 @@ export interface CodexGlobalSettings {
 	autoEnable: boolean;
 	webSocketEnabled: boolean;
 	fastMode: boolean;
+	applyPatch: boolean;
+	webSearch: boolean;
 	imageGeneration: boolean;
 	imageOutputDir: string;
 	imageModel: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1";
@@ -41,6 +43,8 @@ export const DEFAULT_GLOBAL_SETTINGS: Readonly<CodexGlobalSettings> = {
 	autoEnable: true,
 	webSocketEnabled: true,
 	fastMode: false,
+	applyPatch: true,
+	webSearch: true,
 	imageGeneration: true,
 	imageOutputDir: ".pi/openai-codex-images",
 	imageModel: "gpt-image-2",
@@ -206,6 +210,8 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		openaiTransport: openaiTransportSetting(raw),
 		openaiWebSocketPrewarm: boolSetting(raw, "openaiWebSocketPrewarm"),
 		fastMode: boolSetting(raw, "fastMode"),
+		applyPatch: boolSetting(raw, "applyPatch"),
+		webSearch: boolSetting(raw, "webSearch"),
 		compactionMode: compactionModeSetting(raw),
 		requestProfile: requestProfileSetting(raw),
 		apiKeyMode: boolSetting(raw, "apiKeyMode"),
