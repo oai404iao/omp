@@ -1,5 +1,33 @@
 # @oai404iao/pi-codex-core
 
+## 2.0.0
+
+### Major Changes
+
+- 9fe21e3: Require Pi 1.2.0; remove support for Pi 0.99.1. Upgrade the host Pi installation
+  before loading these packages; there is no older-SDK fallback.
+
+  Preserve strict child tool ceilings across MCP discovery and cold resumes,
+  handle custom-run startup and cancellation safely, suppress cancelled
+  notifications and custom-run Telegram delivery, and align Responses sampling
+  and core renderer padding with the new SDK contracts.
+- 5f0d0b4: Remove the redundant local image viewer and its configuration. Use Pi’s native read tool for local image inspection; retain image input and image generation.
+
+### Patch Changes
+
+- a80379d: Preserve selected native edit/write tools when apply_patch is active. Hide their
+  model-facing declarations through Pi's prepareLoadout API instead of physically
+  deactivating them, so tree navigation, reload and resume retain the user's tool
+  selection without in-memory restoration receipts. Keep prewarm and compaction
+  snapshots aligned with the owned patch projection; explicitly disabled tools
+  remain disabled.
+- d250a74: Use pnpm for development scripts and document frozen-lockfile installation.
+- Updated dependencies [9fe21e3]
+- Updated dependencies [a80379d]
+- Updated dependencies [d250a74]
+- Updated dependencies [5f0d0b4]
+  - @oai404iao/pi-codex-runtime@2.0.0
+
 ## 1.0.0
 
 ### Major Changes

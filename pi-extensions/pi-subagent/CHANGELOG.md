@@ -1,5 +1,19 @@
 # @oai404iao/pi-subagent
 
+## 1.2.0
+
+### Minor Changes
+
+- 168e366: Show semantic tool and streamed response previews, and a read-only paginated subagent transcript with live following and expandable tool output. Reuse Pi's native message components, built-in tool renderers and resident child renderer resolvers with structured display data. Simplify agent creation times, sample list execution durations on opening, and hide context snapshot timestamps.
+- 5a6819e: Add sticky per-agent execution selections, permanent subtree closure with retained audit, bounded lifecycle-aware listings and dashboards, and independent fork/clone tree context.
+- 9fe21e3: Require Pi 1.2.0; remove support for Pi 0.99.1. Upgrade the host Pi installation
+  before loading these packages; there is no older-SDK fallback.
+
+  Preserve strict child tool ceilings across MCP discovery and cold resumes,
+  handle custom-run startup and cancellation safely, suppress cancelled
+  notifications and custom-run Telegram delivery, and align Responses sampling
+  and core renderer padding with the new SDK contracts.
+
 ## 1.1.0
 
 ### Minor Changes
