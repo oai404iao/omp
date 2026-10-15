@@ -91,7 +91,6 @@ test("verified Codex tools enters guarded artifacts and targeted publication aft
   assert.equal(tools?.releaseStatus, "publishable");
   const manifest = readManifest(tools.directory);
   assert.equal(manifest.private, false);
-  assert.equal(manifest.version, "0.1.0-alpha.1");
   for (const entries of [publishableWorkspaces, artifactWorkspaces()]) {
     assert(entries.some(({ name }) => name === tools.name));
   }

@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-imagegen",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": false,
   "description": "Compatibility entry for Codex imagegen; implementation owned by pi-codex-tools",
   "type": "module",
@@ -44,7 +44,7 @@
     }
   },
   "dependencies": {
-    "@oai404iao/pi-codex-tools": "0.1.0-alpha.1"
+    "@oai404iao/pi-codex-tools": "0.1.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "1.2.0",

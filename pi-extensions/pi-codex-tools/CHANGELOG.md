@@ -1,5 +1,13 @@
 # @oai404iao/pi-codex-tools
 
+## 0.1.0
+
+### Patch Changes
+
+- Release the first non-prerelease Codex tools version, 0.1.0, with the verified
+  patch, web-search and standalone image-generation architecture. Preserve the
+  runtime-only dependency boundary and update consumers to exact stable pins.
+
 ## 0.1.0-alpha.1
 
 ### Minor Changes

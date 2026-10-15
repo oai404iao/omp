@@ -300,7 +300,7 @@ importers:
   pi-extensions/pi-codex-imagegen:
     dependencies:
       "@oai404iao/pi-codex-tools":
-        specifier: 0.1.0-alpha.1
+        specifier: 0.1.0
         version: link:../pi-codex-tools
     devDependencies:
       "@earendil-works/pi-ai":
@@ -333,7 +333,7 @@ importers:
         specifier: 3.0.0
         version: link:../pi-codex-runtime
       "@oai404iao/pi-codex-tools":
-        specifier: 0.1.0-alpha.1
+        specifier: 0.1.0
         version: link:../pi-codex-tools
     devDependencies:
       "@earendil-works/pi-ai":
@@ -410,7 +410,7 @@ importers:
   pi-extensions/pi-codex-web-search:
     dependencies:
       "@oai404iao/pi-codex-tools":
-        specifier: 0.1.0-alpha.1
+        specifier: 0.1.0
         version: link:../pi-codex-tools
     devDependencies:
       "@earendil-works/pi-ai":
@@ -462,7 +462,7 @@ importers:
         version: 7.0.2
     optionalDependencies:
       "@oai404iao/pi-codex-minimal-tools":
-        specifier: 5.1.0
+        specifier: 5.1.1
         version: link:../pi-codex-minimal-tools
   pi-extensions/pi-telegram-notify:
     devDependencies:

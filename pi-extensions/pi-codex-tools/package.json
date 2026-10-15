@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-tools",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0",
   "private": false,
   "description": "Codex patch, web search and image-generation tools for Pi",
   "type": "module",
