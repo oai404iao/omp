@@ -258,7 +258,7 @@ importers:
   pi-extensions/pi-codex-core:
     dependencies:
       "@oai404iao/pi-codex-runtime":
-        specifier: 1.0.0
+        specifier: 2.0.0
         version: link:../pi-codex-runtime
       https-proxy-agent:
         specifier: ^9.1.0
@@ -297,7 +297,7 @@ importers:
   pi-extensions/pi-codex-imagegen:
     dependencies:
       "@oai404iao/pi-codex-runtime":
-        specifier: 1.0.0
+        specifier: 2.0.0
         version: link:../pi-codex-runtime
       "@silvia-odwyer/photon-node":
         specifier: 0.3.4
@@ -327,16 +327,16 @@ importers:
   pi-extensions/pi-codex-minimal-tools:
     dependencies:
       "@oai404iao/pi-codex-core":
-        specifier: 1.0.0
+        specifier: 2.0.0
         version: link:../pi-codex-core
       "@oai404iao/pi-codex-imagegen":
-        specifier: 1.0.0
+        specifier: 2.0.0
         version: link:../pi-codex-imagegen
       "@oai404iao/pi-codex-runtime":
-        specifier: 1.0.0
+        specifier: 2.0.0
         version: link:../pi-codex-runtime
       "@oai404iao/pi-codex-web-search":
-        specifier: 0.5.0
+        specifier: 1.0.0
         version: link:../pi-codex-web-search
     devDependencies:
       "@earendil-works/pi-ai":
@@ -383,7 +383,7 @@ importers:
   pi-extensions/pi-codex-web-search:
     dependencies:
       "@oai404iao/pi-codex-runtime":
-        specifier: 1.0.0
+        specifier: 2.0.0
         version: link:../pi-codex-runtime
     devDependencies:
       "@earendil-works/pi-ai":
@@ -435,7 +435,7 @@ importers:
         version: 7.0.2
     optionalDependencies:
       "@oai404iao/pi-codex-minimal-tools":
-        specifier: 4.1.1
+        specifier: 5.0.0
         version: link:../pi-codex-minimal-tools
   pi-extensions/pi-telegram-notify:
     devDependencies:
