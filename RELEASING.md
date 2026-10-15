@@ -29,7 +29,7 @@ Its tests version temporary fixtures; actual alpha versions belong in a reviewed
 version PR, never in an unreviewed direct main update.
 
 The original preparation cohort was nine alpha packages. The current artifact
-selection contains seven publishable workspaces: external-thinking, keep-defaults,
+selection contains eight publishable workspaces: external-thinking, keep-defaults,
 tree-continue, and the unpublished Code Mode experiment have been removed.
 Historical release locks are retained, but removed packages must not enter
 new artifact batches.
@@ -135,13 +135,19 @@ it now for both initial public packages. For each additional new scoped package:
 5. Restrict traditional token publishing and revoke bootstrap credentials
    after OIDC has been verified.
 
-### Codex tools first publication
+### Codex tools first publication and activation
 
-The authorized tools first version remains `0.1.0-alpha.1`, with `private:false`
-and `releaseStatus:"bootstrap"`. This is not guarded-publisher activation.
-No existing version may be overwritten.
+Tools was manually bootstrapped at `0.1.0-alpha.1` from
+`b9deaba6ba07d87c048e474b2ddc977f3bd2b442`. Its public tarball, registry
+source/integrity, history/tags and trusted publisher were verified before this
+separate activation to `releaseStatus:"publishable"`; see
+[activation evidence](docs/audits/codex-tools-bootstrap-activation.md).
+No existing version may be overwritten. Tools now uses the normal targeted
+guarded workflow, not the local bootstrap command.
 
-Release the refactor in dependency order:
+The first-publication sequence below is retained as bootstrap procedure/history.
+Prerequisites through tools activation are complete; compatibility consumers
+still require separate dispatch, with minimal-tools last:
 
 1. Merge the reviewed prerequisite version PR and publish runtime, then core,
    using the existing targeted protected workflow (`package` set to each exact
@@ -232,7 +238,7 @@ Release eligibility is explicit in two places:
      artifacts.
 2. only `blocked` packages may set `"private": true`.
 
-CI rejects mismatches. The guarded release scripts select the seven publishable
+CI rejects mismatches. The guarded release scripts select the eight publishable
 workspaces, excluding removed external-thinking, keep-defaults, tree-continue,
 and Code Mode.
 The historical manual releases below remain locked; they are not a live registry
@@ -270,9 +276,18 @@ to that version and no other published version visible in registry history.
 This does not declare the alpha stable. A version-less install of a new package
 can resolve to that alpha; prefer explicit `@next` or exact versions.
 
+The separate tools activation adds only
+`@oai404iao/pi-codex-tools@0.1.0-alpha.1` from
+`b9deaba6ba07d87c048e474b2ddc977f3bd2b442`. Its exact verified history is
+`0.0.0-stage` plus `0.1.0-alpha.1`: npm generated the former as a `stub:true`
+[staged-publication placeholder](https://docs.npmjs.com/staged-publishing/).
+Only this exact tools identity/history may retain its initial `latest`/`next`
+alias. The historical four-package rule stays sole-version-only; no generic
+placeholder filtering or prerelease promotion is allowed.
+
 The guarded publisher accepts this alias only for an already-published
 `recover` candidate with matching reviewed release-lock gitHead/integrity.
-The dedicated activation now admits those four recovery nodes into guarded
+The dedicated activations admit those reviewed recovery nodes into guarded
 artifacts; generic bootstrap/private-package exclusion remains enforced.
 Missing/malformed history,
 missing locks, other packages, later versions or a wrong `next` still fail

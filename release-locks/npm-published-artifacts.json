@@ -37,6 +37,10 @@
     "@oai404iao/pi-telegram-notify@0.1.3": {
       "gitHead": "16dccb8953b717670c34fe978c79c07d592ca7e2",
       "integrity": "sha512-FoCgTMMq5WDT8SIYhp64keiqa2u7eWaxoMM2D4AJWLvWcFDruvPYmHjIuNRE6zBLreorF6v2pHaJttor8bM4GA=="
+    },
+    "@oai404iao/pi-codex-tools@0.1.0-alpha.1": {
+      "gitHead": "b9deaba6ba07d87c048e474b2ddc977f3bd2b442",
+      "integrity": "sha512-JVp6//UJsdANPVdEGDLeBLHn7CM/hfFsq0O0vR7BicrUBQHiBJL93ziPJAYdKD5BrlkAMvizsCgkgwwMkV2/pw=="
     }
   }
 }

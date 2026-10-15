@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { artifactWorkspaces, publishableWorkspaces, readManifest, workspaces } from "./workspaces.mjs";
+import { targetedReleaseWorkspaces } from "./targeted-release.mjs";
 
 test("targeted publication passes the same selection through protected verification and publication", () => {
   const workflow = parse(readFileSync(new URL("../.github/workflows/publish.yml", import.meta.url), "utf8"));
@@ -85,16 +86,21 @@ test("Codex minimal tools enters guarded artifacts after bootstrap activation", 
   assert(artifactWorkspaces(true).some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
 });
 
-test("new Codex tools permits local bootstrap only without activating guarded publication", () => {
+test("verified Codex tools enters guarded artifacts and targeted publication after activation", () => {
   const tools = workspaces.find(({ name }) => name === "@oai404iao/pi-codex-tools");
-  assert.equal(tools?.releaseStatus, "bootstrap");
+  assert.equal(tools?.releaseStatus, "publishable");
   const manifest = readManifest(tools.directory);
   assert.equal(manifest.private, false);
   assert.equal(manifest.version, "0.1.0-alpha.1");
   for (const entries of [publishableWorkspaces, artifactWorkspaces()]) {
-    assert(!entries.some(({ name }) => name === tools.name));
+    assert(entries.some(({ name }) => name === tools.name));
   }
   assert(artifactWorkspaces(true).some(({ name }) => name === tools.name));
+  assert.deepEqual(targetedReleaseWorkspaces(tools.name).map(entry => entry.name), [
+    "@oai404iao/pi-codex-runtime", tools.name,
+  ]);
+  assert.throws(() => targetedReleaseWorkspaces(tools.name, workspaces, entry => readManifest(entry.directory),
+    { bootstrapTarget: true }), /Unapproved/);
   for (const name of ["runtime", "core", "web-search", "imagegen"]) {
     assert.equal(workspaces.find(entry => entry.name === `@oai404iao/pi-codex-${name}`)?.releaseStatus, "publishable");
   }
