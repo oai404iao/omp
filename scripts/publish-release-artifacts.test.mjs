@@ -97,7 +97,15 @@ function isDelayed(kind, target, attempts) {
   fs.writeFileSync(process.env.FAKE_REGISTRY_STATE, JSON.stringify(state));
   return state[kind] <= Number(attempts);
 }
-if (args[0] === "publish") process.exit(args[1] === process.env.FAIL_PUBLISH_PATH ? 1 : 0);
+if (args[0] === "publish") {
+  if (process.env.npm_config_dry_run === "true" && !args.includes("--dry-run=false")) {
+    console.log("Publishing (dry-run)");
+    process.exit(0);
+  }
+  if (process.env.PUBLISH_STDOUT) console.log(process.env.PUBLISH_STDOUT);
+  if (process.env.PUBLISH_STDERR) console.error(process.env.PUBLISH_STDERR);
+  process.exit(args[1] === process.env.FAIL_PUBLISH_PATH ? 1 : 0);
+}
 if (args[0] !== "view") process.exit(1);
 if (args[2] === "version") {
   if (isDelayed("version", process.env.DELAY_VERSION_SPEC, process.env.DELAY_VERSION_ATTEMPTS)) {
@@ -134,6 +142,9 @@ if (args[2] === "version") {
       env: {
         ...process.env,
         RELEASE_PACKAGE: "",
+        npm_config_dry_run: options.inheritedDryRun ? "true" : "false",
+        PUBLISH_STDOUT: options.publishStdout ?? "",
+        PUBLISH_STDERR: options.publishStderr ?? "",
         PATH: `${binaryDirectory}:${process.env.PATH}`,
         CALL_LOG: callLog,
         FAKE_COMMIT: commit,
@@ -277,6 +288,21 @@ test("publisher reorders a shuffled batch and verifies dependency visibility bef
   assert.match(publish[0], /runtime\.tgz/);
   assert.match(publish[1], /bundle\.tgz/);
   assert.ok(calls.indexOf(`npm view ${runtime}@1.0.0`) < calls.indexOf(publish[1]));
+});
+
+test("authorized publication overrides inherited dry-run and retains npm's receipt", () => {
+  const value = { ...candidate("@fixture/receipt"), mode: "publish" };
+  const { process, result, calls } = runPublisher([value], undefined, {
+    inheritedDryRun: true,
+    publishStdout: "+ @fixture/receipt@1.0.0",
+    publishStderr: "npm notice Publishing with provenance",
+  });
+  assert.equal(process.status, 0, process.stderr);
+  assert.equal(result.ok, true);
+  assert.match(calls, /^npm publish .* --dry-run=false /m);
+  assert.match(process.stdout, /\+ @fixture\/receipt@1\.0\.0/);
+  assert.match(process.stderr, /npm notice Publishing with provenance/);
+  assert.doesNotMatch(process.stdout, /Publishing \(dry-run\)/);
 });
 
 test("publisher waits for fresh exact-version metadata without republishing", () => {

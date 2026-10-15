@@ -392,6 +392,12 @@ verification, and approval of the protected `npm-publish` environment.
 
 ## Recovery
 
+- The publisher explicitly disables inherited npm `dry-run` configuration and
+  retains npm's publish receipt in the job log. Exit zero still is not proof of
+  publication: registry version, source, integrity and dist-tag checks remain
+  authoritative. If a receipt reports success but readback stays absent, inspect
+  npm's output and current registry state before starting another attempt; do
+  not turn a readback failure into an automatic second publish.
 - Never overwrite an npm version.
 - After a successful `npm publish`, only the read-side registry checks are
   retried. Exact-version metadata and dist-tags use cache-revalidating
