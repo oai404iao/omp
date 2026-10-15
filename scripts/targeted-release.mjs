@@ -5,12 +5,14 @@ import { assertLockedPublishedArtifact, existingTagCommit } from "./release-util
 import { readManifest, root, workspaces } from "./workspaces.mjs";
 
 /** Select only the target and its complete runtime/optional workspace closure. */
-export function targetedReleaseWorkspaces(requestedPackage, entries = workspaces, manifestFor = e => readManifest(e.directory)) {
+export function targetedReleaseWorkspaces(requestedPackage, entries = workspaces, manifestFor = e => readManifest(e.directory),
+  { bootstrapTarget = false } = {}) {
   const selected = new Map();
   function visit(name) {
     if (selected.has(name)) return;
     const entry = entries.find(entry => entry.name === name);
-    if (!entry || entry.releaseStatus !== "publishable") throw new Error(`Unapproved release target or dependency: ${name}`);
+    const expectedStatus = bootstrapTarget && name === requestedPackage ? "bootstrap" : "publishable";
+    if (!entry || entry.releaseStatus !== expectedStatus) throw new Error(`Unapproved release target or dependency: ${name}`);
     const manifest = manifestFor(entry);
     if (manifest.private || manifest.name !== name) throw new Error(`Invalid release workspace identity: ${name}`);
     selected.set(name, entry);

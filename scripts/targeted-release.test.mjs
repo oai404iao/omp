@@ -29,7 +29,8 @@ function fixture(t, options = {}) {
     if (short === "bundle") manifests[short].dependencies = { [names.runtime]: "1.0.0" };
     writeFileSync(join(directory, short, "package.json"), JSON.stringify(manifests[short]));
     writeFileSync(join(directory, short, "index.js"), "export const original = true;\n");
-    return { name, directory: short, releaseStatus: options.blocked === short ? "blocked" : "publishable" };
+    return { name, directory: short, releaseStatus: options.blocked === short ? "blocked"
+      : options.bootstrap === short ? "bootstrap" : "publishable" };
   });
   writeFileSync(join(scripts, "workspaces.mjs"), `
     import { readFileSync } from "node:fs";
@@ -61,6 +62,21 @@ if (args[0] === "publish") {
 } else { console.error("Unexpected npm request"); process.exit(99); }
 `);
   chmodSync(join(bin, "npm"), 0o755);
+  if (options.bootstrap) {
+    const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(join(bin, "git"), `#!/usr/bin/env node
+const cp = require("node:child_process"), fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "fetch" && args.includes("https://github.com/oai404iao/omp.git")) {
+  const path = cp.execFileSync(${JSON.stringify(realGit)}, ["rev-parse", "--git-path", "FETCH_HEAD"], { encoding: "utf8" }).trim();
+  fs.writeFileSync(path, process.env.FIXTURE_PUBLIC_HEAD + "\\n");
+} else {
+  const result = cp.spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
+  process.exit(result.status ?? 1);
+}
+`);
+    chmodSync(join(bin, "git"), 0o755);
+  }
   function git(...args) {
     const child = spawnSync("git", args, { cwd: directory, encoding: "utf8" });
     assert.equal(child.status, 0, child.stderr);
@@ -99,7 +115,7 @@ if (args[0] === "publish") {
   function saveRegistry() { writeFileSync(registryPath, JSON.stringify(registry)); }
   saveRegistry();
   const env = { ...process.env, GITHUB_SHA: head, RELEASE_PACKAGE: names.target, PATH: `${bin}:${process.env.PATH}`,
-    CALL_LOG: join(directory, "calls.log"), FIXTURE_REGISTRY: registryPath };
+    CALL_LOG: join(directory, "calls.log"), FIXTURE_REGISTRY: registryPath, FIXTURE_PUBLIC_HEAD: head };
   function run(script, args = [], extraEnv = {}) {
     return spawnSync(process.execPath, [join(scripts, script), ...args], {
       cwd: directory, encoding: "utf8", timeout: 30000, env: { ...env, ...extraEnv },
@@ -149,6 +165,38 @@ test("target recovery still checks its own payload and never recovers dependency
   assert.doesNotMatch(f.calls(), /npm publish/);
   assert.equal(f.git("tag"), `${names.target}@1.0.0`);
 });
+
+test("targeted bootstrap packs only its target and verifies immutable published dependencies", t => {
+  const f = fixture(t, { bootstrap: "target" });
+  const prepared = f.prepare(["--include-bootstrap"], { GITHUB_ACTIONS: "false" });
+  assert.equal(prepared.status, 0, prepared.stderr);
+  assert.deepEqual(f.release().candidates.map(candidate => [candidate.name, candidate.mode]), [
+    [names.runtime, "verify"], [names.bundle, "verify"], [names.target, "publish"],
+  ]);
+  assert.equal(f.release().candidates.at(-1).sourceCommit, f.head);
+  assert.doesNotMatch(f.calls(), /@fixture\/unrelated|npm publish/);
+  const published = f.publish();
+  assert.notEqual(published.status, 0, "guarded publication cannot activate a bootstrap target");
+  assert.doesNotMatch(f.calls(), /npm publish/);
+});
+
+for (const failure of ["actions", "unreviewed-source", "missing-dependency", "ordinary-target"]) {
+  test(`targeted bootstrap rejects ${failure}`, t => {
+    const f = fixture(t, failure === "ordinary-target" ? {} : { bootstrap: "target" });
+    if (failure === "missing-dependency") {
+      delete f.registry[`${names.runtime}@1.0.0`];
+      f.saveRegistry();
+    }
+    const prepared = f.prepare(["--include-bootstrap"], {
+      GITHUB_ACTIONS: failure === "actions" ? "true" : "false",
+      ...(failure === "unreviewed-source" ? { FIXTURE_PUBLIC_HEAD: f.source } : {}),
+    });
+    assert.notEqual(prepared.status, 0);
+    assert.match(prepared.stderr, /not GitHub Actions|not reachable|must already be published|Unapproved/);
+    assert.equal(existsSync(f.artifact), false);
+    assert.doesNotMatch(f.calls(), /npm publish/);
+  });
+}
 
 for (const targeted of [true, false]) {
   test(`${targeted ? "targeted" : "full-batch"} recovery retains tarball-facing drift rejection`, t => {
@@ -236,7 +284,12 @@ test("closure selection retains exact pins, eligibility, cycles and private-work
   delete manifests.dependency.private;
   entries[1].releaseStatus = "bootstrap";
   assert.throws(() => targetedReleaseWorkspaces("target", entries, manifestFor), /Unapproved/);
+  entries[0].releaseStatus = "bootstrap";
+  assert.throws(() => targetedReleaseWorkspaces("target", entries, manifestFor, { bootstrapTarget: true }), /Unapproved/);
   entries[1].releaseStatus = "publishable";
+  assert.deepEqual(targetedReleaseWorkspaces("target", entries, manifestFor, { bootstrapTarget: true }).map(e => e.name), ["dependency", "target"]);
+  assert.throws(() => targetedReleaseWorkspaces("target", entries, manifestFor), /Unapproved/);
+  entries[0].releaseStatus = "publishable";
   manifests.dependency.dependencies = { target: "1.0.0" };
   assert.throws(() => targetedReleaseWorkspaces("target", entries, manifestFor), /cycle/);
   assert.throws(() => validateReleaseBatch([{ name: "target", directory: "target", version: "1.0.0", mode: "verify" }],

@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-imagegen",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": false,
   "description": "Compatibility entry for Codex imagegen; implementation owned by pi-codex-tools",
   "type": "module",

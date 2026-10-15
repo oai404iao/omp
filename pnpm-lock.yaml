@@ -261,7 +261,7 @@ importers:
   pi-extensions/pi-codex-core:
     dependencies:
       "@oai404iao/pi-codex-runtime":
-        specifier: 2.0.0
+        specifier: 3.0.0
         version: link:../pi-codex-runtime
       https-proxy-agent:
         specifier: ^9.1.0
@@ -327,10 +327,10 @@ importers:
   pi-extensions/pi-codex-minimal-tools:
     dependencies:
       "@oai404iao/pi-codex-core":
-        specifier: 2.0.0
+        specifier: 3.0.0
         version: link:../pi-codex-core
       "@oai404iao/pi-codex-runtime":
-        specifier: 2.0.0
+        specifier: 3.0.0
         version: link:../pi-codex-runtime
       "@oai404iao/pi-codex-tools":
         specifier: 0.1.0-alpha.1
@@ -380,7 +380,7 @@ importers:
   pi-extensions/pi-codex-tools:
     dependencies:
       "@oai404iao/pi-codex-runtime":
-        specifier: 2.0.0
+        specifier: 3.0.0
         version: link:../pi-codex-runtime
       "@silvia-odwyer/photon-node":
         specifier: 0.3.4
@@ -462,7 +462,7 @@ importers:
         version: 7.0.2
     optionalDependencies:
       "@oai404iao/pi-codex-minimal-tools":
-        specifier: 5.0.0
+        specifier: 5.1.0
         version: link:../pi-codex-minimal-tools
   pi-extensions/pi-telegram-notify:
     devDependencies:
