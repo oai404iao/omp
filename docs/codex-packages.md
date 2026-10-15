@@ -232,11 +232,14 @@ paths, exact declared dependencies and forbidden optional/peer package edges.
 
 ## Release status
 
-The newly consolidated tools workspace is private/`blocked`, not activated
-for publication by this refactor. Existing package eligibility and immutable
-release locks are unchanged. The guarded dependency check intentionally refuses
-consumer release batches until separately authorized tools bootstrap/activation;
-local tarball/loader verification still covers the package.
+The newly consolidated tools workspace is public/`bootstrap` for an authorized
+manual first publication, not activated for guarded publication. Existing package
+eligibility and immutable release locks are unchanged. Publish runtime and core
+prerequisites first, then bootstrap tools locally, then activate it in a separate
+reviewed change after verifying registry identity/integrity and trusted publishing.
+Only afterward publish compatibility consumers; minimal-tools stays last.
+The guarded dependency check intentionally refuses consumer release batches until
+that activation. See [release preparation](../RELEASING.md#codex-tools-first-publication).
 
 The four previously introduced packages are non-private on the guarded `publishable` track.
 Their already-published versions are recovery nodes, pinned by source and SHA-512

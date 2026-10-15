@@ -11,7 +11,7 @@ Run commands from the repository root unless stated otherwise.
 
 - Use Node.js >=22.19.0 and the pinned pnpm 12.4.1 (`package.json`).
 - Install with `pnpm install --frozen-lockfile --ignore-scripts`.
-- `pnpm-workspace.yaml` defines the release workspaces and blocked new tools workspace. The root
+- `pnpm-workspace.yaml` defines the release workspaces, including tools on its local bootstrap track. The root
   `pnpm-lock.yaml` is the only project lockfile; do not add npm or per-package locks.
 - `pi-extensions/pi-local-notify/` is private and outside the release workspace.
   Its checks use root-installed tooling; do not add it to publication batches.
@@ -96,6 +96,7 @@ Notification behavior and configuration are documented in each notifier's README
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the owning package's evidence.
 - Never add real Telegram configuration, provider credentials or private endpoints.
   Local edits do not authorize installing extensions or changing Pi/tmux settings.
-- The new tools package remains private/blocked. Its consumers cannot enter a
-  release batch until separately authorized bootstrap/activation work; do not
-  bypass the release dependency guard.
+- Tools is public/bootstrap for its authorized manual first publication only,
+  not activated for guarded publication. Publish runtime/core prerequisites
+  first; tools bootstrap and immutable registry verification precede consumer
+  publication. Keep minimal-tools publication last; never bypass dependency guards.

@@ -85,15 +85,16 @@ test("Codex minimal tools enters guarded artifacts after bootstrap activation", 
   assert(artifactWorkspaces(true).some(({ name }) => name === "@oai404iao/pi-codex-minimal-tools"));
 });
 
-test("new Codex tools stays private and blocked without changing existing release eligibility", () => {
+test("new Codex tools permits local bootstrap only without activating guarded publication", () => {
   const tools = workspaces.find(({ name }) => name === "@oai404iao/pi-codex-tools");
-  assert.equal(tools?.releaseStatus, "blocked");
+  assert.equal(tools?.releaseStatus, "bootstrap");
   const manifest = readManifest(tools.directory);
-  assert.equal(manifest.private, true);
+  assert.equal(manifest.private, false);
   assert.equal(manifest.version, "0.1.0-alpha.1");
-  for (const entries of [publishableWorkspaces, artifactWorkspaces(), artifactWorkspaces(true)]) {
+  for (const entries of [publishableWorkspaces, artifactWorkspaces()]) {
     assert(!entries.some(({ name }) => name === tools.name));
   }
+  assert(artifactWorkspaces(true).some(({ name }) => name === tools.name));
   for (const name of ["runtime", "core", "web-search", "imagegen"]) {
     assert.equal(workspaces.find(entry => entry.name === `@oai404iao/pi-codex-${name}`)?.releaseStatus, "publishable");
   }

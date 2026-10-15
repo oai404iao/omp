@@ -135,6 +135,59 @@ it now for both initial public packages. For each additional new scoped package:
 5. Restrict traditional token publishing and revoke bootstrap credentials
    after OIDC has been verified.
 
+### Codex tools first publication
+
+The authorized tools first version remains `0.1.0-alpha.1`, with `private:false`
+and `releaseStatus:"bootstrap"`. This is not guarded-publisher activation.
+No existing version may be overwritten.
+
+Release the refactor in dependency order:
+
+1. Merge the reviewed prerequisite version PR and publish runtime, then core,
+   using the existing targeted protected workflow (`package` set to each exact
+   scoped name). Version PRs synchronize exact consumer pins and required version
+   bumps; that does not authorize publishing consumers early. Keep unrelated
+   Telegram changesets deferred. Do not merge a competing broad version PR.
+2. After the exact runtime dependency is visible on npm, prepare **only tools**
+   from a clean reviewed public-main commit:
+
+   ```sh
+   RELEASE_PACKAGE=@oai404iao/pi-codex-tools pnpm run release:bootstrap-artifacts
+   ```
+
+   The local bootstrap selector requires a bootstrap target, a complete
+   published/publishable dependency closure, exact pins and public-main ancestry.
+   Dependency candidates use verification-only mode; only tools gets a tarball.
+   Missing prerequisites stop preparation. GitHub Actions and the guarded
+   publisher cannot bootstrap tools.
+3. The maintainer publishes the named tools tarball with interactive 2FA,
+   `--access public --tag next --registry https://registry.npmjs.org/`.
+   Do not publish from the source directory or run the full-batch publisher.
+   Read back version, `gitHead`, SHA-512 integrity, version history and tags
+   against the prepared manifest before recording any immutable lock.
+4. Configure tools' trusted publisher. Prepare a separate reviewed activation
+   change with the observed immutable source/integrity. If npm assigns its
+   mandatory initial `latest` alias as well as `next`, record a narrow exact
+   tools-version/source exception after verification; the historical four-package
+   exception does not cover tools. Do not delete or overwrite historical locks.
+5. Publish the web-search/imagegen compatibility consumers only after tools is
+   published and activated. Publish minimal-tools last, through its reviewed
+   release PR/protected workflow, followed by affected optional consumers.
+
+To retain tools' still-unpublished initial version while preparing prerequisite
+versions, use the canonical wrapper:
+
+```sh
+pnpm run changeset:version --preserve-bootstrap-version @oai404iao/pi-codex-tools
+```
+
+This explicit option checks bootstrap eligibility, absence from the immutable
+lock and public registry **before writes**. It runs normal Changesets, preserves
+only that validated initial version, and still repairs exact pins and requires
+all other consumer bumps. It is refused once the version exists on npm. Normal
+versioning behavior is unchanged. Pending changesets unrelated to this release
+must be deferred/restored as in the targeted release guidance below.
+
 For a workspace on the `bootstrap` track:
 
 1. Fetch public `main`, then check out a clean commit reachable from it (use

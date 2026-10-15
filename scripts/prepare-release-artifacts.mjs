@@ -31,8 +31,9 @@ for (let index = 0; index < arguments_.length; index += 1) {
     requestedPackage = value;
   } else throw new Error("usage: prepare-release-artifacts.mjs [--include-bootstrap] [--package <name>]");
 }
-if (requestedPackage && includeBootstrap) throw new Error("targeted releases cannot include bootstrap artifacts");
-const selectedWorkspaces = requestedPackage ? targetedReleaseWorkspaces(requestedPackage) : artifactWorkspaces(includeBootstrap);
+const selectedWorkspaces = requestedPackage
+  ? targetedReleaseWorkspaces(requestedPackage, undefined, undefined, { bootstrapTarget: includeBootstrap })
+  : artifactWorkspaces(includeBootstrap);
 assertReleaseDependencies(selectedWorkspaces);
 const orderedWorkspaces = orderReleaseWorkspaces(selectedWorkspaces);
 if (includeBootstrap && process.env.GITHUB_ACTIONS === "true") {

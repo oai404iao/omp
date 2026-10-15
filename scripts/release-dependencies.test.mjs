@@ -35,7 +35,7 @@ test("the compatibility bundle cannot exclude its activated dependencies", () =>
 
 test("the four verified Codex packages enter guarded batches", () => {
   const names = ["runtime", "core", "web-search", "imagegen"].map(name => `@oai404iao/pi-codex-${name}`);
-  assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap"), []);
+  assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap").map(e => e.name), ["@oai404iao/pi-codex-tools"]);
   for (const name of names) {
     const entry = workspaces.find(e => e.name === name);
     assert.equal(entry.releaseStatus, "publishable");
@@ -44,12 +44,11 @@ test("the four verified Codex packages enter guarded batches", () => {
     assert.ok(artifactWorkspaces(true).some(e => e.name === name));
   }
   assert.equal(artifactWorkspaces().length, 7);
-  assert.deepEqual(artifactWorkspaces(), artifactWorkspaces(true));
   const tools = workspaces.find(e => e.name === "@oai404iao/pi-codex-tools");
-  assert.equal(tools.releaseStatus, "blocked");
-  assert.equal(readManifest(tools.directory).private, true);
-  assert.throws(() => assertReleaseDependencies(artifactWorkspaces()), /unpublished workspace dependency:.*pi-codex-tools/);
-  assert.throws(() => assertReleaseDependencies(artifactWorkspaces(true)), /unpublished workspace dependency:.*pi-codex-tools/);
+  assert.equal(tools.releaseStatus, "bootstrap");
+  assert.equal(readManifest(tools.directory).private, false);
+  assert.throws(() => assertReleaseDependencies(artifactWorkspaces()), /outside this artifact batch:.*pi-codex-tools/);
+  assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces(true)));
 });
 
 test("artifact order includes recovery/optional dependencies and is independent of input order", () => {

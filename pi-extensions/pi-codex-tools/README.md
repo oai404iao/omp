@@ -6,7 +6,9 @@ dependency is `pi-codex-runtime`; it does not install the Responses engine.
 Pi 1.2.0 is the supported floor and development target.
 
 Install with `pi install /absolute/path/to/omp/pi-extensions/pi-codex-tools`
-for local testing. This initial private workspace is not publication authorization.
+for local testing. This initial workspace is approved only for manual bootstrap;
+it is not activated for guarded automated publication. See the
+[first-publication sequence](../../RELEASING.md#codex-tools-first-publication).
 
 ## Composition
 
