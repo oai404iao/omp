@@ -13,14 +13,15 @@ import { closeProviderWebSocketSessions } from "../providers/openai-codex/websoc
 import type { ProviderPresentation } from "@oai404iao/pi-codex-runtime/internal/extension/provider-presentation";
 import { createStartupPrewarmLifecycle } from "./startup-prewarm.js";
 import { loadSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
+import type { ToolProtocolSnapshot } from "@oai404iao/pi-codex-runtime/internal/broker";
 
 export function registerResponsesProviderRuntime(
 	pi: ExtensionAPI,
-	options: { getCurrentCwd: () => string; ownsNativeTool?: OpenAIResponsesProviderController["ownsNativeTool"] },
+	options: { getCurrentCwd: () => string; ownsNativeTool?: OpenAIResponsesProviderController["ownsNativeTool"]; getToolProtocols?: ToolProtocolSnapshot },
 	presentation?: ProviderPresentation,
 ): OpenAIResponsesProviderController {
 	installCodexIdentityLifecycle(pi);
-	const prewarm = createStartupPrewarmLifecycle(pi, options.ownsNativeTool);
+	const prewarm = createStartupPrewarmLifecycle(pi, options.ownsNativeTool, options.getToolProtocols);
 	let selectedModel: Model<Api> | undefined;
 	const streamSimple = <TApi extends Api>(model: Model<TApi>, context: TranscriptContext, streamOptions?: SimpleStreamOptions) => {
 		const settings = loadModelSettings(model, options.getCurrentCwd());
@@ -39,6 +40,7 @@ export function registerResponsesProviderRuntime(
 		return createCodexStream(model, projectCodexTranscript(context), streamOptions, {
 			configuredModel: selectedModel?.provider === model.provider && selectedModel?.id === model.id ? selectedModel : model,
 			ownsNativeTool: options.ownsNativeTool,
+			getToolProtocols: options.getToolProtocols,
 			...presentation?.streamEffects(),
 			getCurrentCwd: options.getCurrentCwd,
 			getCurrentTurnId: (sessionId) => currentCodexTurn(sessionId)?.turnId,
@@ -98,6 +100,7 @@ export function registerResponsesProviderRuntime(
 
 	return {
 		ownsNativeTool: options.ownsNativeTool,
+		getToolProtocols: options.getToolProtocols,
 		getCurrentTurnId(sessionId) {
 			return currentCodexTurn(sessionId)?.turnId;
 		},

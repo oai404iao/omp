@@ -40,7 +40,7 @@ for (const id of ["gpt-6-sol", "gpt-6-luna"]) {
 			const declarations = body.input[0] as any;
 			assert.equal(declarations.type, "additional_tools");
 			assert.deepEqual(declarations.tools.map((tool: any) => tool.name), ["functions", "web", "image_gen"]);
-			assert.equal(declarations.tools[0].tools[0].type, "custom");
+			assert.equal(declarations.tools[0].tools[0].type, "function");
 			assert.equal((body.input[1] as any).role, "developer");
 		}
 		assert.equal(loadModelSettings({ ...model, provider: "openai", api: "openai-responses" }, cwd).requestProfile.responsesMode, "standard");

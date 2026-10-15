@@ -9,6 +9,7 @@ import {
 	createAssistantMessageEventStream, getCurrentTools, InMemoryCredentialStore, type AssistantMessage,
 } from "@earendil-works/pi-ai";
 import core from "@oai404iao/pi-codex-core";
+import tools from "@oai404iao/pi-codex-tools";
 import web from "@oai404iao/pi-codex-web-search";
 import {
 	createCompositionHost, withCompositionDirectory, writeCompositionConfig,
@@ -21,6 +22,7 @@ for (const source of ["sdk", "builtin", "foreign"]) for (const bound of [false, 
 			const pi = host.api();
 			try {
 				core(pi);
+				tools(host.api());
 				if (bound) await host.emit("session_start");
 				const original = host.tools.get("apply_patch");
 				host.tools.set("apply_patch", { ...original,
@@ -58,10 +60,11 @@ test("replacing an active Codex patch does not change native tool selection", ()
 		const host = createCompositionHost(directory);
 		try {
 			core(host.api());
+			tools(host.api());
 			await host.emit("session_start");
 			assert(host.active().includes("apply_patch"));
-		assert(host.active().includes("edit"));
-		assert(host.active().includes("write"));
+			assert(host.active().includes("edit"));
+			assert(host.active().includes("write"));
 			const original = host.tools.get("apply_patch");
 			host.tools.set("apply_patch", { ...original,
 				sourceInfo: { path: "<foreign:apply_patch>", source: "foreign", scope: "temporary", origin: "top-level" } });
@@ -77,7 +80,7 @@ test("real Pi loader registers direct patch/search before action methods are bou
 		const settingsManager = SettingsManager.inMemory({ retry: { enabled: false } });
 		const loader = new DefaultResourceLoader({
 			cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true, noThemes: true,
-			noPromptTemplates: true, noContextFiles: true, extensionFactories: [core, web],
+			noPromptTemplates: true, noContextFiles: true, extensionFactories: [core, tools],
 		});
 		await loader.reload();
 		assert.deepEqual(loader.getExtensions().errors, []);
@@ -110,6 +113,7 @@ test("Codex patch/search remain direct tools with no private Code Mode bus", () 
 		const host = createCompositionHost(directory);
 		try {
 			core(host.api());
+			tools(host.api());
 			web(host.api());
 			assert(host.tools.has("apply_patch"));
 			assert(host.tools.has("web_search"));
@@ -123,7 +127,7 @@ test("Codex shutdown does not rewrite native tool selection", () =>
 		const pi = host.api();
 		try {
 			core(pi);
-			web(host.api());
+			tools(host.api());
 			await host.emit("session_start");
 			const selected = host.active();
 			pi.setActiveTools = () => { throw new Error("shutdown must not change tools"); };
@@ -157,7 +161,7 @@ for (const native of [["edit", "write"], ["edit"], []]) {
 			const open = async (restore = false) => {
 				const loader = new DefaultResourceLoader({
 					cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true,
-					noThemes: true, noPromptTemplates: true, noContextFiles: true, extensionFactories: [core],
+					noThemes: true, noPromptTemplates: true, noContextFiles: true, extensionFactories: [core, tools],
 				});
 				await loader.reload();
 				assert.deepEqual(loader.getExtensions().errors, []);

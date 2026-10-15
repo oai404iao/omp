@@ -75,8 +75,12 @@ policy; no endpoint is inferred merely from the declaration.
   optional Codex telemetry fields.
 - Configured residency/auth headers are passed through. Their presence and
   validity belong to Pi/provider authentication, not guessed token claims.
-- Preserve `codexRequestExtensions:false` as an explicit opt-out; Lite/native
-  compaction still fail closed when that switch makes their protocol unavailable.
+- Preserve `codexRequestExtensions:false` as an explicit opt-out from optional
+  Codex identity, headers and request metadata. It does not disable Lite or
+  native compaction: their mandatory format, transport and capability signals
+  remain when those independent capabilities are selected and supported.
+  Endpoint mode/transport allowlists and explicit unsupported responses remain
+  authoritative, without changing Pi authentication, endpoint or identity.
 
 ## Source evidence
 

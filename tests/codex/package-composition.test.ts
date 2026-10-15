@@ -4,27 +4,31 @@ import { dirname } from "node:path";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import core from "@oai404iao/pi-codex-core";
+import tools from "@oai404iao/pi-codex-tools";
 import { buildRequestBody } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/request-body";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import web from "@oai404iao/pi-codex-web-search";
 import image from "@oai404iao/pi-codex-imagegen";
-import { getOpenAICodexLatestImagePath } from "@oai404iao/pi-codex-imagegen/internal/tools/image-generation/storage";
+import { getOpenAICodexLatestImagePath } from "@oai404iao/pi-codex-tools/internal/tools/image-generation/storage";
 import { CODEX_BROKER_CHANNEL, getCodexBroker } from "@oai404iao/pi-codex-runtime";
 import bundle from "@oai404iao/pi-codex-minimal-tools";
+import { snapshotOwnedToolProtocols } from "@oai404iao/pi-codex-runtime/internal/tool-activation";
 import {
 	compositionModel, createCompositionHost, withCompositionDirectory, writeCompositionConfig,
 } from "./support/composition-host.js";
 
 const cases = [
 	{ name: "bundle", factories: [bundle], tools: ["apply_patch", "image_generation", "web_search"], core: true },
-	{ name: "core", factories: [core], tools: ["apply_patch"], core: true },
+	{ name: "core", factories: [core], tools: [], core: true },
+	{ name: "tools", factories: [tools], tools: ["apply_patch", "image_generation", "web_search"], core: false },
+	{ name: "core+tools", factories: [core, tools], tools: ["apply_patch", "image_generation", "web_search"], core: true },
 	{ name: "web", factories: [web], tools: ["web_search"], core: false },
 	{ name: "image", factories: [image], tools: ["image_generation"], core: false },
-	{ name: "core+web", factories: [core, web], tools: ["apply_patch", "web_search"], core: true },
-	{ name: "core+image", factories: [core, image], tools: ["apply_patch", "image_generation"], core: true },
+	{ name: "core+web", factories: [core, web], tools: ["web_search"], core: true },
+	{ name: "core+image", factories: [core, image], tools: ["image_generation"], core: true },
 	{ name: "web+image", factories: [web, image], tools: ["image_generation", "web_search"], core: false },
-	{ name: "all", factories: [core, web, image], tools: ["apply_patch", "image_generation", "web_search"], core: true },
-	{ name: "bundle+capabilities", factories: [bundle, core, web, image, bundle], tools: ["apply_patch", "image_generation", "web_search"], core: true },
+	{ name: "compatibility entries", factories: [core, web, image], tools: ["image_generation", "web_search"], core: true },
+	{ name: "bundle+capabilities", factories: [bundle, core, tools, web, image, bundle], tools: ["apply_patch", "image_generation", "web_search"], core: true },
 ];
 
 for (const scenario of cases) {
@@ -37,7 +41,10 @@ for (const scenario of cases) {
 					assert.deepEqual([...host.tools.keys()].sort(), scenario.tools);
 					assert.equal(host.providers.size, scenario.core ? 2 : 0);
 					await host.emit("session_start");
-					for (const name of scenario.tools) assert.ok(host.active().includes(name), `${name} should activate`);
+					for (const name of scenario.tools) {
+						assert.equal(host.active().includes(name), name !== "apply_patch" || scenario.core,
+							`${name} requires its declared execution capability`);
+					}
 					assert.ok(host.active().includes("unrelated"));
 					assert(host.active().includes("edit"));
 					assert(host.active().includes("write"));
@@ -50,6 +57,126 @@ for (const scenario of cases) {
 			}));
 	}
 }
+
+for (const applyPatch of [false, true]) for (const webSearch of [false, true]) for (const imageGeneration of [false, true]) {
+	test(`tools-only gates are independent: ${JSON.stringify({ applyPatch, webSearch, imageGeneration })}`, () =>
+		withCompositionDirectory(async directory => {
+			writeCompositionConfig(directory, { applyPatch, webSearch, imageGeneration });
+			const host = createCompositionHost(directory);
+			try {
+				tools(host.api()); web(host.api()); image(host.api()); tools(host.api());
+				const expected = [
+					...(applyPatch ? ["apply_patch"] : []),
+					...(imageGeneration ? ["image_generation"] : []),
+					...(webSearch ? ["web_search"] : []),
+				];
+				assert.deepEqual([...host.tools.keys()].sort(), expected);
+				assert.equal(host.providers.size, 0);
+				assert.equal(host.commands.has("image-gen"), imageGeneration);
+				assert.equal(host.renderers.has("codex-image-generation-display"), imageGeneration);
+				assert.equal(host.renderers.has("codex-web-search-activity"), webSearch);
+				const broker = getCodexBroker(host.api());
+				assert.deepEqual([...broker.ownedTools.keys()].sort(), expected);
+				await host.emit("session_start");
+				assert.equal(host.active().includes("apply_patch"), false, "custom patch needs an actual engine");
+				assert.equal(host.active().includes("web_search"), webSearch);
+				assert.equal(host.active().includes("image_generation"), imageGeneration);
+			} finally { await host.emit("session_shutdown"); host.dispose(); }
+		}));
+}
+
+test("custom patch needs an engine supporting the actual model, not a core installation flag", () =>
+	withCompositionDirectory(async directory => {
+		const host = createCompositionHost(directory);
+		try {
+			tools(host.api());
+			const broker = getCodexBroker(host.api());
+			broker.coreEnabled = true;
+			await host.emit("session_start");
+			assert(!host.active().includes("apply_patch"));
+			const input = { input: "*** Begin Patch\n*** Add File: forbidden.txt\n+no\n*** End Patch" };
+			await assert.rejects(host.tools.get("apply_patch").execute("patch", input, undefined, undefined, host.ctx),
+				/requires pi-codex-core with a compatible Responses engine/);
+			assert.equal(existsSync(`${directory}/forbidden.txt`), false);
+			core(host.api());
+			host.ctx.model.api = "anthropic-messages";
+			await host.emit("model_select");
+			assert(!host.active().includes("apply_patch"));
+			assert.equal(broker.engine!.supports(host.ctx.model), false);
+			await assert.rejects(host.tools.get("apply_patch").execute("patch", input, undefined, undefined, host.ctx),
+				/requires pi-codex-core with a compatible Responses engine/);
+			host.ctx.model = compositionModel();
+			await host.emit("model_select");
+			assert(host.active().includes("apply_patch"));
+		} finally { await host.emit("session_shutdown"); host.dispose(); }
+	}));
+
+test("tools-only explicitly configured function patch executes without a Responses provider", () =>
+	withCompositionDirectory(async directory => {
+		writeCompositionConfig(directory, { additionalModelIds: ["custom/fixture"] });
+		const host = createCompositionHost(directory);
+		try {
+			tools(host.api());
+			host.ctx.model = compositionModel("fixture", "custom");
+			await host.emit("session_start");
+			assert(host.active().includes("apply_patch"));
+			assert.equal(host.providers.size, 0);
+			await host.tools.get("apply_patch").execute("patch", {
+				input: "*** Begin Patch\n*** Add File: independent.txt\n+fixture\n*** End Patch",
+			}, undefined, undefined, host.ctx);
+			assert(existsSync(`${directory}/independent.txt`));
+		} finally { await host.emit("session_shutdown"); host.dispose(); }
+	}));
+
+test("tools-only standalone search and images execute without registering Responses", t =>
+	withCompositionDirectory(async directory => {
+		const host = createCompositionHost(directory);
+		host.ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: true, apiKey: "fixture-only" });
+		const requests: string[] = [];
+		t.mock.method(globalThis, "fetch", async (url: unknown) => {
+			requests.push(String(url));
+			if (String(url).endsWith("/alpha/search")) return Response.json({ output: "fixture", results: [] });
+			if (String(url).endsWith("/images/generations")) return Response.json({ data: [{ b64_json: "AQ==" }] });
+			throw new Error(`Unexpected request: ${url}`);
+		});
+		try {
+			tools(host.api());
+			await host.emit("session_start");
+			const search = await host.tools.get("web_search").execute("search",
+				{ search_query: [{ q: "fixture" }] }, undefined, undefined, host.ctx);
+			assert.equal(search.isError, undefined);
+			const generated = await host.tools.get("image_generation").execute("image",
+				{ prompt: "fixture" }, undefined, undefined, host.ctx);
+			assert(generated.structuredContent.path);
+			assert.equal(host.providers.size, 0);
+			assert.equal(requests.length, 2);
+			assert(requests.every(url => !url.endsWith("/responses")));
+		} finally { await host.emit("session_shutdown"); host.dispose(); }
+	}));
+
+test("owned patch descriptors snapshot only the registered implementation and matching request tools", () =>
+	withCompositionDirectory(async directory => {
+		const host = createCompositionHost(directory);
+		try {
+			core(host.api()); tools(host.api());
+			const api = host.api();
+			const broker = getCodexBroker(api);
+			const patch = host.tools.get("apply_patch");
+			const snapshot = snapshotOwnedToolProtocols(api, broker, [patch]);
+			assert.equal(snapshot.get("apply_patch")?.customTool.type, "custom");
+			assert.deepEqual(snapshot.get("apply_patch")?.hiddenTools, ["edit", "write"]);
+			assert.equal(snapshotOwnedToolProtocols(api, broker, [{ ...patch, parameters: {} }]).size, 0);
+			host.tools.set("apply_patch", { ...patch, parameters: { ...patch.parameters },
+				sourceInfo: { source: "sdk", path: "<sdk:apply_patch>" } });
+			assert.equal(snapshotOwnedToolProtocols(api, broker, [patch]).size, 0);
+			const body = buildRequestBody(host.ctx.model, { messages: [], tools: [patch] },
+				resolveCodexRequestProfile({ patchTransport: "custom" }), {
+					toolProtocols: snapshotOwnedToolProtocols(api, broker, [patch]),
+				});
+			assert.equal((body.tools as any[])[0].type, "function", "a foreign same-name tool must never become custom");
+			assert.equal(snapshot.get("apply_patch")?.customTool.type, "custom", "earlier snapshots retain their descriptor");
+		} finally { await host.emit("session_shutdown"); host.dispose(); }
+	}));
 
 test("hosted-only capabilities are inactive without core and manual invocation fails explicitly", () =>
 	withCompositionDirectory(async directory => {
@@ -73,7 +200,7 @@ test("capability disablement and legacy autoEnable config survive independent lo
 		writeCompositionConfig(directory, { autoEnable: false, enabled: true });
 		const host = createCompositionHost(directory);
 		try {
-			image(host.api()); core(host.api()); web(host.api());
+			tools(host.api()); core(host.api()); web(host.api()); image(host.api());
 			await host.emit("session_start");
 			assert.deepEqual(host.active(), ["read", "edit", "write", "bash", "unrelated"]);
 			await host.emit("session_shutdown");
@@ -85,7 +212,7 @@ test("disabled initial configuration registers no tools or providers across dupl
 		writeCompositionConfig(directory, { enabled: false });
 		const host = createCompositionHost(directory);
 		try {
-			bundle(host.api()); web(host.api()); image(host.api());
+			bundle(host.api()); tools(host.api()); web(host.api()); image(host.api());
 			await host.emit("session_start");
 			assert.equal(host.tools.size, 0);
 			assert.equal(host.providers.size, 0);
@@ -99,9 +226,7 @@ test("global image gate registers no image capability while preserving core and 
 		writeCompositionConfig(directory, { imageGeneration: false });
 		const host = createCompositionHost(directory);
 		try {
-			image(host.api());
-			core(host.api());
-			web(host.api());
+			image(host.api()); tools(host.api()); core(host.api()); web(host.api());
 			assert.equal(host.tools.has("image_generation"), false);
 			assert.equal(host.commands.has("image-gen"), false);
 			assert.equal(getCodexBroker(host.api()).tools.has("image_generation"), false);
@@ -142,7 +267,7 @@ test("new/fork clear presentation ownership; shutdown and reload create a fresh 
 		const replacement = createCompositionHost(directory, host.bus);
 		try {
 			const api = replacement.api();
-			web(api); image(replacement.api()); core(replacement.api());
+			web(api); image(replacement.api()); tools(replacement.api()); core(replacement.api());
 			assert.notEqual(getCodexBroker(api), broker);
 			await replacement.emit("session_start");
 			assert.equal(replacement.tools.size, 3);
@@ -153,7 +278,7 @@ test("new/fork clear presentation ownership; shutdown and reload create a fresh 
 test("broker protocol mismatch fails before any registration", () =>
 	withCompositionDirectory(async directory => {
 		const host = createCompositionHost(directory);
-		host.bus.on(CODEX_BROKER_CHANNEL, request => request.accept({ version: 2 }));
+		host.bus.on(CODEX_BROKER_CHANNEL, request => request.accept({ version: 1 }));
 		try {
 			assert.throws(() => web(host.api()), /Incompatible/);
 			assert.equal(host.tools.size, 0);
@@ -165,15 +290,15 @@ test("mixed runtime versions fail closed instead of making catalog ownership loa
 	withCompositionDirectory(async directory => {
 		const host = createCompositionHost(directory);
 		host.bus.on(CODEX_BROKER_CHANNEL, request => request.accept({
-			version: 1, runtimeVersion: "0.0.0", claim() { throw new Error("must not be called"); },
+			version: 2, runtimeVersion: "0.0.0", claim() { throw new Error("must not be called"); },
 		}));
 		try {
-			assert.throws(() => image(host.api()), /requires ABI v1 and runtime/);
+			assert.throws(() => image(host.api()), /requires ABI v2 and runtime/);
 			assert.equal(host.tools.size, 0);
 		} finally { host.dispose(); }
 	}));
 
-for (const override of [{ runtimeVersion: "0.0.0" }, { version: 2 }, { tools: undefined }]) {
+for (const override of [{ runtimeVersion: "0.0.0" }, { version: 1 }, { tools: undefined }]) {
 	test(`cached broker still validates compatibility: ${JSON.stringify(override)}`, () =>
 		withCompositionDirectory(async directory => {
 			const host = createCompositionHost(directory);
@@ -183,7 +308,7 @@ for (const override of [{ runtimeVersion: "0.0.0" }, { version: 2 }, { tools: un
 				Object.defineProperty(api, Symbol.for("@oai404iao/pi-codex/broker/v1"), {
 					value: { ...broker, ...override }, writable: true, configurable: true,
 				});
-				assert.throws(() => image(api), /requires ABI v1 and runtime/);
+				assert.throws(() => image(api), /requires ABI v2 and runtime/);
 				assert.equal(host.tools.size, 0);
 				assert.equal(host.providers.size, 0);
 			} finally {

@@ -490,7 +490,6 @@ function legacyProfilePatch(
 		"nativeProviderTools",
 		"openaiTransport",
 		"openaiWebSocketPrewarm",
-		"compactionMode",
 		"requestProfile",
 		"webSearchEnabled",
 		"applyPatchEnabled",
@@ -498,7 +497,8 @@ function legacyProfilePatch(
 	];
 	const legacyMode = additional || legacyKeys.some((key) => Object.hasOwn(raw, key))
 		|| (model.provider === "openai-codex" && (Object.hasOwn(raw, "apiKeyMode") || settings.apiKeyMode));
-	if (!legacyMode) return undefined;
+	if (!legacyMode) return Object.hasOwn(raw, "compactionMode")
+		? { id, compaction: settings.compactionMode } : undefined;
 
 	const fullId = normalizeId(id);
 	const oldExtendedToolModel = /^openai\/gpt-5(?:$|[.-])/.test(fullId) || additional;
@@ -518,7 +518,7 @@ function legacyProfilePatch(
 
 	return {
 		id,
-		enabled: true,
+		enabled: existing?.enabled !== false,
 		responses: {
 			providerShim: nativeProvider(model) || existing?.responses?.providerShim === true,
 			...(model.provider === "openai-codex"

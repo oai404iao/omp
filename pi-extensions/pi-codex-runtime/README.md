@@ -10,7 +10,7 @@ Owns shared Codex authentication/headers, wire identity, settings/catalog,
 Responses replay contracts and the session-scoped composition broker.
 Capability-specific HTTP clients, storage and transports live in other packages.
 
-Tool activation changes only installed package tools. Core uses Pi's
+Tool activation changes only installed package tools. Tools uses Pi's
 `prepareLoadout.hiddenDeclarations` to hide selected `edit`/`write` declarations
 while `apply_patch` is active, without changing their active or callable state.
 Pi owns tool selection and its restoration across tree navigation, reload and
@@ -23,8 +23,8 @@ Credentials, refresh and effective base URLs come from Pi. Legacy `apiKeyMode`
 and `responses.endpoint` overrides do not route nonlegacy providers.
 
 Global `codexRequestExtensions:true` preserves the existing request enhancements;
-`false` gates wire metadata, Lite and native compaction without disabling
-Standard tools. `endpoint_config` is a per-provider/auth-resolved-base-URL
+`false` gates optional wire identity and metadata, not Responses mode, transport,
+tools or native compaction. `endpoint_config` is a per-provider/auth-resolved-base-URL
 capability allowlist, not a mode selector. Explicit unsupported responses are
 tracked only for the live session and endpoint; no config or credentials are
 rewritten. Tool projection waits for the first resolved request endpoint, while
@@ -48,9 +48,9 @@ Pi's native `read` tool handles local image inspection; model image input and
 standalone image generation remain independent capabilities.
 See `provenance/pi-openai-120-gpt6.json` for the current pinned catalog and limits;
 the original `pi-openai-0991-gpt6.json` evidence remains unchanged.
-The global
-`config.json.imageGeneration:false` setting gates image capability derivation
-without replacing the selected model profile. Likewise,
+The independent global `config.json.applyPatch`, `webSearch` and
+`imageGeneration` booleans default to `true`. Setting one to `false` gates only
+that capability without replacing the selected model profile. Likewise,
 `config.json.webSocketEnabled:false` forces SSE and disables WebSocket prewarm
 without changing that profile.
 `./subagent-inline` supplies the SDK identity integration and session Fast
@@ -59,7 +59,8 @@ disabling Fast inheritance. `config.json.fastMode` is a new-session default;
 runtime changes are persisted as non-context session entries, not config writes.
 `./internal/*` is implementation wiring, not a stable public API.
 
-Broker composition requires ABI v1 and matching runtime package versions.
+Broker composition requires ABI v2 and matching runtime package versions.
+Older ABI copies fail explicitly, including through a cached broker.
 See [the package guide](../../docs/codex-packages.md) for lifecycle and release
 constraints. From repository root, run:
 

@@ -8,9 +8,8 @@ The dependencies retain their own composite licenses, Apache-2.0 license and
 upstream NOTICE snapshots, source modification notices and pinned provenance:
 
 - `@oai404iao/pi-codex-runtime`: schemas, model metadata and reserved-tool serialization.
-- `@oai404iao/pi-codex-core`: Responses transport, apply-patch grammar and adaptations.
-- `@oai404iao/pi-codex-web-search`: web-search client and presentation.
-- `@oai404iao/pi-codex-imagegen`: image-generation client and presentation.
+- `@oai404iao/pi-codex-core`: Responses transport and adaptations.
+- `@oai404iao/pi-codex-tools`: patch grammar/adaptations, search and image clients/presentation.
 
 See each dependency's `LICENSE`, `LICENSES/`, `THIRD_PARTY_NOTICES.md` and
 `provenance/`. Historical bundle source notices are preserved in the repository

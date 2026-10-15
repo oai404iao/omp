@@ -30,15 +30,17 @@ const requiredRuntimeFiles = {
     "provenance/openai-codex-eb9dceba-reserved-tools.json",
     "provenance/openai-codex-ddea03ad-astra.json",
     "provenance/openai-codex-40eac3ce-sol-luna.json",
+  ],
+  "@oai404iao/pi-codex-tools": [
+    "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "THIRD_PARTY_NOTICES.md",
+    "provenance/openai-codex-eb9dceba-reserved-tools.json",
     "src/providers/codex-apply-patch.lark",
   ],
   "@oai404iao/pi-codex-web-search": [
-    "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "THIRD_PARTY_NOTICES.md",
-    "provenance/openai-codex-eb9dceba-reserved-tools.json",
+    "THIRD_PARTY_NOTICES.md",
   ],
   "@oai404iao/pi-codex-imagegen": [
-    "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "THIRD_PARTY_NOTICES.md",
-    "provenance/openai-codex-eb9dceba-reserved-tools.json",
+    "THIRD_PARTY_NOTICES.md",
   ],
   "@oai404iao/pi-subagent": [
     "LICENSES/DeepSeek-Harness-MIT.txt",
@@ -177,6 +179,12 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
     for (const path of packedPaths) {
       if (!allowed.has(path)) report(`${manifest.name}: composition tarball must not contain ${path}`);
     }
+  } else if (["@oai404iao/pi-codex-web-search", "@oai404iao/pi-codex-imagegen"].includes(expectedName)) {
+    const allowed = new Set(["index.ts", "src/index.ts", "package.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]);
+    for (const path of packedPaths) {
+      if (!allowed.has(path)) report(`${manifest.name}: compatibility tarball must not contain ${path}`);
+    }
+    if (!packedPaths.has("src/index.ts")) report(`${manifest.name}: tarball is missing compatibility factory src/index.ts`);
   } else if (expectedName.startsWith("@oai404iao/pi-codex-")) {
     for (const path of readdirSync(resolve(root, directory, "src"), { recursive: true })) {
       if (!path.endsWith(".ts")) continue;

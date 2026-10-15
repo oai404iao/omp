@@ -82,7 +82,7 @@ test("Astra uses the exact Codex Responses Lite request profile", () => withAgen
 	]);
 	assert.deepEqual(
 		additionalTools.tools.find(namespace => namespace.name === "functions")?.tools.map(tool => [tool.type, tool.name]),
-		[["custom", "apply_patch"]],
+		[["function", "apply_patch"]],
 	);
 }));
 

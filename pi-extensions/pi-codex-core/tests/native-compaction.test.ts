@@ -356,6 +356,7 @@ test("responses compaction is requested through Pi's session compaction hook", a
 		mkdirSync(configDir, { recursive: true });
 		writeFileSync(join(configDir, "config.json"), JSON.stringify({
 			compactionMode: "responses",
+			webSocketEnabled: false,
 		}));
 
 		let requestBody: any;

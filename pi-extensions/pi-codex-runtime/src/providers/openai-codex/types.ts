@@ -1,6 +1,7 @@
 import { type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
 import { type ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
 import { type CodexRequestIdentity } from "../../codex-wire-identity.js";
+import type { ToolProtocolSnapshot } from "../../tool-protocol.js";
 
 export interface WebSocketLike {
 	readyState?: number;
@@ -63,6 +64,7 @@ export type NativeToolOwnership = (name: "web_search" | "image_generation") => b
 
 export interface OpenAIResponsesProviderController {
 	ownsNativeTool?: NativeToolOwnership;
+	getToolProtocols?: ToolProtocolSnapshot;
 	getCurrentTurnId(sessionId: string | undefined): string | undefined;
 	getRequestIdentity?(
 		sessionId: string | undefined,

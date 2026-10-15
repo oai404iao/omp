@@ -11,7 +11,7 @@ Run commands from the repository root unless stated otherwise.
 
 - Use Node.js >=22.19.0 and the pinned pnpm 12.4.1 (`package.json`).
 - Install with `pnpm install --frozen-lockfile --ignore-scripts`.
-- `pnpm-workspace.yaml` defines the seven release workspaces. The root
+- `pnpm-workspace.yaml` defines the release workspaces and blocked new tools workspace. The root
   `pnpm-lock.yaml` is the only project lockfile; do not add npm or per-package locks.
 - `pi-extensions/pi-local-notify/` is private and outside the release workspace.
   Its checks use root-installed tooling; do not add it to publication batches.
@@ -47,9 +47,10 @@ Live model tests are separate from CI; do not run them without explicit authoriz
 
 - `pi-codex-runtime` owns shared settings, catalog, identity, broker and replay
   contracts. It is a library, not a Pi extension.
-- `pi-codex-core` owns Responses transport, compaction and patch.
-  `pi-codex-web-search` and `pi-codex-imagegen` own their respective capabilities.
-  Each capability may depend on runtime, not another capability or the bundle.
+- `pi-codex-core` owns the sole Responses engine, transport and compaction.
+  `pi-codex-tools` owns patch, web search and standalone image generation in
+  separate internal modules. Both depend only on runtime, never each other.
+  The old web-search/imagegen packages are selective compatibility entries into tools.
 - `pi-codex-minimal-tools` is pure composition plus the public
   `./subagent-inline` re-export. Do not restore a monolith or duplicate schemas,
   fixtures or implementations there.
@@ -95,3 +96,6 @@ Notification behavior and configuration are documented in each notifier's README
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the owning package's evidence.
 - Never add real Telegram configuration, provider credentials or private endpoints.
   Local edits do not authorize installing extensions or changing Pi/tmux settings.
+- The new tools package remains private/blocked. Its consumers cannot enter a
+  release batch until separately authorized bootstrap/activation work; do not
+  bypass the release dependency guard.

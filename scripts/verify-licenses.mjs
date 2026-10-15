@@ -14,7 +14,7 @@ const expectedHashes = new Map([
   ["pi-extensions/pi-codex-runtime/provenance/openai-codex-5a314017-image-generation.json", "4185e6e1b4bcd9b70a5020ce78ee10ebcf8aba3b5ffffe8005130d5981cdf89c"],
   ["pi-extensions/pi-codex-runtime/provenance/openai-codex-5a314017-wire-alignment.json", "a39869f67c80910e34582b3ad76e40de3a2f6d2665ce262ac81f9c2a53391b83"],
   [
-    "pi-extensions/pi-codex-core/src/providers/codex-apply-patch.lark",
+    "pi-extensions/pi-codex-tools/src/providers/codex-apply-patch.lark",
     "d6367f4826ed608c424b0a308f3d6163527df63c22513d089b91863552f8bfeb",
   ],
 ]);
@@ -130,7 +130,8 @@ for (const name of ["pi-codex-runtime", "pi-codex-core"]) {
     `${name}: missing Sol/Luna adaptation notice`);
 }
 
-for (const packageName of ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"]) {
+const compatibilityPackages = new Set(["pi-codex-web-search", "pi-codex-imagegen"]);
+for (const packageName of ["pi-codex-runtime", "pi-codex-core", "pi-codex-tools", ...compatibilityPackages]) {
   const directory = `pi-extensions/${packageName}`;
   for (const file of ["LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "provenance/openai-codex-eb9dceba-reserved-tools.json"]) {
     check(read(`${directory}/${file}`).equals(read(`pi-extensions/pi-codex-runtime/${file}`)),
@@ -142,8 +143,13 @@ for (const packageName of ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-se
   check(license.includes(`Licensing for ${packageName}`) && license.includes("Copyright (c) 2026 oai404iao"),
     `${packageName}: missing package identity or project copyright`);
   check(readManifest(directory).license === "SEE LICENSE IN LICENSE", `${packageName}: must use its composite LICENSE`);
-  check(readManifest(directory).files?.includes("provenance/"), `${packageName}: must package provenance`);
-  check(text(`${directory}/THIRD_PARTY_NOTICES.md`).includes(codexRevision), `${packageName}: missing pinned source notice`);
+  if (compatibilityPackages.has(packageName)) {
+    check(text(`${directory}/THIRD_PARTY_NOTICES.md`).includes("@oai404iao/pi-codex-tools"),
+      `${packageName}: must identify its implementation license owner`);
+  } else {
+    check(readManifest(directory).files?.includes("provenance/"), `${packageName}: must package provenance`);
+    check(text(`${directory}/THIRD_PARTY_NOTICES.md`).includes(codexRevision), `${packageName}: missing pinned source notice`);
+  }
 }
 for (const packageName of ["pi-codex-runtime", "pi-codex-core"]) {
   const directory = `pi-extensions/${packageName}`;
@@ -220,8 +226,8 @@ check(
   "pi-codex-runtime notice lacks the analyzed Codex revision",
 );
 check(
-  text("pi-extensions/pi-codex-core/THIRD_PARTY_NOTICES.md").includes("03bb3b12367397e14a8facc2e018d645ff4d8e83"),
-  "pi-codex-core notice lacks the apply-patch compatibility revision",
+  text("pi-extensions/pi-codex-tools/THIRD_PARTY_NOTICES.md").includes("03bb3b12367397e14a8facc2e018d645ff4d8e83"),
+  "pi-codex-tools notice lacks the apply-patch compatibility revision",
 );
 check(
   codexNotice.includes(astraRevision),
@@ -244,8 +250,8 @@ check(
 );
 for (const path of ["src/patch/parser.ts", "src/patch/apply.ts"]) {
   check(
-    text(`pi-extensions/pi-codex-core/${path}`).includes("Substantially modified TypeScript adaptation"),
-    `pi-codex-core/${path} lacks its source modification notice`,
+    text(`pi-extensions/pi-codex-tools/${path}`).includes("Substantially modified TypeScript adaptation"),
+    `pi-codex-tools/${path} lacks its source modification notice`,
   );
 }
 check(

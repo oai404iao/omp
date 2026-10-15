@@ -1,11 +1,20 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createRequire } from "node:module";
 import type { PackageToolName } from "./capabilities.js";
+import type { ModelLike } from "./capabilities.js";
 import type { ProviderPresentation } from "./extension/provider-presentation.js";
+import type { ToolProtocol } from "./tool-protocol.js";
+export type { ToolProtocol, ToolProtocolSnapshot } from "./tool-protocol.js";
 
 export const CODEX_BROKER_CHANNEL = "@oai404iao/pi-codex:broker";
 export const CODEX_RUNTIME_VERSION: string = createRequire(import.meta.url)("../package.json").version;
 const CACHE = Symbol.for("@oai404iao/pi-codex/broker/v1");
+
+export interface ResponsesEngineCapability {
+	supports(model: ModelLike): boolean;
+	readonly customTools: true;
+	readonly hostedWebSearch: true;
+}
 
 export interface InstalledTool {
 	register(exposure: "direct" | "model-only"): void;
@@ -18,14 +27,16 @@ export interface OwnedTool {
 	readonly description: string;
 	identity?: string;
 	replaced?: boolean;
+	protocol?: ToolProtocol;
 }
 
 export interface CodexBroker {
-	readonly version: 1;
+	readonly version: 2;
 	readonly runtimeVersion: string;
 	readonly closed: boolean;
 	readonly tools: Map<PackageToolName, InstalledTool>;
 	coreEnabled: boolean;
+	engine?: ResponsesEngineCapability;
 	readonly ownedTools: Map<"apply_patch" | "web_search" | "image_generation", OwnedTool>;
 	claim(name: string): boolean;
 	addPresentation(name: string, presentation: ProviderPresentation): void;
@@ -41,7 +52,7 @@ function createBroker(): CodexBroker & { close(): void } {
 	let closed = false;
 	const ordered = () => [...presentations].sort(([a], [b]) => a.localeCompare(b));
 	return {
-		version: 1,
+		version: 2,
 		runtimeVersion: CODEX_RUNTIME_VERSION,
 		get closed() { return closed; },
 		coreEnabled: false,
@@ -87,7 +98,7 @@ function createBroker(): CodexBroker & { close(): void } {
 }
 
 function isCompatible(candidate: CodexBroker): boolean {
-	return candidate?.version === 1 && candidate.runtimeVersion === CODEX_RUNTIME_VERSION
+	return candidate?.version === 2 && candidate.runtimeVersion === CODEX_RUNTIME_VERSION
 		&& typeof candidate.claim === "function"
 		&& typeof candidate.addPresentation === "function"
 		&& typeof candidate.tools?.get === "function"
@@ -102,12 +113,12 @@ function isCompatible(candidate: CodexBroker): boolean {
 }
 
 function incompatibleBroker(): Error {
-	return new Error(`Incompatible or duplicate Codex capability broker: requires ABI v1 and runtime ${CODEX_RUNTIME_VERSION}`);
+	return new Error(`Incompatible or duplicate Codex capability broker: requires ABI v2 and runtime ${CODEX_RUNTIME_VERSION}`);
 }
 
 /**
  * Pi gives each extension a separate API/module root. Synchronous event-bus
- * discovery shares the v1 service across those roots; no module-global registry
+ * discovery shares the v2 service across those roots; no module-global registry
  * or equality of pi.events wrapper objects is assumed. The cached property is
  * only a fast path (and supports minimal ExtensionAPI test doubles).
  */
@@ -122,7 +133,7 @@ export function getCodexBroker(pi: ExtensionAPI): CodexBroker {
 	let found: CodexBroker | undefined;
 	let incompatible = false;
 	pi.events?.emit(CODEX_BROKER_CHANNEL, {
-		version: 1,
+		version: 2,
 		accept(candidate: CodexBroker) {
 			if (!isCompatible(candidate)) incompatible = true;
 			else if (!candidate.closed) {

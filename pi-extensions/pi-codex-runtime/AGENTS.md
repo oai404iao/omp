@@ -7,7 +7,7 @@ Shared library, not a Pi extension. No default factory or `pi.extensions`.
 - `src/broker.ts`: synchronous event-bus discovery, ABI/runtime-version checks,
   package claims and presentation snapshots. Do not use module identity to dedupe.
 - `src/tool-activation.ts`: one session owner for package-tool activation and
-  exposure. Never alter tools owned by uninstalled capabilities. Core's patch
+  exposure. Never alter tools owned by uninstalled capabilities. Tools' patch
   `prepareLoadout` hook hides selected native mutation-tool declarations without
   removing them from Pi's active set; preserve their resume and codemode access.
 - `src/session-claims.ts`, `codex-identity-extension.ts`: shared identity hooks,
@@ -18,10 +18,12 @@ Shared library, not a Pi extension. No default factory or `pi.extensions`.
 
 ## Constraints
 
-1. No dependency on core, web-search, imagegen or the compatibility bundle,
+1. No dependency on core, tools, web-search, imagegen or the compatibility bundle,
    including optional/peer dependencies. No Responses SSE/WS, image storage or
    capability endpoint clients.
-2. Broker v1 requires identical runtime versions. Shutdown closes discovery;
+2. Broker v2 requires identical runtime versions and rejects older ABI brokers.
+   Keep the discovery channel/cache key stable so incompatible copies are detected.
+   Shutdown closes discovery;
    actual Pi runtime invalidation disposes tracked subscriptions on reload.
 3. Capture presentation sinks before I/O; observer state is response-attempt-local.
 4. Schemas/default-models here are the sole copies. Preserve existing configuration

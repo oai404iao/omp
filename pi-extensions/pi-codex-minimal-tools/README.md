@@ -3,12 +3,12 @@
 Composition-only entry for Pi's Codex extensions. It loads:
 
 - [`pi-codex-core`](../pi-codex-core/README.md): Responses transport, compaction,
-  `apply_patch` and diagnostics.
-- [`pi-codex-web-search`](../pi-codex-web-search/README.md): hosted/standalone search.
-- [`pi-codex-imagegen`](../pi-codex-imagegen/README.md): image generation and display.
+  diagnostics and fast commands.
+- [`pi-codex-tools`](../pi-codex-tools/README.md): patch, web search, images,
+  their rendering and background commands.
 
-All three use [`pi-codex-runtime`](../pi-codex-runtime/README.md). Compatible
-duplicate installations are deduplicated by the shared broker.
+Both use [`pi-codex-runtime`](../pi-codex-runtime/README.md). Compatible
+installations and legacy capability entries share per-capability broker claims.
 Peer floor and development target: Pi 1.2.0.
 
 Use Pi's `openai` provider for API keys or ChatGPT OAuth (`/login openai`).
@@ -52,6 +52,9 @@ Schemas belong only to runtime:
 
 - [config.schema.json](https://unpkg.com/@oai404iao/pi-codex-runtime/config.schema.json)
 - [models.schema.json](https://unpkg.com/@oai404iao/pi-codex-runtime/models.schema.json)
+
+The default-true global `applyPatch`, `webSearch` and `imageGeneration` gates
+independently prevent tool, presentation and command registration.
 
 Global `codexRequestExtensions` defaults to `true`. Set it to `false` to stop
 plugin-generated Codex wire metadata and enhancements while keeping Standard

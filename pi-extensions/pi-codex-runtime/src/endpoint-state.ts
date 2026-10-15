@@ -66,11 +66,15 @@ export function unsupportedEndpointCapabilities(candidates: readonly EndpointCap
 	const code = typeof error.code === "string" ? error.code : "";
 	const message = typeof error.message === "string" ? error.message : "";
 	const param = typeof error.param === "string" ? error.param : "";
-	if (code === "unsupported_parameter" && param !== "compaction_trigger") return [];
+	if (code === "unsupported_parameter" && !["compaction_trigger", "responses_mode", "responses_lite"].includes(param)) return [];
 	const explicitCode = /^(unsupported_(tool|feature|parameter|endpoint)|unknown_tool|not_implemented)$/.test(code);
 	if (!explicitCode && !(typeof status === "number" && /\b(not supported|unsupported|unknown tool)\b/i.test(message))) return [];
 	const text = `${param} ${message}`;
 	const aliases: Record<EndpointCapability, RegExp> = {
+		"responsesMode.standard": /\bstandard responses\b|\bresponses[_ .-]mode\b.*\bstandard\b/i,
+		"responsesMode.lite": /\bresponses[_ .-]lite\b|\blite responses\b|\bresponses[_ .-]mode\b.*\blite\b/i,
+		"transport.sse": /\bSSE\b|\bserver.sent.events\b/i,
+		"transport.websocket": /\bwebsocket\b/i,
 		"webSearch.hosted": /\bweb_search\b/,
 		"webSearch.standalone": /alpha\/search|\bweb\.run\b/,
 		"imageGeneration.standalone": /images\/(generations|edits)|\bimage_gen\b/,

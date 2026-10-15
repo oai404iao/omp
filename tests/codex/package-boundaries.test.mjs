@@ -37,7 +37,7 @@ function sources(directory) {
 }
 
 test("owner tests and shared fixtures cannot pull in sibling implementations", () => {
-	const owners = ["runtime", "core", "web-search", "imagegen"];
+	const owners = ["runtime", "core", "tools"];
 	const packageOf = path => /\/pi-extensions\/(pi-codex-[^/]+)\//.exec(path)?.[1];
 	for (const owner of owners) {
 		const allowed = new Set(["pi-codex-runtime", `pi-codex-${owner}`]);

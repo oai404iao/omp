@@ -33,7 +33,7 @@ conversation forks. Historical grammar/reserved-tool provenance remains intact.
 
 ## Historical Responses baselines
 
-The local executor behavior in [apply-patch behavior](../../pi-codex-core/reference/apply-patch-behavior.md)
+The local executor behavior in [apply-patch behavior](../../pi-codex-tools/reference/apply-patch-behavior.md)
 retains an explicitly documented earlier execution baseline.
 
 The Astra-only profile delta is pinned separately to
@@ -259,13 +259,15 @@ when auditing or modifying code. Paths below are relative to each owner's
 | SSE and WebSocket transport | pi-codex-core | `providers/openai-codex/{sse,websocket-connection,websocket-events,websocket-session,websocket-stream}.ts` |
 | Continuation, prewarm and retries | pi-codex-core | `providers/openai-codex/{continuation,prewarm,retry}.ts` |
 | Remote compaction | pi-codex-core | `adapter/compaction/` |
+| Patch execution, rendering and grammar | pi-codex-tools | `patch/`, `tools/apply-patch.ts`, `providers/codex-apply-patch*` |
+| Standalone JSON HTTP retry policy | pi-codex-tools | `json-request.ts` |
 | Replay, signatures, stream, citations | pi-codex-runtime | `providers/responses/` |
 | Identity, catalog and schemas | pi-codex-runtime | `codex-wire-identity.ts`, `model-catalog/`, package-root schemas |
 | Optional stream effects | pi-codex-runtime | `providers/openai-codex/stream-effects.ts` |
 | Versioned composition and activation | pi-codex-runtime | `broker.ts`, `tool-activation.ts`, `session-claims.ts` |
 | Per-capability namespace evidence | pi-codex-runtime | `reserved-tools/` |
-| Image capture, persistence, display | pi-codex-imagegen | `tools/image-generation/`, `utils/images.ts` |
-| Search client, schema and capture | pi-codex-web-search | `tools/web-search.ts`, `tools/web-search/` |
+| Image capture, persistence, display | pi-codex-tools | `tools/image-generation/`, `utils/images.ts` |
+| Search client, schema and capture | pi-codex-tools | `tools/web-search.ts`, `tools/web-search/` |
 | Provider lifecycle and prewarm | pi-codex-core | `extension/{provider-runtime,startup-prewarm}.ts` |
 | Default composition | pi-codex-minimal-tools | root `index.ts`, `subagent-inline.ts` |
 
@@ -275,7 +277,7 @@ Transport harnesses live in core's `tests/support/`; neutral shared fixtures are
 in root `tests/codex/support/`. Owner tests must not load sibling capabilities.
 
 Runtime exclusively publishes `config.schema.json`, `models.schema.json` and
-the default catalog; core exclusively publishes the apply-patch grammar.
+the default catalog; tools exclusively publishes the apply-patch grammar.
 Each owner retains the license/NOTICE/provenance needed by its shipped code.
 Immutable provenance `localPaths` describe the original snapshot and may name
 retired bundle paths; they are evidence, not live imports.

@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/openai/codex",
+    "revision": "eb9dceba1a2e658142a456c5898836774835616b",
+    "commitUrl": "https://github.com/openai/codex/commit/eb9dceba1a2e658142a456c5898836774835616b",
+    "license": "Apache-2.0"
+  },
+  "files": {
+    "LICENSE": {
+      "role": "upstream Apache-2.0 license",
+      "gitBlobSha": "4606e72e042564097e8780d66c1d4dcb611869bd",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/LICENSE"
+    },
+    "NOTICE": {
+      "role": "upstream NOTICE",
+      "gitBlobSha": "2805899d56d0332d175cfc613c67d45d6f006db7",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/NOTICE"
+    },
+    "codex-rs/ext/web-search/web_run_description.md": {
+      "role": "exact web.run function description",
+      "gitBlobSha": "77be9a0a03e6e2e2760651e903ead2dce9996a57",
+      "sha256": "1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/ext/web-search/web_run_description.md"
+    },
+    "codex-rs/ext/web-search/src/tool.rs": {
+      "role": "web namespace and tool construction",
+      "gitBlobSha": "9747b75eddd1052ee4d75e868a644de7fd4135c1",
+      "sha256": "6ce56d7705c4b29b91d9d39af5468788a04dd925b414c7b44de67014f3329cb3",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/ext/web-search/src/tool.rs"
+    },
+    "codex-rs/ext/web-search/src/schema.rs": {
+      "role": "web parameter-schema generation",
+      "gitBlobSha": "2f71f1595c3b75d21cf78f35877f75b9314a3737",
+      "sha256": "6371391751d2a5dddad546aa810a6c64f770498702cec8153df74d1d7dff6f9b",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/ext/web-search/src/schema.rs"
+    },
+    "codex-rs/codex-api/src/search.rs": {
+      "role": "web SearchCommands input types",
+      "gitBlobSha": "237e7a7ebff4a0eeaa6dbb7b94c457d23dfc09de",
+      "sha256": "a83fd7ddd41c86985cce2aa899a2907ca820c226d5e7337949cc7e47a35c5f4f",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/codex-api/src/search.rs"
+    },
+    "codex-rs/ext/image-generation/imagegen_description.md": {
+      "role": "exact image_gen.imagegen function description",
+      "gitBlobSha": "368aa10ea8f1909f9171b7a7b701bba6321f6f89",
+      "sha256": "77a992a7c90e45fcd11623a1efa34bfd4c7870697e0aa54ce9b28f690877170e",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/ext/image-generation/imagegen_description.md"
+    },
+    "codex-rs/ext/image-generation/src/lib.rs": {
+      "role": "image namespace and function names",
+      "gitBlobSha": "fd9db419309e5b06acb944a553f5ef144c8a261d",
+      "sha256": "c710abe1967cd3f7faaf78c0a35de0f5e6cc5c461f130b79d2b25d27ba8df9de",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/ext/image-generation/src/lib.rs"
+    },
+    "codex-rs/ext/image-generation/src/tool.rs": {
+      "role": "image namespace-tool construction and ImagegenArgs schema",
+      "gitBlobSha": "ab973da74cec4de053cbe943171bb9ad5703bad6",
+      "sha256": "8b8abe637c63e1fa8f52340a4609d96f37a5089364c4d82f0e695fd6731b2206",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/ext/image-generation/src/tool.rs"
+    },
+    "codex-rs/tools/src/responses_api.rs": {
+      "role": "namespace serialization and descriptions",
+      "gitBlobSha": "e450dcf35f93ab4af7bf3f34956755066114ccae",
+      "sha256": "7af0354e43c3fa7f052d86df5ae0c6ce276569243af6f6ea5fe00abcb15bd244",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/tools/src/responses_api.rs"
+    },
+    "codex-rs/tools/src/tool_spec.rs": {
+      "role": "Responses Lite namespace-tool serialization",
+      "gitBlobSha": "530da1be164ce3c6aa4b128ccb878bda7025e217",
+      "sha256": "af8b5286fb6d2eb3574c484b25076f515bca2d4350ecb5059e436966ecdd519d",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/tools/src/tool_spec.rs"
+    },
+    "codex-rs/core/src/client.rs": {
+      "role": "Responses Lite additional_tools placement",
+      "gitBlobSha": "da3b6dad382fd4520026ac447c270e5cc11fa887",
+      "sha256": "4b4d00234a7fb649525fdcc913ffe288e4ef3348a916acbd265c22607fd8652d",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/core/src/client.rs"
+    },
+    "codex-rs/Cargo.toml": {
+      "role": "pinned workspace dependency manifest for schema generation",
+      "gitBlobSha": "f23232e3d0b8246330d2409fc7fe9690062075c2",
+      "sha256": "2e8122fdd528a4d648d9417865153827dc5f7b45ee3afd86bfb129a1e01dcdb8",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/Cargo.toml"
+    },
+    "codex-rs/Cargo.lock": {
+      "role": "pinned schema-generator dependency lockfile",
+      "gitBlobSha": "a67d1f3d7b062424d881a612f4cfd8b14e0ac630",
+      "sha256": "3a4a5361f289227c1ce09dc072811a1e7d1c7b599c58dd91dce6758d187c993d",
+      "rawUrl": "https://raw.githubusercontent.com/openai/codex/eb9dceba1a2e658142a456c5898836774835616b/codex-rs/Cargo.lock"
+    }
+  },
+  "localCompatibilitySerialization": {
+    "path": "src/codex-reserved-tools.ts",
+    "classification": "modified TypeScript compatibility serialization",
+    "boundary": "This local compatibility path uses an internal Codex Responses Lite shape and does not claim a stable or OpenAI-supported public API contract.",
+    "canonicalization": "SHA-256 of recursively lexicographically sorted JSON object keys; arrays retain their order and no whitespace is emitted.",
+    "namespaces": {
+      "web_search": {
+        "namespace": "web",
+        "function": "run",
+        "description": {
+          "sourcePath": "codex-rs/ext/web-search/web_run_description.md",
+          "relationship": "byte-for-byte",
+          "sha256": "1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e"
+        },
+        "parameters": {
+          "sourcePaths": [
+            "codex-rs/ext/web-search/src/tool.rs",
+            "codex-rs/ext/web-search/src/schema.rs",
+            "codex-rs/codex-api/src/search.rs"
+          ],
+          "relationship": "compatibility serialization",
+          "canonicalJsonSha256": "de3be87e7abfe9b67ba757f27804d4206b51c2a8de9e9799fa7db9ef4abe3539"
+        },
+        "canonicalJsonSha256": "f67597d3df3f3a77cb517646508e7305804ea029c6f8b1c1c1f241f0de0b214f"
+      },
+      "image_generation": {
+        "namespace": "image_gen",
+        "function": "imagegen",
+        "description": {
+          "sourcePath": "codex-rs/ext/image-generation/imagegen_description.md",
+          "relationship": "byte-for-byte",
+          "sha256": "77a992a7c90e45fcd11623a1efa34bfd4c7870697e0aa54ce9b28f690877170e"
+        },
+        "parameters": {
+          "sourcePaths": [
+            "codex-rs/ext/image-generation/src/lib.rs",
+            "codex-rs/ext/image-generation/src/tool.rs"
+          ],
+          "relationship": "compatibility serialization",
+          "canonicalJsonSha256": "b4fea7c38ae74635e0072643ac2030899db242657071271e13cdd192a7377a27"
+        },
+        "canonicalJsonSha256": "ccc508cff0a216bbdf368be8c98be94134a1aed0479cddd28c77d8e004f5b73e"
+      }
+    }
+  }
+}

@@ -42,15 +42,15 @@ the current snapshot.
    envelope and tool placement.
 3. [Responses Lite mode](../../pi-codex-core/reference/responses-lite.md) records the internal Lite
    transformation, namespace tools, headers, and restrictions.
-4. [Apply-patch wire protocols](../../pi-codex-core/reference/apply-patch-protocols.md) separates the Codex
+4. [Apply-patch wire protocols](../../pi-codex-tools/reference/apply-patch-protocols.md) separates the Codex
    freeform custom tool, public built-in tool, and JSON function fallback.
 5. [Streaming, parsing, and replay](streaming-parsing-and-replay.md) follows
    custom and namespaced calls through SSE/WebSocket and the next request.
-6. [Apply-patch behavior](../../pi-codex-core/reference/apply-patch-behavior.md) records local parsing,
+6. [Apply-patch behavior](../../pi-codex-tools/reference/apply-patch-behavior.md) records local parsing,
    matching, mutation, and rendering behavior.
 7. [Model modes and Code Mode](model-modes-and-code-mode.md) separates request
    envelope, tool exposure, and model capability.
-8. [Web search](../../pi-codex-web-search/reference/web-search-streaming-rendering.md) covers hosted lifecycle,
+8. [Web search](../../pi-codex-tools/reference/web-search-streaming-rendering.md) covers hosted lifecycle,
    citations, and standalone `web.run`.
 9. [Source map](source-map.md) maps conclusions to Codex source and tests.
 
@@ -61,7 +61,7 @@ Responses streaming client. It can therefore reuse the same WebSocket and
 forms retain the Lite envelope when the active model uses Responses Lite.
 
 The packaged freeform grammar is
-[`pi-codex-core/src/providers/codex-apply-patch.lark`](../../pi-codex-core/src/providers/codex-apply-patch.lark).
+[`pi-codex-tools/src/providers/codex-apply-patch.lark`](../../pi-codex-tools/src/providers/codex-apply-patch.lark).
 
 ## Protocol taxonomy
 

@@ -13,16 +13,19 @@ All package names below have the `@oai404iao/` scope.
 | Package | Installs / owns | Workspace dependencies |
 | --- | --- | --- |
 | `pi-codex-runtime` | Library: auth/headers, identity, catalog/settings, replay contracts, broker | None; no `pi.extensions` |
-| `pi-codex-core` | Responses SSE/WS, prewarm, compaction, apply_patch, diagnostics and fast commands | runtime |
-| `pi-codex-web-search` | web_search, standalone alpha/search, activity/citation capture | runtime only |
-| `pi-codex-imagegen` | image_generation, standalone Images API, background jobs, persistence/preview | runtime only |
-| `pi-codex-minimal-tools` | Pure default composition and public `subagent-inline` re-export | runtime + all three capabilities |
+| `pi-codex-core` | Sole Responses engine: Standard/Lite, SSE/WS, prewarm, native compaction, diagnostics and fast commands | runtime |
+| `pi-codex-tools` | Separate patch, web-search and standalone imagegen modules, grammar, presentation and execution | runtime |
+| `pi-codex-web-search` | Thin selective compatibility entry: web search only | tools |
+| `pi-codex-imagegen` | Thin selective compatibility entry: image generation only | tools |
+| `pi-codex-minimal-tools` | Pure default composition and public `subagent-inline` re-export | runtime + core + tools |
 
-All internal dependency versions are exact. Installing web or image alone does
-not install core or the other capability. Core alone retains protocol/replay
+All internal dependency versions are exact. Installing web or image now installs
+the unified tools dependency, but loads only its selected capability. Disabling
+a tool is runtime selection, not dependency/install isolation. Core alone registers
+none of the three tools and retains protocol/replay
 knowledge of historical web/image items without loading image storage or search
 presentation. This is code/install isolation, not a new sandbox or authorization
-boundary. Existing reserved tool names must not be reused by unrelated tools.
+boundary. Ownership checks prevent conversion of unrelated same-name tools.
 Packages continue shipping TypeScript source for Pi/TS-aware loaders, not
 compiled JavaScript for plain Node imports.
 
@@ -77,6 +80,44 @@ standalone execution without changing Responses mode,
 transport, compaction, patch, web-search, image input or historical replay.
 Per-model `tools.imageGeneration:false` remains an independent profile override.
 
+Global `applyPatch` and `webSearch` are matching default-on kill switches.
+Each disabled capability skips tool, command and dedicated renderer registration
+and starts no capability jobs or network requests. Historical replay remains.
+Model configuration still selects patch `function`/`custom`, search
+`standalone`/`hosted`, and standalone images. Legacy `applyPatchEnabled` and
+`webSearchEnabled` are projected into model overrides first; the new global
+gates are intersected afterward, so a global false wins. Global `enabled:false`
+and an explicitly disabled model still win over every tool/profile switch.
+
+### Migration from core-owned patch
+
+Core no longer provides patch. Load `pi-codex-tools` alongside core, or continue
+using the full compatibility bundle. The old search/image package names remain
+selective entry points, not duplicate implementations. Patch function mode can
+run without core on a provider supporting function tools; custom mode requires
+the currently loaded engine to support that model/protocol. Hosted search also
+requires an actual compatible engine. A model profile alone is not proof that
+an implementation is loaded; missing prerequisites diagnose rather than fall back.
+
+Standard/Lite format, Codex request enhancements, SSE/WS/auto transport and
+Pi/native compaction are independent choices. Lite with enhancements off retains
+`additional_tools`, namespaces, its transport signals, `reasoning.context` and
+the no-hosted/no-parallel restrictions, but emits no optional Codex identity
+metadata. It never changes Pi authentication or endpoint or forces WS.
+Endpoint `responsesMode`/`transport` allowlists validate actual support;
+capability rejection does not silently select another implementation.
+
+The new global gates do not alter the catalog profile hash. Existing explicitly
+reviewed profile migrations remain; unknown custom profile hashes are rejected.
+Changing compaction generation to Pi does not discard or prevent compatible
+opaque-checkpoint replay. Removed configuration diagnostics and model/API/profile
+identity guards still apply.
+Checkpoint compatibility accepts only a full-profile match, a change solely
+from Responses generation to Pi generation, or an explicitly reviewed historical
+bundled hash. The exact legacy `:wire-off` transport-cache suffix is normalized;
+new checkpoints persist the unsuffixed catalog identity. Other profile, model,
+provider or API changes still reject opaque replay.
+
 Global `config.json.webSocketEnabled:false` forces Responses SSE and disables
 WebSocket prewarm across model profiles without rewriting their catalog values.
 
@@ -110,8 +151,12 @@ module paths need not be identical. A session service claims package ownership
 once; tools, providers, commands, renderers and identity hooks are not installed
 again by a duplicate, cooperating package.
 
-The handshake requires **ABI v1 and the same runtime package version**. Mixed
+The handshake requires **ABI v2 and the same runtime package version**. Mixed
 versions fail explicitly rather than selecting catalog semantics by load order.
+The discovery channel and cached key remain stable to detect older ABI copies,
+not create parallel brokers. Tools publishes owned protocol descriptors; core
+captures ownership-checked declaration/input mappings for each ordinary, prewarm
+and compaction request. No grammar asset or tool executor lives in core.
 The first package owns shared activation/presentation hooks; any later core
 connects transport to the existing presentation service.
 
@@ -151,7 +196,7 @@ pnpm run ci
 pnpm run changeset:status
 ```
 
-`pnpm run test:codex-packages` packs all five Codex packages, pnpm-installs them in
+`pnpm run test:codex-packages` packs all six Codex packages, pnpm-installs them in
 temporary consumers, and uses the selected baseline's actual Pi loader. It covers runtime,
 each capability, all pairs, all capabilities, the bundle, duplicate composition,
 reversed order, separate physical runtime copies and shutdown/reload. Standalone
@@ -174,7 +219,7 @@ Separate registry and limited real-smoke evidence is recorded in the
 
 Unit tests additionally exercise activation, unknown/disabled models, legacy
 configuration, new/fork, no UI, abort, late image results and old replay fixtures.
-Behavioral tests live with their runtime/core/web-search/imagegen owners.
+Behavioral tests live with their runtime/core/tools owners.
 Root `tests/codex/` owns cross-package integration and the pure-bundle boundary;
 run `pnpm run test:codex-composition`. It is included in `pnpm run ci`.
 The [reference index](../pi-extensions/pi-codex-runtime/reference/README.md) and
@@ -187,7 +232,13 @@ paths, exact declared dependencies and forbidden optional/peer package edges.
 
 ## Release status
 
-The four new packages are non-private on the guarded `publishable` track.
+The newly consolidated tools workspace is private/`blocked`, not activated
+for publication by this refactor. Existing package eligibility and immutable
+release locks are unchanged. The guarded dependency check intentionally refuses
+consumer release batches until separately authorized tools bootstrap/activation;
+local tarball/loader verification still covers the package.
+
+The four previously introduced packages are non-private on the guarded `publishable` track.
 Their already-published versions are recovery nodes, pinned by source and SHA-512
 in the release lock. Ordinary preparation includes all seven current
 workspaces; dependency closure may not be bypassed. A locked version

@@ -54,6 +54,7 @@
     "@changesets/cli": "3.0.3",
     "@changesets/read": "1.0.1",
     "@oai404iao/pi-codex-core": "workspace:*",
+    "@oai404iao/pi-codex-tools": "workspace:*",
     "@oai404iao/pi-codex-imagegen": "workspace:*",
     "@oai404iao/pi-codex-minimal-tools": "workspace:*",
     "@oai404iao/pi-codex-runtime": "workspace:*",

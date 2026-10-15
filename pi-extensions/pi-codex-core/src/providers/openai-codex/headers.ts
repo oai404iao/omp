@@ -134,7 +134,7 @@ export function buildSSEHeaders(
 	const headers = buildBaseCodexHeaders(modelHeaders, additionalHeaders, accountId, token, codexHeaders);
 	setProviderDefaultHeader(headers, "accept", "text/event-stream");
 	setProviderDefaultHeader(headers, "content-type", "application/json");
-	if (codexRequestExtensions && profile.responsesMode === "lite") {
+	if (profile.responsesMode === "lite") {
 		setProviderDefaultHeader(headers, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE, "true");
 	}
 
@@ -157,7 +157,7 @@ export function applyConfiguredResponsesFeatureHeaders(
 	settings: ResolvedCodexModelSettings,
 	_model: Model<Api>,
 ): Headers {
-	if (settings.codexRequestExtensions && settings.compactionMode === "responses") {
+	if (settings.compactionMode === "responses") {
 		appendCommaSeparatedHeader(
 			headers,
 			X_CODEX_BETA_FEATURES,

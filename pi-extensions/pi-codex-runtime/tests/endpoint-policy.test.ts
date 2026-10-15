@@ -59,17 +59,83 @@ test("removed hosted image and unary compaction declarations fail closed", () =>
 	assert.equal(parsed.diagnostics.length, 2);
 });
 
-test("wire-off preserves standard hosted tools, blocks Lite and changes the cache discriminator", () => {
+test("wire-off preserves mode, transport, tools and native compaction while changing the cache discriminator", () => {
 	const on = loadModelSettings(model, undefined, DEFAULT_SETTINGS);
 	const off = loadModelSettings(model, undefined, { ...DEFAULT_SETTINGS, codexRequestExtensions: false });
 	assert.equal(off.webSearchImplementation, on.webSearchImplementation);
 	assert.equal(off.imageGenerationImplementation, on.imageGenerationImplementation);
-	assert.equal(off.compactionMode, "pi");
+	assert.equal(off.compactionMode, "responses");
+	assert.equal(off.opaqueReplayAllowed, true);
 	assert.notEqual(off.modelProfileHash, on.modelProfileHash);
 	assert.equal(off.requestBlockedReason, undefined);
 	const lite = loadModelSettings({ ...model, id: "gpt-5.6-sol" }, undefined, { ...DEFAULT_SETTINGS, codexRequestExtensions: false });
-	assert.match(lite.requestBlockedReason!, /Lite requires/);
-	assert.equal(lite.openaiWebSocketPrewarm, false);
+	assert.equal(lite.requestBlockedReason, undefined);
+	assert.equal(lite.requestProfile.responsesMode, "lite");
+	assert.equal(lite.openaiWebSocketPrewarm, true);
+	assert.equal(lite.compactionMode, "responses");
+	assert.equal(lite.opaqueReplayAllowed, true);
+});
+
+test("mode, transport and compaction endpoint declarations are independent", () => {
+	const liteModel = { ...model, id: "gpt-5.6-sol" };
+	const resolve = (entry: Record<string, unknown>) => loadModelSettings(liteModel, undefined, {
+		...DEFAULT_SETTINGS, codexRequestExtensions: false,
+		endpoint_config: parseEndpointConfig([{ provider: model.provider, baseUrl: model.baseUrl, ...entry }]).entries,
+	});
+	const noLite = resolve({ responsesMode: ["standard"] });
+	assert.match(noLite.requestBlockedReason!, /lite is disabled/);
+	assert.equal(noLite.requestProfile.responsesMode, "lite");
+	assert.equal(noLite.compactionMode, "responses");
+	assert.equal(noLite.opaqueReplayAllowed, false);
+	assert.equal(noLite.webSearchImplementation, "standalone");
+
+	const noWebsocket = resolve({ transport: ["sse"] });
+	assert.equal(noWebsocket.openaiTransport, "sse");
+	assert.equal(noWebsocket.openaiWebSocketPrewarm, false);
+	assert.equal(noWebsocket.compactionMode, "responses");
+	assert.equal(noWebsocket.opaqueReplayAllowed, true);
+	assert.equal(noWebsocket.requestBlockedReason, undefined);
+	const noTransport = resolve({ transport: [] });
+	assert.match(noTransport.requestBlockedReason!, /transport is disabled/);
+	const noCompaction = resolve({ compaction: [] });
+	assert.equal(noCompaction.requestBlockedReason, undefined);
+	assert.equal(noCompaction.compactionMode, "pi");
+	assert.equal(noCompaction.opaqueReplayAllowed, false);
+	assert.equal(noCompaction.requestProfile.responsesMode, "lite");
+	assert.equal(noCompaction.openaiTransport, "auto");
+	assert.equal(noCompaction.webSearchImplementation, "standalone");
+});
+
+test("invalid mode and transport allowlists fail closed without changing other capabilities", () => {
+	const parsed = parseEndpointConfig([{ provider: model.provider, baseUrl: model.baseUrl,
+		responsesMode: ["guess"], transport: true, webSearch: ["hosted"],
+	}]);
+	assert.deepEqual(parsed.entries[0], { provider: model.provider, baseUrl: model.baseUrl,
+		responsesMode: [], transport: [], webSearch: ["hosted"],
+	});
+	assert.equal(parsed.diagnostics.length, 2);
+});
+
+test("replay capability is independent of the selected compaction generation policy", () => {
+	const resolved = loadModelSettings({ ...model, id: "gpt-4.1" }, undefined, DEFAULT_SETTINGS);
+	assert.equal(resolved.compactionMode, "pi");
+	assert.equal(resolved.opaqueReplayAllowed, true);
+});
+
+test("mode rejection does not disable transport or compaction at the same endpoint", () => {
+	const stop = watchEndpointFailures("mode-policy", () => {});
+	try {
+		reportEndpointFailure(model, "mode-policy", ["responsesMode.lite", "transport.websocket", "compaction.responses"],
+			{ status: 400, code: "unsupported_feature", message: "responses_lite is not supported" });
+		assert.equal(endpointWasRejected(model, "mode-policy", "responsesMode.lite"), true);
+		assert.equal(endpointWasRejected(model, "mode-policy", "transport.websocket"), false);
+		assert.equal(endpointWasRejected(model, "mode-policy", "compaction.responses"), false);
+		const resolved = loadModelSettings({ ...model, id: "gpt-5.6-sol" }, undefined, DEFAULT_SETTINGS, "mode-policy");
+		assert.match(resolved.requestBlockedReason!, /lite is disabled/);
+	} finally {
+		stop();
+		clearEndpointFailures("mode-policy");
+	}
 });
 
 test("only explicit capability rejection disables the exact endpoint in the current live session", () => {

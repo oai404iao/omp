@@ -45,8 +45,11 @@ test("the four verified Codex packages enter guarded batches", () => {
   }
   assert.equal(artifactWorkspaces().length, 7);
   assert.deepEqual(artifactWorkspaces(), artifactWorkspaces(true));
-  assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces()));
-  assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces(true)));
+  const tools = workspaces.find(e => e.name === "@oai404iao/pi-codex-tools");
+  assert.equal(tools.releaseStatus, "blocked");
+  assert.equal(readManifest(tools.directory).private, true);
+  assert.throws(() => assertReleaseDependencies(artifactWorkspaces()), /unpublished workspace dependency:.*pi-codex-tools/);
+  assert.throws(() => assertReleaseDependencies(artifactWorkspaces(true)), /unpublished workspace dependency:.*pi-codex-tools/);
 });
 
 test("artifact order includes recovery/optional dependencies and is independent of input order", () => {

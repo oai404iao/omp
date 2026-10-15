@@ -3,11 +3,14 @@ export type EndpointCompaction = "responses";
 export interface EndpointConfig {
 	provider: string;
 	baseUrl: string;
+	responsesMode?: ("standard" | "lite")[];
+	transport?: ("sse" | "websocket")[];
 	webSearch?: ToolImplementation[];
 	imageGeneration?: "standalone"[];
 	compaction?: EndpointCompaction[];
 }
 export type EndpointCapability =
+	| "responsesMode.standard" | "responsesMode.lite" | "transport.sse" | "transport.websocket"
 	| `webSearch.${ToolImplementation}` | "imageGeneration.standalone" | `compaction.${EndpointCompaction}`;
 export interface EndpointIdentity { provider?: string; baseUrl?: string; id?: string }
 
@@ -38,9 +41,11 @@ export function parseEndpointConfig(raw: unknown): { entries: EndpointConfig[]; 
 			diagnostics.push(`${label}: baseUrl must be a valid URL without credentials, query or fragment.`);
 			continue;
 		}
-		for (const field of ["webSearch", "imageGeneration", "compaction"] as const) {
+		for (const field of ["responsesMode", "transport", "webSearch", "imageGeneration", "compaction"] as const) {
 			if (value[field] === undefined) continue;
-			const allowed = field === "compaction" ? ["responses"] : field === "imageGeneration" ? ["standalone"] : ["hosted", "standalone"];
+			const allowed = field === "responsesMode" ? ["standard", "lite"]
+				: field === "transport" ? ["sse", "websocket"]
+				: field === "compaction" ? ["responses"] : field === "imageGeneration" ? ["standalone"] : ["hosted", "standalone"];
 			const values = value[field];
 			if (!Array.isArray(values) || values.some(item => !allowed.includes(item))) {
 				diagnostics.push(`${label}.${field}: invalid capability list; this capability is disabled.`);
@@ -66,6 +71,6 @@ export function endpointDeclares(
 	const key = endpointKey(model);
 	const entry = key && entries.find(item => endpointKey(item) === key);
 	if (!entry) return true;
-	const [field, mode] = capability.split(".") as [keyof Pick<EndpointConfig, "webSearch" | "imageGeneration" | "compaction">, string];
+	const [field, mode] = capability.split(".") as [keyof Omit<EndpointConfig, "provider" | "baseUrl">, string];
 	return entry[field] === undefined || (entry[field] as string[]).includes(mode);
 }

@@ -11,7 +11,7 @@ import {
 	SessionManager, SettingsManager, withFileMutationQueue, type AgentSession, type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import core from "@oai404iao/pi-codex-core";
-import web from "@oai404iao/pi-codex-web-search";
+import tools from "@oai404iao/pi-codex-tools";
 import imagegen from "@oai404iao/pi-codex-imagegen";
 import {
 	compositionModel, createCompositionHost, withCompositionDirectory, writeCompositionConfig,
@@ -59,7 +59,7 @@ async function withNativeCodemode(
 		const loader = new DefaultResourceLoader({
 			cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true,
 			noThemes: true, noPromptTemplates: true, noContextFiles: true,
-			extensionFactories: [core, web, imagegen, createCodemodeExtension({ mode, models: false }), ...extensions],
+			extensionFactories: [core, tools, createCodemodeExtension({ mode, models: false }), ...extensions],
 		});
 		await loader.reload();
 		assert.deepEqual(loader.getExtensions().errors, []);

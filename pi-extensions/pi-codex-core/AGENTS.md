@@ -1,15 +1,16 @@
 # pi-codex-core — maintenance
 
-Provider/transport capability. Does not install web or image generation.
+Sole Responses engine. Does not register patch, web search or image generation.
 
 ## Ownership
 
-- `src/index.ts`: core claims, patch registration and diagnostics.
+- `src/index.ts`: engine claim/capability publication and diagnostics.
 - `src/extension/provider-runtime.ts`: provider/session lifecycle; optional effects.
 - `src/extension/startup-prewarm.ts`: cancellation, auth waiters and generation reset.
 - `src/providers/openai-codex/`: request bodies, SSE/WS, continuation, retry, usage.
 - `src/adapter/compaction/`: checkpoints and remote compaction protocols.
-- `src/patch/`, `src/providers/codex-apply-patch.lark`: executor and pinned grammar.
+- Tools supplies owned protocol descriptors through runtime; core snapshots
+  these for declaration and replay mapping without importing tool implementations.
 
 ## Constraints
 
@@ -21,11 +22,10 @@ Provider/transport capability. Does not install web or image generation.
    ignores abort; consume late promise rejections without opening old connections.
 4. Preserve exact-prefix continuation, opaque compaction items, event ordering,
    output indices and signatures. HTTP fallback is not a generic retry.
-5. Preserve grammar hashes and Apache adaptation notices. Core owns the sole
-   grammar asset and transport/apply-patch references under `reference/`.
-6. Patch `prepareLoadout` hides native edit/write declarations only for the
-   request; never remove those tools from Pi's active set or saved transcript.
-   Preserve codemode callable access and tree/resume behavior.
+5. Preserve protocol provenance and Apache adaptation notices. Tools owns the
+   sole patch grammar, executor, rendering and patch references.
+6. Use runtime's ownership-checked descriptor snapshots consistently across
+   ordinary, prewarm and compaction requests. Never rewrite foreign same-name tools.
 
 ## Workflow and verification
 

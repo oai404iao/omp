@@ -20,6 +20,7 @@ for (const { cwd, label, paths, expectedTools, core } of job.probes) {
   assert.deepEqual([...tools].sort(), [...expectedTools].sort());
   const commands = result.extensions.flatMap(extension => [...extension.commands.keys()]);
   assert.equal(new Set(commands).size, commands.length, "commands registered more than once");
+  assert.equal(commands.includes("image-gen"), expectedTools.includes("image_generation"), "disabled image generation must not register its command");
   assert.equal(result.runtime.pendingProviderRegistrations.length, core ? 2 : 0);
   assert.equal(result.runtime.pendingNativeProviderRegistrations.length, 0);
   const model = { provider: "openai", api: "openai-responses", id: "gpt-5.6-sol", baseUrl: "https://fixture.invalid/v1", input: ["text", "image"] };

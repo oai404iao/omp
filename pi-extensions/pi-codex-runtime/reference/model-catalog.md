@@ -166,11 +166,13 @@ The request includes:
 
 ## Package-wide gates
 
-Global `config.json.imageGeneration:false` gates all image-generation
-implementations after profile resolution. It is not a legacy model-profile
-patch and therefore cannot reset Responses mode, transport, compaction, patch,
-web-search or Fast behavior. Per-model `tools.imageGeneration:false` remains
-the profile-level control.
+Global `config.json.applyPatch`, `webSearch` and `imageGeneration` are independent
+booleans defaulting to `true`. Setting one to `false` gates only that capability
+after profile resolution. They are not legacy model-profile patches and cannot
+reset Responses mode, transport, compaction or Fast behavior. Per-model
+`tools.applyPatch:false`, `tools.webSearch:false` and `tools.imageGeneration:false`
+remain profile-level controls. Legacy overrides keep their precedence but cannot
+reactivate a disabled profile or bypass a global gate.
 
 Global `config.json.webSocketEnabled:false` is applied at the same final gate
 stage. It forces the derived runtime transport to SSE and disables prewarm
@@ -228,6 +230,10 @@ The effective profile hash is included in:
 
 Changing protocol behavior therefore cannot reuse a continuation or opaque
 checkpoint created under a different profile.
+The optional `codexRequestExtensions` metadata switch retains a distinct runtime
+hash discriminator without changing Responses mode or native compaction support.
+Endpoint declarations independently allow/deny Responses modes, transports and
+native compaction; see [configuration](configuration.md#endpoint-declarations).
 
 ## Source snapshot
 

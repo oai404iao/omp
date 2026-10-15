@@ -18,8 +18,9 @@ import { websocketHttpFallbackSessions, websocketSessionCache } from "../provide
 import { startupPrewarmSnapshot, type StartupPrewarmSnapshot } from "./prewarm-snapshot.js";
 import { hasProjectedToolLoadout } from "./tool-snapshot.js";
 import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
-import { reportHostedFailure } from "../providers/openai-codex/endpoint-policy.js";
+import { allowsTransport, reportHostedFailure } from "../providers/openai-codex/endpoint-policy.js";
 import { rememberResolvedEndpoint } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
+import type { ToolProtocolSnapshot } from "@oai404iao/pi-codex-runtime/internal/broker";
 
 interface StartupPrewarmState {
 	status: "pending" | "ready" | "failed";
@@ -49,7 +50,7 @@ function settleSpeculativeTask(task: Promise<void>, signal: AbortSignal): Promis
 	});
 }
 
-export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?: NativeToolOwnership) {
+export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?: NativeToolOwnership, getToolProtocols?: ToolProtocolSnapshot) {
 	const startupPrewarms = new Map<string, StartupPrewarmState>();
 	const sessionStartupPrewarmTasks = new Map<string, SessionStartupPrewarmTask>();
 	let sessionGeneration = 0;
@@ -126,6 +127,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 				...requestBodyToolOptions(settings),
 				requestIdentity,
 				ownsNativeTool,
+				toolProtocols: getToolProtocols?.(snapshot.tools),
 				apiKey: auth.apiKey,
 				headers: auth.headers,
 				sessionId,
@@ -219,7 +221,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 				state.status = "ready";
 			})
 			.catch((error) => {
-				if (!startupSignal.aborted && generation === sessionGeneration) reportHostedFailure(model!, sessionId, body, error, ownsNativeTool);
+				if (!startupSignal.aborted && generation === sessionGeneration) reportHostedFailure(model!, sessionId, body, error, ownsNativeTool, [`responsesMode.${profile.responsesMode}`, "transport.websocket"]);
 				state.status = "failed";
 				if (
 					!startupSignal.aborted
@@ -227,6 +229,7 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 					&& settings.openaiTransport === "auto"
 					&& fallbackKey
 					&& isWebSocketUpgradeRejectedError(error)
+					&& allowsTransport(settings, model!, sessionId, "sse")
 				) {
 					websocketHttpFallbackSessions.add(fallbackKey);
 				}

@@ -1,0 +1,83 @@
+{
+  "name": "@oai404iao/pi-codex-tools",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Codex patch, web search and image-generation tools for Pi",
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oai404iao/omp.git",
+    "directory": "pi-extensions/pi-codex-tools"
+  },
+  "homepage": "https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-tools#readme",
+  "bugs": {
+    "url": "https://github.com/oai404iao/omp/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "codex"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./internal/*": "./src/*.ts",
+    "./web-search": "./src/web-search.ts",
+    "./imagegen": "./src/imagegen.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=1.2.0",
+    "@earendil-works/pi-coding-agent": ">=1.2.0",
+    "@earendil-works/pi-tui": ">=1.2.0",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@oai404iao/pi-codex-runtime": "2.0.0",
+    "@silvia-odwyer/photon-node": "0.3.4"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@earendil-works/pi-tui": "1.2.0",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.20.6",
+    "typebox": "^1.1.24",
+    "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
+    "check": "pnpm run typecheck && pnpm run test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "index.ts",
+    "src/",
+    "LICENSE",
+    "LICENSES/",
+    "THIRD_PARTY_NOTICES.md",
+    "provenance/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { registerResponsesProviderRuntime } from "../../src/extension/provider-runtime.js";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { normalizeContext, type Context } from "@earendil-works/pi-ai";
+import type { ToolProtocolSnapshot } from "@oai404iao/pi-codex-runtime/internal/broker";
 
 export function codexJwt(): string {
 	const payload = Buffer.from(JSON.stringify({
@@ -14,6 +15,7 @@ export function createProviderHarness(options?: {
 	snapshotTools?: boolean;
 	register?: typeof registerResponsesProviderRuntime;
 	cwd?: string;
+	getToolProtocols?: ToolProtocolSnapshot;
 }) {
 	const providers: Record<string, any> = {};
 	const handlers: Record<string, Array<(event: any, ctx?: any) => Promise<void> | void>> = {};
@@ -39,7 +41,9 @@ export function createProviderHarness(options?: {
 			getThinkingLevel: () => "medium",
 		} : {}),
 	};
-	(options?.register ?? registerResponsesProviderRuntime)(pi as any, { getCurrentCwd: () => options?.cwd ?? process.cwd() });
+	(options?.register ?? registerResponsesProviderRuntime)(pi as any, {
+		getCurrentCwd: () => options?.cwd ?? process.cwd(), getToolProtocols: options?.getToolProtocols,
+	});
 	assert.ok(providers["openai-codex"]);
 	assert.ok(providers.openai);
 	return { providers, handlers, messages, renderers };
