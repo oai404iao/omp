@@ -1,5 +1,12 @@
 # @oai404iao/pi-subagent
 
+## 1.3.1
+
+### Patch Changes
+
+- 2173aa4: 参考 Pi 的任务导向结构重写中文使用与维护文档，补齐配置、接口、迁移与安全边界，并修正过期说明。
+- ea12036: Refresh workspace development dependencies and update the Codex WebSocket dependency; retain the existing Pi baseline and undici version.
+
 ## 1.3.0
 
 ### Minor Changes

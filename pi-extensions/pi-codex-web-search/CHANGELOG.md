@@ -1,5 +1,15 @@
 # @oai404iao/pi-codex-web-search
 
+## 1.1.2
+
+### Patch Changes
+
+- 2173aa4: 参考 Pi 的任务导向结构重写中文使用与维护文档，补齐配置、接口、迁移与安全边界，并修正过期说明。
+- ea12036: Refresh workspace development dependencies and update the Codex WebSocket dependency; retain the existing Pi baseline and undici version.
+- Updated dependencies [2173aa4]
+- Updated dependencies [ea12036]
+  - @oai404iao/pi-codex-tools@0.1.1
+
 ## 1.1.1
 
 ### Patch Changes
