@@ -30,30 +30,56 @@ jobs:
           - target
 
     steps:
+      # Keep the existing required contexts during the rollout. Non-target PR
+      # legs report an explicit scope skip without installing or testing.
+      - name: Select verification scope
+        id: scope
+        shell: bash
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_NODE: ${{ matrix.node }}
+          CI_PI: ${{ matrix.pi }}
+        run: |
+          if [[ "$CI_EVENT" != "pull_request" || ( "$CI_NODE" == "24.x" && "$CI_PI" == "target" ) ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Compatibility leg deferred to main; PR verification runs on Node 24 / Pi target."
+          fi
+
       - name: Check out repository
+        if: steps.scope.outputs.run == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up pnpm
+        if: steps.scope.outputs.run == 'true'
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
 
       - name: Set up Node.js
+        if: steps.scope.outputs.run == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
 
       - name: Install locked dependencies
+        if: steps.scope.outputs.run == 'true'
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Run complete baseline CI
+      - name: Run baseline verification
+        if: steps.scope.outputs.run == 'true'
         run: node scripts/test-pi-baselines.mjs ${{ matrix.pi }}
         env:
           OMP_PI_MATRIX_LOG_DIR: ${{ runner.temp }}/pi-matrix
+          # Both target legs must pass this same workflow revision. Floor reuse
+          # is guarded by identical projected manifests AND the complete lock.
+          OMP_PI_REUSE_TARGET: "1"
+          OMP_CODEX_CONSUMER_MODE: ${{ matrix.node == '24.x' && matrix.pi == 'target' && 'full' || 'smoke' }}
 
       - name: Upload baseline diagnostics
-        if: always()
+        if: always() && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pi-${{ matrix.pi }}-node-${{ matrix.node }}
@@ -62,9 +88,11 @@ jobs:
           retention-days: 7
 
       - name: Audit production dependencies
+        if: steps.scope.outputs.run == 'true'
         run: pnpm audit --prod --audit-level=high
 
       - name: Ensure checks did not modify tracked files
+        if: steps.scope.outputs.run == 'true'
         shell: bash
         run: |
           git diff --exit-code

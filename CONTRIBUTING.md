@@ -30,6 +30,49 @@ Package checks include each extension's typecheck and tests where present.
 inspects the exact npm tarball file list and verifies every Pi extension entry
 point and runtime asset is included.
 
+### Remote CI scope
+
+Pull requests run the full suite on **Node 24 / Pi target**. The other three
+existing required matrix contexts report an explicit scope skip; they are not
+claims of pre-merge compatibility testing. No branch-protection change is needed.
+Pushes to `main` and manual CI runs retain both Node versions and both Pi lock
+roles, so additional compatibility regressions may be detected only after merge.
+
+The Node 24/target leg runs the exhaustive tarball-consumer matrix. Other legs
+use `OMP_CODEX_CONSUMER_MODE=smoke`: pack all six packages, install the bundle
+offline in an isolated consumer, and check its actual SDK/loader and inline
+re-export. Their package and composition tests are otherwise unchanged.
+Local `pnpm run ci`, `test:codex-packages`, and `ci:pi-matrix` remain exhaustive
+by default. Invalid consumer modes fail rather than silently reducing coverage.
+
+CI opts into `OMP_PI_REUSE_TARGET=1`. A floor role can reuse the required target
+leg's behavioral tests for the **same source and Node version** only when Pi
+versions, every projected workspace manifest, and the complete application lock
+match. Floor lock regeneration, integrity validation, frozen installation,
+resolved-SDK/CLI checks, packaging checks, and isolated consumer smoke still run.
+Any difference falls back to the suite with the leg's configured consumer mode.
+Do not enable standalone floor reuse without requiring the companion target.
+Local `all` with this switch runs target first and never reuses a failed target.
+
+Cheap changeset, package, license and architecture checks precede runtime tests,
+so package-policy failures do not first run the expensive suites. The Release PR
+workflow waits for successful trusted `main` CI at the exact still-current SHA
+instead of rerunning it; see [Releasing](RELEASING.md).
+
+### Dependency PR refreshes
+
+Dependabot retains monthly version discovery and existing PR limits/groups, but
+automatic rebasing is disabled for npm and GitHub Actions. Review pending updates
+weekly and request `@dependabot rebase` when a PR is ready to merge or strict
+up-to-date checks require it. Handle urgent security updates immediately; no
+security alerts, update creation, dependency checks, or audit gates are disabled.
+Older open PRs can continue auto-rebasing until 30 days after creation, per the
+[Dependabot rebase policy](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#rebase-strategy).
+
+To roll back the reduced coverage policy, revert the CI scope/consumer/reuse
+settings together; the four required check names have not changed. Reverting
+the Release PR trigger restores its original independent verification job.
+
 `check:architecture` checks Codex local module edges (including type imports),
 compatibility-facade back-edges, direct/transitive layer restrictions, and
 400-line source budgets. The provider runtime must not reach tool implementations

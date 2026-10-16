@@ -346,7 +346,17 @@ separate publication authorization.
    pnpm run changeset
    ```
 
-2. Merge changes to `main`. `release-pr.yml` creates or updates the version PR.
+2. Merge changes to `main`. After its CI succeeds, `release-pr.yml` creates or
+   updates the version PR without rerunning `pnpm run ci`. It accepts only a
+   successful canonical CI **push** run from this repository's own `main`,
+   verifies the current run/attempt through the API, and requires its SHA to
+   equal both live main and the native workflow context SHA. PR/fork, stale,
+   failed and superseded completions fail closed. The trusted workflow revision
+   supplies the guard; no upstream artifacts or unverified ref code are used.
+   The exact verified SHA is checked out and revalidated immediately before
+   Changesets writes. Release PR runs serialize; a concurrent external main push
+   after that final check can leave a stale version PR, which still requires its
+   own review and PR CI. The newer main must pass CI before its release update.
 3. Review generated versions and changelogs, then approve that PR's CI.
 4. Merge the version PR.
 5. Manually run `publish.yml` from `main`, enter `publish`, and approve the
