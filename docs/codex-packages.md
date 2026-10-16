@@ -1,285 +1,204 @@
-# Codex package composition
+<a id="codex-package-composition"></a>
 
-The four workspaces introduced in S3 are published at **`0.1.0-alpha.1`**.
-This checkout activates their guarded recovery after independent registry and
-trusted-publisher verification. The existing
-`@oai404iao/pi-codex-minimal-tools` name becomes the compatibility bundle in this
-checkout; its previously published tarballs are unchanged.
+# Codex 包组合
 
-## Ownership
+按需要组合引擎与工具，或使用完整兼容包。包拆分提供实现与依赖边界，
+不是新的沙箱、账号授权或网络隔离。初次加载见[快速开始](quickstart.md)。
 
-All package names below have the `@oai404iao/` scope.
+<a id="ownership"></a>
 
-| Package | Installs / owns | Workspace dependencies |
+## 选择最小组合
+
+以下包均使用 `@oai404iao/` scope，内部依赖版本精确固定：
+
+| 包 | 拥有什么 | 工作区依赖 |
 | --- | --- | --- |
-| `pi-codex-runtime` | Library: auth/headers, identity, catalog/settings, replay contracts, broker | None; no `pi.extensions` |
-| `pi-codex-core` | Sole Responses engine: Standard/Lite, SSE/WS, prewarm, native compaction, diagnostics and fast commands | runtime |
-| `pi-codex-tools` | Separate patch, web-search and standalone imagegen modules, grammar, presentation and execution | runtime |
-| `pi-codex-web-search` | Thin selective compatibility entry: web search only | tools |
-| `pi-codex-imagegen` | Thin selective compatibility entry: image generation only | tools |
-| `pi-codex-minimal-tools` | Pure default composition and public `subagent-inline` re-export | runtime + core + tools |
+| `pi-codex-runtime` | 配置/catalog、认证辅助与 headers、身份、回放契约、broker | 无；库，不声明 `pi.extensions` |
+| `pi-codex-core` | 唯一 Responses 引擎，Standard/Lite、SSE/WS、预热、原生压缩、诊断与 Fast 命令 | runtime |
+| `pi-codex-tools` | 分开的 patch、web-search、standalone imagegen 模块，含 grammar、执行与展示 | runtime |
+| `pi-codex-web-search` | 只加载搜索的兼容入口 | tools |
+| `pi-codex-imagegen` | 只加载图像生成的兼容入口 | tools |
+| `pi-codex-minimal-tools` | 默认完整组合与公开 `subagent-inline` 转导出 | runtime、core、tools |
 
-All internal dependency versions are exact. Installing web or image now installs
-the unified tools dependency, but loads only its selected capability. Disabling
-a tool is runtime selection, not dependency/install isolation. Core alone registers
-none of the three tools and retains protocol/replay
-knowledge of historical web/image items without loading image storage or search
-presentation. This is code/install isolation, not a new sandbox or authorization
-boundary. Ownership checks prevent conversion of unrelated same-name tools.
-Packages continue shipping TypeScript source for Pi/TS-aware loaders, not
-compiled JavaScript for plain Node imports.
-
-`./internal/*` exports support package wiring and owner tests; they
-are not stable user-facing APIs. The old bundle's `./subagent-inline` remains
-supported, forwarding to runtime's identically named subpath.
-
-## Model and configuration behavior
-
-The default bundle keeps its existing tool names, package-tool activation,
-commands, schemas, saved message types and wire formats. Patch activation hides
-selected native mutation-tool declarations through Pi's `prepareLoadout` hook,
-not by removing tools from the active set. The session transcript retains them
-for tree navigation and resume, and codemode can still call them.
-Unknown or disabled model profiles remain on Pi's native implementation.
-`openai-codex/gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna` have exact Responses
-Lite profiles. Pi 1.2.0 is the package floor; 0.87.1 first supplied the Sol/Luna
-descriptors. Core composes a stream
-shim without replacing provider authentication, streams, or models.
-
-`openai/gpt-6.1-sol` explicitly inherits `openai/gpt-5.6-sol` defaults: Lite,
-auto WS/SSE, prewarm, standalone web/image, custom patch, native Responses
-compaction and Fast availability (priority, 2x cost multiplier).
-This is a compatibility policy, not verified endpoint access or pricing.
-Pi still owns the model's descriptor, authentication and resolved endpoint.
-
-The separate `openai/gpt-6-astra`, `gpt-6-sol` and
-`gpt-6-luna` profiles follow Pi 0.99.1 Standard Responses descriptors. They
-default to SSE and local custom patch; remote tools, native
-compaction, prewarm and Fast remain off. Their inheritance stays entirely
-within `openai`; no legacy Lite behavior, account entitlement or billing
-multiplier is inferred from similar names.
-
-Local image inspection uses Pi's native `read` tool.
-
-All combinations read the same existing configuration:
-
-```text
-<agentDir>/extensions/pi-codex-minimal-tools/config.json
-<agentDir>/extensions/pi-codex-minimal-tools/models.json
-```
-
-`PI_CODING_AGENT_DIR` still selects the agent directory. Existing project-level
-settings precedence is unchanged. Runtime owns the canonical schemas/default
-catalog; the bundle no longer contains copies. Use runtime's schema URLs in
-new configurations; old version-pinned bundle URLs remain unchanged. Do not create
-parallel configuration directories named after the new capabilities.
-
-Global `config.json.imageGeneration:false` is a generation kill switch. It
-prevents image tool, command and presentation registration and blocks
-standalone execution without changing Responses mode,
-transport, compaction, patch, web-search, image input or historical replay.
-Per-model `tools.imageGeneration:false` remains an independent profile override.
-
-Global `applyPatch` and `webSearch` are matching default-on kill switches.
-Each disabled capability skips tool, command and dedicated renderer registration
-and starts no capability jobs or network requests. Historical replay remains.
-Model configuration still selects patch `function`/`custom`, search
-`standalone`/`hosted`, and standalone images. Legacy `applyPatchEnabled` and
-`webSearchEnabled` are projected into model overrides first; the new global
-gates are intersected afterward, so a global false wins. Global `enabled:false`
-and an explicitly disabled model still win over every tool/profile switch.
-
-### Migration from core-owned patch
-
-Core no longer provides patch. Load `pi-codex-tools` alongside core, or continue
-using the full compatibility bundle. The old search/image package names remain
-selective entry points, not duplicate implementations. Patch function mode can
-run without core on a provider supporting function tools; custom mode requires
-the currently loaded engine to support that model/protocol. Hosted search also
-requires an actual compatible engine. A model profile alone is not proof that
-an implementation is loaded; missing prerequisites diagnose rather than fall back.
-
-Standard/Lite format, Codex request enhancements, SSE/WS/auto transport and
-Pi/native compaction are independent choices. Lite with enhancements off retains
-`additional_tools`, namespaces, its transport signals, `reasoning.context` and
-the no-hosted/no-parallel restrictions, but emits no optional Codex identity
-metadata. It never changes Pi authentication or endpoint or forces WS.
-Endpoint `responsesMode`/`transport` allowlists validate actual support;
-capability rejection does not silently select another implementation.
-
-The new global gates do not alter the catalog profile hash. Existing explicitly
-reviewed profile migrations remain; unknown custom profile hashes are rejected.
-Changing compaction generation to Pi does not discard or prevent compatible
-opaque-checkpoint replay. Removed configuration diagnostics and model/API/profile
-identity guards still apply.
-Checkpoint compatibility accepts only a full-profile match, a change solely
-from Responses generation to Pi generation, or an explicitly reviewed historical
-bundled hash. The exact legacy `:wire-off` transport-cache suffix is normalized;
-new checkpoints persist the unsuffixed catalog identity. Other profile, model,
-provider or API changes still reject opaque replay.
-
-Global `config.json.webSocketEnabled:false` forces Responses SSE and disables
-WebSocket prewarm across model profiles without rewriting their catalog values.
-
-Standalone clients obtain authentication from Pi's model registry. Without core:
-
-- Catalog-supported `standalone` web/image profiles execute directly.
-- Hosted search stays inactive and explicit execution reports that core is needed.
-- Image generation is standalone only; hosted image and direct fallback were removed.
-- No endpoint or unsupported model-family capability is guessed.
-- Missing authentication produces a tool error, not an implicit alternate account.
-
-The maintained OpenAI route is `openai`, using either Pi's API-key or ChatGPT
-OAuth login; both default to `/v1/responses`. `openai-codex` is frozen,
-deprecated compatibility, not an automatic OAuth fallback. Plugin routing
-overrides apply only to that legacy provider. Main requests consume Pi's
-prepared auth, while auxiliary requests honor model-registry auth and its
-resolved base URL. Even the explicit direct image fallback no longer reads
-a separate environment key or forces another provider's endpoint.
-
-The internal Lite and reserved endpoints remain unsupported compatibility
-surfaces. Fixture success is not proof that a real account may access them.
-
-The request serializer is aligned against Codex `5a314017`. See
-[wire alignment and migration](codex-wire-alignment.md) for the retained Pi
-identity/privacy boundary and removed legacy execution modes.
-
-## Broker and lifecycle contract
-
-`pi.events` synchronously discovers `@oai404iao/pi-codex:broker`. API wrappers and
-module paths need not be identical. A session service claims package ownership
-once; tools, providers, commands, renderers and identity hooks are not installed
-again by a duplicate, cooperating package.
-
-The handshake requires **ABI v2 and the same runtime package version**. Mixed
-versions fail explicitly rather than selecting catalog semantics by load order.
-The discovery channel and cached key remain stable to detect older ABI copies,
-not create parallel brokers. Tools publishes owned protocol descriptors; core
-captures ownership-checked declaration/input mappings for each ordinary, prewarm
-and compaction request. No grammar asset or tool executor lives in core.
-The first package owns shared activation/presentation hooks; any later core
-connects transport to the existing presentation service.
-
-Stream effects snapshot contributions and image sinks before request I/O.
-Observers remain response-attempt-local and run after normalization/continuation
-capture, before replay. New/fork session starts invalidate display sinks; abort
-blocks new image writes and completion notifications. Session clear alone does
-not cancel or roll back file writes.
-
-Shutdown disconnects discovery, flushes/clears presentation, aborts background
-jobs and resets core prewarm/transports. Pi runtime invalidation also removes
-tracked bus subscriptions. Reload discovers a fresh service, including when a
-host reuses its event bus.
-
-Duplicate-install support means **this broker-enabled bundle plus compatible
-capability versions**. Mixing a pre-broker published monolith with new packages
-is not covered: an unchanged old factory cannot participate in the handshake.
-Upgrade the bundle to a broker-enabled release before mixing installations.
-
-## Verification
-
-The repository-only [offline ablation audit](audits/codex-ablation.md) compares
-selected components and Pi 0.87.1's built-in Codex stream implementation.
-Run `pnpm run test:codex-ablation` for reproducible fixtures without credentials
-or model requests. These characterize current behavior, including known gaps;
-they are not model-quality or latency benchmarks.
-The same audit records the implemented transport fixes, synthetic compression
-measurements, and the explicitly authorized, compatibility-limited
-`openai/gpt-6-sol` live smoke. `test:codex-live` requires `--execute provider/model`
-and is never invoked by CI or the offline experiment.
-
-From repository root:
+在仓库根目录试用完整组合：
 
 ```bash
-pnpm install --frozen-lockfile --ignore-scripts
-pnpm run ci
-pnpm run changeset:status
+pi -e ./pi-extensions/pi-codex-minimal-tools
 ```
 
-`pnpm run test:codex-packages` packs all six Codex packages, pnpm-installs them in
-temporary consumers, and uses the selected baseline's actual Pi loader. It covers runtime,
-each capability, all pairs, all capabilities, the bundle, duplicate composition,
-reversed order, separate physical runtime copies and shutdown/reload. Standalone
-auth/HTTP are deterministic fixtures; there are no real credentials or endpoints.
+或仅组合 core 与 tools：
 
-This exhaustive matrix is the default. Remote CI selects it on Node 24/target;
-other compatibility legs set `OMP_CODEX_CONSUMER_MODE=smoke`. Smoke still packs
-all six packages, installs the bundle from local tarballs using the projected
-frozen offline lock, checks external-link containment and inline re-export
-identity, and probes the consumer's actual Pi SDK/loader with core and all tools.
-It omits the other consumer combinations, reverse/duplicate loading sweeps and
-configuration masks; it is not equivalent exhaustive compatibility coverage.
-Unknown modes fail. `pnpm run ci` and local baseline commands remain exhaustive
-unless the caller explicitly selects smoke.
+```bash
+pi -e ./pi-extensions/pi-codex-core -e ./pi-extensions/pi-codex-tools
+```
 
-Every Codex dependency in those consumers comes from a tarball and cannot resolve
-back to workspace source. S4 installs external Pi/transport dependencies from
-the root `pnpm-lock.yaml`'s exact registry artifacts using
-`pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-scripts`.
-The root frozen install populates the pnpm store needed by these offline checks.
-The test projects only the production/host-peer closure, preserving dependency
-and peer snapshots and checksums. pnpm's internal symlinks, including executable
-links, are allowed only inside the consumer fixture; none may resolve outside
-it or back to the checkout. It imports the consumer's own Pi loader, not the
-workspace loader. The node_modules capability closure is independently asserted.
-These tests deliberately use local Codex tarballs, not mutable registry installs;
-they do not themselves verify publication or real endpoint/account access.
-Separate registry and limited real-smoke evidence is recorded in the
-[activation audit](audits/codex-bootstrap-activation.md).
+Core 不注册三类工具，也不加载图像存储或搜索展示实现；保留历史 web/image 项的协议与回放知识。
+搜索/图像兼容入口会安装统一 tools 依赖，但只加载选定能力。禁用能力不是依赖安装隔离。
+本项目不接管无关的同名工具，本地图片查看使用 Pi 原生 `read`。
 
-Unit tests additionally exercise activation, unknown/disabled models, legacy
-configuration, new/fork, no UI, abort, late image results and old replay fixtures.
-Behavioral tests live with their runtime/core/tools owners.
-Root `tests/codex/` owns cross-package integration and the pure-bundle boundary;
-run `pnpm run test:codex-composition`. It is included in `pnpm run ci`.
-The [reference index](../pi-extensions/pi-codex-runtime/reference/README.md) and
-[source map](../pi-extensions/pi-codex-runtime/reference/source-map.md) locate
-protocol documentation, schemas, fixtures and source/licensing evidence.
-The [composition cleanup inventory](audits/codex-composition-cleanup.md) records
-the final resource ownership, preserved interfaces and verification results.
-Architecture checks include type/re-export edges, cycles, exported cross-package
-paths, exact declared dependencies and forbidden optional/peer package edges.
+包发布 TypeScript 源码，供 Pi/TS-aware loader 使用，不承诺 plain Node 可直接导入。
+`./internal/*` 仅服务内部装配与 owner tests，不是稳定公共 API。
+旧组合包的公开 `./subagent-inline` 保留，转发 runtime 同名 subpath。
 
-## Release status
+<a id="model-and-configuration-behavior"></a>
 
-The newly consolidated tools workspace is public/`bootstrap` for an authorized
-manual first publication, not activated for guarded publication. Existing package
-eligibility and immutable release locks are unchanged. Publish runtime and core
-prerequisites first, then bootstrap tools locally, then activate it in a separate
-reviewed change after verifying registry identity/integrity and trusted publishing.
-Only afterward publish compatibility consumers; minimal-tools stays last.
-The guarded dependency check intentionally refuses consumer release batches until
-that activation. See [release preparation](../RELEASING.md#codex-tools-first-publication).
+## 配置与模型选择
 
-The four previously introduced packages are non-private on the guarded `publishable` track.
-Their already-published versions are recovery nodes, pinned by source and SHA-512
-in the release lock. Ordinary preparation includes all seven current
-workspaces; dependency closure may not be bypassed. A locked version
-temporarily missing from registry metadata stops preparation, not triggers a
-new publish. Removed extensions cannot enter new artifact batches; previous
-lock entries remain unchanged.
+所有组合继续读取同一份配置：
 
-S4 supplies `changeset:sync`, CI coverage checking and the guarded
-`changeset:version` wrapper. Generated consumer changesets recurse through hard
-and optional workspace dependencies; exact-pin changes require a consumer bump.
-The publication pipeline independently validates dependency order, artifacts,
-eligibility and dependency visibility, stopping downstream publication on failure.
+```text
+<codex-agent-dir>/extensions/pi-codex-minimal-tools/config.json
+<codex-agent-dir>/extensions/pi-codex-minimal-tools/models.json
+```
 
-Initial bootstrap is complete and this dedicated activation change was authorized
-for review. Protected publication of new versions still needs separate
-approval. The first four packages have both `next`
-and `latest` pointing to their sole initial alpha; that bounded exception is not
-stable-release acceptance. Trusted-publisher configuration is not proof of a
-successful OIDC publish. See [activation evidence](audits/codex-bootstrap-activation.md)
-and [RELEASING.md](../RELEASING.md).
-The public package floor and development target are Pi 1.2.0.
-See
-[Pi compatibility](pi-compatibility.md) for verification commands and limits.
+Runtime 拥有唯一 schema 与默认 catalog。目录解析和常用开关见[配置](configuration.md)；
+不要按能力包另建配置目录，也不要把 Pi 项目设置的优先级推断为插件自有配置的项目覆盖。
+新配置使用 runtime 的 schema URL，旧的版本固定 bundle schema URL 不改写。
 
-The [integration review](audits/codex-integration.md) additionally checks cached
-broker compatibility and restricts native placeholder rewriting to broker-owned
-capabilities across extension requests, prewarm and compaction. Lower-level
-helpers keep their legacy behavior when no ownership policy is supplied.
-Background `/image-gen` jobs now have instance-owned status and cancellation:
-session replacement/shutdown aborts work and suppresses late notifications and
-new writes. Already-started server generation or file writes cannot be undone.
+组合包保留工具名、包工具激活、命令、schemas、保存消息类型和 wire formats。
+Patch 通过 Pi `prepareLoadout` 隐藏选中的原生修改工具声明，不从 active set 删除工具。
+原生调用仍留在 transcript 中供树导航/恢复，codemode 仍可调用它们。
+未知或显式禁用的模型保持 Pi 原生实现；core 的 stream shim 不替代 Pi 认证和模型注册。
+
+### 精确模型 profile
+
+| Provider / 模型 | 当前策略 |
+| --- | --- |
+| `openai/gpt-6.1-sol` | 显式继承 `openai/gpt-5.6-sol`：Lite、auto WS/SSE、预热、standalone 搜索/图像、custom patch、native Responses 压缩与 Fast 可用性（priority、2x 成本乘数） |
+| `openai/gpt-6-astra`、`openai/gpt-6-sol`、`openai/gpt-6-luna` | Pi Standard Responses 描述符；默认 SSE、local custom patch；远程工具、native 压缩、预热与 Fast 默认关闭 |
+| `openai-codex/gpt-6-astra`、`openai-codex/gpt-6-sol`、`openai-codex/gpt-6-luna` | 保留精确匹配的旧 Lite profiles；provider 已冻结，不按家族名扩展支持 |
+
+上述继承和 Fast 倍数是兼容策略，不是实际账号权限或价格核验。Pi 拥有模型描述、认证和解析地址。
+不同 provider 的相近模型名不互相继承，没有 `openai-codex/gpt-6.1-sol` 自动映射。
+详见 [Pi 兼容性](pi-compatibility.md)。
+
+### 全局与模型开关
+
+`applyPatch`、`webSearch`、`imageGeneration` 为默认开启的全局能力门禁。
+关闭后跳过该能力工具、命令、专用 renderer，并阻止新任务/请求；历史回放保留。
+图像开关不影响图像输入、Responses 模式、压缩或其他工具。
+
+模型层仍决定 patch `function` / `custom`、搜索 `standalone` / `hosted` 与 standalone 图像。
+旧 `applyPatchEnabled` / `webSearchEnabled` 先投影为模型覆盖，再与全局门禁相交，
+因此全局 `false`、总开关 `enabled:false`、显式禁用模型都不能被其他开关绕过。
+全局 `webSocketEnabled:false` 强制 SSE 并关闭 WS 预热，但不改写 catalog。
+
+<a id="migration-from-core-owned-patch"></a>
+
+## 从旧组合迁移
+
+Core 已不再拥有 patch。需要补丁时同时加载 tools，或继续使用 broker-enabled 完整组合包。
+原搜索/图像包是选择性入口，不是实现副本。
+
+| 能力 | 不加载 core 时 |
+| --- | --- |
+| Function patch | Provider 支持 function tools 时可运行 |
+| Custom patch | 需要实际加载支持该模型/协议的引擎，不能只写 profile |
+| Standalone 搜索/图像 | Catalog 支持时直接执行，从 Pi model registry 取得认证与地址 |
+| Hosted 搜索 | 未加载兼容引擎时不激活，显式调用会报告缺少 core |
+| Hosted 图像、direct image fallback | 已移除，不能回退执行 |
+
+缺少认证会返回工具错误，不会尝试另一账号，也不会从独立环境密钥或别的 provider 强制取地址。
+维护 route 为 `openai`：API key 与 ChatGPT OAuth 均遵循 Pi 原生认证及默认 `/v1/responses`。
+`openai-codex` 仅为冻结兼容路径；插件 route overrides 只作用于这一旧 provider。
+
+Standard/Lite、可选 Codex request 增强、SSE/WS/auto、Pi/native 压缩互相独立。
+关闭增强时 Lite 仍保留 `additional_tools`、namespaces、transport signals、`reasoning.context`
+及禁 hosted/parallel 限制，只移除可选身份元数据，不改 Pi 认证、端点或强制 WS。
+端点模式/传输白名单拒绝能力时不会暗中选择另一实现。
+内部 Lite 与 reserved endpoints 仍是非官方兼容面，fixture 成功不证明账号有访问权。
+
+### 保留历史检查点
+
+新全局门禁不改变 catalog profile hash。切换到 Pi 压缩生成也不意味着可删除已有 opaque checkpoint。
+兼容回放仅接受完整 profile 匹配、仅从 Responses 生成切至 Pi 生成，或已明确审查的历史 bundle hash。
+旧 `:wire-off` transport-cache 后缀会归一化，新 checkpoint 保存不带后缀的 catalog 身份。
+其他 model/provider/API/profile 变化仍拒绝不透明回放；未知自定义 hash 不作宽松放行。
+
+请求序列化对齐 Codex `5a314017`，已移除选项见[协议对齐与迁移](codex-wire-alignment.md)。
+
+<a id="broker-and-lifecycle-contract"></a>
+
+## Broker 与生命周期
+
+`pi.events` 通过 `@oai404iao/pi-codex:broker` 同步发现共享 session service。
+API wrapper 和模块路径可以不同；一个服务只认领一次 package ownership，合作包不会重复安装
+provider、工具、命令、renderer 或身份 hooks。
+
+握手要求 **ABI v2 和相同 runtime 包版本**。混合版本显式失败，不按加载顺序决定 catalog 语义。
+发现 channel 与 cache key 保持稳定以检测旧 ABI，而不是建立平行 broker。
+仅支持新 broker-enabled bundle 与兼容能力版本重复安装；旧单体工厂不参与握手。
+
+Tools 发布带所有权的协议描述符。Core 为 ordinary、prewarm、compaction 请求捕获经过所有权检查的
+declaration/input 映射，不拥有 grammar 资源或工具 executor。
+首个包拥有共享 activation/presentation hooks，后加载 core 将 transport 连接到已有 presentation service。
+
+流副作用在 I/O 前快照 contributions 与 image sinks。Observer 属于单次 response attempt，
+在归一化/continuation 捕获后、回放前运行。New/fork 会使 display sink 失效；abort 阻止新的图片写入和完成通知。
+单纯 clear session 不取消也不回滚文件写入。
+
+Shutdown 断开发现、flush/clear 展示、取消后台 jobs 并重置 core 的预热/传输。
+Pi runtime 失效还会移除跟踪的 bus subscriptions；即使宿主复用事件总线，reload 也会发现新 service。
+`/image-gen` 的状态和取消属于具体实例，session replacement/shutdown 抑制晚到结果；
+已开始的服务端生成或文件写入不能撤销。
+
+<a id="verification"></a>
+
+## 验证组合而非猜测支持
+
+在仓库根目录运行：
+
+```bash
+pnpm run test:codex-composition
+pnpm run test:codex-packages
+pnpm run check:architecture
+```
+
+完整 `pnpm run ci` 已包含这些检查。Behavioral tests 属于 runtime/core/tools 各 owner，
+根 `tests/codex/` 负责跨包集成与纯组合边界，不在 bundle 重复实现/测试行为。
+架构检查覆盖 type/re-export edges、循环、跨包导出路径、精确依赖和禁止的 optional/peer edges。
+
+`test:codex-packages` 将六个 Codex 包打包，在临时 consumer 内使用自身真实 Pi SDK/loader，
+覆盖 runtime、各能力、两两/全部组合、bundle、重复和逆序加载、不同物理 runtime 副本、shutdown/reload。
+所有 Codex 代码来自 tarball，不得回链源码；standalone auth/HTTP 是固定 fixture，不触真实端点。
+
+外部依赖从根锁投影 production/host-peer 闭包，保留 dependency/peer snapshots 和 integrity：
+
+```bash
+pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-scripts
+```
+
+先完成根冻结安装来填充 pnpm store。缺失产物必须失败，不能在线换解锁版本。
+pnpm 内部链接包括可执行链接只能留在 consumer 内，不能指向 checkout 或其他外部目录。
+`--trust-lockfile` 仅跳过 registry-metadata policy 复查，不跳过冻结锁与完整性。
+
+默认为 exhaustive。远端 Node 24/target 选中时运行完整组合矩阵，其他兼容腿用
+`OMP_CODEX_CONSUMER_MODE=smoke`：仍打包六包、离线隔离安装 bundle、校验链接和 inline re-export，
+并以真实 SDK/loader 加载 core 与所有工具；不覆盖其余组合、逆序/重复加载扫描及配置掩码。
+未知模式失败。普通本地 CI 和 baseline 命令不默认降为 smoke。
+
+离线消融 `pnpm run test:codex-ablation` 比较固定组件与 Pi 0.87.1 内置 Codex stream，
+结果见[消融审计](audits/codex-ablation.md)，不是模型质量或延迟基准。
+Live 测试与 CI 分开，需显式授权和 `--execute provider/model`，不要为检查文档而运行。
+协议依据见 [reference 索引](../pi-extensions/pi-codex-runtime/reference/README.md)、
+[来源映射](../pi-extensions/pi-codex-runtime/reference/source-map.md)及[组合清理审计](audits/codex-composition-cleanup.md)。
+
+<a id="release-status"></a>
+
+## 发布状态与边界
+
+以 `scripts/workspaces.mjs` 为资格来源：当前八个发布工作区均为 `publishable`，
+tools 的 `0.1.0-alpha.1` 首发与独立激活已经完成，**不再等待 bootstrap**。
+旧文档中的七包/九包队列或 tools 待首发叙述是历史阶段，不是当前批次。
+
+这不表示当前 manifest 的所有版本都已发布，也不授权发布。
+普通批次要求完整依赖闭包和依赖优先顺序；定向发布要求精确依赖已在 npm 验证。
+消费者仍需单独受保护调度，minimal-tools 保持在依赖之后发布。
+已发布 recovery 节点由 release lock 的 source/SHA-512 固定；暂时 E404 必须停止，不能重打包当新候选。
+
+Changesets 的 `changeset:sync` 递归覆盖 hard/optional workspace 消费者；
+`changeset:version` 保持 exact pins 并要求相应 consumer bump。
+不要手改生成 changeset 或跳过依赖守卫。
+初始 alpha 的有限 `latest`/`next` 同指例外不是稳定认证；trusted publisher 配置也不证明 OIDC 已成功发布。
+完整流程见[发布指南](../RELEASING.md)，证据见[初始激活](audits/codex-bootstrap-activation.md)、
+[tools 激活](audits/codex-tools-bootstrap-activation.md)和[集成审计](audits/codex-integration.md)。

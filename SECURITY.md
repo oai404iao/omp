@@ -1,21 +1,41 @@
-# Security Policy
+<a id="security-policy"></a>
 
-These Pi extensions execute with the user's operating-system permissions.
-Review extension source before installation and treat project-local
-configuration as trusted code.
+# 安全说明
 
-## Reporting a vulnerability
+这些扩展在 Pi 进程内运行，拥有启动 Pi 的操作系统用户权限。
+安装前审阅来源与代码；项目级配置可以加载可执行扩展，授予项目信任前应检查其内容。
+工作目录、子代理角色、包拆分和工具隐藏都不是操作系统沙箱。
 
-After the GitHub repository is public, use GitHub private vulnerability
-reporting. Until then, contact the maintainer through the existing private
-project channel.
+## 限制影响范围
 
-Do not include credentials, tokens, private session files, or exploitable
-details in a public issue. A report should include the affected package and
-version, impact, reproduction steps with secrets removed, and any suggested
-mitigation.
+- 不可信任务应放在独立用户、容器或虚拟机中，只暴露必需的文件、网络与凭证。
+- 子代理通常共享工作树。明确文件归属；取消或关闭代理不会撤销已完成的文件修改。
+- Telegram 通知会将配置允许的内容发往外部服务，先确认目标和脱敏策略。
+- 提示词、工具参数、输出、会话和导出都可能含敏感信息。分享前审阅，不要提交真实通知配置、
+  provider token、私有端点或 `auth.json`。
+- 对重要数据使用版本控制或备份。检查生成的补丁与命令，不要把模型输出视为可信代码。
 
-## Supported versions
+## 认证与权限边界
 
-No npm release is currently supported. A package-specific support policy will
-be published before the first public release.
+Codex 能力使用 Pi 解析的模型认证与地址，不应配置备用密钥绕过拒绝。
+工具开关控制能力启用，不证明服务端授权。测试 fixture 通过也不证明账号权限、沙箱隔离或真实端点可用。
+扩展不伪造 Codex CLI 身份、审批状态、沙箱证明，也不为协议对齐额外上传工作区/Git 遥测。
+
+<a id="reporting-a-vulnerability"></a>
+
+## 报告漏洞
+
+优先使用仓库的 [GitHub 私密漏洞报告入口](https://github.com/oai404iao/omp/security/advisories/new)。
+若该入口不可用，请通过已有的私密项目渠道联系维护者，不要退而发布可利用细节。
+
+报告应包括受影响包与版本、影响范围、脱敏复现步骤和可选缓解建议。
+不要在公开 issue 中放入密钥、token、私有会话或可直接利用的敏感细节。
+
+<a id="supported-versions"></a>
+
+## 版本与发布可信性
+
+已发布并不表示所有历史版本都获得持续维护；本项目未在此承诺统一的 LTS 窗口。
+报告时注明精确版本，区分 npm 不可变产物与当前源码。当前兼容基线见
+[Pi 兼容性](docs/pi-compatibility.md)，发布与完整性核验见[发布指南](RELEASING.md)。
+安全修复、弃用或撤回注册表产物仍需独立授权，文档修改不等于批准这些操作。
