@@ -361,7 +361,10 @@ separate publication authorization.
 4. Merge the version PR.
 5. Manually run `publish.yml` from `main`, enter `publish`, and approve the
    `npm-publish` environment deployment.
-6. The read-only job reruns checks and packs immutable release artifacts.
+6. The read-only job verifies the release scope, packs immutable artifacts, and
+   tests their actual isolated installation before uploading the same bytes.
+   Validated exact-SHA main coverage can replace source behavior reruns only;
+   fresh policy, audit and artifact checks always run (see below).
 7. The protected OIDC job validates repository/license metadata, publishes the
    exact tarballs, waits for each package's exact npm metadata and dist-tag to
    become visible, atomically pushes package tags, and creates package-specific
@@ -414,6 +417,59 @@ release.
 Local artifact preparation uses `RELEASE_PACKAGE=<exact-name> pnpm run
 release:artifacts`. Dispatch still requires `confirm=publish`, successful
 verification, and approval of the protected `npm-publish` environment.
+
+### Scoped verification and trusted source reuse
+
+`pnpm run ci:release --package <exact-name>` verifies the target and its canonical
+runtime/optional workspace dependency closure. Without `--package` it verifies
+all release workspaces, excluding private local notifications. It does not pack,
+publish, change versions, or bypass dependency prerequisites. Repository policy
+and release-infrastructure regressions are retained. Any Codex/subagent selection
+still runs the full source composition and consumer suites; independent Telegram
+releases do not rerun unrelated Codex behavior.
+
+The read-only publish job queries the canonical GitHub CI workflow with
+`actions: read`. Source reruns are skipped only for the exact release SHA's
+latest successful **main push** run/attempt from this repository, with all nine
+package jobs, all three shared suites, three additional compatibility roles,
+four legacy aggregates and `Trusted main coverage / v1` successfully completed.
+The source workflow must match the reviewed SHA-256 pinned in
+`scripts/ci/trusted-main.mjs`; update it and policy tests deliberately after graph
+changes. API pagination, repository/head identity and each job's run/attempt/SHA
+are checked. Live main must still equal the release SHA. Manual/PR/fork runs,
+old successful attempts, missing/skipped jobs, changed graphs and API uncertainty
+never authorize reuse: the selected source checks run instead.
+
+The workflow revalidates reused evidence immediately before uploading artifacts;
+if it is no longer valid, verification fails and must be rerun. It never switches
+to another SHA. This helper is separate from the Release PR workflow's
+`workflow_run` guard. It consumes no upstream logs or untrusted result artifacts.
+
+After artifact preparation, `pnpm run release:verify-installations
+release-artifacts/manifest.json` validates the **actual** release combination:
+
+- New candidates use the exact prepared tarballs. `verify`/`recover` candidates
+  use their immutable npm archives after registry identity and SHA-512 checks.
+  Dependency source edits in the checkout are never repacked as substitutes.
+- Manifests come from each candidate's source commit. Historical dependency and
+  peer contracts must fit the reviewed root lock; missing or mismatched external
+  prerequisites stop verification, rather than resolving another version.
+- Exact, verified archives are seeded into the existing store. Each isolated
+  consumer installs offline with a projected frozen lock and lifecycle scripts
+  disabled, then runs its own Pi SDK loader with network disabled. Every candidate
+  closure and combined/reversed loading are checked; bundle inline exports remain
+  covered. Links may not escape a consumer.
+- `consumer-verification.json` binds the manifest, source commits and artifact
+  hashes to those consumers. Verification rechecks the bytes at completion; both
+  upload and the protected job validate the receipt and publish tarball hashes.
+
+Registry acquisition is read-only, bounded and restricted to canonical npm
+artifact URLs. It is not a live endpoint/model test. Run the verifier only after
+authorized artifact preparation; it does not write to npm. Source-built
+`test:codex-packages` remains additional coverage, not proof of a historical npm
+dependency payload. Existing source ancestry, exact dependency pins, immutable
+locks, dist-tag/recovery rules, approval, OIDC separation and dependency-first
+serialized publication are unchanged.
 
 ## Recovery
 

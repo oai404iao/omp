@@ -14,86 +14,225 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PI_OFFLINE: "1"
+  PI_TELEMETRY: "0"
+
 jobs:
-  verify:
-    name: Node ${{ matrix.node }} / Pi ${{ matrix.pi }}
+  plan:
+    name: Verification plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+      packages: ${{ steps.plan.outputs.packages }}
+      suites: ${{ steps.plan.outputs.suites }}
+      has_packages: ${{ steps.plan.outputs.has_packages }}
+      has_suites: ${{ steps.plan.outputs.has_suites }}
+      full: ${{ steps.plan.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.x"
+      - name: Select and explain verification scope
+        id: plan
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "$CI_EVENT" == "pull_request" ]]; then
+            node scripts/ci/plan.mjs --base "$BASE_SHA" --head "$GITHUB_SHA" --shadow --github-output "$GITHUB_OUTPUT" --output "$RUNNER_TEMP/verification-plan.json"
+          else
+            node scripts/ci/plan.mjs --full --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT" --output "$RUNNER_TEMP/verification-plan.json"
+          fi
+          printf '### Verification plan\n```json\n' >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/verification-plan.json" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+
+  policy:
+    name: Repository policy
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - name: Verify repository policy
+        env:
+          VERIFICATION_PLAN: ${{ needs.plan.outputs.plan }}
+        run: |
+          printf '%s\n' "$VERIFICATION_PLAN" > "$RUNNER_TEMP/verification-plan.json"
+          node scripts/ci/run.mjs --plan "$RUNNER_TEMP/verification-plan.json" --task policy --report "$RUNNER_TEMP/policy-timings.json"
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level=high
+      - name: Require a clean checkout
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
+  packages:
+    name: Package / ${{ matrix.package }}
+    needs: [plan, policy]
+    if: needs.plan.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        package: ${{ fromJSON(needs.plan.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - name: Check selected package
+        env:
+          VERIFICATION_PLAN: ${{ needs.plan.outputs.plan }}
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          printf '%s\n' "$VERIFICATION_PLAN" > "$RUNNER_TEMP/verification-plan.json"
+          node scripts/ci/run.mjs --plan "$RUNNER_TEMP/verification-plan.json" --task "package:$PACKAGE" --report "$RUNNER_TEMP/timings.json"
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+      - name: Upload package timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: timings-${{ matrix.package }}
+          path: ${{ runner.temp }}/timings.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  suites:
+    name: Suite / ${{ matrix.suite }}
+    needs: [plan, policy]
+    if: needs.plan.outputs.has_suites == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
-        node:
-          - "22.19.0"
-          - "24.x"
-        pi:
-          - floor
-          - target
-
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
     steps:
-      # Keep the existing required contexts during the rollout. Non-target PR
-      # legs report an explicit scope skip without installing or testing.
-      - name: Select verification scope
-        id: scope
-        shell: bash
-        env:
-          CI_EVENT: ${{ github.event_name }}
-          CI_NODE: ${{ matrix.node }}
-          CI_PI: ${{ matrix.pi }}
-        run: |
-          if [[ "$CI_EVENT" != "pull_request" || ( "$CI_NODE" == "24.x" && "$CI_PI" == "target" ) ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Compatibility leg deferred to main; PR verification runs on Node 24 / Pi target."
-          fi
-
-      - name: Check out repository
-        if: steps.scope.outputs.run == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Set up pnpm
-        if: steps.scope.outputs.run == 'true'
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Set up Node.js
-        if: steps.scope.outputs.run == 'true'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup-ci
+      - name: Run selected integration suite
+        env:
+          VERIFICATION_PLAN: ${{ needs.plan.outputs.plan }}
+          SUITE: ${{ matrix.suite }}
+          OMP_CODEX_CONSUMER_MODE: full
+        run: |
+          printf '%s\n' "$VERIFICATION_PLAN" > "$RUNNER_TEMP/verification-plan.json"
+          node scripts/ci/run.mjs --plan "$RUNNER_TEMP/verification-plan.json" --task "$SUITE" --report "$RUNNER_TEMP/timings.json"
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+      - name: Upload suite timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          node-version: ${{ matrix.node }}
-          cache: pnpm
+          name: timings-${{ matrix.suite }}
+          path: ${{ runner.temp }}/timings.json
+          if-no-files-found: ignore
+          retention-days: 7
 
-      - name: Install locked dependencies
-        if: steps.scope.outputs.run == 'true'
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Run baseline verification
-        if: steps.scope.outputs.run == 'true'
+  compatibility:
+    name: Compatibility / Node ${{ matrix.node }} / Pi ${{ matrix.pi }}
+    needs: [plan, policy]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - node: "22.19.0"
+            pi: floor
+          - node: "22.19.0"
+            pi: target
+          - node: "24.x"
+            pi: floor
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+        with:
+          node: ${{ matrix.node }}
+      - name: Verify additional baseline
         run: node scripts/test-pi-baselines.mjs ${{ matrix.pi }}
         env:
           OMP_PI_MATRIX_LOG_DIR: ${{ runner.temp }}/pi-matrix
-          # Both target legs must pass this same workflow revision. Floor reuse
-          # is guarded by identical projected manifests AND the complete lock.
+          # The final gate requires successful full target coverage at this SHA
+          # and Node version. Reuse still compares every manifest and lock entry.
           OMP_PI_REUSE_TARGET: "1"
-          OMP_CODEX_CONSUMER_MODE: ${{ matrix.node == '24.x' && matrix.pi == 'target' && 'full' || 'smoke' }}
-
+          OMP_CODEX_CONSUMER_MODE: smoke
       - name: Upload baseline diagnostics
-        if: always() && steps.scope.outputs.run == 'true'
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pi-${{ matrix.pi }}-node-${{ matrix.node }}
           path: ${{ runner.temp }}/pi-matrix/
           if-no-files-found: ignore
           retention-days: 7
-
-      - name: Audit production dependencies
-        if: steps.scope.outputs.run == 'true'
-        run: pnpm audit --prod --audit-level=high
-
-      - name: Ensure checks did not modify tracked files
-        if: steps.scope.outputs.run == 'true'
-        shell: bash
+      - name: Require a clean checkout
         run: |
           git diff --exit-code
           test -z "$(git status --porcelain)"
+
+  verify:
+    # Keep all four existing required contexts; none can hide a failed matrix.
+    name: Node ${{ matrix.node }} / Pi ${{ matrix.pi }}
+    needs: [plan, policy, packages, suites, compatibility]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.19.0", "24.x"]
+        pi: [floor, target]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.x"
+      - name: Require every planned task
+        env:
+          VERIFICATION_PLAN: ${{ needs.plan.outputs.plan }}
+          CI_NEEDS: ${{ toJSON(needs) }}
+          CI_EVENT: ${{ github.event_name }}
+        run: node scripts/ci/aggregate.mjs
+
+  trusted-main-coverage:
+    name: Trusted main coverage / v1
+    needs: [plan, policy, packages, suites, compatibility, verify]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.x"
+      - name: Certify complete main coverage
+        env:
+          VERIFICATION_PLAN: ${{ needs.plan.outputs.plan }}
+          CI_NEEDS: ${{ toJSON(needs) }}
+          CI_EVENT: ${{ github.event_name }}
+          REQUIRE_FULL_COVERAGE: "1"
+        run: node scripts/ci/aggregate.mjs

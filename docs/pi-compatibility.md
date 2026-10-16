@@ -190,15 +190,22 @@ hashes fail closed; the production-consumer check rejects unhashed dependencies.
 Failed copies are removed but their logs are retained. The matrix returns failure
 if either baseline fails; it does not automatically retry failing tests.
 `OMP_PI_MATRIX_LOG_DIR` optionally selects a parent directory for unique log sets.
-The read-only GitHub workflow runs full Node 24/target CI for pull requests;
-the other required contexts explicitly defer compatibility testing to `main`.
-Main pushes and manual runs cover both Pi roles on Node 22.19.0 and 24.x and
-upload diagnostics. Node 24/target runs the exhaustive consumer matrix; other
-legs use the isolated bundle consumer smoke, retaining actual SDK and loader
-validation but not the exhaustive consumer combinations.
+The read-only GitHub workflow runs affected Node 24/target checks for pull
+requests, with source packages and shared suites in independent jobs. Policy
+always checks installed SDK resolution. Canonical target jobs use the committed
+root lock and isolated agent directory without a second checkout installation.
+The four existing required contexts aggregate all selected work, rather than
+claiming extra pre-merge compatibility coverage. Main pushes and manual runs
+retain full coverage of both Pi roles on Node 22.19.0 and 24.x and upload
+diagnostics. Node 24/target runs exhaustive consumers whenever selected; other
+legs retain snapshot/lock preparation and isolated bundle consumer smoke.
+Local baseline commands still create independent tracked-file snapshots and
+remain exhaustive unless explicitly opted into the existing reuse policy.
 
 `OMP_PI_REUSE_TARGET=1` is an explicit optimization for callers that also require
-target success at the same source revision and Node version. After floor lock
+complete target success at the same source revision and Node version. Remote
+aggregates require all target package/suite jobs; a smaller affected plan must
+not stand in for full target coverage on main/manual runs. After floor lock
 projection, hash validation and frozen installation, reuse requires equal Pi
 versions, equal workspace/root manifests and deep equality of the complete
 application lock (including settings, importers, package identities, integrity

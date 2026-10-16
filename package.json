@@ -29,7 +29,11 @@
     "check:local-notify": "pnpm --dir pi-extensions/pi-local-notify run check",
     "check:architecture": "node scripts/check-codex-architecture.mjs",
     "test:architecture": "node --test scripts/check-codex-architecture.test.mjs scripts/release-dependencies.test.mjs",
-    "ci": "pnpm run changeset:check && pnpm run pack:check && pnpm run license:check && pnpm run check:architecture && pnpm run test:architecture && pnpm run check:pi-baseline && pnpm run check && pnpm run test:codex-composition && pnpm run test:release-scripts && pnpm run test:codex-packages",
+    "ci": "node scripts/ci/run.mjs --full",
+    "ci:plan": "node scripts/ci/plan.mjs",
+    "ci:affected": "node scripts/ci/run.mjs",
+    "ci:release": "node scripts/ci/run.mjs --release",
+    "test:ci": "node --test scripts/ci/*.test.mjs scripts/ci-policy.test.mjs",
     "test:codex-composition": "node scripts/test-codex-composition.mjs",
     "check:pi-baseline": "node scripts/check-pi-baseline.mjs",
     "ci:pi-matrix": "node scripts/test-pi-baselines.mjs",
@@ -44,7 +48,8 @@
     "release:artifacts": "node scripts/prepare-release-artifacts.mjs",
     "release:bootstrap-artifacts": "node scripts/prepare-release-artifacts.mjs --include-bootstrap",
     "release:preflight": "node scripts/release-preflight.mjs",
-    "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/prepare-release-artifacts.test.mjs scripts/targeted-release.test.mjs scripts/initial-codex-bootstrap.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs scripts/pi-baselines.test.mjs scripts/pi-ci-policy.test.mjs scripts/ci-policy.test.mjs scripts/codex-consumer-matrix.test.mjs scripts/release-pr-ci-gate.test.mjs"
+    "release:verify-installations": "node scripts/verify-release-installations.mjs",
+    "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/prepare-release-artifacts.test.mjs scripts/targeted-release.test.mjs scripts/initial-codex-bootstrap.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs scripts/pi-baselines.test.mjs scripts/pi-ci-policy.test.mjs scripts/ci-policy.test.mjs scripts/codex-consumer-matrix.test.mjs scripts/release-pr-ci-gate.test.mjs scripts/ci/*.test.mjs scripts/release-consumer*.test.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "1.2.0",

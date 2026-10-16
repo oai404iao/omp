@@ -30,20 +30,61 @@ Package checks include each extension's typecheck and tests where present.
 inspects the exact npm tarball file list and verifies every Pi extension entry
 point and runtime asset is included.
 
+### Focused verification and timings
+
+Every package keeps its own `check` entry point. The composition-only bundle's
+check is deliberately a typecheck, not a duplicate behavior suite. Local-only
+notifications stay outside the release workspace and use `check:local-notify`.
+
+```bash
+pnpm --filter @oai404iao/pi-codex-tools run check
+pnpm run check:local-notify
+pnpm run ci:plan --base origin/main --head HEAD --shadow
+pnpm run ci:affected --base origin/main --head HEAD
+pnpm run ci:release --package @oai404iao/pi-telegram-notify
+pnpm run ci --concurrency 2
+pnpm run test:ci
+```
+
+Revision-based plans compare immutable Git revisions, not staged/unstaged edits.
+Use a package's direct check or full `ci` while developing uncommitted changes.
+Plans explain every selection and full fallback; `--shadow` also reports selected
+counts against the full reference. Execution prints per-task timings. Add
+`--report <path>` to the executor to retain machine-readable task/command timings;
+use a task-specific scratch directory outside the checkout.
+
+The shared planner reads manifest dependency, optional, development and peer
+edges. A package change selects it and recursive consumers using both the merge
+base and head graphs. All Codex packages **and subagent** select the composition
+and exhaustive source-consumer suites. Shared tests select their integration
+group; shared infrastructure, lock/toolchain changes and unclassified paths fall
+back to full coverage. Only explicitly classified repository documentation and
+changeset Markdown can be policy-only. Renames consider both paths. Missing Git
+history falls back to full; invalid registrations/plans fail rather than skip.
+New package directories must be registered, including non-published test targets.
+
+`ci` runs the same full policy, nine package checks and three shared suites as
+the full reference, with policy first and a bounded pool afterward (default two,
+configurable from one to eight). It does not invoke live model tests. Package
+test workers may themselves be concurrent; increase the outer limit only after
+checking memory use. `ci:release` without a package selects all eight release
+workspaces, never private local notifications, and only verifies sources.
+
 ### Remote CI scope
 
-Pull requests run the full suite on **Node 24 / Pi target**. The other three
-existing required matrix contexts report an explicit scope skip; they are not
-claims of pre-merge compatibility testing. No branch-protection change is needed.
-Pushes to `main` and manual CI runs retain both Node versions and both Pi lock
-roles, so additional compatibility regressions may be detected only after merge.
+Pull requests run the **affected plan on Node 24 / Pi target**. Repository policy
+and production audit always run. Selected packages and shared suites run in
+separate bounded matrices after policy succeeds. Main pushes and manual runs
+select the full plan and retain Node 22.19/24 and both Pi lock roles; compatibility
+regressions outside the PR scope can therefore still be detected after merge.
 
-The Node 24/target leg runs the exhaustive tarball-consumer matrix. Other legs
-use `OMP_CODEX_CONSUMER_MODE=smoke`: pack all six packages, install the bundle
-offline in an isolated consumer, and check its actual SDK/loader and inline
-re-export. Their package and composition tests are otherwise unchanged.
-Local `pnpm run ci`, `test:codex-packages`, and `ci:pi-matrix` remain exhaustive
-by default. Invalid consumer modes fail rather than silently reducing coverage.
+Canonical Node 24/target checks execute once across package/suite jobs using the
+committed root lock and an isolated agent directory. Its consumer suite is always
+exhaustive when selected. The other three compatibility roles retain the
+baseline snapshot/lock preparation and use `OMP_CODEX_CONSUMER_MODE=smoke`:
+pack all six packages and check the isolated bundle's actual SDK/loader and inline
+re-export. Local `ci`, `test:codex-packages`, and `ci:pi-matrix` remain exhaustive
+by default. Invalid consumer modes fail, rather than reducing coverage silently.
 
 CI opts into `OMP_PI_REUSE_TARGET=1`. A floor role can reuse the required target
 leg's behavioral tests for the **same source and Node version** only when Pi
@@ -51,13 +92,26 @@ versions, every projected workspace manifest, and the complete application lock
 match. Floor lock regeneration, integrity validation, frozen installation,
 resolved-SDK/CLI checks, packaging checks, and isolated consumer smoke still run.
 Any difference falls back to the suite with the leg's configured consumer mode.
-Do not enable standalone floor reuse without requiring the companion target.
+The final aggregate requires the complete companion target coverage. Do not
+enable standalone floor reuse without that successful companion.
 Local `all` with this switch runs target first and never reuses a failed target.
 
-Cheap changeset, package, license and architecture checks precede runtime tests,
-so package-policy failures do not first run the expensive suites. The Release PR
-workflow waits for successful trusted `main` CI at the exact still-current SHA
-instead of rerunning it; see [Releasing](RELEASING.md).
+All four existing `Node … / Pi …` required contexts now aggregate the plan and
+all required work. They fail for failed, cancelled, missing or unexpectedly
+skipped matrices; an empty docs-only selection is explicitly validated. These
+names do not claim extra PR compatibility coverage, and no branch-protection
+change is required. Workflow-level path filters must not skip these contexts.
+Main pushes additionally certify `Trusted main coverage / v1` for release reuse.
+
+CI stores per-package/suite timing artifacts. Compare both wall time and total
+runner minutes before changing sharding: small packages need not gain a new
+runner as they grow. The setup action caches only the pnpm store, never mutable
+`node_modules` or test outcomes.
+
+The Release PR workflow still waits for successful trusted main CI at the exact
+still-current SHA. Publication can reuse separately validated full source
+coverage, but always verifies fresh policy/audit and the actual immutable release
+combination; see [Releasing](RELEASING.md).
 
 ### Dependency PR refreshes
 
@@ -69,9 +123,12 @@ security alerts, update creation, dependency checks, or audit gates are disabled
 Older open PRs can continue auto-rebasing until 30 days after creation, per the
 [Dependabot rebase policy](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#rebase-strategy).
 
-To roll back the reduced coverage policy, revert the CI scope/consumer/reuse
-settings together; the four required check names have not changed. Reverting
-the Release PR trigger restores its original independent verification job.
+For a conservative rollback, select `--full` for PRs instead of the affected plan
+and remove the publish source-reuse condition so its selected checks always run.
+Keep the aggregates, artifact consumers and publication safety gates. Workflow
+changes must update the reviewed workflow digest in `scripts/ci/trusted-main.mjs`
+and its policy tests; a digest mismatch refuses reuse. The four required names
+and the independent Release PR trigger need not change.
 
 `check:architecture` checks Codex local module edges (including type imports),
 compatibility-facade back-edges, direct/transitive layer restrictions, and
