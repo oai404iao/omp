@@ -172,6 +172,22 @@ admission. Each active child owns an SDK `AgentSessionRuntime`. An idle runtime
 is unloaded; its identity, history and inbox remain reusable by cold resume.
 Parent residency is not required for descendants to finish.
 
+Each child has an independent model runtime and provider/virtual-model
+registration tables. Initialization and reload snapshot the root's resolved
+catalogs, provider definitions, virtual routes and runtime API keys; stored
+credentials remain shared. Inherited extensions then register fresh child-local
+providers. Child registration, unregistration and runtime-key overrides cannot
+replace a parent's or sibling's callbacks, including after child disposal.
+
+Root callbacks and virtual routes remain root-bound; this does not rebind opaque
+extension closures. Descendants always start from the root baseline, not a
+temporary intermediate agent's registrations. Child-only models/routes must be
+recreated by inherited extensions; a missing selected model fails explicitly.
+Remote/personalized root catalogs are snapshots, not shared mutable refresh
+wrappers. Pi 1.2's private runtime-constructor adaptation is isolated and checked
+in `src/model-runtime.ts`; incompatible SDK layouts fail rather than sharing a
+mutable runtime again.
+
 Statuses are `pending_init`, `running`, `completed`, `interrupted`, `errored`.
 They describe execution, not whether a runtime currently occupies memory.
 
