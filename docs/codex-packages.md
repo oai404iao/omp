@@ -202,6 +202,16 @@ each capability, all pairs, all capabilities, the bundle, duplicate composition,
 reversed order, separate physical runtime copies and shutdown/reload. Standalone
 auth/HTTP are deterministic fixtures; there are no real credentials or endpoints.
 
+This exhaustive matrix is the default. Remote CI selects it on Node 24/target;
+other compatibility legs set `OMP_CODEX_CONSUMER_MODE=smoke`. Smoke still packs
+all six packages, installs the bundle from local tarballs using the projected
+frozen offline lock, checks external-link containment and inline re-export
+identity, and probes the consumer's actual Pi SDK/loader with core and all tools.
+It omits the other consumer combinations, reverse/duplicate loading sweeps and
+configuration masks; it is not equivalent exhaustive compatibility coverage.
+Unknown modes fail. `pnpm run ci` and local baseline commands remain exhaustive
+unless the caller explicitly selects smoke.
+
 Every Codex dependency in those consumers comes from a tarball and cannot resolve
 back to workspace source. S4 installs external Pi/transport dependencies from
 the root `pnpm-lock.yaml`'s exact registry artifacts using

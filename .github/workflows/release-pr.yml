@@ -1,27 +1,57 @@
 name: Release PR
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
     branches:
       - main
 
 permissions:
+  actions: read
   contents: write
   pull-requests: write
 
 concurrency:
-  group: release-pr-${{ github.ref }}
+  group: release-pr-main
   cancel-in-progress: false
 
 jobs:
   release-pr:
+    # This is only an early filter. The API-backed guard below is authoritative.
+    if: >-
+      github.repository == 'oai404iao/omp' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.repository.id == github.repository_id &&
+      github.event.workflow_run.head_repository.id == github.repository_id
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
     steps:
-      - name: Check out repository
+      # Only the immutable trusted default-branch workflow revision supplies the
+      # guard. Never load code/artifacts from an unverified triggering CI ref.
+      - name: Check out trusted gate implementation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Verify canonical successful CI and live main
+        id: gate
+        run: |
+          cp scripts/release-pr-ci-gate.mjs "$RUNNER_TEMP/release-pr-ci-gate.mjs"
+          node "$RUNNER_TEMP/release-pr-ci-gate.mjs"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check out exact verified CI head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.gate.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -37,8 +67,21 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Verify packages
-        run: pnpm run ci
+      # Re-read live main immediately before Changesets, after setup/install.
+      # The pinned action resets/prepares its branch and API base at context.sha:
+      # https://github.com/changesets/action/blob/ae32849d5ba541f9ae29e40e22a623bc13562f51/src/github.ts
+      # The guard requires native GITHUB_SHA == verified head; do not override it.
+      # Serialization excludes other Release PR runs, not external main pushes.
+      # A push after this check remains a TOCTOU race: Changesets can update a
+      # stale version PR, not certify a newer head. The new main's CI must pass
+      # before its subsequent Release PR run; version PR review/CI still apply.
+      - name: Revalidate verified head immediately before writing
+        run: |
+          test "$(git rev-parse HEAD)" = "$VERIFIED_HEAD_SHA"
+          node "$RUNNER_TEMP/release-pr-ci-gate.mjs"
+        env:
+          VERIFIED_HEAD_SHA: ${{ steps.gate.outputs.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create or update the release pull request
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2

@@ -13,6 +13,9 @@ context edits.
 See the [upstream changelog](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/CHANGELOG.md).
 The floor role regenerates its projected lock; the target uses the committed lock.
 Both roles now use the same version but retain these distinct lock checks.
+Remote CI may reuse target behavior tests only after comparing the entire
+projected application lock and all workspace manifests, not version strings
+alone. The local matrix remains exhaustive unless explicitly opted in.
 The workspace's release-age exceptions name only the seven exact Pi 1.2.0
 artifacts explicitly selected for this migration. Other supply-chain checks
 and locked integrity hashes remain enabled.
@@ -164,7 +167,8 @@ remain unchanged between the two snapshots.
 
 The target copy uses the root `pnpm-lock.yaml` unchanged. The floor copy projects the exact
 floor development pins, creates a temporary lock from the root-lock seed, and
-runs its own clean installation and complete CI. This preparation can read npm
+runs its own clean installation. Local verification runs complete CI; remote
+CI uses the guarded reuse policy described below. This preparation can read npm
 registry metadata; it is not an offline lock-generation promise. The resulting
 Codex production consumers use
 `pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-scripts` with the
@@ -180,9 +184,25 @@ hashes fail closed; the production-consumer check rejects unhashed dependencies.
 Failed copies are removed but their logs are retained. The matrix returns failure
 if either baseline fails; it does not automatically retry failing tests.
 `OMP_PI_MATRIX_LOG_DIR` optionally selects a parent directory for unique log sets.
-The read-only GitHub workflow covers both Pi roles on Node 22.19.0 and 24.x and
-uploads diagnostics. Configuring that matrix is not a claim that remote jobs
-have already passed.
+The read-only GitHub workflow runs full Node 24/target CI for pull requests;
+the other required contexts explicitly defer compatibility testing to `main`.
+Main pushes and manual runs cover both Pi roles on Node 22.19.0 and 24.x and
+upload diagnostics. Node 24/target runs the exhaustive consumer matrix; other
+legs use the isolated bundle consumer smoke, retaining actual SDK and loader
+validation but not the exhaustive consumer combinations.
+
+`OMP_PI_REUSE_TARGET=1` is an explicit optimization for callers that also require
+target success at the same source revision and Node version. After floor lock
+projection, hash validation and frozen installation, reuse requires equal Pi
+versions, equal workspace/root manifests and deep equality of the complete
+application lock (including settings, importers, package identities, integrity
+hashes and peer/dependency snapshots). A mismatch runs the normal suite with the
+leg's selected consumer mode. A match still runs `check:pi-baseline`, `pack:check`
+and consumer smoke. An opted-in local `all` runs target first and reuses only its
+successful result; a standalone opted-in floor relies on its required companion
+target job. Defaults do not reuse behavior tests.
+
+Configuring this matrix is not a claim that remote jobs have already passed.
 
 ## Checks that prevent false positives
 
@@ -205,8 +225,10 @@ have already passed.
 
 ## Limits and known issues
 
-The configured matrix covers Node 22.19.0 and 24.x against both lock-validation
-roles at Pi 1.2.0. It does not claim validation of every future Node or Pi
+The main/manual matrix covers Node 22.19.0 and 24.x against both lock-validation
+roles at Pi 1.2.0, with guarded behavior reuse and noncanonical consumer smoke
+as documented above. PRs validate only Node 24/target before merge. This does not
+claim validation of every future Node or Pi
 release or execution of remote GitHub jobs. Older audit records describe the
 former 0.84.2/0.85.1 floors and remain historical evidence, not current compatibility.
 There are no real account, billable endpoint, interactive UI or publication tests.
