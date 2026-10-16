@@ -32,6 +32,12 @@ and locked integrity hashes remain enabled.
   patterns or `+name`/`-name` modifiers. Explicit ceilings exclude ungranted MCP
   tools and resource helpers, including late registration and restored declarations;
   Pi's default MCP allowlist exception cannot widen a role's permissions.
+- Child model runtimes isolate provider, virtual-router and runtime-key
+  registrations. The guarded Pi 1.2 constructor adapter in
+  `pi-subagent/src/model-runtime.ts` preserves the root baseline, including
+  native/custom providers and root-bound virtual routes, without sharing mutable
+  remote catalog refresh wrappers. Inherited extensions recreate child callbacks;
+  transient intermediate registrations are not a descendant's baseline.
 - Startup cancellation uses Pi's pending abort rather than throwing from a
   `started` preflight callback. Undelivered task envelopes remain pending for an
   explicit follow-up; cancellation does not authorize rolling back context receipts.

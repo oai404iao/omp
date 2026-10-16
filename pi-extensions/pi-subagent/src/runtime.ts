@@ -12,6 +12,7 @@ import { TOOL_NAMES } from "./schemas.ts";
 import type { AgentDescriptor } from "./types.ts";
 import { recordChildSelection, SelectionPersistenceError, type SessionView } from "./providers.ts";
 import { ensureCodexLineage } from "./task-attribution.ts";
+import { createChildModelRuntime } from "./model-runtime.ts";
 
 export { SelectionPersistenceError } from "./providers.ts";
 
@@ -153,7 +154,7 @@ export async function createChildRuntime(options: {
 	const ceiling = buildToolCeiling({ requested: descriptor.agent.tools, mandatory: TOOL_NAMES });
 	const create: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 		const services = await createAgentSessionServices({
-			cwd, agentDir: options.agentDir, modelRuntime,
+			cwd, agentDir: options.agentDir, modelRuntime: createChildModelRuntime(modelRuntime),
 			settingsManager: SettingsManager.create(cwd, options.agentDir, { projectTrusted: options.projectTrusted }),
 			resourceLoaderOptions: {
 				noExtensions: !descriptor.settings.inheritExtensions,
@@ -176,8 +177,13 @@ export async function createChildRuntime(options: {
 				}),
 			},
 		});
+		const selected = services.modelRuntime.getModel(descriptor.model.provider, descriptor.model.id);
+		if (!selected) {
+			services.resourceLoader.getExtensions().runtime.invalidate();
+			throw new Error(`child model cannot be recreated from the root catalog or inherited extensions: ${descriptor.model.provider}/${descriptor.model.id}`);
+		}
 		const created = await withSelectionPersistence(sessionManager, () => createAgentSessionFromServices({
-			services, sessionManager, sessionStartEvent, model,
+			services, sessionManager, sessionStartEvent, model: selected,
 			thinkingLevel: descriptor.thinkingLevel, customTools: options.tools,
 			...(ceiling ? { tools: ceiling, excludeTools: buildToolExclusions(ceiling) } : {}),
 		}));

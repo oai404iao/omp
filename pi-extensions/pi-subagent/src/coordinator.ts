@@ -770,6 +770,7 @@ export class SubagentCoordinator implements DashboardSource {
 					hooks: this.hooks(path),
 				});
 				caller.sessionManager = run.runtime.session.sessionManager;
+				caller.modelRuntime = run.runtime.services.modelRuntime;
 				caller.model = run.runtime.session.model;
 				caller.thinkingLevel = run.runtime.session.thinkingLevel;
 				checkSignal(run.abort.signal);
