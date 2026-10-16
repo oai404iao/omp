@@ -59,10 +59,10 @@
     "@oai404iao/pi-codex-minimal-tools": "workspace:*",
     "@oai404iao/pi-codex-runtime": "workspace:*",
     "@oai404iao/pi-codex-web-search": "workspace:*",
-    "@types/node": "26.6.2",
-    "tsx": "4.23.14",
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
     "typescript": "7.0.2",
     "typescript-ast": "npm:typescript@5.9.3",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   }
 }
