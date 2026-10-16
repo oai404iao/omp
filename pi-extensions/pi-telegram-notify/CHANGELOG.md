@@ -1,5 +1,21 @@
 # @oai404iao/pi-telegram-notify
 
+## 1.0.0
+
+### Major Changes
+
+- 9fe21e3: Require Pi 1.2.0; remove support for Pi 0.99.1. Upgrade the host Pi installation
+  before loading these packages; there is no older-SDK fallback.
+  
+  Preserve strict child tool ceilings across MCP discovery and cold resumes,
+  handle custom-run startup and cancellation safely, suppress cancelled
+  notifications and custom-run Telegram delivery, and align Responses sampling
+  and core renderer padding with the new SDK contracts.
+
+### Patch Changes
+
+- d250a74: Use pnpm for development scripts and document frozen-lockfile installation.
+
 ## 0.6.0
 
 ### Minor Changes
