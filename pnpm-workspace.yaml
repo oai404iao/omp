@@ -22,3 +22,7 @@ minimumReleaseAgeExclude:
   - '@earendil-works/pi-mcp@1.2.0'
   - '@earendil-works/pi-telemetry@1.2.0'
   - '@earendil-works/pi-tui@1.2.0'
+allowBuilds:
+  '@google/genai': true
+  esbuild: true
+  protobufjs: true
