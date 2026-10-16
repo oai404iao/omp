@@ -1,510 +1,406 @@
-# Releasing
+<a id="releasing"></a>
+# 发布维护
 
-## Codex bootstrap activation
+本页面向已获授权的维护者。**开发、验证、生成版本 PR、准备制品和发布是不同权限边界**；
+普通维护不授权 workflow dispatch、npm 写入、资格变更或修改不可变发布记录。
 
-The four new Codex workspaces were manually published at `0.1.0-alpha.1` from
-`32ba01f3c08b7fd63d09e9b2373cf081c4525533`. Their registry identity, downloaded
-tarball SHA-512 and trusted publishers have been independently verified.
-This dedicated activation checkout moves them to `publishable` and records
-their exact artifacts in the release lock. Its merge and actual protected
-publication still require separate approval.
+当前受保护发布已启用，但只接受从 `main` 手动触发的 workflow、精确 `publish`
+确认和 `npm-publish` environment 审批。Tools 首发与激活已经完成，不能再次 bootstrap。
 
-The bootstrap activation originally included nine alpha packages: four immutable
-`recover` dependencies plus five `publish` candidates. Do not republish the
-initial four, ignore dependencies, or replace locked artifacts. A known locked
-version returning E404 is pending verification, not a fresh publication candidate.
-See [activation evidence](docs/audits/codex-bootstrap-activation.md).
+| 你要做什么 | 从这里开始 |
+| --- | --- |
+| 发布常规版本 | [版本 PR → 受保护发布](#normal-release-flow) |
+| 只发布一个包 | [定向发布](#targeted-package-releases) |
+| 确认哪些检查能复用 | [源码证据与实际制品验证](#scoped-verification-and-trusted-source-reuse) |
+| npm 成功但读回／tag／Release 失败 | [失败恢复](#recovery) |
+| 新增从未发布的包 | [资格与一次性 bootstrap](#npm-bootstrap-and-trusted-publishing) |
+| 查询历史首发、alpha alias | [历史记录](#workflow-state-and-historical-bootstraps) |
 
-S4 implements recursive exact-pin changesets, dependency-ordered artifacts and
-isolated production consumers with no external links. These tests do not authorize registry writes or
-verify real account/model access. See
-[Codex composition](docs/codex-packages.md) for the tested boundaries.
+日常环境、检查和 changeset 要求见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+以下流程不是发布授权，也不是对当前注册表或账号状态的实时确认。
 
-Use `pnpm run changeset:sync` after authoring a changeset. Its generated consumer
-changeset covers `dependencies` and `optionalDependencies` recursively, including
-subagent's optional dependency on the compatibility bundle. The release-PR
-workflow already calls `pnpm run changeset:version`; that wrapper preserves exact
-pins and rejects pin changes without a corresponding consumer version bump.
-Its tests version temporary fixtures; actual alpha versions belong in a reviewed
-version PR, never in an unreviewed direct main update.
+<a id="normal-release-flow"></a>
+## 版本 PR → 受保护发布
 
-The original preparation cohort was nine alpha packages. The current artifact
-selection contains eight publishable workspaces: external-thinking, keep-defaults,
-tree-continue, and the unpublished Code Mode experiment have been removed.
-Historical release locks are retained, but removed packages must not enter
-new artifact batches.
-Prerelease artifacts use the `next` dist-tag when prerelease mode is active.
-Limited real smoke on the immutable bootstrap
-artifacts has been performed, with important harness/coverage limitations
-recorded in the activation audit; it is not universal endpoint acceptance.
-Remaining publication requires separate approval. The earlier
-[alpha preparation audit](docs/audits/codex-alpha-release.md) is a historical checkpoint.
+<a id="release-steps"></a>
+### 1. 记录变更，审阅版本 PR
 
-Artifact preparation and publication both apply a stable dependency-first order.
-Every workspace dependency must be present in the batch, including a recovery
-candidate for an already-published dependency. The publisher validates the whole
-batch before any registry write, then verifies each exact version's gitHead and
-integrity before proceeding to dependents. Failure stops subsequent publication;
-final reconciliation still gates all tag creation.
+包行为、配置、依赖和随包发布的文档变更须附 changeset：
 
-## Workflow state and historical bootstraps
-
-Guarded npm publication is enabled:
-
-```yaml
-RELEASE_INFRASTRUCTURE_ENABLED: "true"
+```bash
+pnpm run changeset
+pnpm run changeset:sync
 ```
 
-in `.github/workflows/publish.yml`. The workflow remains manually dispatched:
-it requires the exact `publish` confirmation and approval of the protected
-`npm-publish` environment.
+同步器递归覆盖 runtime／optional 工作区依赖的消费者，包括 subagent 对兼容 bundle
+的 optional 依赖。已有显式消费者 changeset 优先，不手改生成的
+`.changeset/workspace-dependent-releases*.md`。
 
-The initial public releases already exist:
+改动合并到 `main` 并通过 CI 后，`release-pr.yml` 创建或更新版本 PR，不重复运行 `ci`。
+版本操作只能使用：
 
-- `@oai404iao/pi-keep-defaults@0.1.2`
-- `@oai404iao/pi-telegram-notify@0.1.2`
-
-Their npm `gitHead`, package tags, and GitHub Releases point to
-`0c53bdb9e13b006a23a8da05a01c06f106fa2c10`. The guarded workflow for future
-releases is enabled; the trusted-publisher and protected-environment gates
-below still apply.
-
-Both packages subsequently released stable version `0.1.3` from
-`16dccb8953b717670c34fe978c79c07d592ca7e2`.
-
-`@oai404iao/pi-external-thinking@0.1.0` is public, published from
-`aae803f4b25603991d9375c602cf35da1df922b0`; its npm `gitHead`, package tag,
-and GitHub Release match that commit.
-
-`@oai404iao/pi-subagent@0.2.0` is public, published from
-`ef42984c0e40ef1f26ead4b4c7d149b21280e66b`; its npm `gitHead` and `latest`
-dist-tag were verified at that bootstrap checkpoint. Its trusted publisher was configured for guarded
-tag/Release reconciliation and future OIDC releases.
-
-## One-time GitHub preparation
-
-1. Use the public `oai404iao/omp` repository, which was created without an
-   initial README or license commit.
-2. Preserve the existing Gitea remote and add GitHub as a separate remote.
-3. Complete `docs/audits/publication-readiness.md`.
-4. Add exact repository metadata to every npm package:
-
-   ```json
-   {
-     "repository": {
-       "type": "git",
-       "url": "git+https://github.com/oai404iao/omp.git",
-       "directory": "pi-extensions/<package>"
-     },
-     "homepage": "https://github.com/oai404iao/omp/tree/main/pi-extensions/<package>#readme",
-     "bugs": {
-       "url": "https://github.com/oai404iao/omp/issues"
-     }
-   }
-   ```
-
-5. Keep reviewed package-level license files and all required third-party
-   notices in every tarball. Do not infer ownership from a manifest field
-   alone.
-6. Protect `main`: require pull requests and CI, block force pushes and branch
-   deletion, and require review for workflow changes.
-7. Allow GitHub Actions to create release pull requests. PRs created with
-   `GITHUB_TOKEN` may require a maintainer to approve their CI run.
-
-## npm bootstrap and trusted publishing
-
-All workspace package manifests use the `@oai404iao` npm scope. Scope naming
-does not override each package's `private` flag or release eligibility.
-
-An npm trusted publisher can only be attached after a package exists. Configure
-it now for both initial public packages. For each additional new scoped package:
-
-1. Recheck package-name availability and ownership.
-2. Perform the one-time initial publish interactively with 2FA from the exact
-   reviewed `main` commit. That commit must remain in the public history. Do
-   not store a bootstrap token in GitHub.
-3. Configure the package's GitHub Actions trusted publisher with:
-   - repository: `oai404iao/omp`
-   - workflow: `publish.yml`
-   - environment: `npm-publish`
-   - allowed action: `npm publish`
-4. Configure the GitHub `npm-publish` environment:
-   - required maintainer reviewer;
-   - deployment restricted to `main`;
-   - variable `NPM_PUBLISH_ENABLED=true`.
-5. Restrict traditional token publishing and revoke bootstrap credentials
-   after OIDC has been verified.
-
-### Codex tools first publication and activation
-
-Tools was manually bootstrapped at `0.1.0-alpha.1` from
-`b9deaba6ba07d87c048e474b2ddc977f3bd2b442`. Its public tarball, registry
-source/integrity, history/tags and trusted publisher were verified before this
-separate activation to `releaseStatus:"publishable"`; see
-[activation evidence](docs/audits/codex-tools-bootstrap-activation.md).
-No existing version may be overwritten. Tools now uses the normal targeted
-guarded workflow, not the local bootstrap command.
-
-The first-publication sequence below is retained as bootstrap procedure/history.
-Prerequisites through tools activation are complete; compatibility consumers
-still require separate dispatch, with minimal-tools last:
-
-1. Merge the reviewed prerequisite version PR and publish runtime, then core,
-   using the existing targeted protected workflow (`package` set to each exact
-   scoped name). Version PRs synchronize exact consumer pins and required version
-   bumps; that does not authorize publishing consumers early. Keep unrelated
-   Telegram changesets deferred. Do not merge a competing broad version PR.
-2. After the exact runtime dependency is visible on npm, prepare **only tools**
-   from a clean reviewed public-main commit:
-
-   ```sh
-   RELEASE_PACKAGE=@oai404iao/pi-codex-tools pnpm run release:bootstrap-artifacts
-   ```
-
-   The local bootstrap selector requires a bootstrap target, a complete
-   published/publishable dependency closure, exact pins and public-main ancestry.
-   Dependency candidates use verification-only mode; only tools gets a tarball.
-   Missing prerequisites stop preparation. GitHub Actions and the guarded
-   publisher cannot bootstrap tools.
-3. The maintainer publishes the named tools tarball with interactive 2FA,
-   `--access public --tag next --registry https://registry.npmjs.org/`.
-   Do not publish from the source directory or run the full-batch publisher.
-   Read back version, `gitHead`, SHA-512 integrity, version history and tags
-   against the prepared manifest before recording any immutable lock.
-4. Configure tools' trusted publisher. Prepare a separate reviewed activation
-   change with the observed immutable source/integrity. If npm assigns its
-   mandatory initial `latest` alias as well as `next`, record a narrow exact
-   tools-version/source exception after verification; the historical four-package
-   exception does not cover tools. Do not delete or overwrite historical locks.
-5. Publish the web-search/imagegen compatibility consumers only after tools is
-   published and activated. Publish minimal-tools last, through its reviewed
-   release PR/protected workflow, followed by affected optional consumers.
-
-To retain tools' still-unpublished initial version while preparing prerequisite
-versions, use the canonical wrapper:
-
-```sh
-pnpm run changeset:version --preserve-bootstrap-version @oai404iao/pi-codex-tools
+```bash
+pnpm run changeset:version
 ```
 
-This explicit option checks bootstrap eligibility, absence from the immutable
-lock and public registry **before writes**. It runs normal Changesets, preserves
-only that validated initial version, and still repairs exact pins and requires
-all other consumer bumps. It is refused once the version exists on npm. Normal
-versioning behavior is unchanged. Pending changesets unrelated to this release
-must be deferred/restored as in the targeted release guidance below.
+该 wrapper 同步 changeset、执行 Changesets、修复精确 pin、拒绝依赖 pin 改变但消费者
+未升级的情况，并刷新根锁。不要手改包版本、放宽 pin 或直接调用裸 Changesets version。
+测试中的临时 fixture 版本升级不授权改动真实 alpha 版本；真实升级必须进入经审阅的版本 PR。
 
-For a workspace on the `bootstrap` track:
+审阅版本和 changelog，批准该 PR 的 CI，再合并。使用 `GITHUB_TOKEN` 创建的 PR
+可能需要维护者批准其 CI 运行。
 
-1. Fetch public `main`, then check out a clean commit reachable from it (use
-   `git fetch github main` and normally `git checkout github/main`). Run
-   `pnpm install --frozen-lockfile --ignore-scripts`, `pnpm run ci`, and
-   `pnpm run release:bootstrap-artifacts`.
-2. Publish only that workspace's named tarball from `release-artifacts/` with
-   interactive 2FA and `--access public`, using the prepared manifest's
-   `distTag`: `next` for prereleases, `latest` for stable releases. Do not
-   explicitly publish a prerelease with `--tag latest`. npm retains a `latest`
-   tag for a new package; the reviewed initial Codex exception below handles
-   that alias without trying to delete it. Bootstrap artifacts cannot be
-   prepared from GitHub Actions.
-3. Configure its trusted publisher, then merge a dedicated reviewed change
-   from `bootstrap` to `publishable`. That activation change must record the
-   reviewed npm `gitHead` and SHA-512 integrity in
-   `release-locks/npm-published-artifacts.json`.
-4. Dispatch the guarded workflow to reconcile the matching Git tag and GitHub
-   Release. Do not dispatch it while the package remains on `bootstrap`.
+### 2. 确认 Release PR 的 CI 证据
 
-Create the matching package tag and GitHub Release during bootstrap when
-possible. If they are missing, the guarded workflow can reconstruct them only
-after the package is `publishable`, npm `gitHead` is a reachable ancestor, and
-that commit contains the same package name and version.
+Release PR 只接受本仓库规范 CI 的成功 **main push** 运行。API guard 核实：
 
-The publish job uses a GitHub-hosted runner, `id-token: write`, npm 11.19.0,
-and provenance. It does not read an `NPM_TOKEN`. Verification runs in a
-separate read-only job without OIDC. That job uploads exact, checksummed npm
-tarballs; the protected publish job publishes those tarballs without running
-package lifecycle scripts. Development, verification and lockfile updates use
-the repository-pinned pnpm 12.4.1; npm remains the registry publication client.
+- workflow、repository 和 head repository 都来自本仓库；
+- 当前 run／attempt 是该 SHA 最新的运行，且已成功，不重放旧成功 attempt；
+- SHA 同时等于 live main 和原生 workflow context SHA。
 
-## Package publication eligibility
+PR、fork、过期、失败或被更新运行取代的 completion 均拒绝。guard 来自可信默认分支
+workflow revision，不读取未验证触发 ref 的代码或上游制品。验证后 checkout 精确 SHA，
+安装完成、Changesets 写入前再核实一次，不能伪造 `GITHUB_SHA` 让不相关 context 通过。
 
-Release eligibility is explicit in two places:
+Release PR 运行串行化，但阻止不了最后一次检查之后的外部 main push。此时可能留下过期
+版本 PR，仍须审阅并通过自身 PR CI；新 main 必须先通过 CI，才能更新其版本 PR。
 
-1. `scripts/workspaces.mjs` must set one of:
-   - `blocked`: package stays private and is excluded from artifacts;
-   - `bootstrap`: package is non-private but is included only by the local
-     `pnpm run release:bootstrap-artifacts` command;
-   - `publishable`: package is non-private and enters guarded workflow
-     artifacts.
-2. only `blocked` packages may set `"private": true`.
+### 3. 手动确认发布
 
-CI rejects mismatches. The guarded release scripts select the eight publishable
-workspaces, excluding removed external-thinking, keep-defaults, tree-continue,
-and Code Mode.
-The historical manual releases below remain locked; they are not a live registry
-inventory. See the root README and activation audit for this alpha cohort.
-All future releases require a maintainer to manually dispatch and approve the
-guarded workflow. Their trusted-publisher configuration and
-`NPM_PUBLISH_ENABLED` environment variable are release prerequisites.
+在获授权后，从 `main` 手动运行 `.github/workflows/publish.yml`：
 
-`@oai404iao/pi-codex-minimal-tools@1.3.0` was manually bootstrapped from
-`596d799c6f7db3508b6d46bb05cdca6ea9e3b716`. Its Apache source map is
-recorded in `pi-extensions/pi-codex-runtime/provenance/`; its internal
-Responses Lite compatibility boundary remains documented in the package README
-and notice. Its trusted publisher is configured, so it now enters guarded
-GitHub Actions release artifacts. A prerelease package must also use prerelease SemVer so the workflow
-selects the `next` dist-tag.
+1. 全批发布时留空 `package`；单包发布时填[精确 scoped 包名](#targeted-package-releases)。
+2. `confirm` 输入 **`publish`**，不能使用其他值。
+3. 等待读验证 job 成功，再由维护者批准 `npm-publish` environment deployment。
 
-The recovery guard compares the registry `gitHead` and SHA-512 integrity with
-any matching entry in `release-locks/npm-published-artifacts.json`. Add an
-entry when an interactive bootstrap is verified; do not alter a locked value
-without a separate source-and-registry investigation.
+workflow 中 `RELEASE_INFRASTRUCTURE_ENABLED: "true"` 不是充分授权。environment 必须
+有维护者 reviewer、限制从 `main` 部署并设置 `NPM_PUBLISH_ENABLED=true`。
+preflight 还要求仓库为 `oai404iao/omp`、checkout 干净、HEAD 等于 `GITHUB_SHA`，
+并检查精确仓库元数据、包级 LICENSE、Codex notices／provenance 及其打包白名单。
 
-### Initial Codex `latest` alias
+### 4. 只发布已验证的精确字节
 
-npm's registry metadata requires a `latest` tag. The first runtime publication
-has both `next` and `latest` pointing to its only version; removing `latest`
-returned E400. Do not unpublish, republish, publish a dummy stable version, or
-delete the tag to work around this. See the
-[official registry schema](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md#package).
+| 阶段 | 必须完成的工作 |
+| --- | --- |
+| 只读 verify job | 选择范围；核实可复用源码证据或重跑源码检查；fresh policy／production audit；要求干净 checkout；准备不可变制品；验证实际隔离安装；上传校验后的同一字节 |
+| 受保护 publish job | 重新验证 manifest、消费者 receipt 和 tarball hashes；整批门禁通过后，依赖优先串行发布并读回每个精确版本 |
+| 最终对账 | 所有候选的 source／integrity／dist-tag 一致后，原子推送包级 Git tags，按 changelog 创建 GitHub Releases |
 
-The maintainer approved a narrow exception recorded in
-`scripts/initial-codex-bootstrap.mjs`: only runtime/core/imagegen/web-search
-at `0.1.0-alpha.1` from reviewed source
-`32ba01f3c08b7fd63d09e9b2373cf081c4525533`, with `next` and `latest` both pointing
-to that version and no other published version visible in registry history.
-This does not declare the alpha stable. A version-less install of a new package
-can resolve to that alpha; prefer explicit `@next` or exact versions.
+验证 job 无 OIDC，只授予只读权限；受保护 job 使用 GitHub-hosted runner、
+`id-token: write`、固定 **npm 11.19.0** 和 provenance，不读取 `NPM_TOKEN`，
+不运行包生命周期脚本。开发、验证和锁更新仍使用固定 **pnpm 12.4.1**；npm 只是发布客户端。
 
-The separate tools activation adds only
-`@oai404iao/pi-codex-tools@0.1.0-alpha.1` from
-`b9deaba6ba07d87c048e474b2ddc977f3bd2b442`. Its exact verified history is
-`0.0.0-stage` plus `0.1.0-alpha.1`: npm generated the former as a `stub:true`
-[staged-publication placeholder](https://docs.npmjs.com/staged-publishing/).
-Only this exact tools identity/history may retain its initial `latest`/`next`
-alias. The historical four-package rule stays sole-version-only; no generic
-placeholder filtering or prerelease promotion is allowed.
+制品准备与发布均采用稳定的依赖优先顺序。全批 manifest 必须包含全部工作区依赖，
+已发布依赖以 `recover` 候选进入。发布器在第一次不可逆写入前验证整批；只有前一依赖
+的精确 npm `gitHead`、SHA-512 和 dist-tag 可见后，才继续消费者。任何失败停止后续发布，
+最终对账失败则不创建新 tags。Codex 兼容消费者须等 tools 的精确依赖已验证；
+Codex 发布顺序中 minimal-tools 保持最后，之后才是受影响的 optional 消费者。
 
-The guarded publisher accepts this alias only for an already-published
-`recover` candidate with matching reviewed release-lock gitHead/integrity.
-The dedicated activations admit those reviewed recovery nodes into guarded
-artifacts; generic bootstrap/private-package exclusion remains enforced.
-Missing/malformed history,
-missing locks, other packages, later versions or a wrong `next` still fail
-closed. Existing stable packages retain their prerelease/latest prohibition.
-Tags are checked before proceeding to consumers and again during reconciliation.
-Neither the publisher nor the local verifier edits registry tags.
+包级 Git tag 使用 Changesets 格式，例如 `@oai404iao/pi-subagent@0.3.0`。
+预发布必须使用 prerelease SemVer 和 `next` dist-tag；稳定版使用 `latest`。
+不要仅靠改 dist-tag 把实验包宣称为稳定；提升前须通过 clean-install smoke，并另获发布授权。
 
-The local interactive bootstrap verifier uses the same tag predicate after
-validating the prepared artifact and published identity; it cannot require a
-release-lock entry that is only added after verified bootstrap. See
-[the correction record](docs/audits/codex-bootstrap-latest.md).
+<a id="targeted-package-releases"></a>
+## 只发布一个包
 
-Public and supported-package peer ranges currently require Pi 1.2.0 or
-newer; the exact development target is 1.2.0, with both lock-validation
-roles checked by `pnpm run ci:pi-matrix`. Actual SDK resolution is checked, not
-inferred from peer declarations. Update the development baseline, peer ranges,
-lockfile, compatibility notes, and tests together. Do not lower the minimum
-below the tested baseline.
-The open-ended upper range is an intentional forward-compatibility policy;
-evaluate each new Pi baseline in CI and tighten the range if an incompatibility
-is found.
-See [Pi compatibility](docs/pi-compatibility.md) for the verified scope and
-the transcript-context migration.
+`publish.yml` 的可选 `package` 输入只接受一个精确 `publishable` 工作区名，
+如 `@oai404iao/pi-subagent`。留空是全批发布。制品准备和受保护发布都执行同一选择，
+不会改变包的发布资格，也不会顺便发布缺失的依赖。
 
-Official references:
+### 准备只包含目标升级的版本 PR
 
-- [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
-- [npm trust](https://docs.npmjs.com/cli/v11/commands/npm-trust/)
-- [npm provenance](https://docs.npmjs.com/generating-provenance-statements/)
+1. 拆分共享 changeset，把其他包的待发记录暂缓，不要消费它们。
+2. 用 `pnpm run changeset:version` 生成目标版本和 changelog，不能手改 manifest 版本。
+3. 提交前恢复暂缓的 changeset，再运行 `pnpm run changeset:sync`。
+4. 如果尚待发布的依赖又为刚升级的目标生成消费者 changeset，保留它供后续批次使用。
 
-## Normal release flow
+自动化可以继续更新暂缓的全批版本 PR，但完成定向发布前不要合并那个竞争的 PR。
 
-### Pi 0.86.1 migration release note
+### 依赖只能验证，不能补发
 
-Include this retirement notice in the migration release announcement:
-`@oai404iao/pi-keep-defaults` is retired from this repository and future artifact
-batches. Existing users must remove their installed copy and fully restart Pi;
-`/reload` cannot reliably remove its old process-global patches. Pi 0.86.1 keeps
-ordinary model/thinking changes session-local, but the retired settings-file
-watcher's stronger protection against explicit saves and external edits is
-intentionally **not** retained. For npm installations, run
-`pi remove npm:@oai404iao/pi-keep-defaults` (add `-l` for a project-local install).
-For local-path installations, remove the configured source instead.
+目标保留现有精确工作区 pin；所有传递 runtime／optional 工作区依赖必须已经在 npm
+存在该精确版本。依赖以 `verify` 模式进入 manifest：
 
-The last recorded stable release is `0.1.3`; there is no new retirement package
-version or changeset for the removed workspace. This change does not run
-`npm deprecate`, unpublish, or alter installed copies. Thus existing npm users
-will not receive a registry-level deprecation warning; any such operation needs
-separate publication authorization.
+- 核实不可变 registry identity、SHA-512、release lock、源码 ancestry 和包身份；
+- 其历史源码中的 `dependencies`、`optionalDependencies`、`peerDependencies` 和
+  `peerDependenciesMeta` 必须与当前契约相同，版本号未变但契约已改也会阻止该路径；
+- 不发布依赖，不创建它们的 tags／GitHub Releases，也不把依赖的未发源码重新打包来替代 npm 制品；
+- 不要求当前 npm dist-tag 仍指向该历史精确依赖版本。
 
-### Release steps
+缺失或不匹配就停止，不回退到顺带发布依赖。目标本身恢复已发布版本时，仍受
+[payload 不变门禁](#recovery)约束；`verify` 依赖不被伪装成当前 checkout 的恢复候选。
 
-1. Add a changeset in each package-facing pull request:
+获授权的本地制品准备使用：
 
-   ```bash
-   pnpm run changeset
-   ```
-
-2. Merge changes to `main`. After its CI succeeds, `release-pr.yml` creates or
-   updates the version PR without rerunning `pnpm run ci`. It accepts only a
-   successful canonical CI **push** run from this repository's own `main`,
-   verifies the current run/attempt through the API, and requires its SHA to
-   equal both live main and the native workflow context SHA. PR/fork, stale,
-   failed and superseded completions fail closed. The trusted workflow revision
-   supplies the guard; no upstream artifacts or unverified ref code are used.
-   The exact verified SHA is checked out and revalidated immediately before
-   Changesets writes. Release PR runs serialize; a concurrent external main push
-   after that final check can leave a stale version PR, which still requires its
-   own review and PR CI. The newer main must pass CI before its release update.
-3. Review generated versions and changelogs, then approve that PR's CI.
-4. Merge the version PR.
-5. Manually run `publish.yml` from `main`, enter `publish`, and approve the
-   `npm-publish` environment deployment.
-6. The read-only job verifies the release scope, packs immutable artifacts, and
-   tests their actual isolated installation before uploading the same bytes.
-   Validated exact-SHA main coverage can replace source behavior reruns only;
-   fresh policy, audit and artifact checks always run (see below).
-7. The protected OIDC job validates repository/license metadata, publishes the
-   exact tarballs, waits for each package's exact npm metadata and dist-tag to
-   become visible, atomically pushes package tags, and creates package-specific
-   GitHub Releases from their changelogs.
-
-Tags use Changesets' package-level format:
-
-```text
-@oai404iao/pi-subagent@0.3.0
-@oai404iao/pi-telegram-notify@0.1.3
+```bash
+RELEASE_PACKAGE=@oai404iao/pi-subagent pnpm run release:artifacts
 ```
 
-Prerelease SemVer versions are published with the `next` dist-tag; stable
-versions use `latest`. Do not promote experimental packages until
-clean-install smoke tests pass.
+该命令要求干净 checkout，会读取注册表，并重建 `release-artifacts/`，但不发布。
+实际 dispatch 仍要求 `confirm=publish`、验证成功和受保护 environment 审批。
 
-### Targeted package releases
+<a id="scoped-verification-and-trusted-source-reuse"></a>
+## 验证源码证据和真实制品
 
-The optional `package` input on `publish.yml` accepts one exact publishable
-workspace name, such as `@oai404iao/pi-subagent`. Leave it empty for the normal
-full-batch release. The same selection is enforced during artifact preparation
-and protected publication; it does not change any workspace's release eligibility.
+### 选择源码检查范围
 
-Before dispatch, prepare and review a version PR containing only that package's
-version bump and changelog. Split shared changesets so other packages' pending
-entries remain unconsumed. Use `pnpm run changeset:version`, not manual manifest
-version edits; restore deferred changesets and run `pnpm run changeset:sync`
-before committing. If a pending dependency release generates a new consumer
-changeset for the just-versioned package, retain it for the later batch.
+```bash
+pnpm run ci:release --package @oai404iao/pi-telegram-notify
+pnpm run ci:release
+```
 
-Targeted publication retains the package's existing exact workspace dependency
-pins. Every transitive workspace dependency must already exist on npm at that
-exact version. Dependencies enter the artifact manifest in verification-only
-mode: validate their immutable registry identity, source ancestry and dependency
-contracts, but never publish them or create their tags/GitHub Releases.
-Unreleased dependency source edits are not shipped and are not represented as
-recovery of the current checkout. Missing or mismatched dependencies stop the
-release rather than falling back to publishing them. The selected package itself
-still obeys the ordinary unchanged-payload guard when recovering a published
-version.
-Dependency runtime, optional and peer dependency maps must match their published
-source manifests; a pending dependency-contract change therefore blocks this
-path even when its version number is unchanged. Current npm dist-tags need not
-point to these immutable pinned dependency versions.
+单包命令检查目标及其规范 runtime／optional 工作区闭包；不带参数则检查全部 8 个
+发布工作区，不包含私有本地通知。它不打包、不发布、不改版本、不绕过依赖前置条件。
+仓库 policy 和发布基础设施回归始终保留；任何 Codex／subagent 选择仍运行完整源码
+composition 和 consumer 套件。独立 Telegram 发布无需重跑无关 Codex 行为。
 
-The normal release-PR automation may continue updating the deferred full-batch
-version PR. Leave that PR unmerged while preparing and dispatching the targeted
-release.
+### 什么时候可省去源码行为重跑
 
-Local artifact preparation uses `RELEASE_PACKAGE=<exact-name> pnpm run
-release:artifacts`. Dispatch still requires `confirm=publish`, successful
-verification, and approval of the protected `npm-publish` environment.
+只读 publish 验证 job 用 `actions: read` 查询规范 GitHub CI。仅当发布 SHA 的**最新
+main push run／attempt**成功，且以下全部完成，才允许复用源码行为结果：
 
-### Scoped verification and trusted source reuse
+- 9 个包 job、3 个共享套件、3 个附加兼容角色；
+- 4 个既有 aggregate contexts 和 `Trusted main coverage / v1`；
+- `.github/workflows/ci.yml` 的内容匹配 `scripts/ci/trusted-main.mjs` 固定的已审阅 SHA-256；
+- API 完整分页、repository／head 身份、每个 job 的 run／attempt／SHA 均一致；live main 仍等于发布 SHA。
 
-`pnpm run ci:release --package <exact-name>` verifies the target and its canonical
-runtime/optional workspace dependency closure. Without `--package` it verifies
-all release workspaces, excluding private local notifications. It does not pack,
-publish, change versions, or bypass dependency prerequisites. Repository policy
-and release-infrastructure regressions are retained. Any Codex/subagent selection
-still runs the full source composition and consumer suites; independent Telegram
-releases do not rerun unrelated Codex behavior.
+手动 CI、PR、fork、旧成功 attempt、缺失／跳过 job、workflow 图改变或 API 不确定，
+都不能授权复用：转为执行所选源码检查。修改 CI 图时须有意更新固定摘要和策略测试。
 
-The read-only publish job queries the canonical GitHub CI workflow with
-`actions: read`. Source reruns are skipped only for the exact release SHA's
-latest successful **main push** run/attempt from this repository, with all nine
-package jobs, all three shared suites, three additional compatibility roles,
-four legacy aggregates and `Trusted main coverage / v1` successfully completed.
-The source workflow must match the reviewed SHA-256 pinned in
-`scripts/ci/trusted-main.mjs`; update it and policy tests deliberately after graph
-changes. API pagination, repository/head identity and each job's run/attempt/SHA
-are checked. Live main must still equal the release SHA. Manual/PR/fork runs,
-old successful attempts, missing/skipped jobs, changed graphs and API uncertainty
-never authorize reuse: the selected source checks run instead.
+上传制品前会再次核实已复用证据；若失效，验证失败，须重新运行，不换成别的 SHA。
+这个 helper 与 Release PR 的 `workflow_run` guard 分开，不消费上游日志或不可信结果制品。
+即使源码复用，**fresh policy、audit 和实际制品验证仍然必跑**。
 
-The workflow revalidates reused evidence immediately before uploading artifacts;
-if it is no longer valid, verification fails and must be rerun. It never switches
-to another SHA. This helper is separate from the Release PR workflow's
-`workflow_run` guard. It consumes no upstream logs or untrusted result artifacts.
+### 验证要发的组合，而非仅验证当前源码
 
-After artifact preparation, `pnpm run release:verify-installations
-release-artifacts/manifest.json` validates the **actual** release combination:
+仅在授权的制品准备完成后运行：
 
-- New candidates use the exact prepared tarballs. `verify`/`recover` candidates
-  use their immutable npm archives after registry identity and SHA-512 checks.
-  Dependency source edits in the checkout are never repacked as substitutes.
-- Manifests come from each candidate's source commit. Historical dependency and
-  peer contracts must fit the reviewed root lock; missing or mismatched external
-  prerequisites stop verification, rather than resolving another version.
-- Exact, verified archives are seeded into the existing store. Each isolated
-  consumer installs offline with a projected frozen lock and lifecycle scripts
-  disabled, then runs its own Pi SDK loader with network disabled. Every candidate
-  closure and combined/reversed loading are checked; bundle inline exports remain
-  covered. Links may not escape a consumer.
-- `consumer-verification.json` binds the manifest, source commits and artifact
-  hashes to those consumers. Verification rechecks the bytes at completion; both
-  upload and the protected job validate the receipt and publish tarball hashes.
+```bash
+pnpm run release:verify-installations release-artifacts/manifest.json
+```
 
-Registry acquisition is read-only, bounded and restricted to canonical npm
-artifact URLs. It is not a live endpoint/model test. Run the verifier only after
-authorized artifact preparation; it does not write to npm. Source-built
-`test:codex-packages` remains additional coverage, not proof of a historical npm
-dependency payload. Existing source ancestry, exact dependency pins, immutable
-locks, dist-tag/recovery rules, approval, OIDC separation and dependency-first
-serialized publication are unchanged.
+| 对象 | 验证要求 |
+| --- | --- |
+| 新 `publish` 候选 | 使用准备好的精确 tarball |
+| `verify`／`recover` 候选 | 使用核实 registry identity 和 SHA-512 后获取的不可变 npm archive，不能替换成 checkout 重打包 |
+| 依赖契约 | 从各候选 source commit 读取 manifest；历史依赖／peer 必须适配审阅后的根锁，外部前置条件缺失或不符就停止 |
+| 消费者 | 将已核实 archive 加入现有 store；投影 frozen lock、离线安装、禁用生命周期脚本；运行消费者自己的 Pi SDK loader，并禁用网络 |
+| 组合覆盖 | 每个候选闭包、组合和反向加载、bundle inline exports；任何链接不得逃出消费者 |
 
-## Recovery
+`consumer-verification.json` 将 manifest、source commits、artifact hashes 与消费者绑定。
+结束时再检查制品字节；上传和受保护 job 都验证 receipt 与待发 tarball hash。
+注册表获取仅为只读、有界的 canonical npm artifact URL 访问，不是模型／端点测试。
 
-- The publisher explicitly disables inherited npm `dry-run` configuration and
-  retains npm's publish receipt in the job log. Exit zero still is not proof of
-  publication: registry version, source, integrity and dist-tag checks remain
-  authoritative. If a receipt reports success but readback stays absent, inspect
-  npm's output and current registry state before starting another attempt; do
-  not turn a readback failure into an automatic second publish.
-- Never overwrite an npm version.
-- After a successful `npm publish`, only the read-side registry checks are
-  retried. Exact-version metadata and dist-tags use cache-revalidating
-  `--prefer-online` lookups with capped exponential backoff for up to three
-  minutes per newly published package. The workflow never blindly retries the
-  irreversible publish command.
-  The timeout, initial delay, and maximum delay are controlled by
-  `NPM_REGISTRY_PROPAGATION_TIMEOUT_MS`,
-  `NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS`, and
-  `NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS`.
-- A release-lock entry is evidence that a version was already published.
-  If its metadata lookup returns E404, preparation stops as pending verification
-  without packing or publishing that version. Do not remove the lock to proceed.
-- If npm succeeds only for part of a release, the workflow reconciles each
-  published package's npm `gitHead` but creates no new tags or GitHub Releases.
-  If registry visibility still exceeds the bounded wait, a clean rerun recovers
-  missing tags/Releases and publishes only versions still absent from npm.
-- Recovery also verifies `latest` for stable versions and `next` for
-  prereleases. Dist-tag mistakes fail with an interactive repair instruction;
-  the OIDC workflow does not silently rewrite package tags.
-- Recovery is refused when a current tarball-facing file changed after the
-  published npm `gitHead` without a version bump. Add a changeset and release
-  a new version instead of treating different package contents as a recovery.
-- Tags are pushed atomically. Existing GitHub Releases are skipped, so release
-  finalization is safe to retry.
-- If a bad package is public, prefer a corrective patch or `npm deprecate`
-  over routine unpublishing.
-- Keep the publishing workflow disabled if npm ownership, provenance, source
-  rights, tag identity, or repository metadata is uncertain.
+源码构建的 `test:codex-packages` 是额外覆盖，不能证明历史 npm payload。
+此流程不放宽 ancestry、精确 pin、不可变 lock、dist-tag／恢复规则、审批、OIDC 分离
+或依赖优先串行发布要求。普通 CI 的 affected／target／floor 及复用契约见
+[贡献指南](CONTRIBUTING.md#remote-ci-scope)。
+
+<a id="recovery"></a>
+## 失败恢复：先读状态，不重试不可逆写入
+
+**永远不要覆盖 npm 版本。** 保留失败运行的日志、npm receipt 和已准备 manifest，
+先查清版本、源码、integrity、dist-tag，再决定经授权的下一步。
+
+| 失败表现 | 处理方式 |
+| --- | --- |
+| `npm publish` exit 0／receipt 成功，但读回缺失 | exit 0 不等于发布证据。检查 npm 输出和注册表状态，不能自动再 publish |
+| 新发布版本暂不可见 | 只重试只读 registry 检查；默认每个新包最多等待 3 分钟，使用 `--prefer-online` 和有上限的指数退避 |
+| release lock 已记为 published，但查询 E404 | 视为待验证，停止准备；不打包、不重发，不能删锁绕过 |
+| 批次只发出一部分 | 停止后续发布，对账已发布包的 `gitHead`，不创建任何新 tags／Releases；干净重跑只发布仍缺失版本，恢复缺失 tags／Releases |
+| `latest`／`next` 错误 | 失败并提示交互修复；OIDC workflow 和本地 verifier 都不静默改 registry tags |
+| 相同版本的 tarball-facing 文件自 npm `gitHead` 后改变 | 拒绝恢复；添加 changeset，发布新版本，不把不同 payload 冒充恢复 |
+| 已有 Git tag 指向错误源码 | 停止调查，不覆盖 tag 身份 |
+| tags／GitHub Releases 最终化中断 | 对账全部通过后原子推 tags；已存在 Release 跳过，可安全重试最终化 |
+
+发布器显式禁用继承的 npm dry-run 配置，并在 job 日志中保留 publish receipt。
+成功 publish 后只重试读取，不盲目重复不可逆命令。传播等待由以下变量控制：
+
+| 变量 | workflow 默认值 |
+| --- | --- |
+| `NPM_REGISTRY_PROPAGATION_TIMEOUT_MS` | `180000` |
+| `NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS` | `2000` |
+| `NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS` | `15000` |
+
+release lock 比较注册表 `gitHead` 与 SHA-512，是已经发布的证据，不能修改已锁值来
+“修好”失败。变更锁值必须另行开展 source／registry 调查；历史记录不能删除或替换。
+
+若坏包已公开，优先发布修正 patch 或另行授权 `npm deprecate`，不要例行 unpublish。
+npm ownership、provenance、源码权利、tag 身份或仓库元数据不确定时，保持发布 workflow
+禁用，先解决不确定性；恢复流程不自动授予任何注册表操作权限。
+
+<a id="package-publication-eligibility"></a>
+## 确认发布资格
+
+`@oai404iao` scope 不覆盖 `private` 或 release eligibility。资格必须在
+`scripts/workspaces.mjs` 与包 manifest 中一致，CI 拒绝冲突：
+
+| `releaseStatus` | `private` | 可进入的流程 |
+| --- | --- | --- |
+| `blocked` | 必须为 `true`，且只有此状态允许 | 不进入发布制品 |
+| `bootstrap` | 非 private | 仅本地一次性 `release:bootstrap-artifacts` |
+| `publishable` | 非 private | 正常受保护 workflow |
+
+当前登记的 8 个工作区均为 publishable：6 个 Codex 包（runtime、core、tools、web-search、
+imagegen、minimal-tools），以及 subagent、telegram-notify。本地通知不在发布工作区。
+已移除的 external-thinking、keep-defaults、tree-continue 和未发布 Code Mode 实验不能进入新批次；
+历史 release locks 仍保留。此清单描述仓库资格，不是实时 registry inventory。
+
+包的 trusted publisher、environment 保护和 `NPM_PUBLISH_ENABLED` 是每次发布的前置条件，
+所有未来发布仍须手动 dispatch 和维护者审批。配置读回不证明实际 OIDC 发布成功；
+不能为了验证配置而虚构或覆盖版本。
+
+公共和支持包的 peer 下限为 Pi 1.2.0，精确开发目标也是 1.2.0。
+开放上界是有意的前向兼容策略，不是已验证所有未来 Pi 版本；新基线须经 CI 验证，
+发现不兼容时收紧范围。更新基线要同步开发依赖、peer、锁、说明和测试，并运行
+`pnpm run ci:pi-matrix` 检查实际 SDK 解析。详见 [Pi 兼容性](docs/pi-compatibility.md)。
+
+<a id="npm-bootstrap-and-trusted-publishing"></a>
+## 新包的一次性 bootstrap 与 trusted publishing
+
+**这不是 tools 的当前待办。** 以下仅适用于经单独批准、尚未发布且明确登记为
+`bootstrap` 的新包；现有包走常规发布／恢复。npm 包必须先存在，才能附加 trusted publisher。
+
+1. 重新核实包名可用性和所有权，完成权属审计及[一次性仓库准备](#one-time-github-preparation)。
+2. 从刚获取的公共 `main` 上可达、经审阅且干净的 commit 准备制品；该源码必须留在公共历史。
+   通常先 `git fetch github main`、checkout `github/main`，完成 frozen install 和 `pnpm run ci`。
+3. 使用本地 `pnpm run release:bootstrap-artifacts`；可用 `RELEASE_PACKAGE` 指定精确 bootstrap
+   目标。定向选择要求已发布／publishable 的完整依赖闭包和精确 pin；依赖只验证，只有目标打包。
+   GitHub Actions 禁止准备 bootstrap 制品，受保护 publisher 也不能发布 bootstrap 包。
+4. 维护者以交互式 2FA **只发布 manifest 指定的目标 tarball**，使用 `--access public`
+   及 manifest 的 `distTag`：预发布 `next`、稳定版 `latest`。不要从源码目录发布，
+   不要运行全批 publisher，不要显式用 `--tag latest` 发布预发布。
+5. 读回精确版本、`gitHead`、SHA-512、完整版本历史和 tags，匹配准备好的 manifest。
+   不把可见性延迟当成重发许可；不要把 bootstrap token 存进 GitHub。
+6. 配置该包的 GitHub Actions trusted publisher：repository `oai404iao/omp`、
+   workflow `publish.yml`、environment `npm-publish`、allowed action `npm publish`。
+   environment 要求维护者审批、仅 main 部署和 `NPM_PUBLISH_ENABLED=true`。
+7. 单独提交并审阅 `bootstrap` → `publishable` 激活变更，把已验证 source／SHA-512
+   追加到 `release-locks/npm-published-artifacts.json`；不能覆盖历史项。
+8. 激活后才可 dispatch 受保护 workflow，对账缺失 Git tag／GitHub Release。
+   若首发时能一并创建则优先完成；恢复要求 npm `gitHead` 是可达祖先，且该提交的包名／版本一致。
+9. 验证 OIDC 后限制传统 token 发布并撤销 bootstrap 凭据。
+
+新包若被 npm 自动赋予初始 `latest` alias，必须另行审阅精确 identity／history 例外，
+不能套用历史 Codex 例外，也不能删除 tag、unpublish、重发或造一个 dummy stable 版本。
+
+### 仅尚未首发时保留初始版本
+
+经授权的前置版本准备可用 wrapper 的
+`--preserve-bootstrap-version <exact-name>` 选项。它在写入前核实非 private bootstrap
+资格、immutable lock 中无该包发布历史、注册表确认从未发布，且与待发 changeset 有关；
+Changesets prerelease mode 不支持此选项。随后正常运行 Changesets，仅恢复被核实目标
+的初始版本，仍修复精确 pin 并要求其他消费者升级。
+
+它不是回滚版本或跳过消费者升级的通道，任何已发布历史都会拒绝；**不得再用于 tools**。
+相关命令会联网核实前置条件，不能在普通文档或维护任务中顺手执行。
+暂缓无关 changeset 时，沿用[定向发布](#targeted-package-releases)的恢复／同步步骤。
+
+<a id="one-time-github-preparation"></a>
+## 一次性仓库准备参考
+
+公共仓库为 `oai404iao/omp`，初建时没有额外 README／license commit。
+保留原 Gitea remote，GitHub 使用独立 remote；完成
+[publication readiness 审计](docs/audits/publication-readiness.md)。不要重复初始化现有仓库。
+
+每个 npm 包必须有精确元数据：
+
+```json
+{
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oai404iao/omp.git",
+    "directory": "pi-extensions/<package>"
+  },
+  "homepage": "https://github.com/oai404iao/omp/tree/main/pi-extensions/<package>#readme",
+  "bugs": { "url": "https://github.com/oai404iao/omp/issues" }
+}
+```
+
+每个 tarball 保留经审阅的包级 LICENSE 和第三方 notices；不要只根据 manifest 字段推断权属。
+保护 `main`：要求 PR 和 CI，阻止 force push／删除分支，workflow 改动须审阅。
+允许 Actions 创建 release PR；这不替代 PR CI 审批或 protected environment。
+
+官方参考：[trusted publishing](https://docs.npmjs.com/trusted-publishers/)、
+[npm trust](https://docs.npmjs.com/cli/v11/commands/npm-trust/)、
+[provenance](https://docs.npmjs.com/generating-provenance-statements/)。
+
+<a id="workflow-state-and-historical-bootstraps"></a>
+<a id="codex-bootstrap-activation"></a>
+## 历史首发与激活记录
+
+以下是已记录的检查点，不是待执行步骤、当前 registry inventory 或新的发布批准。
+早期 alpha 准备共 9 个包，激活批次为 4 个不可变 `recover` 依赖加 5 个 `publish` 候选；
+当前资格已调整为前述 8 个工作区。不要重新发布首发四包或让移除包进入新批次。
+
+| 历史检查点 | 源码 commit／证据 |
+| --- | --- |
+| keep-defaults、telegram-notify 首发 `0.1.2`，npm gitHead／包 tag／GitHub Release 一致 | `0c53bdb9e13b006a23a8da05a01c06f106fa2c10` |
+| 上述两包后续稳定版 `0.1.3` | `16dccb8953b717670c34fe978c79c07d592ca7e2` |
+| external-thinking `0.1.0`，npm gitHead／tag／Release 一致，现已移除 | `aae803f4b25603991d9375c602cf35da1df922b0` |
+| subagent `0.2.0`，当时已核实 gitHead／latest，已配置 trusted publisher | `ef42984c0e40ef1f26ead4b4c7d149b21280e66b` |
+| minimal-tools `1.3.0` 手动 bootstrap，后进入 guarded artifacts | `596d799c6f7db3508b6d46bb05cdca6ea9e3b716`；Apache source map 在 runtime `provenance/`，Responses Lite 边界保留在包 README／notice |
+| runtime／core／imagegen／web-search `0.1.0-alpha.1` 手动首发，identity、下载 tarball SHA-512、trusted publisher 已核实 | `32ba01f3c08b7fd63d09e9b2373cf081c4525533`；[激活审计](docs/audits/codex-bootstrap-activation.md) |
+| tools `0.1.0-alpha.1` 手动首发及独立激活完成 | `b9deaba6ba07d87c048e474b2ddc977f3bd2b442`；[tools 激活审计](docs/audits/codex-tools-bootstrap-activation.md) |
+
+S4 建立递归精确 pin changeset、依赖优先制品和无外链的隔离生产消费者；这些测试不授权
+registry 写入，也不证明真实账号／模型可用。有限真实 bootstrap smoke 的 harness／覆盖限制
+见激活审计，不是通用端点验收。[早期 alpha 准备审计](docs/audits/codex-alpha-release.md)
+保留为历史检查点；组合测试边界见 [Codex 包结构](docs/codex-packages.md)。
+
+<a id="codex-tools-first-publication"></a>
+<a id="codex-tools-first-publication-and-activation"></a>
+### Tools 首发已完成：后续只走 guarded workflow
+
+Tools 已设为 `releaseStatus: "publishable"`，已记录不可变 source／integrity，
+公开 tarball、history／tags 和 trusted publisher 已验证。现有版本的 workflow 运行
+只能恢复；未来新版本须另行授权，**不能再运行 tools 本地 bootstrap 或保留首发版本命令**。
+
+历史迁移顺序是 runtime → core → tools 首发 → tools 独立激活 → web-search／imagegen
+兼容消费者 → minimal-tools → 受影响 optional 消费者。前置版本 PR 同步消费者 pin／升级
+不代表能提前发布消费者；当时要求暂缓无关 Telegram changeset、不得合并竞争的全批版本 PR。
+首发到激活的前置步骤已完成，消费者仍须各自获授权的受保护 dispatch，不能把历史次序
+当成自动执行队列。
+
+<a id="initial-codex-latest-alias"></a>
+### 初始 alpha 的 `latest` alias 例外
+
+npm 元数据要求 `latest`，首个 runtime 的 `next`／`latest` 都指向唯一 alpha，
+删除 `latest` 曾返回 E400。例外记录在 `scripts/initial-codex-bootstrap.mjs`，严格限于：
+
+| 包／版本 | 精确源码与允许历史 |
+| --- | --- |
+| runtime／core／imagegen／web-search `0.1.0-alpha.1` | `32ba01f3c08b7fd63d09e9b2373cf081c4525533`；仅此一个可见版本，`next=latest=0.1.0-alpha.1` |
+| tools `0.1.0-alpha.1` | `b9deaba6ba07d87c048e474b2ddc977f3bd2b442`；历史精确为 `0.0.0-stage` 和该 alpha，`next=latest=0.1.0-alpha.1` |
+
+Tools 的 `0.0.0-stage` 是 npm 标为 `stub:true` 的 staged-publication placeholder，
+不是第二个工具实现版本。不推断是谁创建／批准 stage，也不允许为其他包过滤 placeholder。
+见 [npm registry schema](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md#package)
+及 [staged publishing](https://docs.npmjs.com/staged-publishing/)。
+
+guarded publisher 仅对**已发布的 `recover` 候选**，且 release lock 的 gitHead／integrity
+匹配时接受 alias；缺 lock、历史缺失／畸形、其他包／后续版本、错误 `next` 都 fail closed。
+历史四包仍要求 sole-version-only，tools 例外不能扩散；已有稳定包的 prerelease／latest 禁令不变。
+进入消费者前和最终对账时都会检查 tags，publisher／本地 verifier 均不修改 registry tags。
+
+本地交互 bootstrap verifier 在验证制品与发布身份后使用同一 tag predicate，
+但不能要求尚待验证后才追加的 release lock。见[修正记录](docs/audits/codex-bootstrap-latest.md)。
+这些 alias 不表示 alpha 已稳定；无版本安装可能解析到 alpha，用户应选明确 `@next` 或精确版本。
+
+<a id="pi-0861-migration-release-note"></a>
+### Pi 0.86.1 迁移公告保留项
+
+迁移公告须说明 `@oai404iao/pi-keep-defaults` 已退出仓库和未来批次，最后记录的稳定版为
+`0.1.3`；不生成新的退休包版本或 changeset。用户须卸载并**完全重启 Pi**，`/reload`
+不能可靠撤销旧进程级 patch：
+
+```bash
+pi remove npm:@oai404iao/pi-keep-defaults
+```
+
+项目本地安装加 `-l`，本地路径安装则移除配置来源。Pi 0.86.1 将普通模型／thinking
+变更保持在 session 内，但故意不保留旧 settings watcher 对显式保存和外部编辑的更强保护。
+这是历史迁移说明，当前支持基线见 [Pi 兼容性](docs/pi-compatibility.md)。
+
+移除工作区不会修改已有安装，不执行 npm deprecate／unpublish，也不会给 npm 用户提供
+registry 级弃用警告；任何此类操作都需要另行发布授权。
