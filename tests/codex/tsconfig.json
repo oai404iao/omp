@@ -1,4 +1,7 @@
 {
   "extends": "../../pi-extensions/pi-codex-core/tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true
+  },
   "include": ["**/*.ts"]
 }
