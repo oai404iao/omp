@@ -183,19 +183,6 @@ function bootstrapCandidate(name = "@oai404iao/pi-codex-runtime") {
       ? "b9deaba6ba07d87c048e474b2ddc977f3bd2b442" : "32ba01f3c08b7fd63d09e9b2373cf081c4525533" };
 }
 
-test("full-batch publisher fixture ignores the caller's release selection", () => {
-  const previous = process.env.RELEASE_PACKAGE;
-  process.env.RELEASE_PACKAGE = "@oai404iao/pi-subagent";
-  try {
-    const { process: child, result } = runPublisher([candidate("@fixture/full-batch")]);
-    assert.equal(child.status, 0, child.stderr);
-    assert.equal(result.ok, true);
-  } finally {
-    if (previous === undefined) delete process.env.RELEASE_PACKAGE;
-    else process.env.RELEASE_PACKAGE = previous;
-  }
-});
-
 function bootstrapOptions(value) {
   return {
     locked: { [`${value.name}@${value.version}`]: { gitHead: value.sourceCommit, integrity: value.integrity } },

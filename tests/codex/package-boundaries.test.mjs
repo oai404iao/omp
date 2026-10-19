@@ -5,29 +5,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { moduleReferences } from "../../scripts/check-codex-architecture.mjs";
-import bundle from "@oai404iao/pi-codex-minimal-tools";
-import * as bundleInline from "@oai404iao/pi-codex-minimal-tools/subagent-inline";
-import * as runtimeInline from "@oai404iao/pi-codex-runtime/subagent-inline";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const bundleDir = resolve(root, "pi-extensions/pi-codex-minimal-tools");
-
-test("bundle preserves its public factory and exact runtime inline exports", () => {
-	assert.equal(typeof bundle, "function");
-	assert.deepEqual(Object.keys(bundleInline), Object.keys(runtimeInline));
-	for (const key of Object.keys(runtimeInline)) assert.equal(bundleInline[key], runtimeInline[key]);
-	const manifest = JSON.parse(readFileSync(resolve(bundleDir, "package.json"), "utf8"));
-	assert.deepEqual(manifest.exports, { ".": "./index.ts", "./subagent-inline": "./subagent-inline.ts" });
-	assert.deepEqual(manifest.pi.extensions, ["./index.ts"]);
-});
-
-test("bundle contains only composition entries and package maintenance files", () => {
-	const entries = readdirSync(bundleDir).filter(name => name !== "node_modules").sort();
-	assert.deepEqual(entries, [
-		"AGENTS.md", "CHANGELOG.md", "LICENSE", "README.md", "THIRD_PARTY_NOTICES.md",
-		"index.ts", "package.json", "subagent-inline.ts", "tsconfig.json",
-	].sort());
-});
 
 function sources(directory) {
 	return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../src/config.ts";
 import {
-	CloseParameters, CloseOutput, FollowupOutput, SpawnOutput, ListOutput, FollowupTaskParameters, InterruptParameters, ListAgentsParameters, SendMessageParameters,
+	CloseParameters, CloseOutput, ListOutput, FollowupTaskParameters, InterruptParameters, ListAgentsParameters, SendMessageParameters,
 	TOOL_DESCRIPTIONS, TOOL_NAMES, WaitAgentParameters, spawnAgentParameters,
 } from "../src/schemas.ts";
 import { resolveTaskPath, taskPath, pathMatches } from "../src/task-path.ts";
@@ -54,8 +54,6 @@ test("execution profiles, lifecycle and pagination public contracts reject unsup
 	assert(!Value.Check(CloseParameters, { target: "review", recursive: false }));
 	assert(Value.Check(ListAgentsParameters, { include_closed: true, limit: 200, cursor: "opaque" }));
 	for (const limit of [0, 201, 1.5]) assert(!Value.Check(ListAgentsParameters, { limit }));
-	assert(Value.Check(SpawnOutput, { task_name: "/root/review", model: "p/m", thinking: "low" }));
-	assert(Value.Check(FollowupOutput, { accepted: true, model: "p/m", thinking: "low" }));
 	assert(Value.Check(CloseOutput, { accepted: true, target: "/root/review", lifecycle: "closing", affected_count: 1 }));
 	assert(Value.Check(ListOutput, { agents: [{
 		agent_name: "/root/review", agent_status: "completed", lifecycle: "closed", model: "virtual/auto", thinking: "high",

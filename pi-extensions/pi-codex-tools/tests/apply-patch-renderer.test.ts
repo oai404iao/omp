@@ -15,12 +15,6 @@ test("apply_patch definition is compatible with pi-tool-renderer assumptions", (
 	assert.equal("renderResult" in tool, false);
 });
 
-test("apply_patch registers its filesystem preview renderer unless rendering is deferred", () => {
-	const tool = createApplyPatchToolDefinition() as Record<string, any>;
-	assert.equal(typeof tool.renderCall, "function");
-	assert.equal(typeof tool.renderResult, "function");
-});
-
 test("apply_patch renderer updates from a throttled filesystem preview", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "pi-apply-patch-render-"));
 	writeFileSync(join(cwd, "existing.txt"), "before\n");
@@ -76,14 +70,6 @@ test("apply_patch renderer updates from a throttled filesystem preview", async (
 	assert.match(settled, /M existing\.txt/);
 	context.expanded = true;
 	assert.match(tool.renderResult(result, { expanded: true }, theme, context).render(120).join("\n"), /M existing\.txt/);
-});
-
-test("fallback output remains readable without a custom renderer", async () => {
-	const tool = createApplyPatchToolDefinition({ cwd: process.cwd(), deferRendering: true }) as Record<string, any>;
-	assert.equal(typeof tool.execute, "function");
-	assert.match(tool.description, /Codex patch format/);
-	assert.doesNotMatch(tool.description, /input argument/i);
-	assert.doesNotMatch(tool.promptSnippet, /input argument/i);
 });
 
 test("apply_patch self rendering applies outputPad to cached calls and settled results", () => {

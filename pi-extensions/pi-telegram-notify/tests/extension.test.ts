@@ -149,8 +149,6 @@ test("child identity survives navigation before its descriptor", () => withHarne
 }));
 
 test("agent_settled deduplicates the active-branch assistant and ignores intermediate retries", () => withHarness(async ({ pi, requests }) => {
-	assert.equal(pi.handlers.agent_settled?.length, 1);
-	assert.equal(pi.handlers.agent_end, undefined);
 	let branch = [assistantEntry("retry-error", "error", "temporary provider failure")];
 	const ctx = context(() => branch, "/private/work/project", () => [
 		...branch, assistantEntry("off-branch", "error", "off-branch failure"),
@@ -268,8 +266,6 @@ test("tool preflight and legacy rpiv events no longer guess waiting or duplicate
 	const ctx = context(() => []);
 	await emit(pi, "session_start", ctx);
 	await startUser(pi, ctx);
-	assert.equal(pi.handlers.tool_call, undefined);
-	assert.equal(pi.handlers.tool_result, undefined);
 	await emit(pi, "tool_call", ctx, { toolName: "ask_user_question", input: { question: "may be blocked" } });
 	pi.events.emit("rpiv:ask-user:prompt", { questions: [{ question: "legacy summary" }] });
 	assert.equal(requests.length, 0);

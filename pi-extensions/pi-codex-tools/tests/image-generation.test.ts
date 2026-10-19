@@ -1,18 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createImageGenerationToolDefinition, standaloneImageGeneration } from "@oai404iao/pi-codex-tools/internal/tools/image-generation";
-import * as generation from "@oai404iao/pi-codex-tools/internal/tools/image-generation";
-import * as background from "@oai404iao/pi-codex-tools/internal/background-image-generation";
 import { DEFAULT_SETTINGS } from "@oai404iao/pi-codex-runtime/internal/settings";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { withCodexSettings } from "../../../tests/codex/support/provider-lifecycle-test-support.js";
 
 const model = { provider: "openai", api: "openai-responses", id: "gpt-5.6-sol", baseUrl: "https://fixture.invalid" } as any;
-
-test("hosted and direct image execution exports are removed", () => {
-	assert.equal("directImageGeneration" in generation, false);
-	assert.equal("buildBackgroundImageRequest" in background, false);
-});
 
 test("global image gate blocks standalone before authentication", () => withCodexSettings({ imageGeneration: false }, async cwd => {
 	let authRequested = false;

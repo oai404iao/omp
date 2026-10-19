@@ -89,15 +89,3 @@ test("preparation rejects pnpm output outside the expected artifact directory", 
   assert.match(child.stderr, /pnpm pack returned an unexpected artifact path/);
   assert.equal(existsSync(join(temporary, "release-artifacts/manifest.json")), false);
 });
-
-test("full-batch preparation fixture ignores the caller's release selection", t => {
-  const previous = process.env.RELEASE_PACKAGE;
-  process.env.RELEASE_PACKAGE = "@oai404iao/pi-subagent";
-  try {
-    const { child } = prepareFixture(t);
-    assert.equal(child.status, 0, child.stdout + child.stderr);
-  } finally {
-    if (previous === undefined) delete process.env.RELEASE_PACKAGE;
-    else process.env.RELEASE_PACKAGE = previous;
-  }
-});

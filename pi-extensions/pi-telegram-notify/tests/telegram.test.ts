@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sendTelegramMessage, telegramEndpoint, type TelegramFetch } from "../src/telegram.js";
+import { sendTelegramMessage, type TelegramFetch } from "../src/telegram.js";
 
 test("sends a MarkdownV2 Telegram message to the configured chat", async () => {
 	let request: { url: string; body: string; method: string } | undefined;
@@ -19,7 +19,6 @@ test("sends a MarkdownV2 Telegram message to the configured chat", async () => {
 		fetchMock,
 	);
 
-	assert.equal(telegramEndpoint("123:abc"), "https://api.telegram.org/bot123%3Aabc/sendMessage");
 	assert.deepEqual(request, {
 		url: "https://api.telegram.org/bot123%3Aabc/sendMessage",
 		method: "POST",

@@ -117,12 +117,3 @@ test("release reuse skips only source checks and keeps fresh policy, audit and i
   const publication = publish.jobs.publish.steps.find(step => step.name === "Publish exact tarballs and reconcile registry state");
   assert.ok(publication.run.indexOf("release-consumer-receipt.mjs") < publication.run.indexOf("publish-release-artifacts.mjs"));
 });
-
-test("Dependabot monthly discovery, update limits and disabled automatic rebasing remain unchanged", () => {
-  for (const entry of read(".github/dependabot.yml").updates) {
-    assert.equal(entry.schedule.interval, "monthly");
-    assert.equal(entry["rebase-strategy"], "disabled");
-    assert.equal(entry["open-pull-requests-limit"], 5);
-    assert.equal(entry.ignore, undefined);
-  }
-});

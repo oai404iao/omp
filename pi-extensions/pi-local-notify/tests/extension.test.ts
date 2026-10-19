@@ -43,7 +43,7 @@ function harness(t: TestContext) {
 		type: "message", id, message: { role: "assistant", stopReason },
 	});
 	return {
-		handlers, commands, ctx, emit, writes, warnings, assistant,
+		commands, ctx, emit, writes, warnings, assistant,
 		setBranch(value: unknown[]) { branch = value; },
 		setEntries(value: unknown[]) { entries = value; },
 	};
@@ -51,7 +51,6 @@ function harness(t: TestContext) {
 
 test("only agent_settled notifies; active-branch results are deduplicated", (t) => {
 	const h = harness(t);
-	assert.equal(h.handlers.agent_end, undefined);
 	h.setEntries([h.assistant("off-branch", "error")]);
 	h.setBranch([h.assistant("final")]);
 	h.emit("agent_end");

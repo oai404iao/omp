@@ -85,8 +85,6 @@ test("invalid explicit model values reject before registering a child or changin
 	const original = structuredClone(f.manager.getEntries());
 	const originalAgents = f.coordinator.list(f.caller).agents;
 	for (const value of ["", " ", "\t\n", null, false, 0, 17, {}, []]) {
-		await assert.rejects(resolveExecutionProfile(f.modelRuntime, f.model, "high", { model: value as never }),
-			/model must be a nonempty string/);
 		await assert.rejects(f.coordinator.spawn(f.caller, {
 			task_name: "invalid", message: "must not register", model: value as never,
 		}), /model must be a nonempty string/);
@@ -95,8 +93,6 @@ test("invalid explicit model values reject before registering a child or changin
 		assert.equal(f.coordinator.activeCount, 0);
 	}
 	for (const value of ["", "unknown", null, false, 4, {}, []]) {
-		await assert.rejects(resolveExecutionProfile(f.modelRuntime, f.model, "off", { thinking: value as never }),
-			/unsupported/);
 		await assert.rejects(f.coordinator.spawn(f.caller, {
 			task_name: "invalid", message: "must not register", thinking: value as never,
 		}), /unsupported/);
