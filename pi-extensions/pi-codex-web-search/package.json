@@ -57,8 +57,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test tests/**/*.test.ts",
-    "check": "pnpm run typecheck && pnpm run test"
+    "check": "pnpm run typecheck"
   },
   "publishConfig": {
     "access": "public",

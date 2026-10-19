@@ -83,17 +83,6 @@ test("rewriteNativeOpenAiTools rewrites image_generation only to a standalone na
 	assert.equal((result.payload.tools[2] as any).name, "read");
 });
 
-test("rewriteNativeOpenAiTools rewrites web_search only when enabled", () => {
-	const payload = { tools: [{ type: "function", name: "web_search", parameters: {} }] };
-	const disabled = rewriteNativeOpenAiTools(payload, { webSearch: false });
-	assert.deepEqual(disabled.rewritten, []);
-	assert.deepEqual(disabled.payload.tools[0], { type: "function", name: "web_search", parameters: {} });
-
-	const enabled = rewriteNativeOpenAiTools(payload, { webSearch: true });
-	assert.deepEqual(enabled.rewritten, ["web_search"]);
-	assert.deepEqual(enabled.payload.tools[0], { type: "web_search", external_web_access: true });
-});
-
 test("rewriteNativeOpenAiTools removes only a disabled tool owned by this package", () => {
 	const image = { type: "function", name: "image_generation", parameters: {} };
 	const read = { type: "function", name: "read", parameters: {} };

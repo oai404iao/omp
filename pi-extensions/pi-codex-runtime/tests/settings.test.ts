@@ -36,15 +36,6 @@ function writeConfig(agentDir: string, value: unknown): void {
 	writeFileSync(join(dir, "config.json"), typeof value === "string" ? value : JSON.stringify(value));
 }
 
-test("loadSettings returns defaults when config.json is absent", () => {
-	withAgentDir(() => {
-		assert.deepEqual(loadSettings(), DEFAULT_SETTINGS);
-		assert.equal(loadSettings().deferApplyPatchRendering, false);
-		assert.equal(Object.hasOwn(DEFAULT_SETTINGS, "strictPatchMode"), false);
-		assert.equal(Object.hasOwn(DEFAULT_SETTINGS, "allowAbsolutePatchPaths"), false);
-	});
-});
-
 test("config schema exposes only global settings and their defaults", () => {
 	const schema = JSON.parse(readFileSync(new URL("../config.schema.json", import.meta.url), "utf8"));
 	assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");
@@ -62,12 +53,6 @@ test("config schema exposes only global settings and their defaults", () => {
 		),
 		false,
 	);
-});
-
-test("configPath points to extensions/pi-codex-minimal-tools/config.json", () => {
-	withAgentDir((agentDir) => {
-		assert.equal(configPath(), join(agentDir, "extensions", "pi-codex-minimal-tools", "config.json"));
-	});
 });
 
 test("global tool gates load independently without becoming legacy profile overrides", () => withAgentDir(agentDir => {

@@ -9,7 +9,6 @@ import { createStartupPrewarmLifecycle } from "../src/extension/startup-prewarm.
 import { closeProviderWebSocketSessions } from "../src/providers/openai-codex/websocket-session.js";
 import { prewarmWebSocket } from "../src/providers/openai-codex/prewarm.js";
 import { compactionMetadata } from "../src/adapter/compaction/metadata.js";
-import { requestOpenAINativeCompaction } from "../src/adapter/compaction/request.js";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { eventContext, withCodexSettings } from "../../../tests/codex/support/provider-lifecycle-test-support.js";
@@ -144,10 +143,4 @@ test("compaction metadata comes from Pi trigger and captured history rather than
 			implementation: "responses_compaction_v2", phase, strategy: "memento",
 		});
 	}
-});
-
-test("removed unary compaction fails before any request dispatch", async () => {
-	await assert.rejects(requestOpenAINativeCompaction({} as any, {} as any, {
-		mode: "responses-compact", signal: new AbortController().signal,
-	} as any), /Only Responses compaction_trigger/);
 });

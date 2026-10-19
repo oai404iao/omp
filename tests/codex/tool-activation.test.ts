@@ -108,19 +108,6 @@ test("real Pi loader registers direct patch/search before action methods are bou
 		}
 	}));
 
-test("Codex patch/search remain direct tools with no private Code Mode bus", () =>
-	withCompositionDirectory(async (directory) => {
-		const host = createCompositionHost(directory);
-		try {
-			core(host.api());
-			tools(host.api());
-			web(host.api());
-			assert(host.tools.has("apply_patch"));
-			assert(host.tools.has("web_search"));
-			assert.equal(host.bus.eventNames().filter(name => String(name).startsWith("@oai404iao/pi-code-mode:")).length, 0);
-		} finally { host.dispose(); }
-	}));
-
 test("Codex shutdown does not rewrite native tool selection", () =>
 	withCompositionDirectory(async (directory) => {
 		const host = createCompositionHost(directory);

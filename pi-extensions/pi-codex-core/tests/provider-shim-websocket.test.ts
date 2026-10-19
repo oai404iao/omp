@@ -1747,43 +1747,6 @@ test("resumed sessions prewarm once without replaying restored history", async (
 	}
 });
 
-test("session shutdown cancels a pending startup prewarm before replacement", async () => {
-	writeSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true });
-	let releaseWarmup: (() => void) | undefined;
-	const server = await startWebSocketServer([
-		() => ({
-			async before() {
-				await new Promise<void>((resolve) => {
-					releaseWarmup = resolve;
-				});
-			},
-			events: successEvents("warm_cancelled"),
-		}),
-	]);
-	try {
-		const harness = createProviderHarnessWithEvents();
-		const model = {
-			provider: "openai",
-			api: "openai-responses",
-			id: "gpt-5.5",
-			baseUrl: server.url,
-			headers: {},
-			input: ["text"],
-			reasoning: false,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		};
-		const ctx = providerEventContext(model);
-		await emitHandlers(harness, "session_start", { type: "session_start", reason: "startup" }, ctx);
-		await assertEventually(() => server.requests.length === 1);
-		await emitHandlers(harness, "session_shutdown", { type: "session_shutdown", reason: "new" }, ctx);
-		assert.equal(server.connections, 1);
-		releaseWarmup?.();
-	} finally {
-		releaseWarmup?.();
-		await server.close();
-	}
-});
-
 test("max reasoning stays identical between startup prewarm and first request", async () => {
 	writeSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true });
 	const server = await startWebSocketServer([

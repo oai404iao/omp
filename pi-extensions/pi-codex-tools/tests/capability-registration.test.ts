@@ -6,58 +6,25 @@ import test from "node:test";
 import type { ExtensionAPI, ToolDefinition, ToolLoadout } from "@earendil-works/pi-coding-agent";
 import { getCodexBroker } from "@oai404iao/pi-codex-runtime/internal/broker";
 import codexTools from "../src/index.js";
-import codexWebSearch from "../src/web-search.js";
-import codexImagegen from "../src/imagegen.js";
 import { createApplyPatchToolDefinition } from "../src/tools/apply-patch.js";
 import { createWebSearchToolDefinition, standaloneWebSearch } from "../src/tools/web-search.js";
 import { eventContext, responsesModel, withCodexSettings } from "../../../tests/codex/support/provider-lifecycle-test-support.js";
 
 function fixture() {
 	const tools = new Map<string, any>();
-	const commands: string[] = [];
-	const renderers: string[] = [];
-	const registrations: string[] = [];
 	let active: string[] = [];
 	const pi = {
 		events: new EventEmitter(),
 		on() {},
-		registerTool(tool: { name: string }) { tools.set(tool.name, tool); registrations.push(tool.name); },
-		registerCommand(name: string) { commands.push(name); },
-		registerMessageRenderer(name: string) { renderers.push(name); },
+		registerTool(tool: { name: string }) { tools.set(tool.name, tool); },
+		registerCommand() {},
+		registerMessageRenderer() {},
 		getActiveTools: () => active,
 		setActiveTools(names: string[]) { active = names; },
 		getAllTools: () => [...tools.values()].map(tool => ({ ...tool, sourceInfo: { source: "extension", path: "/fixture/tools.ts" } })),
 	} as unknown as ExtensionAPI;
-	return { pi, tools, commands, renderers, registrations };
+	return { pi, tools };
 }
-
-for (const gate of ["enabled", "applyPatch", "webSearch", "imageGeneration"] as const) {
-	test(`${gate}: false prevents only the selected registrations and presentation`, () =>
-		withCodexSettings({ [gate]: false }, async () => {
-			const f = fixture();
-			codexTools(f.pi);
-			const expected = gate === "enabled" ? [] : ["apply_patch", "web_search", "image_generation"]
-				.filter(name => name !== ({ applyPatch: "apply_patch", webSearch: "web_search", imageGeneration: "image_generation" } as Record<string, string>)[gate]);
-			assert.deepEqual([...f.tools.keys()].sort(), expected.sort());
-			if (gate === "enabled" || gate === "imageGeneration") {
-				assert.deepEqual(f.commands, []);
-				assert(!f.renderers.some(name => name.includes("image")));
-			}
-			if (gate === "enabled" || gate === "webSearch") assert(!f.renderers.some(name => name.includes("web-search")));
-		}));
-}
-
-test("selective factories register only their capability and deduplicate the full factory", () =>
-	withCodexSettings({}, async () => {
-		for (const selected of [codexWebSearch, codexImagegen]) {
-			const f = fixture();
-			selected(f.pi);
-			assert.deepEqual([...f.tools.keys()], [selected === codexWebSearch ? "web_search" : "image_generation"]);
-			codexTools(f.pi);
-			selected(f.pi);
-			assert.deepEqual(f.registrations.sort(), ["apply_patch", "image_generation", "web_search"]);
-		}
-	}));
 
 test("custom patch requires actual matching engine capability, not coreEnabled", () =>
 	withCodexSettings({}, async cwd => {

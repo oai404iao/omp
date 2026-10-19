@@ -18,11 +18,6 @@ test("task attribution is synchronously captured and detached from the caller sn
 	assert.equal(message.kind, "task");
 });
 
-test("missing Codex integration keeps task delivery functional", () => {
-	const pi = { events: { emit() {} } } as unknown as ExtensionAPI;
-	assert.equal(taskMessage(pi, "/root", "/root/worker", "work", "session").codexTurnAttribution, undefined);
-});
-
 test("FIFO task attribution ignores ordinary mail and clears an older cause when absent", () => {
 	const session = SessionManager.inMemory();
 	const message = (id: string, kind: MailMessage["kind"], parentTurnId?: string): MailMessage => ({

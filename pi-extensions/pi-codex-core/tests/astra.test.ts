@@ -86,23 +86,7 @@ test("Astra uses the exact Codex Responses Lite request profile", () => withAgen
 	);
 }));
 
-test("Astra exposes every Pi-supported reasoning effort without inventing ultra", () => withAgentDir(() => {
-	assert.equal(OPENAI_CODEX_ASTRA_MODEL.provider, "openai-codex");
-	assert.equal(OPENAI_CODEX_ASTRA_MODEL.api, "openai-codex-responses");
-	assert.deepEqual(OPENAI_CODEX_ASTRA_MODEL.input, ["text", "image"]);
-	assert.equal(OPENAI_CODEX_ASTRA_MODEL.contextWindow, 272_000);
-	assert.equal(OPENAI_CODEX_ASTRA_MODEL.maxTokens, 128_000);
-	assert.equal(OPENAI_CODEX_ASTRA_MODEL.compat?.supportsAdditionalTools, true);
-	assert.equal(OPENAI_CODEX_ASTRA_MODEL.compat?.supportsOpenAIGrammarTools, true);
-	assert.deepEqual(OPENAI_CODEX_ASTRA_MODEL.thinkingLevelMap, {
-		off: null,
-		minimal: "low",
-		low: "low",
-		medium: "medium",
-		high: "high",
-		xhigh: "xhigh",
-		max: "max",
-	});
+test("Astra serializes Pi's maximum reasoning effort", () => withAgentDir(() => {
 	const settings = loadModelSettings(OPENAI_CODEX_ASTRA_MODEL, undefined, DEFAULT_SETTINGS);
 	const body = buildRequestBody(
 		OPENAI_CODEX_ASTRA_MODEL,

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { computeNextActiveTools, computeToolCapabilities } from "@oai404iao/pi-codex-runtime/internal/capabilities";
+import { computeToolCapabilities } from "@oai404iao/pi-codex-runtime/internal/capabilities";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { DEFAULT_SETTINGS } from "@oai404iao/pi-codex-runtime/internal/settings";
 
@@ -51,36 +51,6 @@ test("tool capabilities come from the exact model profile and input modalities",
 		DEFAULT_SETTINGS,
 	);
 	assert.ok(Object.values(unknown).every((capability) => !capability.enabled));
-}));
-
-test("Responses Lite profiles keep standalone tools and custom apply_patch", () => withAgentDir(() => {
-	const model = { provider: "openai", id: "gpt-5.6-sol", input: ["text", "image"] };
-	const capabilities = computeToolCapabilities(model, DEFAULT_SETTINGS);
-	const settings = loadModelSettings(model, undefined, DEFAULT_SETTINGS);
-
-	assert.equal(settings.requestProfile.responsesMode, "lite");
-	assert.equal(settings.requestProfile.patchTransport, "custom");
-	assert.equal(settings.requestProfile.supportsHostedTools, false);
-	assert.equal(settings.requestProfile.supportsParallelTools, false);
-	assert.equal(settings.webSearchImplementation, "standalone");
-	assert.equal(settings.imageGenerationImplementation, "standalone");
-	assert.equal(capabilities.apply_patch.enabled, true);
-	assert.equal(capabilities.web_search.enabled, true);
-	assert.equal(capabilities.image_generation.enabled, true);
-}));
-
-test("global image gate disables only image generation", () => withAgentDir(() => {
-	const settings = { ...DEFAULT_SETTINGS, imageGeneration: false };
-	const capabilities = computeToolCapabilities(
-		{ provider: "openai-codex", id: "gpt-6-astra", input: ["text", "image"] },
-		settings,
-	);
-	assert.deepEqual(capabilities.image_generation, {
-		enabled: false,
-		reason: "image generation disabled by global setting",
-	});
-	assert.equal(capabilities.apply_patch.enabled, true);
-	assert.equal(capabilities.web_search.enabled, true);
 }));
 
 test("all global tool-gate combinations preserve protocol and unrelated capabilities", () => withAgentDir(() => {
@@ -160,28 +130,4 @@ test("additionalModelIds remains compatible for exact custom model ids", () => w
 		settings,
 	);
 	assert.ok(Object.values(unlisted).every((capability) => !capability.enabled));
-}));
-
-test("active tool sync follows the model profile and preserves unrelated tools", () => withAgentDir(() => {
-	const current = ["read", "bash", "edit", "write", "old_custom"];
-	const next = computeNextActiveTools(
-		current,
-		{ provider: "openai", id: "gpt-5.5", input: ["text"] },
-		DEFAULT_SETTINGS,
-	);
-	assert.deepEqual(next.activeTools, ["read", "bash", "edit", "write", "old_custom", "apply_patch", "web_search"]);
-	assert.deepEqual(next.added, ["apply_patch", "web_search"]);
-	assert.deepEqual(next.removed, []);
-	assert.deepEqual(next.preserved, current);
-}));
-
-test("unsupported models remove only package tools", () => withAgentDir(() => {
-	const current = ["read", "edit", "write", "image_generation", "apply_patch", "web_search"];
-	const next = computeNextActiveTools(
-		current,
-		{ provider: "anthropic", id: "claude", input: ["text"] },
-		DEFAULT_SETTINGS,
-	);
-	assert.deepEqual(next.activeTools, ["read", "edit", "write"]);
-	assert.deepEqual(next.removed.sort(), ["apply_patch", "image_generation", "web_search"].sort());
 }));

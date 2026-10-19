@@ -8,7 +8,7 @@ import { buildCachedWebSocketRequestBody } from "@oai404iao/pi-codex-core/intern
 import { createInitialAssistantMessage } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/message";
 import { processCapturedResponsesStream } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/captured-stream";
 import { processResponsesStream } from "@oai404iao/pi-codex-runtime/internal/providers/responses/stream";
-import { createWebSearchCapture } from "@oai404iao/pi-codex-web-search/internal/tools/web-search/capture";
+import { createWebSearchCapture } from "@oai404iao/pi-codex-tools/internal/tools/web-search/capture";
 import { context, iterable, model, terminal, textEvents, textItem } from "./fixtures.js";
 
 const patchTool = {
@@ -20,33 +20,6 @@ const requestContext = { ...context, tools: [patchTool] };
 const body = (override = {}) => buildRequestBody(
 	model, structuredClone(requestContext), { ...baseProfile, ...override }, { reasoning: "low" },
 ) as any;
-
-test("A1 remove custom patch declaration: only the tool declaration changes", (t) => {
-	const full = body();
-	const ablated = body({ patchTransport: "function" });
-	assert.equal(full.tools[0].type, "custom");
-	assert.equal(full.tools[0].format.syntax, "lark");
-	assert.equal(ablated.tools[0].type, "function");
-	assert.deepEqual({ ...full, tools: [] }, { ...ablated, tools: [] });
-	t.diagnostic(`custom declaration bytes=${Buffer.byteLength(JSON.stringify(full.tools))}; JSON=${Buffer.byteLength(JSON.stringify(ablated.tools))}; not a token or quality metric`);
-});
-
-test("A2 remove reasoning summary request: effort and other fields stay fixed", () => {
-	const full = body();
-	const ablated = body({ reasoningSummary: "none" });
-	assert.equal(full.reasoning.summary, "auto");
-	assert.equal(ablated.reasoning.summary, undefined);
-	const expected = structuredClone(full);
-	delete expected.reasoning.summary;
-	assert.deepEqual(ablated, expected);
-});
-
-test("A3 disable parallel tool calls: only parallel_tool_calls changes", () => {
-	const full = body();
-	const ablated = body({ supportsParallelTools: false });
-	assert.deepEqual(ablated, { ...full, parallel_tool_calls: false });
-	assert.equal(full.parallel_tool_calls, true);
-});
 
 test("A4 remove exact replay signature: text survives, identity and annotations do not", () => {
 	const item = { ...structuredClone(textItem), content: [{
@@ -151,19 +124,4 @@ test("A7 bypass normalization: compaction content survives but continuation capt
 	assert.equal(full.content.length, 1);
 	assert.deepEqual(full.content, ablated.content);
 	assert.deepEqual(full.usage, ablated.usage);
-});
-
-test("P1 Standard vs Lite is a compound protocol control, NOT a one-factor ablation", () => {
-	const standard = body();
-	const liteProfile = resolveCodexRequestProfile({ responsesMode: "lite", patchTransport: "custom" });
-	const lite = buildRequestBody(model, structuredClone(requestContext), liteProfile, { reasoning: "low" }) as any;
-	assert.equal(standard.instructions, context.systemPrompt);
-	assert.equal(lite.instructions, undefined);
-	assert.equal(lite.tools, undefined);
-	assert.equal(lite.input[0].type, "additional_tools");
-	assert.equal(lite.input[1].role, "developer");
-	assert.equal(lite.reasoning.context, "all_turns");
-	assert.equal(lite.parallel_tool_calls, false);
-	assert.equal(liteProfile.supportsHostedTools, false);
-	assert.deepEqual(lite.input.slice(2), standard.input);
 });

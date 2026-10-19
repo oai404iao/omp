@@ -17,5 +17,6 @@ pnpm run test:codex-composition
 pnpm run test:codex-packages
 ```
 
-The local test checks importability; behavior belongs to tools and cross-package
-composition belongs to root `tests/codex/`. Do not run live endpoints.
+The package check covers types; behavior belongs to tools and importability and
+cross-package composition belong to root `tests/codex/` and tarball consumers.
+Do not run live endpoints.

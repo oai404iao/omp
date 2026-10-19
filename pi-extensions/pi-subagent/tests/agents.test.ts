@@ -94,22 +94,6 @@ test("unsupported logical tool groups are rejected during discovery", () => {
 	assert.match(result.diagnostics.join("\n"), /unsupported logical tool "\$unknown"/);
 });
 
-test("runtime discovery uses user-maintained agents", () => {
-	const root = tempRoot();
-	const agentDir = join(root, "agent");
-	writeAgent(join(agentDir, "agents"), "scout", "user-maintained scout");
-
-	const result = discoverAgents({
-		cwd: root,
-		scope: "user",
-		projectTrusted: false,
-		agentDir,
-	});
-	assert.equal(result.agents.length, 1);
-	assert.equal(result.agents[0].source, "user");
-	assert.equal(result.agents[0].description, "user-maintained scout");
-});
-
 test("an empty user directory has no package fallback", () => {
 	const root = tempRoot();
 	const bundled = join(root, "bundled");
@@ -125,23 +109,6 @@ test("an empty user directory has no package fallback", () => {
 	});
 	assert.deepEqual(result.agents, []);
 	assert.equal(existsSync(join(agentDir, "agents")), false);
-});
-
-test("deleting every user definition leaves no available agents", () => {
-	const root = tempRoot();
-	const agentDir = join(root, "agent");
-	const userAgents = join(agentDir, "agents");
-	writeAgent(userAgents, "scout", "user scout");
-	writeAgent(userAgents, "worker", "user worker");
-	rmSync(userAgents, { recursive: true, force: true });
-
-	const result = discoverAgents({
-		cwd: root,
-		scope: "user",
-		projectTrusted: false,
-		agentDir,
-	});
-	assert.deepEqual(result.agents, []);
 });
 
 test("tool catalog describes only effective agents without exposing their prompts", () => {

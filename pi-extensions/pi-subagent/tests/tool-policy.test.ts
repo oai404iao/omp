@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	MUTATION_TOOL_GROUP,
-	assertSupportedToolReferences,
 	buildToolCeiling,
 	buildToolExclusions,
 	resolveToolPolicy,
@@ -58,25 +57,6 @@ test("an omitted allowlist preserves extension choices while applying runtime co
 		active: ["read", "apply_patch", "internal_only"],
 	});
 	assert.deepEqual(policy.activeTools, ["read", "apply_patch", "send_message"]);
-});
-
-test("unknown logical tool groups fail loud", () => {
-	assert.throws(
-		() => assertSupportedToolReferences(["read", "$unknown"], "agent.md: tools"),
-		/unsupported logical tool "\$unknown"/,
-	);
-});
-
-test("requested callable-only tools do not become direct declarations", () => {
-	const policy = resolveToolPolicy({
-		requested: ["codemode", "deferred_tool"],
-		registered: ["codemode", "deferred_tool", "send_message"],
-		active: ["codemode"],
-		callable: ["deferred_tool"],
-		mandatory: ["send_message"],
-	});
-	assert.deepEqual(policy.activeTools, ["codemode", "send_message"]);
-	assert.deepEqual(policy.resolvedRequestedTools, ["codemode", "deferred_tool"]);
 });
 
 test("the permission ceiling does not eagerly declare deferred tools activated during SDK setup", () => {

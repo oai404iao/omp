@@ -32,7 +32,7 @@ const cases = [
 ];
 
 for (const scenario of cases) {
-	for (const reverse of [false, true]) {
+	for (const reverse of scenario.factories.length > 1 ? [false, true] : [false]) {
 		test(`${scenario.name}: ${reverse ? "reversed" : "forward"} separate API roots compose once`, () =>
 			withCompositionDirectory(async directory => {
 				const host = createCompositionHost(directory);

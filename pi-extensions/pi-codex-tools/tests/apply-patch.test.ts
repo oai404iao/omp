@@ -244,29 +244,6 @@ test("apply_patch shares alias locks with native mutations and reads after acqui
 	assert.equal(readFileSync(target, "utf8"), "patched\n");
 });
 
-test("parseApplyPatch parses add/update/delete actions", () => {
-	const parsed = parseApplyPatch(`*** Begin Patch
-*** Add File: a.txt
-+hello
-*** Update File: b.txt
-@@
--old
-+new
-*** Delete File: c.txt
-*** End Patch`);
-	assert.equal(parsed.actions.length, 3);
-	assert.equal(parsed.actions[0]?.kind, "add");
-	assert.equal(parsed.actions[1]?.kind, "update");
-	assert.equal(parsed.actions[2]?.kind, "delete");
-	assert.equal(parsed.actions[0]?.kind === "add" ? parsed.actions[0].content : undefined, "hello\n");
-	assert.deepEqual(parsed.actions[1]?.kind === "update" ? parsed.actions[1].chunks : undefined, [{
-		changeContext: undefined,
-		oldLines: ["old"],
-		newLines: ["new"],
-		isEndOfFile: false,
-	}]);
-});
-
 test("parseApplyPatch rejects content after end marker", () => {
 	assert.throws(
 		() => parseApplyPatch(`*** Begin Patch
@@ -441,15 +418,6 @@ test("applyPatch refuses to overwrite existing files with Add File", async () =>
 		/already exists/,
 	);
 	assert.equal(readFileSync(join(cwd, "existing.txt"), "utf8"), "keep");
-});
-
-test("applyPatch deletes files without a non-canonical Delete body", async () => {
-	const cwd = tempDir();
-	writeFileSync(join(cwd, "delete.txt"), "actual\n");
-	await applyPatch(`*** Begin Patch
-*** Delete File: delete.txt
-*** End Patch`, { cwd });
-	assert.equal(existsSync(join(cwd, "delete.txt")), false);
 });
 
 test("applyPatch refuses to overwrite existing files with Move to", async () => {

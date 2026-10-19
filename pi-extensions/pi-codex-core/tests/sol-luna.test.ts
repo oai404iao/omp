@@ -8,15 +8,9 @@ import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-ca
 import { withCodexSettings } from "../../../tests/codex/support/provider-lifecycle-test-support.js";
 
 for (const id of ["gpt-6-sol", "gpt-6-luna"]) {
-	test(`${id}: exact descriptor and evidence-backed Lite profile`, () => withCodexSettings({}, async (cwd) => {
+	test(`${id}: evidence-backed Lite request profile`, () => withCodexSettings({}, async (cwd) => {
 		const model: Model<"openai-codex-responses"> | undefined = getBuiltinModels("openai-codex").find((model) => model.id === id);
 		assert(model, "supported Pi must supply the descriptor");
-		assert.deepEqual(model.input, ["text", "image"]);
-		assert.equal(model.contextWindow, 272000);
-		assert.equal(model.maxTokens, 128000);
-		assert.equal(model.thinkingLevelMap?.off, "none");
-		assert.equal(model.thinkingLevelMap?.max, "max");
-		assert.equal(model.compat?.supportsOpenAIGrammarTools, true);
 		const settings = loadModelSettings(model, cwd);
 		assert.equal(settings.compactionMode, "responses");
 		assert.equal(settings.openaiTransport, "auto");

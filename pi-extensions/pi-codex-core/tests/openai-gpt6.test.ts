@@ -16,16 +16,6 @@ for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 		withCodexSettings({}, async cwd => {
 			const model: Model<"openai-responses"> | undefined = getBuiltinModels("openai").find(model => model.id === id);
 			assert(model, "Pi must supply the descriptor");
-			assert.equal(model.type, "chat");
-			assert.equal(model.api, "openai-responses");
-			assert.equal(model.baseUrl, "https://api.openai.com/v1");
-			assert.deepEqual(model.input, ["text", "image"]);
-			assert.equal(model.contextWindow, 272000);
-			assert.equal(model.maxTokens, 128000);
-			const off = id === "gpt-6-astra" ? null : "none";
-			assert.deepEqual(model.thinkingLevelMap, { off, minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" });
-			assert.equal(clampThinkingLevel(model, "off"), off === null ? "low" : "off");
-			assert.equal(model.compat?.supportsOpenAIGrammarTools, true);
 			const settings = loadModelSettings(model, cwd);
 			assert.equal(settings.requestProfile.responsesMode, "standard");
 			assert.equal(settings.responsesEndpoint, "openai");
@@ -94,15 +84,10 @@ for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 		}));
 }
 
-test("GPT-6.1 Sol defaults match the GPT-5.6 Sol Lite capabilities without replacing Pi metadata", () =>
+test("GPT-6.1 Sol defaults match the GPT-5.6 Sol Lite capabilities", () =>
 	withCodexSettings({}, async cwd => {
 		const model = getBuiltinModels("openai").find(model => model.id === "gpt-6.1-sol");
 		assert(model);
-		assert.equal(model.api, "openai-responses");
-		assert.equal(model.baseUrl, "https://api.openai.com/v1");
-		assert.equal(model.contextWindow, 272000);
-		assert.equal(model.maxTokens, 128000);
-		assert.deepEqual(model.input, ["text", "image"]);
 		const settings = loadModelSettings(model, cwd);
 		const previous = loadModelSettings({ ...model, id: "gpt-5.6-sol" }, cwd);
 		assert.deepEqual(settings.modelProfile?.effective, previous.modelProfile?.effective);

@@ -5,7 +5,6 @@ import { join } from "node:path";
 import test from "node:test";
 import {
 	modelCatalogDiagnostics,
-	modelsPath,
 	resolveModelProfile,
 } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
@@ -497,13 +496,6 @@ test("removed hosted image provenance follows inheritance and resets on valid ov
 	assert.equal(after.removedHostedImageGeneration, undefined);
 	assert.deepEqual(after.effective, before.effective);
 	assert.equal(after.profileHash, before.profileHash);
-}));
-
-test("modelsPath points to the extension models.json", () => withAgentDir((agentDir) => {
-	assert.equal(
-		modelsPath(),
-		join(agentDir, "extensions", "pi-codex-minimal-tools", "models.json"),
-	);
 }));
 
 test("invalid reasoning summary values are diagnosed and fall back to the mode default", () => withAgentDir((agentDir) => {

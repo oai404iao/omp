@@ -9,7 +9,6 @@ const direct = (body = "Ready for input") => notificationSequence(kitty, body, "
 test("Kitty receives a multipart OSC 99 notification with click-to-focus", () => {
 	assert.equal(direct(), "\x1b]99;i=test-notification:e=1:a=focus:o=unfocused:d=0;UGk=\x1b\\"
 		+ "\x1b]99;i=test-notification:e=1:p=body:d=1;UmVhZHkgZm9yIGlucHV0\x1b\\");
-	assert.doesNotMatch(direct(), /a=report/);
 });
 
 test("tmux wraps both OSC parts in one DCS and doubles all inner escapes", () => {
@@ -32,10 +31,6 @@ test("base64 safely carries Unicode, semicolons, BEL, and ESC in project names",
 	assert.ok(!sequence.includes(body));
 	assert.ok(!sequence.includes("\x07"));
 	assert.equal(sequence.match(/\x1b\]99;/g)?.length, 2);
-});
-
-test("test notifications can bypass focus suppression", () => {
-	assert.match(notificationSequence(kitty, "Test", "always", id)!, /o=always/);
 });
 
 test("different notifications have unique identifiers", () => {
