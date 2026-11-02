@@ -4,7 +4,7 @@
 
 默认工厂转发到 `@oai404iao/pi-codex-tools/imagegen`；图片客户端、保存、显示、后台任务与行为测试都归 [tools](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-tools#readme)。**不加载 Responses 引擎，不注册搜索或补丁。** 安装仍带入统一 tools 依赖，选择能力不等于依赖隔离或沙箱。
 
-要求 Node.js ≥22.19.0；Pi peer 下限和开发验证目标均为 **1.2.0**。
+要求 Node.js ≥22.19.0；Pi peer 下限为 **1.2.0**，开发验证目标为 **1.4.0**。
 
 ## 安装与加载
 

@@ -11,6 +11,11 @@ revision `06a466935536f8c9bcacb2d5efc0fc021be1bdff`.
 `provenance/pi-openai-120-gpt6.json` records exact source and catalog hashes;
 the four selected chat descriptors are unchanged from the original evidence.
 
+The Pi 1.4.0 development catalog is checked at MIT-licensed revision
+`4a080252f06caf63a525d7873c5d94d3c23887e0`.
+`provenance/pi-openai-140-gpt6.json` pins its exact catalog and descriptor hashes.
+The four selected descriptors add only `compat.supportsMidConvoEffort`.
+
 Sol/Luna profile metadata was independently checked against Apache-2.0 Codex
 revision `40eac3ce8a0c10cbcb9db910d529355eb2f8fc09` and the MIT Pi 0.87.1
 catalog. See `provenance/openai-codex-40eac3ce-sol-luna.json` for exact source

@@ -6,6 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { root, workspaces } from "./workspaces.mjs";
 import { isPiDependency, piFloor, piVersion } from "./pi-baselines.mjs";
+import { readPnpmLock } from "./pnpm-lock.mjs";
+
+for (const identity of Object.keys(readPnpmLock(join(root, "pnpm-lock.yaml")).packages ?? {})) {
+  const separator = identity.lastIndexOf("@");
+  if (isPiDependency(identity.slice(0, separator))) {
+    assert.equal(identity.slice(separator + 1), piVersion(), `${identity}: locked Pi dependency version`);
+  }
+}
 
 for (const entry of [{ directory: ".", name: "workspace-root" }, ...workspaces]) {
   const directory = join(root, entry.directory);

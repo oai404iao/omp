@@ -156,10 +156,10 @@ for (const native of [["edit", "write"], ["edit"], []]) {
 					cwd, agentDir: cwd, modelRuntime, model: patchModel, resourceLoader: loader,
 					sessionManager: manager, settingsManager,
 				};
-				// The floor SDK factory always supplies an initial selection. Exercise
-				// AgentSession's transcript restoration with no selection override.
+				// Exercise transcript restoration without an explicit tool selection.
 				const session = restore ? new AgentSession({
 					...options,
+					usesDefaultTools: true,
 					agent: new Agent({
 						convertToLlm,
 						streamFn: () => { throw new Error("fixture prompt must install its capture stream"); },

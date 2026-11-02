@@ -250,7 +250,7 @@ imagegen、minimal-tools），以及 subagent、telegram-notify。本地通知�
 所有未来发布仍须手动 dispatch 和维护者审批。配置读回不证明实际 OIDC 发布成功；
 不能为了验证配置而虚构或覆盖版本。
 
-公共和支持包的 peer 下限为 Pi 1.2.0，精确开发目标也是 1.2.0。
+公共和支持包的 peer 下限为 Pi 1.2.0，精确开发目标为 1.4.0。
 开放上界是有意的前向兼容策略，不是已验证所有未来 Pi 版本；新基线须经 CI 验证，
 发现不兼容时收紧范围。更新基线要同步开发依赖、peer、锁、说明和测试，并运行
 `pnpm run ci:pi-matrix` 检查实际 SDK 解析。详见 [Pi 兼容性](docs/pi-compatibility.md)。

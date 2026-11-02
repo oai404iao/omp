@@ -55,7 +55,7 @@ pnpm install --frozen-lockfile --ignore-scripts
 
 ### 验证 Pi 兼容性
 
-当前 peer 下限（floor）和精确开发目标（target）均为 **Pi 1.2.0**，
+当前 peer 下限（floor）为 **Pi 1.2.0**，精确开发目标（target）为 **Pi 1.4.0**，
 但保留两种锁验证角色：target 使用已提交的根锁，floor 重新生成投影锁。
 矩阵在独立副本中运行，不修改工作树；它复制的是**受 Git 跟踪的工作树文件**，
 因此新增源码须先暂存。floor 准备过程可能读取注册表元数据。

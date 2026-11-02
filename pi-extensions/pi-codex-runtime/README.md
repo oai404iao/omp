@@ -6,7 +6,7 @@ Codex 扩展共用的配置、模型能力目录、认证投影、请求身份�
 
 **这是库，不是 Pi 扩展。** 没有默认扩展工厂，也没有 `pi.extensions` 入口；单独安装不会注册 provider、工具或命令。Responses 网络传输属于 core，补丁、搜索与图片执行属于 tools。
 
-要求 Node.js ≥22.19.0；Pi peer 下限和开发验证目标均为 **1.2.0**。包提供 TypeScript 源码，适用于 Pi 或支持 TypeScript 的加载器，不是可直接交给普通 Node.js 的编译产物。
+要求 Node.js ≥22.19.0；Pi peer 下限为 **1.2.0**，开发验证目标为 **1.4.0**。包提供 TypeScript 源码，适用于 Pi 或支持 TypeScript 的加载器，不是可直接交给普通 Node.js 的编译产物。
 
 ## 安装与接入
 

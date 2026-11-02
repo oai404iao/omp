@@ -53,7 +53,7 @@ locked Pi package supplies the audited bytes. It verifies exact chat model
 IDs, Standard Responses, grammar compatibility and image input, not Codex
 Lite or hosted/standalone service entitlements.
 
-The current SDK catalog is pinned separately in
+The floor SDK catalog is pinned separately in
 `provenance/pi-openai-120-gpt6.json` at Pi 1.2.0 revision
 `06a466935536f8c9bcacb2d5efc0fc021be1bdff`. Its four selected chat descriptors
 are unchanged; the complete catalog also contains a separate Decisions
@@ -62,6 +62,12 @@ classifier operation. This record additionally pins the public
 root-exported thinking-level clamp. Pi's extension loader aliases the AI root,
 so core does not import that subpath. The original 0.99.1 source/catalog record
 remains historical evidence, not the installed baseline.
+
+The Pi 1.4.0 development target is recorded in
+`provenance/pi-openai-140-gpt6.json` at revision
+`4a080252f06caf63a525d7873c5d94d3c23887e0`. Its selected chat descriptors
+add only `compat.supportsMidConvoEffort`; limits, costs and thinking maps are
+unchanged. The floor evidence and local profile selections remain intact.
 
 | Source | Evidence |
 | --- | --- |
