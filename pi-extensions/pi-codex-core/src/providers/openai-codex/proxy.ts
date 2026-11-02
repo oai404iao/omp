@@ -1,4 +1,4 @@
-import { ProxyAgent, type Dispatcher } from "undici";
+import { Dispatcher1Wrapper, ProxyAgent, type Dispatcher } from "undici";
 import type { ProviderEnv } from "@earendil-works/pi-ai";
 
 function envFirst(names: string[], env?: ProviderEnv): string | undefined {
@@ -49,7 +49,8 @@ export function proxyForWebSocketUrl(rawUrl: string, env?: ProviderEnv): string 
 export async function proxyDispatcherForUrl(rawUrl: string, env?: ProviderEnv): Promise<Dispatcher | undefined> {
 	const proxy = proxyForWebSocketUrl(rawUrl, env);
 	if (!proxy) return undefined;
-	return new ProxyAgent(proxy);
+	// Node's built-in fetch still supplies the v1 dispatcher handler contract.
+	return new Dispatcher1Wrapper(new ProxyAgent(proxy));
 }
 
 export async function webSocketOptionsForUrl(url: string, headers: Record<string, string>, env?: ProviderEnv): Promise<{
