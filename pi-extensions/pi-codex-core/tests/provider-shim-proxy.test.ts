@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import test, { afterEach } from "node:test";
-import { proxyForWebSocketUrl, webSocketOptionsForUrl } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/proxy";
+import { proxyDispatcherForUrl, proxyForWebSocketUrl, webSocketOptionsForUrl } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/proxy";
 import { webSocketCacheKey, webSocketFallbackKey } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/cache-key";
 
 const originalEnv = {
@@ -70,6 +72,37 @@ test("provider proxy environment overrides ambient values, with port/IPv6 NO_PRO
 	const options = await webSocketOptionsForUrl("wss://remote.invalid", {}, env);
 	assert.ok(options.dispatcher);
 	await options.dispatcher.close();
+});
+
+test("proxy dispatcher carries native fetch headers and SSE bodies through an HTTP proxy", async () => {
+	const body = "data: {\"type\":\"response.completed\"}\n\n";
+	const requests: { url?: string; authorization?: string }[] = [];
+	const proxy = createServer((request, response) => {
+		requests.push({ url: request.url, authorization: request.headers.authorization });
+		response.writeHead(200, { "Content-Type": "text/event-stream" });
+		response.end(body);
+	});
+	proxy.listen(0, "127.0.0.1");
+	await once(proxy, "listening");
+	const proxyAddress = proxy.address();
+	assert.ok(proxyAddress && typeof proxyAddress !== "string");
+	const url = "http://responses.invalid/responses";
+	const dispatcher = await proxyDispatcherForUrl(url, { HTTP_PROXY: `http://127.0.0.1:${proxyAddress.port}`, NO_PROXY: "" });
+	assert.ok(dispatcher);
+	try {
+		const response = await fetch(url, {
+			dispatcher,
+			headers: { Authorization: "Bearer fixture-token" },
+			signal: AbortSignal.timeout(5_000),
+		} as RequestInit);
+		assert.equal(response.status, 200);
+		assert.equal(await response.text(), body);
+		assert.deepEqual(requests, [{ url, authorization: "Bearer fixture-token" }]);
+	} finally {
+		await dispatcher.destroy();
+		proxy.closeAllConnections();
+		await new Promise<void>((resolve, reject) => proxy.close((error) => error ? reject(error) : resolve()));
+	}
 });
 
 test("socket reuse and fallback are separated by effective proxy route, not unrelated env", () => {
