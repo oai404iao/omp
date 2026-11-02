@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/earendil-works/pi",
+    "revision": "4a080252f06caf63a525d7873c5d94d3c23887e0",
+    "tag": "v1.4.0",
+    "license": "MIT"
+  },
+  "catalogReference": {
+    "package": "@earendil-works/pi-ai",
+    "version": "1.4.0",
+    "path": "dist/providers/data/openai.json",
+    "sha256": "cf5e119eb05f47bbf1dbad179de6a07b904bf7673e96691be72ab0b1fe40a781",
+    "fields": ["type", "id", "api", "input", "thinkingLevelMap", "contextWindow", "maxTokens", "compat"]
+  },
+  "models": ["openai/gpt-6.1-sol", "openai/gpt-6-astra", "openai/gpt-6-sol", "openai/gpt-6-luna"],
+  "chatDescriptorSha256": {
+    "gpt-6.1-sol": "1ce2a36d07f0b2777b6560235a19332a5018cae3e50417421118d5192c9890b0",
+    "gpt-6-astra": "d09330729cea10ff2f64a7014b41509c5c770b461db39549d2df3d2430e885fc",
+    "gpt-6-sol": "4d122f11bd9d209305a9251e150693025c49d1a413bca1aefc094fd78619bc4e",
+    "gpt-6-luna": "bca3e402716ebf6b03d677ba8a966f22a5ceec8993921e66ea619a92379248ab"
+  },
+  "decisions": [
+    "The four selected chat descriptors differ from Pi 1.2.0 only by compat.supportsMidConvoEffort=true; model limits, costs, thinking maps and existing capabilities are unchanged.",
+    "Retain pi-openai-120-gpt6.json and pi-openai-0991-gpt6.json as immutable floor and historical evidence.",
+    "Pi 1.4.0 is the development target; the supported peer floor remains Pi 1.2.0."
+  ],
+  "limits": [
+    "Locked package/catalog and credential-free fixture evidence only, not account access, endpoint acceptance or verified Fast pricing.",
+    "No new model profiles or endpoint capabilities are inferred."
+  ],
+  "localImplementations": ["pi-codex-runtime/src/model-catalog/default-models.json"]
+}

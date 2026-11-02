@@ -10,7 +10,7 @@
 | [tools](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-tools#readme) | `apply_patch`、`web_search`、`image_generation`，含执行、显示与 `/image-gen` |
 | [runtime](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-runtime#readme) | 共享配置、schemas、精确模型目录、身份和会话 broker |
 
-包名、默认扩展工厂和 `@oai404iao/pi-codex-minimal-tools/subagent-inline` 保持支持。要求 Node.js ≥22.19.0；Pi peer 下限和开发验证目标均为 **1.2.0**。
+包名、默认扩展工厂和 `@oai404iao/pi-codex-minimal-tools/subagent-inline` 保持支持。要求 Node.js ≥22.19.0；Pi peer 下限为 **1.2.0**，开发验证目标为 **1.4.0**。
 
 ## 安装与开始使用
 

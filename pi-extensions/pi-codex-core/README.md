@@ -6,7 +6,7 @@
 
 适合只需要传输/压缩增强，或想自己组合工具的用户。**core 不注册 `apply_patch`、`web_search` 或 `image_generation`。** 需要这些工具时另加 [tools](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-tools#readme)，需要一次加载全部功能则使用 [组合包](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-minimal-tools#readme)。本地看图使用 Pi 原生 `read`。
 
-要求 Node.js ≥22.19.0；Pi peer 下限和开发验证目标均为 **1.2.0**。
+要求 Node.js ≥22.19.0；Pi peer 下限为 **1.2.0**，开发验证目标为 **1.4.0**。
 
 ## 安装与加载
 

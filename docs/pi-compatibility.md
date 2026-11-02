@@ -12,11 +12,11 @@
 | 角色 | 版本 | 用途 |
 | --- | --- | --- |
 | 支持下限 floor | 1.2.0 | 所有公开 Pi peer 均要求 `>=1.2.0` |
-| 开发目标 target | 1.2.0 | 根与工作区 devDependencies 精确固定 |
+| 开发目标 target | 1.4.0 | 根与工作区 devDependencies 精确固定 |
 
 不再支持 1.2.0 之前的 Pi，包括 0.99.1；没有旧 SDK 回退。
-版本变化见 [Pi v1.2.0 changelog](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/CHANGELOG.md)。
-Floor 与 target 版本相同仍保留两种锁验证：floor 重新生成投影锁，target 使用提交的根锁。
+版本变化见 [Pi v1.4.0 changelog](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/CHANGELOG.md)。
+Floor 重新生成 Pi 1.2.0 投影锁，target 使用提交的 Pi 1.4.0 根锁。
 远端行为复用必须比较整个应用锁与 manifests，不可仅比较版本字符串。
 本地 matrix 默认完整执行。Supply-chain release-age 例外只覆盖迁移明确选定的七个 Pi 1.2.0
 精确产物，其他检查及 integrity hashes 仍然有效。
@@ -159,6 +159,8 @@ OpenAI ChatGPT OAuth 和 API key 均遵循 Pi 原生认证/解析地址。
 不换凭证或 fallback 实现。详见[配置](configuration.md)。
 
 Pi 提供精确 OpenAI GPT-6 描述符，固定 0.99.1 与 1.2.0 catalogs 的这些 chat metadata 不变。
+1.4.0 target 的四个描述符仅增加 `compat.supportsMidConvoEffort`，没有修改模型限制、价格或本地 profiles；
+其独立[固定证据](../pi-extensions/pi-codex-runtime/provenance/pi-openai-140-gpt6.json)保留完整 catalog 与描述符 hash。
 `openai/gpt-6.1-sol` 显式继承 `gpt-5.6-sol`：Lite、auto WS/SSE、prewarm、standalone web/image、
 custom patch、native Responses compaction、Fast（priority、2x 成本乘数）可用性。
 这是兼容策略，不证明端点权限或 Fast 价格。
@@ -212,7 +214,7 @@ Grammar eligibility 同样使用有效 context。通知和 cleanup 保持 `agent
 
 ## 没有验证什么
 
-Main/manual matrix 的范围为 Node 22.19.0 / 24.x 与 Pi 1.2.0 两种锁角色，按上述规则做 guarded reuse 与非 canonical smoke。
+Main/manual matrix 的范围为 Node 22.19.0 / 24.x 与 Pi floor 1.2.0 / target 1.4.0，按上述规则做 guarded reuse 与非 canonical smoke。
 PR 合并前仅验证 Node 24/target，不代表已执行其他远端组合，更不覆盖所有未来 Node/Pi 版本。
 旧审计中的 0.84.2/0.85.1 等基线仅为历史记录。
 

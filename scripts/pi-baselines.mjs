@@ -1,8 +1,51 @@
 export const piFloor = "1.2.0";
-export const piTarget = "1.2.0";
+export const piTarget = "1.4.0";
 
-// Both lock-validation roles currently use the same version and artifact evidence.
-export const piFloorArtifacts = [];
+// Floor artifacts retained from the reviewed root lock at b1b402155ad216a136ea26250247eee8a3535137.
+export const piFloorArtifacts = [
+  {
+    name: "@earendil-works/pi-agent-core",
+    version: "1.2.0",
+    resolved: "https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-1.2.0.tgz",
+    integrity: "sha512-pUR0vYmGhHkBQGeCeWjwVIA+l1+MrDu6m6VGuysjh6KBzBpovTV/MlcVrEIOaM8jv/slpAyUmuCEQl1jOBqHJQ==",
+  },
+  {
+    name: "@earendil-works/pi-ai",
+    version: "1.2.0",
+    resolved: "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-1.2.0.tgz",
+    integrity: "sha512-U5/1zXqfV1on7/9sbez03tT4Ru49Lvfb4+zXSDK3DBKF5cRk6KxvAOTOY3HJ4jimlZth+rs7vbJqN6iBQAoNuQ==",
+  },
+  {
+    name: "@earendil-works/pi-codemode",
+    version: "1.2.0",
+    resolved: "https://registry.npmjs.org/@earendil-works/pi-codemode/-/pi-codemode-1.2.0.tgz",
+    integrity: "sha512-UZF7IN0IIrf3bop2wTxrwoAakGctH6d3zdPwhPN+QHMECfoI5E6B6l6I17YGFZPj8cmGex6xX7mLCNJXRf7wsw==",
+  },
+  {
+    name: "@earendil-works/pi-coding-agent",
+    version: "1.2.0",
+    resolved: "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-1.2.0.tgz",
+    integrity: "sha512-h/4WaVWv1VlCaY8x8qEN5U+7jbF/e7+Ck6moPeEOFn5juMTWwNAXjwgYM7gRgbBYh8Zppwt6qWvJDzNTf4GNEQ==",
+  },
+  {
+    name: "@earendil-works/pi-mcp",
+    version: "1.2.0",
+    resolved: "https://registry.npmjs.org/@earendil-works/pi-mcp/-/pi-mcp-1.2.0.tgz",
+    integrity: "sha512-ertUv40rUBgssTzw2lIPlejjIBdhvdg4uw+whWCDJYKYHU+ldp1ezhbB0BzwpBfnwef6/YN+m6eKLscj+r3p7w==",
+  },
+  {
+    name: "@earendil-works/pi-telemetry",
+    version: "1.2.0",
+    resolved: "https://registry.npmjs.org/@earendil-works/pi-telemetry/-/pi-telemetry-1.2.0.tgz",
+    integrity: "sha512-NZ3aJE6dr7aTgzzXDe53OW7BsAsF8ZUKHPJTtnjaQcxtlagkUT0Ew8Qas0EvYQsZqR/KpF1lB+z209XBzIC7xg==",
+  },
+  {
+    name: "@earendil-works/pi-tui",
+    version: "1.2.0",
+    resolved: "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-1.2.0.tgz",
+    integrity: "sha512-OdJCiYklkL3TqmdmGKUflHoLy9zw18GBYO0DPASZvGlP4RkDXAZzLLDt7cidJ6wUR7DBrKb13rrekDsXgMF60g==",
+  },
+];
 
 export function piVersion(baseline = process.env.OMP_PI_BASELINE ?? "target") {
   if (baseline === "floor") return piFloor;

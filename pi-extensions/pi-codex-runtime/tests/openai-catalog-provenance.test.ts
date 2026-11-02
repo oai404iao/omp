@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("OpenAI profiles retain exact Pi 1.2.0 catalog and unchanged chat descriptor evidence", () => {
-	const evidence = JSON.parse(readFileSync(new URL("../provenance/pi-openai-120-gpt6.json", import.meta.url), "utf8"));
+test("OpenAI profiles retain exact installed Pi catalog and chat descriptor evidence", () => {
+	const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.resolve("@earendil-works/pi-ai")), "utf8"));
+	const evidence = JSON.parse(readFileSync(new URL(`../provenance/pi-openai-${version.replaceAll(".", "")}-gpt6.json`, import.meta.url), "utf8"));
 	const bytes = readFileSync(new URL("./providers/data/openai.json", import.meta.resolve("@earendil-works/pi-ai")));
 	assert.equal(createHash("sha256").update(bytes).digest("hex"), evidence.catalogReference.sha256);
-	assert.equal(evidence.catalogReference.version, "1.2.0");
-	assert.equal(evidence.upstream.revision, "06a466935536f8c9bcacb2d5efc0fc021be1bdff");
+	assert.equal(evidence.catalogReference.version, version);
+	const floor = JSON.parse(readFileSync(new URL("../provenance/pi-openai-120-gpt6.json", import.meta.url), "utf8"));
+	assert.equal(floor.upstream.revision, "06a466935536f8c9bcacb2d5efc0fc021be1bdff");
 	assert.deepEqual(evidence.models, ["openai/gpt-6.1-sol", "openai/gpt-6-astra", "openai/gpt-6-sol", "openai/gpt-6-luna"]);
 	const catalog = JSON.parse(bytes.toString("utf8"));
 	for (const [id, sha256] of Object.entries(evidence.chatDescriptorSha256)) {

@@ -36,10 +36,10 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/pi-coding-agent": "1.2.0",
-    "@types/node": "^26.6.5",
-    "openai": "7.32.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@types/node": "^26.6.6",
+    "openai": "7.45.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },

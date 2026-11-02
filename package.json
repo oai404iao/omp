@@ -52,10 +52,10 @@
     "test:release-scripts": "node --test scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/prepare-release-artifacts.test.mjs scripts/targeted-release.test.mjs scripts/initial-codex-bootstrap.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs scripts/pi-baselines.test.mjs scripts/pi-ci-policy.test.mjs scripts/ci-policy.test.mjs scripts/codex-consumer-matrix.test.mjs scripts/release-pr-ci-gate.test.mjs scripts/ci/*.test.mjs scripts/release-consumer*.test.mjs"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.2.0",
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/pi-coding-agent": "1.2.0",
-    "@earendil-works/pi-tui": "1.2.0",
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@earendil-works/pi-tui": "1.4.0",
     "@changesets/cli": "3.0.3",
     "@changesets/read": "1.0.1",
     "@oai404iao/pi-codex-core": "workspace:*",
@@ -64,7 +64,7 @@
     "@oai404iao/pi-codex-minimal-tools": "workspace:*",
     "@oai404iao/pi-codex-runtime": "workspace:*",
     "@oai404iao/pi-codex-web-search": "workspace:*",
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "typescript-ast": "npm:typescript@5.9.3",

@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { parse, stringify } from "yaml";
 import { isPiDependency, piFloorArtifacts, piVersion } from "./pi-baselines.mjs";
 import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
 import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
@@ -76,6 +77,14 @@ for (const baseline of baselines) {
         }
         writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
       }
+      // Pi 1.2's internal caret ranges must not select the newer target SDK.
+      const workspacePath = join(cwd, "pnpm-workspace.yaml");
+      const workspace = parse(readFileSync(workspacePath, "utf8"));
+      workspace.overrides = {
+        ...workspace.overrides,
+        ...Object.fromEntries(piFloorArtifacts.map(({ name, version }) => [name, version])),
+      };
+      writeFileSync(workspacePath, stringify(workspace));
       run("pnpm", ["install", "--lockfile-only", "--ignore-scripts", "--no-frozen-lockfile"]);
       const path = join(cwd, "pnpm-lock.yaml");
       const lock = preserveRegistryIntegrity(sourceLock, readPnpmLock(path), piFloorArtifacts);

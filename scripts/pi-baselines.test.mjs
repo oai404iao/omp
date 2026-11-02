@@ -9,9 +9,8 @@ import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
 import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
 
 test("explicit floor/target selection resolves the audited Pi baseline", () => {
-  assert.equal(piFloor, piTarget);
   assert.equal(piVersion("floor"), "1.2.0");
-  assert.equal(piVersion("target"), "1.2.0");
+  assert.equal(piVersion("target"), "1.4.0");
   assert.throws(() => piVersion("latest"), /Unknown Pi baseline/);
   assert.equal(isPiDependency("@earendil-works/pi-ai"), true);
   assert.equal(isPiDependency("typescript-ast"), false);
@@ -31,7 +30,13 @@ test("new target package entries reuse only matching hashed artifacts from the n
 });
 
 test("floor-only evidence fills exact artifacts without weakening unknown/mutated hash rejection", () => {
-  assert.deepEqual(piFloorArtifacts, []);
+  assert.equal(piFloorArtifacts.length, 7);
+  for (const artifact of piFloorArtifacts) {
+    const key = `floor@${artifact.version}`;
+    const lock = { packages: { [key]: { resolution: { tarball: artifact.resolved } } } };
+    assert.equal(preserveRegistryIntegrity({ packages: {} }, lock, piFloorArtifacts)
+      .packages[key].resolution.integrity, artifact.integrity);
+  }
   for (const artifact of [{
     version: piFloor, resolved: "https://registry.npmjs.org/floor-fixture.tgz", integrity: "sha512-fixture",
   }]) {

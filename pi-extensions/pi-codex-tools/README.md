@@ -4,7 +4,7 @@
 
 适合需要这些工具、但想自行选择模型引擎的用户。**本包不加载 Responses 引擎**，唯一工作区依赖是 runtime。独立搜索/生图和 function 补丁可以单独使用；custom 补丁与 hosted 搜索还需要 [core](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-core#readme)。希望一次安装两者，请用 [组合包](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-minimal-tools#readme)。
 
-要求 Node.js ≥22.19.0；Pi peer 下限和开发验证目标均为 **1.2.0**。
+要求 Node.js ≥22.19.0；Pi peer 下限为 **1.2.0**，开发验证目标为 **1.4.0**。
 
 ## 安装与加载
 
