@@ -1,5 +1,12 @@
 # @oai404iao/pi-codex-runtime
 
+## 3.0.2
+
+### Patch Changes
+
+- 02f8024: Record integrity-verified Pi 1.5.0 GPT-6 catalog evidence without changing model profiles or the Pi development baseline. Replay provider-effort history as append-only configuration updates, coalescing unchanged effective settings and retaining exact upstream protocol evidence.
+- 5bc12b5: Update the Pi development target to 1.4.0 and refresh development dependencies while retaining support for Pi 1.2.0.
+
 ## 3.0.1
 
 ### Patch Changes

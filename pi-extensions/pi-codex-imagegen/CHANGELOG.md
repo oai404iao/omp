@@ -1,5 +1,14 @@
 # @oai404iao/pi-codex-imagegen
 
+## 2.1.3
+
+### Patch Changes
+
+- 5bc12b5: Update the Pi development target to 1.4.0 and refresh development dependencies while retaining support for Pi 1.2.0.
+- Updated dependencies [5c4c696]
+- Updated dependencies [5bc12b5]
+  - @oai404iao/pi-codex-tools@0.1.2
+
 ## 2.1.2
 
 ### Patch Changes

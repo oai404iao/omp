@@ -1,5 +1,15 @@
 # @oai404iao/pi-codex-tools
 
+## 0.1.2
+
+### Patch Changes
+
+- 5c4c696: Hide native read declarations alongside edit/write while apply_patch is enabled, preserving callable tools and restoring declarations when patch is disabled.
+- 5bc12b5: Update the Pi development target to 1.4.0 and refresh development dependencies while retaining support for Pi 1.2.0.
+- Updated dependencies [02f8024]
+- Updated dependencies [5bc12b5]
+  - @oai404iao/pi-codex-runtime@3.0.2
+
 ## 0.1.1
 
 ### Patch Changes

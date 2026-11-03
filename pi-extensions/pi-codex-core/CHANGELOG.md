@@ -1,5 +1,16 @@
 # @oai404iao/pi-codex-core
 
+## 3.0.2
+
+### Patch Changes
+
+- 69184b3: Update the audited undici proxy transport baseline to 8.12.3 and adapt its dispatcher for Node's built-in fetch so proxied SSE requests preserve headers and response bodies.
+- 02f8024: Honor Pi model thinking-level capabilities and preserve Off in startup prewarm. Support Codex-style append-only configuration updates for models declaring mid-conversation effort support, keep request baselines stable, and replay persisted effort annotations across session restoration and branching.
+- 5bc12b5: Update the Pi development target to 1.4.0 and refresh development dependencies while retaining support for Pi 1.2.0.
+- Updated dependencies [02f8024]
+- Updated dependencies [5bc12b5]
+  - @oai404iao/pi-codex-runtime@3.0.2
+
 ## 3.0.1
 
 ### Patch Changes
