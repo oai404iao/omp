@@ -6,6 +6,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import core from "@oai404iao/pi-codex-core";
 import tools from "@oai404iao/pi-codex-tools";
 import { buildRequestBody } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/request-body";
+import { activeToolSnapshot } from "@oai404iao/pi-codex-core/internal/extension/tool-snapshot";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import web from "@oai404iao/pi-codex-web-search";
 import image from "@oai404iao/pi-codex-imagegen";
@@ -162,9 +163,18 @@ test("owned patch descriptors snapshot only the registered implementation and ma
 			const api = host.api();
 			const broker = getCodexBroker(api);
 			const patch = host.tools.get("apply_patch");
+			const getAllTools = api.getAllTools;
+			api.getAllTools = () => [
+				...getAllTools(),
+				...["read", "edit", "write", "bash"].map(name => ({ name, description: name, parameters: {} })),
+			] as ReturnType<typeof getAllTools>;
+			api.setActiveTools(["read", "edit", "write", "bash", "apply_patch"]);
+			assert.deepEqual(activeToolSnapshot(api).map(tool => tool.name), ["apply_patch", "bash"]);
+			api.setActiveTools(["read", "edit", "write", "bash"]);
+			assert.deepEqual(activeToolSnapshot(api).map(tool => tool.name), ["read", "edit", "write", "bash"]);
 			const snapshot = snapshotOwnedToolProtocols(api, broker, [patch]);
 			assert.equal(snapshot.get("apply_patch")?.customTool.type, "custom");
-			assert.deepEqual(snapshot.get("apply_patch")?.hiddenTools, ["edit", "write"]);
+			assert.deepEqual(snapshot.get("apply_patch")?.hiddenTools, ["read", "edit", "write"]);
 			assert.equal(snapshotOwnedToolProtocols(api, broker, [{ ...patch, parameters: {} }]).size, 0);
 			host.tools.set("apply_patch", { ...patch, parameters: { ...patch.parameters },
 				sourceInfo: { source: "sdk", path: "<sdk:apply_patch>" } });

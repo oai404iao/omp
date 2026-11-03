@@ -123,7 +123,7 @@ test("Codex shutdown does not rewrite native tool selection", () =>
 		} finally { host.dispose(); }
 	}));
 
-for (const native of [["edit", "write"], ["edit"], []]) {
+for (const native of [["read", "edit", "write"], ["read", "edit"], ["read"], []]) {
 	test(`real Pi preserves native selection ${JSON.stringify(native)} through patch projection, tree, reload and resume`, () =>
 		withCompositionDirectory(async cwd => {
 			writeCompositionConfig(cwd, { webSocketEnabled: false, imageGeneration: false });
@@ -166,7 +166,7 @@ for (const native of [["edit", "write"], ["edit"], []]) {
 						initialState: { model: patchModel, thinkingLevel: "off", messages: manager.buildSessionContext().messages },
 					}),
 				}) : (await createAgentSession({
-					...options, tools: ["read", "bash", ...native, "apply_patch"],
+					...options, tools: ["bash", ...native, "apply_patch"],
 				})).session;
 				await session.bindExtensions({ mode: "print" });
 				return { session, loader };
@@ -198,7 +198,7 @@ for (const native of [["edit", "write"], ["edit"], []]) {
 				};
 				await session.prompt("Check the selected tools.");
 				assert.equal(declared.includes("apply_patch"), patch);
-				for (const name of ["edit", "write"]) {
+				for (const name of ["read", "edit", "write"]) {
 					const selected = native.includes(name);
 					assert.equal(session.getActiveToolNames().includes(name), selected, name);
 					assert.equal(session.getCallableToolNames().includes(name), selected, name);

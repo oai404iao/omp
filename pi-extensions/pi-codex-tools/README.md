@@ -65,7 +65,7 @@ broker 按能力去重，兼容包、tools 与组合包可按任意顺序加载�
 
 支持 `@@ class/function` 上下文、有序 update chunks、`*** Move to:`、`*** End of File`、模糊匹配和 CRLF 保留。custom 模式用随包固定的 grammar；function 模式接受 `{ "input": "补丁文本" }`。
 
-patch 被声明时，通过 Pi `prepareLoadout.hiddenDeclarations` 隐藏所选原生 `edit`/`write` 的模型声明。它们**仍在 active set 中**、可由 codemode 调用、保留在历史会话中；patch 不再声明时 Pi 重新展示这些原生工具。不会重新启用用户明确禁用的工具，也不靠恢复凭据修改历史选择。
+patch 被声明时，通过 Pi `prepareLoadout.hiddenDeclarations` 隐藏所选原生 `read`/`edit`/`write` 的模型声明。它们**仍在 active set 中**、可由 codemode 调用、保留在历史会话中；patch 不再声明时 Pi 重新展示这些原生工具。不会重新启用用户明确禁用的工具，也不靠恢复凭据修改历史选择。
 
 早期插件创建的会话可能已不含 `edit`/`write` 选择；本包不猜它们是旧插件移除还是用户禁用。必要时新建会话并显式选择所需工具，不要编辑会话记录。
 

@@ -1,11 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { addPackageTool, ensureCodexServices } from "@oai404iao/pi-codex-runtime";
-import { NATIVE_MUTATION_TOOL_NAMES } from "@oai404iao/pi-codex-runtime/internal/capabilities";
 import { knownEndpointModel } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { loadSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
 import { createCodexApplyPatchCustomTool } from "./providers/codex-apply-patch-tool.js";
-import { createApplyPatchToolDefinition, type ApplyPatchInput } from "./tools/apply-patch.js";
+import { APPLY_PATCH_HIDDEN_TOOL_NAMES, createApplyPatchToolDefinition, type ApplyPatchInput } from "./tools/apply-patch.js";
 
 export default function codexApplyPatch(pi: ExtensionAPI): void {
 	const broker = ensureCodexServices(pi);
@@ -23,7 +22,7 @@ export default function codexApplyPatch(pi: ExtensionAPI): void {
 		protocol: {
 			customTool: createCodexApplyPatchCustomTool(),
 			inputProperty: "input",
-			hiddenTools: NATIVE_MUTATION_TOOL_NAMES,
+			hiddenTools: APPLY_PATCH_HIDDEN_TOOL_NAMES,
 		},
 	});
 	addPackageTool(broker, "apply_patch", exposure => {
