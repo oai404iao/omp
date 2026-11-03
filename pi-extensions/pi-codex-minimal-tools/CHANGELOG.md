@@ -1,5 +1,19 @@
 # @oai404iao/pi-codex-minimal-tools
 
+## 5.1.3
+
+### Patch Changes
+
+- 5bc12b5: Update the Pi development target to 1.4.0 and refresh development dependencies while retaining support for Pi 1.2.0.
+- Updated dependencies [69184b3]
+- Updated dependencies [02f8024]
+- Updated dependencies [02f8024]
+- Updated dependencies [5c4c696]
+- Updated dependencies [5bc12b5]
+  - @oai404iao/pi-codex-core@3.0.2
+  - @oai404iao/pi-codex-runtime@3.0.2
+  - @oai404iao/pi-codex-tools@0.1.2
+
 ## 5.1.2
 
 ### Patch Changes
