@@ -342,7 +342,7 @@ Changesets prerelease mode 不支持此选项。随后正常运行 Changesets，
 | minimal-tools `1.3.0` 手动 bootstrap，后进入 guarded artifacts | `596d799c6f7db3508b6d46bb05cdca6ea9e3b716`；Apache source map 在 runtime `provenance/`，Responses Lite 边界保留在包 README／notice |
 | runtime／core／imagegen／web-search `0.1.0-alpha.1` 手动首发，identity、下载 tarball SHA-512、trusted publisher 已核实 | `32ba01f3c08b7fd63d09e9b2373cf081c4525533`；[激活审计](docs/audits/codex-bootstrap-activation.md) |
 | tools `0.1.0-alpha.1` 手动首发及独立激活完成 | `b9deaba6ba07d87c048e474b2ddc977f3bd2b442`；[tools 激活审计](docs/audits/codex-tools-bootstrap-activation.md) |
-| notify `0.1.0` 手动首发已核验；激活须满足 npm 授权门禁 | `915f7e4811de6f737607005f4da758fe86393c14`；[notify 核验与激活门禁](docs/audits/pi-notify-bootstrap-activation.md) |
+| notify `0.1.0` 手动首发已核验；维护者确认 npm 授权后启用受保护流程 | `915f7e4811de6f737607005f4da758fe86393c14`；[notify 核验与激活记录](docs/audits/pi-notify-bootstrap-activation.md) |
 
 S4 建立递归精确 pin changeset、依赖优先制品和无外链的隔离生产消费者；这些测试不授权
 registry 写入，也不证明真实账号／模型可用。有限真实 bootstrap smoke 的 harness／覆盖限制

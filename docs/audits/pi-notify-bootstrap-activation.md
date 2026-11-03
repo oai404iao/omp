@@ -1,11 +1,12 @@
-# Pi Notify 首发核验与激活门禁
+# Pi Notify 首发核验与发布支持激活
 
 ## 状态与范围
 
 `@oai404iao/pi-notify@0.1.0` 已由维护者手动发布，公开制品与首发准备制品一致。
-本变更准备将唯一目标从 `bootstrap` 转为 `publishable`，并追加不可变发布身份。
-**npm Trusted Publisher 尚未成功读回，激活 PR 必须保持 Draft、不合并。**
-这不是 npm 发布批准，也不代表实际 OIDC 发布成功。
+本变更将唯一目标从 `bootstrap` 转为 `publishable`，并追加不可变发布身份。
+维护者针对下表精确字段确认已在 npm 保存 Trusted Publisher，并明确授权合并启用。
+**npm 侧配置依据为维护者本人声明，不是 CLI 或浏览器独立读回。**
+此次授权仅启用受保护发布支持，不是 npm 发布批准，也不代表实际 OIDC 发布成功。
 
 ## 首发身份核验
 
@@ -26,7 +27,7 @@
 和 `src/{notification,settings,telegram}.ts`。本次没有修改包 payload、版本或依赖，
 因此无需 changeset；`0.1.0` README 保留首发时的历史准备说明。
 
-## 现有 Actions 接入与待确认授权
+## 现有 Actions 接入与维护者授权确认
 
 直接复用 `.github/workflows/publish.yml`，不新增 workflow 或旁路：
 
@@ -40,13 +41,13 @@
 - 只变更 notify 资格；普通发布选择由 8 增至 9，完整 CI 仍为 9 个包。
   通用 bootstrap 拒绝规则和单包精确选择仍受测试约束。
 
-**未核实的是 npm 侧授权，不是 GitHub environment。** 实际 `/usr/bin/npm`
-执行 `npm trust list @oai404iao/pi-notify --json` 返回 `EOTP`，需要本人交互完成 2FA。
-PATH 中另一个 npm wrapper 的空输出不是授权证据。浏览器公共包页遇 Cloudflare
-安全质询后停止，没有绕过、读取会话凭据或索取验证码。
+此前实际 `/usr/bin/npm` 执行 `npm trust list @oai404iao/pi-notify --json`
+返回 `EOTP`，浏览器公共包页遇 Cloudflare 安全质询，未完成独立读回。
+随后维护者针对已提供的精确字段确认已保存配置并授权合并启用，作为本人配置声明及
+合并授权记录；没有把此前失败的查询改写为成功，也没有再次索取 2FA 或验证码。
 
-维护者本人打开 [npm 包页面](https://www.npmjs.com/package/@oai404iao/pi-notify)，
-进入 Settings → Trusted Publisher，确认以下字段：
+维护者确认保存的 [npm 包设置](https://www.npmjs.com/package/@oai404iao/pi-notify)
+Settings → Trusted Publisher 字段：
 
 | 字段 | 值 |
 | --- | --- |
@@ -57,18 +58,8 @@ PATH 中另一个 npm wrapper 的空输出不是授权证据。浏览器公共�
 | Environment | `npm-publish` |
 | Allowed action | `npm publish`，不额外授予 dist-tag 权限 |
 
-已有配置只需读回核对；仅尚未配置时，在本人终端运行 npm 官方创建命令，
-按提示完成确认与 2FA：
-
-```bash
-/usr/bin/npm trust github @oai404iao/pi-notify \
-  --repo oai404iao/omp --file publish.yml --env npm-publish --allow-publish \
-  --registry=https://registry.npmjs.org/
-/usr/bin/npm trust list @oai404iao/pi-notify --json --registry=https://registry.npmjs.org/
-```
-
-成功读回并核对字段后，再更新本记录、完成独立审阅和普通 PR 合并。
-配置成功只证明已配置授权；真实 OIDC 发布须留待另行批准的新版本发布验证，
+此前独立审阅和测试已完成；维护者确认后，激活 PR 可按正常必需检查和合并流程收束。
+上述本人声明不能替代独立配置读回或实际 OIDC 验证。真实 OIDC 发布须留待另行批准的新版本发布验证，
 不得为测试而重发 `0.1.0`、伪造版本或 dispatch 写 npm 的 workflow。
 首发 tag／GitHub Release 若缺失，也留待激活完成后按既有受保护恢复流程对账；
 本次未执行该 dispatch。
