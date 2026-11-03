@@ -22,7 +22,7 @@ Codex Responses 引擎、补丁与联网工具、多代理协作，以及 Telegr
 | 只启用搜索或图像生成 | [pi-codex-web-search](pi-extensions/pi-codex-web-search/README.md)、[pi-codex-imagegen](pi-extensions/pi-codex-imagegen/README.md) |
 | 创建、复用和协调子代理 | [pi-subagent](pi-extensions/pi-subagent/README.md) |
 | 接收 Telegram 完成通知 | [pi-telegram-notify](pi-extensions/pi-telegram-notify/README.md) |
-| 接收 Kitty／Telegram 通知，支持双通道及 tmux 透传 | [pi-notify](pi-extensions/pi-notify/README.md)，npm 首发准备中 |
+| 接收 Kitty／Telegram 通知，支持双通道及 tmux 透传 | [pi-notify](pi-extensions/pi-notify/README.md) |
 | 开发包间共享配置、身份或 broker 集成 | [pi-codex-runtime](pi-extensions/pi-codex-runtime/README.md)，库，不是扩展 |
 
 Core 本身不提供 `apply_patch`；需要补丁时同时加载 tools，或使用完整组合包。
@@ -66,7 +66,7 @@ pnpm run ci
 
 修改 Pi 兼容性时还需 `pnpm run ci:pi-matrix`。
 阅读[贡献指南](CONTRIBUTING.md)了解定向检查与 Changesets，阅读[发布指南](RELEASING.md)
-了解受保护发布和恢复流程。八个发布工作区的资格由 `scripts/workspaces.mjs` 管理；
+了解受保护发布和恢复流程。九个发布工作区的资格由 `scripts/workspaces.mjs` 管理；
 tools 首发及激活已完成，但后续消费者发布仍需单独授权、精确依赖验证与受保护调度。
 文档修改不授权安装、变更本机配置、发版或修改不可变发布记录。
 

@@ -29,7 +29,7 @@ export const workspaces = [
   {
     name: "@oai404iao/pi-notify",
     directory: "pi-extensions/pi-notify",
-    releaseStatus: "bootstrap",
+    releaseStatus: "publishable",
   },
 ];
 

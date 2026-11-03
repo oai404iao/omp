@@ -60,7 +60,7 @@ test("documentation remains policy-only but unknown/shared/toolchain paths fall 
   assert.equal(tasksForPlan(affectedPlan([], [], sha)).length, 1);
 });
 
-test("subagent and all Codex packages activate integrations; bootstrap notify is testable alone", () => {
+test("subagent and all Codex packages activate integrations; notify is testable alone", () => {
   for (const entry of testPackages.filter(entry => entry.id.startsWith("pi-codex-") || entry.id === "pi-subagent")) {
     assert.deepEqual(affectedPlan([`${entry.directory}/index.ts`], [], sha).suites, ["composition", "consumers"]);
   }
@@ -131,15 +131,17 @@ test("every planning mode fails before fallback if the current checkout has an u
   }
 });
 
-test("release plans use canonical runtime/optional closure, never bootstrap notify", () => {
+test("release plans use canonical runtime/optional closure, including activated notify", () => {
   const value = createPlan({ mode: "release", packageName: "@oai404iao/pi-codex-tools", git: () => sha });
   assert.deepEqual(value.packages, ["pi-codex-runtime", "pi-codex-tools"]);
   assert.deepEqual(value.suites, ["composition", "consumers", "infrastructure"]);
-  const notify = createPlan({ mode: "release", packageName: "@oai404iao/pi-telegram-notify", git: () => sha });
-  assert.deepEqual(notify.suites, ["infrastructure"]);
-  assert.equal(createPlan({ mode: "release", packageName: "", git: () => sha }).packages.length, 8);
-  assert.throws(() => createPlan({ mode: "release", packageName: "@oai404iao/pi-notify", git: () => sha }), /Unapproved/);
-  assert.throws(() => validatePlan({ ...notify, packages: ["pi-notify"] }), /release/);
+  for (const id of ["pi-telegram-notify", "pi-notify"]) {
+    const notify = createPlan({ mode: "release", packageName: `@oai404iao/${id}`, git: () => sha });
+    assert.deepEqual(notify.packages, [id]);
+    assert.deepEqual(notify.suites, ["infrastructure"]);
+  }
+  assert.equal(createPlan({ mode: "release", packageName: "", git: () => sha }).packages.length, 9);
+  assert.throws(() => createPlan({ mode: "release", packageName: "@oai404iao/unapproved", git: () => sha }), /Unapproved/);
 });
 
 test("CLI and plan validation reject conflicting/invalid/under-scoped input", () => {

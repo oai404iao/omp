@@ -23,8 +23,8 @@ pnpm install --frozen-lockfile --ignore-scripts
 ```
 
 `pnpm-workspace.yaml` 定义发布工作区；根目录 `pnpm-lock.yaml` 是唯一项目锁文件。
-不要新增 npm 锁文件或包级锁文件。`pi-notify` 已进入工作区，首发资格为 `bootstrap`；
-本地首发和后续激活流程见[发布指南](RELEASING.md#npm-bootstrap-and-trusted-publishing)。
+不要新增 npm 锁文件或包级锁文件。`pi-notify` 的 `0.1.0` 首发已核验；后续使用
+受保护发布流程，核验边界见[激活记录](docs/audits/pi-notify-bootstrap-activation.md)。
 
 <a id="checks"></a>
 ## 选择要运行的检查
@@ -144,7 +144,7 @@ revision 计划比较不可变 Git 提交，**不包含已暂存或未暂存的�
 依赖图包含 runtime、optional、dev 和 peer 边；重命名同时考虑旧、新路径。
 新增包目录必须注册，即使它只是非发布测试目标。
 
-`ci:release` 不带 `--package` 时选择 8 个 `publishable` 工作区，排除尚待首发的 `pi-notify`。
+`ci:release` 不带 `--package` 时选择 9 个 `publishable` 工作区，包含 `pi-notify`。
 它只验证源码，不打包、不发布、不改版本；定向依赖闭包和复用规则见
 [发布验证](RELEASING.md#scoped-verification-and-trusted-source-reuse)。
 

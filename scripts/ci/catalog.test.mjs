@@ -19,7 +19,7 @@ function repositoryFixture() {
   return directory;
 }
 
-test("catalog registers every publishable and bootstrap workspace exactly once", () => {
+test("catalog registers every release workspace exactly once", () => {
   validateCatalog();
   validateRepositoryCatalog();
   assert.equal(testPackages.length, 9);
@@ -29,7 +29,7 @@ test("catalog registers every publishable and bootstrap workspace exactly once",
   assert.equal(local.name, readPackage(local).name);
   assert.deepEqual(taskCatalog.get(`package:${local.id}`).commands,
     [["pnpm", "--filter", local.name, "--fail-if-no-match", "run", "check"]]);
-  assert.equal(local.releaseStatus, "bootstrap");
+  assert.equal(local.releaseStatus, "publishable");
   assert.equal(integrationPackages.size, 7);
   assert.ok(integrationPackages.has("pi-subagent"));
   assert.deepEqual(taskCatalog.get("policy").commands, policyScripts.map(script => ["pnpm", "run", script]));

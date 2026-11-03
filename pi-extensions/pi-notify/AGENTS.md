@@ -1,12 +1,11 @@
 # Pi notifications — maintenance
 
 Follow [root instructions](../../AGENTS.md) for repository workflow.
-This is a non-private release workspace with `bootstrap` status, pending its first
-npm publication. Read [RELEASING.md](../../RELEASING.md#npm-bootstrap-and-trusted-publishing)
-for first-publication preparation: a maintainer performs the interactive npm publish;
-guarded workflow eligibility requires a separately reviewed activation after
-publication verification and trusted publisher setup. Use the root lockfile and
-keep tests, `AGENTS.md` and private configuration out of the package allowlist.
+This is a non-private `publishable` workspace. Its verified `0.1.0` first publication
+is locked; use [guarded publishing](../../RELEASING.md), never bootstrap again.
+Read the [activation evidence](../../docs/audits/pi-notify-bootstrap-activation.md)
+for registry identity and trusted-publisher verification boundaries. Use the root
+lockfile and keep tests, `AGENTS.md` and private configuration out of the package allowlist.
 Read [README.md](README.md) for supported terminals and manual checks.
 
 ## Ownership

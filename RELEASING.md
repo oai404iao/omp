@@ -149,8 +149,8 @@ pnpm run ci:release --package @oai404iao/pi-telegram-notify
 pnpm run ci:release
 ```
 
-单包命令检查目标及其规范 runtime／optional 工作区闭包；不带参数则检查全部 8 个
-`publishable` 工作区，不包含尚待首发的 `pi-notify`。它不打包、不发布、不改版本、不绕过依赖前置条件。
+单包命令检查目标及其规范 runtime／optional 工作区闭包；不带参数则检查全部 9 个
+`publishable` 工作区，包含 `pi-notify`。它不打包、不发布、不改版本、不绕过依赖前置条件。
 仓库 policy 和发布基础设施回归始终保留；任何 Codex／subagent 选择仍运行完整源码
 composition 和 consumer 套件。独立 Telegram 发布无需重跑无关 Codex 行为。
 
@@ -241,8 +241,8 @@ npm ownership、provenance、源码权利、tag 身份或仓库元数据不确�
 | `bootstrap` | 非 private | 仅本地一次性 `release:bootstrap-artifacts` |
 | `publishable` | 非 private | 正常受保护 workflow |
 
-当前登记 9 个工作区：8 个 publishable（6 个 Codex 包，以及 subagent、telegram-notify），
-另有 `pi-notify` 处于 bootstrap 首发准备状态，不进入常规受保护发布批次。
+当前登记 9 个 publishable 工作区：6 个 Codex 包，以及 subagent、telegram-notify、pi-notify。
+Notify 首发身份和激活前置条件见[核验记录](docs/audits/pi-notify-bootstrap-activation.md)。
 已移除的 external-thinking、keep-defaults、tree-continue 和未发布 Code Mode 实验不能进入新批次；
 历史 release locks 仍保留。此清单描述仓库资格，不是实时 registry inventory。
 
@@ -258,7 +258,7 @@ npm ownership、provenance、源码权利、tag 身份或仓库元数据不确�
 <a id="npm-bootstrap-and-trusted-publishing"></a>
 ## 新包的一次性 bootstrap 与 trusted publishing
 
-**这不是 tools 的当前待办。** 以下仅适用于经单独批准、尚未发布且明确登记为
+**这不是 tools 或 notify 的当前待办。** 以下仅适用于经单独批准、尚未发布且明确登记为
 `bootstrap` 的新包；现有包走常规发布／恢复。npm 包必须先存在，才能附加 trusted publisher。
 
 1. 重新核实包名可用性和所有权，完成权属审计及[一次性仓库准备](#one-time-github-preparation)。
@@ -342,6 +342,7 @@ Changesets prerelease mode 不支持此选项。随后正常运行 Changesets，
 | minimal-tools `1.3.0` 手动 bootstrap，后进入 guarded artifacts | `596d799c6f7db3508b6d46bb05cdca6ea9e3b716`；Apache source map 在 runtime `provenance/`，Responses Lite 边界保留在包 README／notice |
 | runtime／core／imagegen／web-search `0.1.0-alpha.1` 手动首发，identity、下载 tarball SHA-512、trusted publisher 已核实 | `32ba01f3c08b7fd63d09e9b2373cf081c4525533`；[激活审计](docs/audits/codex-bootstrap-activation.md) |
 | tools `0.1.0-alpha.1` 手动首发及独立激活完成 | `b9deaba6ba07d87c048e474b2ddc977f3bd2b442`；[tools 激活审计](docs/audits/codex-tools-bootstrap-activation.md) |
+| notify `0.1.0` 手动首发已核验；激活须满足 npm 授权门禁 | `915f7e4811de6f737607005f4da758fe86393c14`；[notify 核验与激活门禁](docs/audits/pi-notify-bootstrap-activation.md) |
 
 S4 建立递归精确 pin changeset、依赖优先制品和无外链的隔离生产消费者；这些测试不授权
 registry 写入，也不证明真实账号／模型可用。有限真实 bootstrap smoke 的 harness／覆盖限制
