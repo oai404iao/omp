@@ -7,6 +7,8 @@ import { parseApplyPatch } from "../patch/parser.js";
 import { createApplyPatchRenderers } from "../patch/render.js";
 import { applyPatchOutputSchema } from "./apply-patch-output.js";
 
+export const APPLY_PATCH_HIDDEN_TOOL_NAMES = ["read", ...NATIVE_MUTATION_TOOL_NAMES] as const;
+
 export interface ApplyPatchInput {
 	input: string;
 }
@@ -132,7 +134,7 @@ export function createApplyPatchToolDefinition(options: { cwd?: string; deferRen
 			if (!loadout.declared.some(tool => tool.name === "apply_patch")) return undefined;
 			return {
 				hiddenDeclarations: loadout.declared
-					.filter(tool => NATIVE_MUTATION_TOOL_NAMES.some(name => name === tool.name))
+					.filter(tool => APPLY_PATCH_HIDDEN_TOOL_NAMES.some(name => name === tool.name))
 					.map(tool => tool.name),
 			};
 		},

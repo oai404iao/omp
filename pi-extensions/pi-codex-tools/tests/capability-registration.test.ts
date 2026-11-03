@@ -73,20 +73,21 @@ test("global web gate blocks explicit standalone and tool execution before authe
 		assert.equal(authenticated, false);
 	}));
 
-test("patch loadout preserves native active/callable declarations and source history", () => {
+test("patch loadout hides read/edit/write declarations while preserving active/callable tools and source history", () => {
 	const tool = createApplyPatchToolDefinition({ deferRendering: true });
 	const prepare = tool.prepareLoadout as NonNullable<ToolDefinition["prepareLoadout"]>;
 	for (const names of [
 		["read", "edit", "write", "apply_patch", "custom_edit"],
 		["write", "read", "apply_patch"],
 		["read", "apply_patch", "custom_edit"],
+		["read", "bash", "apply_patch"],
 	]) {
 		const declared = Object.freeze(names.map(name => Object.freeze({ name })));
 		const loadout = { declared, callable: declared, registered: declared } as unknown as ToolLoadout;
-		assert.deepEqual(prepare(loadout), { hiddenDeclarations: names.filter(name => name === "edit" || name === "write") });
+		assert.deepEqual(prepare(loadout), { hiddenDeclarations: names.filter(name => ["read", "edit", "write"].includes(name)) });
 		assert.deepEqual(loadout.declared.map(tool => tool.name), names);
 		assert.equal(loadout.callable, declared);
 		assert.equal(loadout.registered, declared);
 	}
-	assert.equal(prepare({ declared: [{ name: "edit" }, { name: "write" }] } as unknown as ToolLoadout), undefined);
+	assert.equal(prepare({ declared: [{ name: "read" }, { name: "edit" }, { name: "write" }] } as unknown as ToolLoadout), undefined);
 });

@@ -21,7 +21,7 @@ not merely a model's provider/API name. Function patch and standalone search/ima
 can operate independently. Do not infer unknown model or endpoint support.
 Global kill switches prevent registration, renderers and commands.
 
-Patch loadout projection hides native mutation declarations only, preserving
+Patch loadout projection hides native read/edit/write declarations only, preserving
 active/callable tools and saved history. Preserve parser safety, queued mutations,
 rollback, CRLF, grammar fingerprints and Apache adaptation notices.
 Image clear invalidates sinks and timers without undoing writes already begun;
