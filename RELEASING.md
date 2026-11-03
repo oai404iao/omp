@@ -150,7 +150,7 @@ pnpm run ci:release
 ```
 
 单包命令检查目标及其规范 runtime／optional 工作区闭包；不带参数则检查全部 8 个
-发布工作区，不包含私有本地通知。它不打包、不发布、不改版本、不绕过依赖前置条件。
+`publishable` 工作区，不包含尚待首发的 `pi-notify`。它不打包、不发布、不改版本、不绕过依赖前置条件。
 仓库 policy 和发布基础设施回归始终保留；任何 Codex／subagent 选择仍运行完整源码
 composition 和 consumer 套件。独立 Telegram 发布无需重跑无关 Codex 行为。
 
@@ -241,8 +241,8 @@ npm ownership、provenance、源码权利、tag 身份或仓库元数据不确�
 | `bootstrap` | 非 private | 仅本地一次性 `release:bootstrap-artifacts` |
 | `publishable` | 非 private | 正常受保护 workflow |
 
-当前登记的 8 个工作区均为 publishable：6 个 Codex 包（runtime、core、tools、web-search、
-imagegen、minimal-tools），以及 subagent、telegram-notify。本地通知不在发布工作区。
+当前登记 9 个工作区：8 个 publishable（6 个 Codex 包，以及 subagent、telegram-notify），
+另有 `pi-notify` 处于 bootstrap 首发准备状态，不进入常规受保护发布批次。
 已移除的 external-thinking、keep-defaults、tree-continue 和未发布 Code Mode 实验不能进入新批次；
 历史 release locks 仍保留。此清单描述仓库资格，不是实时 registry inventory。
 
@@ -331,7 +331,7 @@ Changesets prerelease mode 不支持此选项。随后正常运行 Changesets，
 
 以下是已记录的检查点，不是待执行步骤、当前 registry inventory 或新的发布批准。
 早期 alpha 准备共 9 个包，激活批次为 4 个不可变 `recover` 依赖加 5 个 `publish` 候选；
-当前资格已调整为前述 8 个工作区。不要重新发布首发四包或让移除包进入新批次。
+当前资格见前述工作区清单。不要重新发布首发四包或让移除包进入新批次。
 
 | 历史检查点 | 源码 commit／证据 |
 | --- | --- |

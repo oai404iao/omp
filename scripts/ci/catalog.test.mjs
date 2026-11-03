@@ -19,16 +19,17 @@ function repositoryFixture() {
   return directory;
 }
 
-test("catalog registers every release package and explicit private notification target", () => {
+test("catalog registers every publishable and bootstrap workspace exactly once", () => {
   validateCatalog();
   validateRepositoryCatalog();
-  assert.equal(testPackages.length, workspaces.length + 1);
-  assert.deepEqual(testPackages.filter(entry => !entry.private).map(entry => entry.name).sort(),
+  assert.equal(testPackages.length, 9);
+  assert.deepEqual(testPackages.map(entry => entry.name).sort(),
     workspaces.map(entry => entry.name).sort());
-  const local = testPackages.find(entry => entry.id === "pi-local-notify");
+  const local = testPackages.find(entry => entry.id === "pi-notify");
   assert.equal(local.name, readPackage(local).name);
   assert.deepEqual(taskCatalog.get(`package:${local.id}`).commands,
-    [["pnpm", "--dir", local.directory, "run", "check"]]);
+    [["pnpm", "--filter", local.name, "--fail-if-no-match", "run", "check"]]);
+  assert.equal(local.releaseStatus, "bootstrap");
   assert.equal(integrationPackages.size, 7);
   assert.ok(integrationPackages.has("pi-subagent"));
   assert.deepEqual(taskCatalog.get("policy").commands, policyScripts.map(script => ["pnpm", "run", script]));
@@ -39,9 +40,9 @@ test("catalog registers every release package and explicit private notification 
 
 test("pnpm release workspace configuration exactly matches the release catalog", () => {
   const config = parse(readFileSync(resolve(root, "pnpm-workspace.yaml"), "utf8"));
-  assert.equal(workspaces.length, 8);
+  assert.equal(workspaces.length, 9);
   assert.deepEqual([...config.packages].sort(), workspaces.map(entry => entry.directory).sort());
-  assert.ok(!config.packages.includes("pi-extensions/pi-local-notify"));
+  assert.ok(config.packages.includes("pi-extensions/pi-notify"));
 });
 
 test("repository discovery rejects unregistered, missing, malformed and symlinked packages", () => {

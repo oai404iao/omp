@@ -16,6 +16,14 @@ The Pi 1.4.0 development catalog is checked at MIT-licensed revision
 `provenance/pi-openai-140-gpt6.json` pins its exact catalog and descriptor hashes.
 The four selected descriptors add only `compat.supportsMidConvoEffort`.
 
+Append-only effort-history serialization follows Apache-2.0 Codex revision
+`0585dcb5dbb276a78909fa8fd0b36310f16973f9` and MIT Pi 1.5.0 revision
+`f9a26365568127461c47a07a37dcb42c140a3ac5`.
+`provenance/openai-codex-0585dcb-effort-updates.json` records exact sources.
+The local converter reconstructs only same-model provider-effort annotations
+and suppresses unchanged updates; it does not copy a process-global pin or
+infer model support from names.
+
 Sol/Luna profile metadata was independently checked against Apache-2.0 Codex
 revision `40eac3ce8a0c10cbcb9db910d529355eb2f8fc09` and the MIT Pi 0.87.1
 catalog. See `provenance/openai-codex-40eac3ce-sol-luna.json` for exact source

@@ -18,6 +18,7 @@ import { assertSuccessfulOutput, createErrorMessage, createInitialAssistantMessa
 import { proxyDispatcherForUrl } from "./proxy.js";
 import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOptions, requestGrammarProperties } from "./request-body.js";
 import { getLatestUserText } from "./request-context.js";
+import { configurationUpdateEffort, requestThinkingLevel } from "./reasoning.js";
 import { createCodexRequestId, createPiTurnId, withSseRequestMetadata } from "./request-metadata.js";
 import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, isWebSocketUpgradeRejectedError, sleep, sseMaxRetries, sseRetryDelayMs, webSocketRetryDelayMs, webSocketStreamMaxRetries } from "./retry.js";
 import { fetchWithResponseHeaderTimeout, parseSSE, responseHeaderTimeoutMsFromOptions } from "./sse.js";
@@ -88,7 +89,7 @@ export function createCodexStream<TApi extends Api>(
 			);
 			let body = applyFastModeServiceTier(
 				buildRequestBody(model, context, requestProfile, {
-					...options,
+					...options, reasoning: requestThinkingLevel(model, options?.reasoning),
 					...requestBodyToolOptions(settings),
 					requestIdentity,
 					ownsNativeTool: deps.ownsNativeTool,
@@ -108,9 +109,10 @@ export function createCodexStream<TApi extends Api>(
 			if (nextBody !== undefined) {
 				body = nextBody as ResponsesBody;
 			}
+			output.providerThinkingLevel = configurationUpdateEffort(body);
 			if (requestIdentity) requestIdentity = {
 				...requestIdentity, model: typeof body.model === "string" && body.model.trim() ? body.model : model.id,
-				reasoningEffort: body.reasoning?.effort,
+				reasoningEffort: configurationUpdateEffort(body) ?? body.reasoning?.effort,
 			};
 			options = withRequestServiceTier(options, body.service_tier);
 			ensureWebSearchDetailsIncluded(body);

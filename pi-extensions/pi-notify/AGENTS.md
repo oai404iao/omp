@@ -1,21 +1,40 @@
-# Local Kitty notifications — maintenance
+# Pi notifications — maintenance
 
 Follow [root instructions](../../AGENTS.md) for repository workflow.
-This package is `private: true`, outside `pnpm-workspace.yaml` and npm release
-batches. Use root-installed tooling; do not add publication metadata or another
-lockfile. Read [README.md](README.md) for supported terminals and manual checks.
+This is a non-private release workspace with `bootstrap` status, pending its first
+npm publication. Read [RELEASING.md](../../RELEASING.md#npm-bootstrap-and-trusted-publishing)
+for first-publication preparation: a maintainer performs the interactive npm publish;
+guarded workflow eligibility requires a separately reviewed activation after
+publication verification and trusted publisher setup. Use the root lockfile and
+keep tests, `AGENTS.md` and private configuration out of the package allowlist.
+Read [README.md](README.md) for supported terminals and manual checks.
 
 ## Ownership
 
 - `index.ts` owns Pi event wiring, mode/child guards, stdout writes,
-  deduplication and `/local-notify-test`.
+  per-channel deduplication and `/notify` / `/notify-test`.
 - `src/notification.ts` owns Kitty OSC 99 encoding and tmux DCS passthrough.
-  This extension needs no credentials, config file or extra runtime dependency.
+  The default local channel needs no credentials or configuration.
+- `src/settings.ts` owns all configuration at
+  `<agent-dir>/extensions/pi-notify/config.json`: `channel` and the nested
+  `telegram` enabled/credentials/timeout settings. Missing or invalid config
+  defaults to `local`. Keep config reads and implementation within this package.
+- `src/telegram.ts` owns terminal-result classification, MarkdownV2 formatting
+  and timeout-bounded delivery. The standalone Telegram extension is independent;
+  neither extension controls the other's settings, commands or registration.
 - `tests/extension.test.ts` covers lifecycle, isolation and write failures;
   `tests/notification.test.ts` covers encoding and passthrough.
 
 ## Notification contracts
 
+- The contracts below apply to local delivery. Telegram automatically notifies
+  only user-started runs; waiting prompts require an active user run and `hasUI`.
+  Ordinary parent RPC/print sessions can send Telegram. Check child identity at
+  every send and reset run eligibility on settle and session transitions.
+- Telegram sends the absolute project path and answer/error/prompt or dialog
+  summary, as disclosed in the README. Preserve MarkdownV2 escaping, Unicode-safe
+  truncation and timeout cleanup. Status output shows credential presence only;
+  automatic failures are silent and explicit test failures must not expose secrets.
 - Notify only on public `agent_settled`, after retries, compaction and queued
   work settle. Read the final assistant from the active `getBranch()`.
   `stop`/`length` show `Ready for input`; `error` shows `Stopped with an error`.
@@ -44,12 +63,13 @@ lockfile. Read [README.md](README.md) for supported terminals and manual checks.
 
 ## Verification and desktop authorization
 
-- From the repository root, run `pnpm run check:local-notify` for implementation
-  changes. It delegates to this package's TypeScript check and Node tests;
-  a workspace package filter does not cover this private directory.
-- Automated tests capture stdout and do not send real desktop notifications.
+- From the repository root, run `pnpm --filter @oai404iao/pi-notify run check`
+  for implementation changes. It runs this package's TypeScript check and Node
+  tests. For packaged path or entry-point changes, also run `pnpm run pack:check`
+  and `pnpm run license:check`.
+- Automated tests capture stdout and mock Telegram; they send no real notices.
   Preserve their environment/stdout restoration and isolation.
-- Real-session loading and `/local-notify-test` require explicit authorization.
+- Real-session loading and `/notify-test` require explicit authorization.
   Do not install the extension or change Pi/tmux configuration as part of a
   code check. Desktop display and click-to-focus need an authorized real desktop
   check: a successful stdout write alone proves neither.

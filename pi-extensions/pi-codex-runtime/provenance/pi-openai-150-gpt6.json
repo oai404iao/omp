@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/earendil-works/pi",
+    "revision": "f9a26365568127461c47a07a37dcb42c140a3ac5",
+    "tag": "v1.5.0",
+    "license": "MIT"
+  },
+  "catalogReference": {
+    "package": "@earendil-works/pi-ai",
+    "version": "1.5.0",
+    "path": "dist/providers/data/openai.json",
+    "sha256": "df2fe1f312051bbe29801ef903ab370c701a74a680f1370e96eb465eacd1d82d",
+    "fields": ["type", "id", "api", "input", "thinkingLevelMap", "contextWindow", "maxTokens", "compat"],
+    "tarball": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-1.5.0.tgz",
+    "integrity": "sha512-VeWxNqTHSqRCf8AcY/6kvNwh+neRL6MPxZPePVztIQy6qqK9MR/YoCSN/ZgDnIyCD3pqEXgRyQbzk4KV4uvjbg=="
+  },
+  "models": ["openai/gpt-6.1-sol", "openai/gpt-6-astra", "openai/gpt-6-sol", "openai/gpt-6-luna"],
+  "chatDescriptorSha256": {
+    "gpt-6.1-sol": "1ce2a36d07f0b2777b6560235a19332a5018cae3e50417421118d5192c9890b0",
+    "gpt-6-astra": "d09330729cea10ff2f64a7014b41509c5c770b461db39549d2df3d2430e885fc",
+    "gpt-6-sol": "4d122f11bd9d209305a9251e150693025c49d1a413bca1aefc094fd78619bc4e",
+    "gpt-6-luna": "bca3e402716ebf6b03d677ba8a966f22a5ceec8993921e66ea619a92379248ab"
+  },
+  "decisions": [
+    "The four selected chat descriptors are byte-for-byte identical after JSON serialization to Pi 1.4.0, including thinkingLevelMap and compat.supportsMidConvoEffort.",
+    "Pi 1.5.0 also supplies gpt-6.1-terra; it does not gain a Codex extension profile from its name or catalog presence.",
+    "Retain all earlier catalog evidence unchanged. Pi 1.5.0 is an isolated compatibility verification, not a development-target or peer-floor change."
+  ],
+  "limits": [
+    "Integrity-verified package/catalog and credential-free fixture evidence only, not account access, endpoint acceptance or verified Fast pricing.",
+    "No new model profiles or endpoint capabilities are inferred."
+  ],
+  "localImplementations": ["pi-codex-runtime/src/model-catalog/default-models.json"]
+}

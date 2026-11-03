@@ -1,0 +1,54 @@
+{
+  "name": "@oai404iao/pi-notify",
+  "version": "0.0.0",
+  "description": "Configurable Kitty and Telegram notifications for Pi.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oai404iao/omp.git",
+    "directory": "pi-extensions/pi-notify"
+  },
+  "homepage": "https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-notify#readme",
+  "bugs": {
+    "url": "https://github.com/oai404iao/omp/issues"
+  },
+  "author": "oai404iao",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "kitty",
+    "telegram",
+    "notification"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.2.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "pnpm run typecheck && pnpm run test"
+  },
+  "files": [
+    "index.ts",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

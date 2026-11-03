@@ -17,6 +17,14 @@ revision `06a466935536f8c9bcacb2d5efc0fc021be1bdff`,
 thinking-level clamp and adds request-envelope, subscription and Lite guards;
 it does not copy the upstream unrestricted payload assignment.
 
+Append-only effort updates follow Apache-2.0 Codex revision
+`0585dcb5dbb276a78909fa8fd0b36310f16973f9` and MIT Pi 1.5.0 revision
+`f9a26365568127461c47a07a37dcb42c140a3ac5`. The local implementation replays
+Pi's persisted provider-effort annotations, coalesces unchanged settings and
+derives the request baseline from surviving context instead of a separate pin.
+Source hashes and boundaries are in runtime's
+`provenance/openai-codex-0585dcb-effort-updates.json`.
+
 This package owns core code split from `@oai404iao/pi-codex-minimal-tools`.
 Project material remains Copyright (c) 2026 oai404iao. The composite LICENSE
 and verified Apache license/NOTICE snapshots are retained.

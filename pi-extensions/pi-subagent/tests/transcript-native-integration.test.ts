@@ -4,6 +4,7 @@ import { initTheme, type Theme, type ToolRenderers } from "@earendil-works/pi-co
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { TranscriptView } from "../src/transcript-view.ts";
 import { deferred, fixture, waitUntil } from "./support/fixture.ts";
+import { renderKeybindings } from "./support/render-keybindings.ts";
 
 const theme = {
 	fg: (_color: unknown, text: string) => text,
@@ -11,6 +12,7 @@ const theme = {
 	bold: (text: string) => text,
 } as Theme;
 const context = (cwd: string): Parameters<NonNullable<ToolRenderers["renderCall"]>>[2] => ({
+	...renderKeybindings,
 	args: {}, toolCallId: "unused", invalidate() {}, state: {}, cwd, lastComponent: undefined, durationMs: undefined,
 	executionStarted: false, argsComplete: true, isPartial: false, expanded: false, showImages: false, isError: false, outputPad: 1,
 });

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/openai/codex",
+    "revision": "0585dcb5dbb276a78909fa8fd0b36310f16973f9",
+    "license": "Apache-2.0",
+    "files": {
+      "codex-rs/core/src/session/reasoning_effort.rs": "69d94db93aaa9d9e7c8e7c97e40a9be53fba715c5d98138e40a8d2512cf4bd07",
+      "codex-rs/core/src/client.rs": "06dbdb68ca008fd015c700e7ef26b9999df307f1ef86c7c1e0bc1a31459a7782",
+      "codex-rs/core/tests/suite/reasoning_effort_override.rs": "170db487de7b748c2a185f1052b359ea8cf2b70e65089e4bcbb68dbf360e81d4"
+    }
+  },
+  "piReference": {
+    "repository": "https://github.com/earendil-works/pi",
+    "revision": "f9a26365568127461c47a07a37dcb42c140a3ac5",
+    "tag": "v1.5.0",
+    "license": "MIT",
+    "files": {
+      "packages/ai/src/api/openai-responses.ts": "20a2a355191df9c171e3e91c462fc771ff09cdfa40bf671eaf5a6cabd68b549b",
+      "packages/ai/src/api/openai-responses-shared.ts": "f5198fe8a6438008e0f57b149e4d2db4c93d839d30d904ddee33e44f6560e083"
+    }
+  },
+  "adaptations": [
+    "Replay configuration_update items at reply boundaries from same-provider/API/model providerThinkingLevel annotations; append only changed effective efforts.",
+    "Pin request-level effort to the earliest surviving annotated reply, or the current selection when no annotation remains; do not add a separate session state store.",
+    "Use Pi's explicit supportsMidConvoEffort capability and official ChatGPT request-field guard, not inferred GPT model-name support.",
+    "Normalize Pi's omitted Off request to its model-clamped value; only a supported off mapping can produce native none.",
+    "Empty-history prewarm retains its developer/tool prefix; a changed first-request effort can invalidate speculative continuation.",
+    "Compaction and branch projections are authoritative: removed replies do not reappear just to reconstruct effort state."
+  ],
+  "localImplementations": [
+    "pi-codex-runtime/src/providers/responses/messages.ts",
+    "pi-codex-core/src/providers/openai-codex/reasoning.ts",
+    "pi-codex-core/src/providers/openai-codex/request-body.ts",
+    "pi-codex-core/src/providers/openai-codex/stream.ts",
+    "pi-codex-core/src/adapter/compaction/request.ts"
+  ],
+  "limits": [
+    "Protocol/source and mocked transport evidence only; no account entitlement or live endpoint acceptance claim.",
+    "No model instructions, credentials, or unrelated Codex features copied."
+  ]
+}

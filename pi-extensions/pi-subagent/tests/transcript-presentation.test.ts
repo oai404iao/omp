@@ -4,9 +4,11 @@ import { Text } from "@earendil-works/pi-tui";
 import type { AgentSession, MarkdownTransformer, MessageRenderer, Theme, ToolDefinition, ToolRenderers } from "@earendil-works/pi-coding-agent";
 import { createTranscriptPresentation } from "../src/transcript-presentation.ts";
 import { MESSAGE_CUSTOM_TYPE } from "../src/store.ts";
+import { renderKeybindings } from "./support/render-keybindings.ts";
 
 type CallContext = Parameters<NonNullable<ToolRenderers["renderCall"]>>[2];
 const context = (): CallContext => ({
+	...renderKeybindings,
 	args: {}, toolCallId: "call", invalidate() {}, state: {}, cwd: "/workspace", lastComponent: undefined, durationMs: undefined,
 	executionStarted: false, argsComplete: true, isPartial: false, expanded: false, showImages: false, isError: false, outputPad: 1,
 });
@@ -86,15 +88,15 @@ test("native custom message and Markdown resolver callbacks follow current sessi
 	const presentation = createTranscriptPresentation("/workspace", f.session);
 	const message = { role: "custom" as const, customType: "custom", content: "text", display: true, timestamp: 1 };
 	const renderer = presentation.resolveMessage("custom")!;
-	assert.equal(renderer(message, { expanded: false, outputPad: 0 }, theme)?.render(80).join("").trim(), "first renderer");
+	assert.equal(renderer(message, { ...renderKeybindings, expanded: false, outputPad: 0 }, theme)?.render(80).join("").trim(), "first renderer");
 	f.messages.set("custom", () => new Text("second renderer"));
-	assert.equal(renderer(message, { expanded: false, outputPad: 0 }, theme)?.render(80).join("").trim(), "second renderer");
+	assert.equal(renderer(message, { ...renderKeybindings, expanded: false, outputPad: 0 }, theme)?.render(80).join("").trim(), "second renderer");
 	const markdownContext = { messageType: "assistant" as const, isStreaming: false, availableWidth: 80 };
 	assert.equal(presentation.markdownTransformers[0]("markdown", markdownContext), "markdown first");
 	f.transformers([]);
 	assert.equal(presentation.markdownTransformers[0]("markdown", markdownContext), "markdown");
 	f.messages.delete("custom");
-	assert.equal(renderer(message, { expanded: false, outputPad: 0 }, theme), undefined);
+	assert.equal(renderer(message, { ...renderKeybindings, expanded: false, outputPad: 0 }, theme), undefined);
 });
 
 test("cold attribution messages reuse the extension's existing main-session renderer", () => {
@@ -104,7 +106,7 @@ test("cold attribution messages reuse the extension's existing main-session rend
 	const component = renderer({
 		role: "custom", customType: MESSAGE_CUSTOM_TYPE, content: "[Agent task: /root/worker]\nReview safely.",
 		display: true, timestamp: 1,
-	}, { expanded: true, outputPad: 1 }, theme)!;
+	}, { ...renderKeybindings, expanded: true, outputPad: 1 }, theme)!;
 	assert.match(component.render(90).join("\n"), /Review safely/);
 	assert.equal(presentation.resolveMessage("unknown"), undefined);
 });

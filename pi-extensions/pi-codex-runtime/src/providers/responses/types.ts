@@ -69,6 +69,7 @@ export type TextSignaturePhase = "commentary" | "final_answer";
 export interface ConvertResponsesMessagesOptions {
 	includeSystemPrompt?: boolean;
 	grammarToolInputProperties?: ReadonlyMap<string, string>;
+	configurationUpdateEffort?: string;
 }
 
 export interface ConvertResponsesToolsOptions {

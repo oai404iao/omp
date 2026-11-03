@@ -37,7 +37,7 @@ pi -e ./pi-extensions/pi-subagent
 pi -e ./pi-extensions/pi-codex-minimal-tools
 
 # 只试本地桌面通知
-pi -e ./pi-extensions/pi-local-notify
+pi -e ./pi-extensions/pi-notify
 ```
 
 `-e` 不会添加持久安装记录；本地路径不复制包，也不替你安装依赖。

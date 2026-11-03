@@ -1,4 +1,33 @@
-import { type Api, type Model, type ThinkingLevel } from "@earendil-works/pi-ai/compat";
+import { type Api, type Context, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { ResponsesBody } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
+
+export function supportsEffortUpdates(model: Model<Api>): boolean {
+	return model.reasoning && (model.compat as { supportsMidConvoEffort?: boolean } | undefined)?.supportsMidConvoEffort === true;
+}
+
+export function requestThinkingLevel(model: Model<Api>, level: ModelThinkingLevel | undefined): ModelThinkingLevel | undefined {
+	// Pi encodes session Off by omitting SimpleStreamOptions.reasoning.
+	return level ?? (supportsEffortUpdates(model) ? "off" : undefined);
+}
+
+export function configurationUpdateEffort(body: ResponsesBody): string | undefined {
+	for (const item of [...body.input].reverse()) {
+		if (item && typeof item === "object" && (item as { type?: string }).type === "configuration_update") {
+			return (item as { reasoning: { effort: string } }).reasoning.effort;
+		}
+	}
+	return undefined;
+}
+
+export function requestEffortBaseline(model: Model<Api>, context: Context, selected: string): string {
+	for (const message of context.messages) {
+		if (message.role !== "assistant" || message.stopReason === "error" || message.stopReason === "aborted"
+			|| message.model !== model.id || message.api !== model.api || message.provider !== model.provider) continue;
+		const effort = message.providerThinkingLevel;
+		if (effort !== undefined) return effort;
+	}
+	return selected;
+}
 
 export function clampReasoningEffort(modelId: string, effort: string): string {
 	const id = modelId.includes("/") ? (modelId.split("/").pop() ?? modelId) : modelId;
@@ -10,39 +39,9 @@ export function clampReasoningEffort(modelId: string, effort: string): string {
 	return effort;
 }
 
-const CODEX_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-
-type CodexThinkingLevel = (typeof CODEX_THINKING_LEVELS)[number];
-
-/**
- * Preserve the legacy Codex/Lite effort mapping. Standard OpenAI requests use
- * Pi's native clamp, including descriptors that explicitly disallow Off.
- */
-export function clampCodexThinkingLevel(model: Model<Api>, level: ThinkingLevel): CodexThinkingLevel {
-	if (!model.reasoning) return "off";
-	const available = CODEX_THINKING_LEVELS.filter((candidate) => {
-		if (candidate === "off") return true;
-		const mapped = (model.thinkingLevelMap as Record<string, string | null | undefined> | undefined)?.[candidate];
-		if (mapped === null) return false;
-		if (candidate === "xhigh" || candidate === "max") return mapped !== undefined;
-		return true;
-	});
-	if (available.includes(level as CodexThinkingLevel)) return level as CodexThinkingLevel;
-	const requestedIndex = CODEX_THINKING_LEVELS.indexOf(level as CodexThinkingLevel);
-	if (requestedIndex < 0) return available[0] ?? "off";
-	for (let index = requestedIndex; index < CODEX_THINKING_LEVELS.length; index++) {
-		const candidate = CODEX_THINKING_LEVELS[index]!;
-		if (available.includes(candidate)) return candidate;
-	}
-	for (let index = requestedIndex - 1; index >= 0; index--) {
-		const candidate = CODEX_THINKING_LEVELS[index]!;
-		if (available.includes(candidate)) return candidate;
-	}
-	return available[0] ?? "off";
-}
-
-export function thinkingLevelFromUnknown(value: unknown): ThinkingLevel | undefined {
-	return value === "minimal"
+export function thinkingLevelFromUnknown(value: unknown): ModelThinkingLevel | undefined {
+	return value === "off"
+		|| value === "minimal"
 		|| value === "low"
 		|| value === "medium"
 		|| value === "high"

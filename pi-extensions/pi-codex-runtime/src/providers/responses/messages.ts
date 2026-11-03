@@ -44,6 +44,12 @@ export function convertResponsesMessages<TApi extends Api>(
 	}
 
 	let msgIndex = 0;
+	let establishedEffort: string | undefined;
+	const appendEffort = (effort: string): void => {
+		if (effort === establishedEffort) return;
+		messages.push({ type: "configuration_update", reasoning: { effort } } as ResponseInput[number]);
+		establishedEffort = effort;
+	};
 	for (const msg of transformedMessages) {
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
@@ -59,6 +65,8 @@ export function convertResponsesMessages<TApi extends Api>(
 		} else if (msg.role === "assistant") {
 			const output: ResponseInput = [];
 			const isSameModel = msg.model === model.id && msg.provider === model.provider && msg.api === model.api;
+			const recordedEffort = msg.providerThinkingLevel;
+			if (options?.configurationUpdateEffort !== undefined && isSameModel && recordedEffort !== undefined) appendEffort(recordedEffort);
 			const isDifferentModel = msg.model !== model.id && msg.provider === model.provider && msg.api === model.api;
 			let assistantBlockIndex = 0;
 			for (const block of msg.content as InternalAssistantContent[]) {
@@ -171,6 +179,7 @@ export function convertResponsesMessages<TApi extends Api>(
 		}
 		msgIndex++;
 	}
+	if (options?.configurationUpdateEffort !== undefined) appendEffort(options.configurationUpdateEffort);
 
 	return messages;
 }

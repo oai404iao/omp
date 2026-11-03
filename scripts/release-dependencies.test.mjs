@@ -35,7 +35,8 @@ test("the compatibility bundle cannot exclude its activated dependencies", () =>
 
 test("the verified Codex packages, including tools, enter dependency-complete guarded batches", () => {
   const names = ["runtime", "core", "tools", "web-search", "imagegen"].map(name => `@oai404iao/pi-codex-${name}`);
-  assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap"), []);
+  assert.deepEqual(workspaces.filter(e => e.releaseStatus === "bootstrap").map(e => e.name),
+    ["@oai404iao/pi-notify"]);
   for (const name of names) {
     const entry = workspaces.find(e => e.name === name);
     assert.equal(entry.releaseStatus, "publishable");
@@ -44,6 +45,7 @@ test("the verified Codex packages, including tools, enter dependency-complete gu
     assert.ok(artifactWorkspaces(true).some(e => e.name === name));
   }
   assert.equal(artifactWorkspaces().length, 8);
+  assert.equal(artifactWorkspaces(true).length, 9);
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces()));
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces(true)));
 });

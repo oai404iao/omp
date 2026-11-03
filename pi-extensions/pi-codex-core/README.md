@@ -120,6 +120,27 @@ agent 目录规则、全部字段及迁移表见 [runtime 配置说明](https://
 
 custom patch 和 standalone web/image 的 profile 配置只有在相应 tools 能力已加载时才有工具实现。以上默认值不证明账号可访问 Lite、预留端点或 Fast，也不验证实际费用。
 
+### GPT-6 思考等级
+
+在同一会话用 Pi `/thinking` 切换，无需另开会话或执行插件命令。模型明确声明
+`compat.supportsMidConvoEffort:true` 时，Standard/Lite 按
+[Codex 的追加式协议](https://github.com/openai/codex/blob/0585dcb5dbb276a78909fa8fd0b36310f16973f9/codex-rs/core/src/session/reasoning_effort.rs)
+在请求 `input` 中追加 `configuration_update`，不是改写已有提示词或每轮替换顶层 effort。
+例如 low → high → high → off 对支持 Off 的模型只产生 low、high、none 三次配置。
+顶层 `reasoning.effort` 保持当前可见上下文最早已记录的值，已有输入前缀不变，便于 SSE 缓存和 WS 续传。
+
+每条回复保存实际 provider effort 到 Pi 的 `providerThinkingLevel`；恢复、分支和 fork 只从当前
+有效上下文重放，不读取废弃分支或使用全局切换状态。压缩后按保留下来的回复元数据建立基线；
+没有旧元数据时从当前选择开始，不猜测旧会话的等级。相同有效等级不重复追加。
+
+等级仍服从 Pi 的 `thinkingLevelMap`。维护中的 `openai` GPT-6 Astra、6.1 Sol 支持
+`low/medium/high/xhigh/max`；Sol、Luna 另有 `off`（映射为 `none`）。不支持的请求由 Pi 钳制。
+不把 Codex 的 UI 别名（如 ultra）直接当成已验证的 wire effort，也不改用户模型配置。
+
+没有明确能力标记的模型继续使用请求级 effort。Pi 官方 OpenAI 路由的 ChatGPT OAuth
+不接受 `configuration_update`，仍使用请求级切换；不会遇错后暗中探测、换账号或换协议。
+空历史的启动预热保留原稳定前缀；预热后首次请求的等级若已改变，可能放弃该次推测续传。
+
 ## 传输、预热与续传
 
 | `responses.transport` | 行为 |

@@ -7,6 +7,7 @@ import { renderAgentCall, renderAgentMessage, renderAgentResult } from "../src/r
 import { truncateUtf8 } from "../src/result.ts";
 import { createAgentTools } from "../src/tools.ts";
 import { fixture } from "./support/fixture.ts";
+import { renderKeybindings } from "./support/render-keybindings.ts";
 
 const theme = { fg: (_color: unknown, text: string) => text, bold: (text: string) => text } as Theme;
 type ToolRenderContext = Parameters<NonNullable<ToolDefinition["renderCall"]>>[2];
@@ -14,6 +15,7 @@ const executionContext = (context: ExtensionContext) => context as Parameters<To
 
 function renderContext(args: Record<string, unknown>, overrides: Partial<ToolRenderContext> = {}): ToolRenderContext {
 	return {
+		...renderKeybindings,
 		args, toolCallId: "render-test", invalidate() {}, lastComponent: undefined, state: {}, cwd: "/",
 		executionStarted: true, argsComplete: true, isPartial: false, expanded: false, showImages: false,
 		isError: false, durationMs: undefined, outputPad: 1, ...overrides,

@@ -22,7 +22,7 @@ test("targeted publication passes the same selection through protected verificat
   }
 });
 
-test("all workspaces, including private packages, satisfy release metadata gates", () => {
+test("all workspaces, including bootstrap packages, satisfy release metadata gates", () => {
   for (const { name, directory } of workspaces) {
     const manifest = readManifest(directory);
     assert.deepEqual(manifest.repository, {
@@ -49,6 +49,23 @@ test("bootstrap packages stay out of guarded release artifacts", () => {
     artifactWorkspaces(true, fixture).map(({ name }) => name),
     ["publishable", "bootstrap"],
   );
+});
+
+test("notify is non-private bootstrap-only with no runtime workspace dependencies", () => {
+  assert.equal(workspaces.length, 9);
+  assert.equal(publishableWorkspaces.length, 8);
+  const notify = workspaces.find(entry => entry.name === "@oai404iao/pi-notify");
+  assert.deepEqual(workspaces.filter(entry => entry.releaseStatus === "bootstrap"), [notify]);
+  const manifest = readManifest(notify.directory);
+  assert.notEqual(manifest.private, true);
+  const dependencies = Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies });
+  assert.deepEqual(dependencies.filter(name => workspaces.some(entry => entry.name === name)), []);
+  assert(!publishableWorkspaces.includes(notify));
+  assert(!artifactWorkspaces().includes(notify));
+  assert(artifactWorkspaces(true).includes(notify));
+  assert.throws(() => targetedReleaseWorkspaces(notify.name), /Unapproved/);
+  assert.deepEqual(targetedReleaseWorkspaces(notify.name, workspaces, entry => readManifest(entry.directory),
+    { bootstrapTarget: true }), [notify]);
 });
 
 test("verified Codex tools enters guarded artifacts and targeted publication after activation", () => {
