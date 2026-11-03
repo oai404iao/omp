@@ -26,6 +26,11 @@ export const workspaces = [
     directory: "pi-extensions/pi-telegram-notify",
     releaseStatus: "publishable",
   },
+  {
+    name: "@oai404iao/pi-notify",
+    directory: "pi-extensions/pi-notify",
+    releaseStatus: "bootstrap",
+  },
 ];
 
 export function readManifest(directory) {

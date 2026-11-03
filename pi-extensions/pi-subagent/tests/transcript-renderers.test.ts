@@ -5,12 +5,14 @@ import { Container, Text, stripTerminalSequences, type TUI } from "@earendil-wor
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { builtinToolRenderers, readOnlyToolRenderers } from "../src/transcript-renderers.ts";
+import { renderKeybindings } from "./support/render-keybindings.ts";
 
 initTheme("dark", false);
 const theme = { fg: (_color: unknown, text: string) => text, bg: (_color: unknown, text: string) => text,
 	bold: (text: string) => text } as Theme;
 type Context = Parameters<NonNullable<ToolRenderers["renderCall"]>>[2];
 const context = (): Context => ({
+	...renderKeybindings,
 	args: {}, toolCallId: "fixture", state: {}, cwd: ".", executionStarted: true, argsComplete: true,
 	lastComponent: undefined, durationMs: undefined, isPartial: false, expanded: false,
 	showImages: false, isError: false, outputPad: 1, invalidate() {},

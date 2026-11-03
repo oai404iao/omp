@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { root as repositoryRoot, workspaces } from "../workspaces.mjs";
+import { publishableWorkspaces, root as repositoryRoot, workspaces } from "../workspaces.mjs";
 import { targetedReleaseWorkspaces } from "../targeted-release.mjs";
 import { buildGraph, integrationPackages, readPackage, reverseClosure, suites,
   taskCatalog, testPackages, validateRepositoryCatalog } from "./catalog.mjs";
@@ -28,6 +28,7 @@ export function parseDiff(output) {
 }
 
 const allPackages = testPackages.map(entry => entry.id);
+const releasePackages = testPackages.filter(entry => entry.releaseStatus === "publishable").map(entry => entry.id);
 function plan(mode, sourceSha, packages, selectedSuites, reasons, full = false) {
   return validatePlan({ schemaVersion: 1, mode, sourceSha, packages: [...packages].sort(),
     suites: suites.filter(id => selectedSuites.includes(id)), policy: true, reasons, full });
@@ -93,7 +94,7 @@ export function createPlan({ mode = "full", packageName, base, head = "HEAD",
   if (mode === "release") {
     buildGraph(testPackages, entry => readPackage(entry, root));
     const entries = packageName?.trim()
-      ? targetedReleaseWorkspaces(packageName, workspaces, entry => readPackage(entry, root)) : workspaces;
+      ? targetedReleaseWorkspaces(packageName, workspaces, entry => readPackage(entry, root)) : publishableWorkspaces;
     const packages = entries.map(entry => testPackages.find(item => item.name === entry.name).id);
     return plan(mode, sourceSha, packages, packages.some(id => integrationPackages.has(id))
       ? suites : ["infrastructure"], [`Release verification: ${packageName?.trim() || "all release workspaces"}`]);
@@ -129,7 +130,7 @@ export function validatePlan(value) {
     throw new Error("Incomplete full CI plan");
   }
   if (value.mode === "release" && (value.full || !value.packages.length ||
-      value.packages.includes("pi-local-notify") || !value.suites.includes("infrastructure"))) {
+      value.packages.some(id => !releasePackages.includes(id)) || !value.suites.includes("infrastructure"))) {
     throw new Error("Invalid release CI plan");
   }
   if (value.packages.some(id => integrationPackages.has(id)) &&

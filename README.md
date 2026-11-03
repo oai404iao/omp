@@ -22,7 +22,7 @@ Codex Responses 引擎、补丁与联网工具、多代理协作，以及 Telegr
 | 只启用搜索或图像生成 | [pi-codex-web-search](pi-extensions/pi-codex-web-search/README.md)、[pi-codex-imagegen](pi-extensions/pi-codex-imagegen/README.md) |
 | 创建、复用和协调子代理 | [pi-subagent](pi-extensions/pi-subagent/README.md) |
 | 接收 Telegram 完成通知 | [pi-telegram-notify](pi-extensions/pi-telegram-notify/README.md) |
-| 接收 Kitty 桌面通知，含 tmux 透传 | [pi-local-notify](pi-extensions/pi-local-notify/README.md)，仅限本地，不发布到 npm |
+| 接收 Kitty／Telegram 通知，支持双通道及 tmux 透传 | [pi-notify](pi-extensions/pi-notify/README.md)，npm 首发准备中 |
 | 开发包间共享配置、身份或 broker 集成 | [pi-codex-runtime](pi-extensions/pi-codex-runtime/README.md)，库，不是扩展 |
 
 Core 本身不提供 `apply_patch`；需要补丁时同时加载 tools，或使用完整组合包。

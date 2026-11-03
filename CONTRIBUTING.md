@@ -23,8 +23,8 @@ pnpm install --frozen-lockfile --ignore-scripts
 ```
 
 `pnpm-workspace.yaml` 定义发布工作区；根目录 `pnpm-lock.yaml` 是唯一项目锁文件。
-不要新增 npm 锁文件或包级锁文件。`pi-local-notify` 是本地私有扩展，不在发布工作区内，
-检查时使用根目录安装的工具。
+不要新增 npm 锁文件或包级锁文件。`pi-notify` 已进入工作区，首发资格为 `bootstrap`；
+本地首发和后续激活流程见[发布指南](RELEASING.md#npm-bootstrap-and-trusted-publishing)。
 
 <a id="checks"></a>
 ## 选择要运行的检查
@@ -34,8 +34,8 @@ pnpm install --frozen-lockfile --ignore-scripts
 | 要做什么 | 命令 |
 | --- | --- |
 | 检查一个发布工作区包 | `pnpm --filter @oai404iao/pi-codex-tools run check`（替换包名） |
-| 检查本地通知 | `pnpm run check:local-notify` |
-| 检查所有包，包括本地通知 | `pnpm run check` |
+| 检查合并通知 | `pnpm run check:notify` |
+| 检查所有工作区包 | `pnpm run check` |
 | 检查 Codex 模块边界 | `pnpm run check:architecture` |
 | 检查跨包组合行为 | `pnpm run test:codex-composition` |
 | 检查源码构建的隔离 tarball 消费者 | `pnpm run test:codex-packages` |
@@ -144,7 +144,7 @@ revision 计划比较不可变 Git 提交，**不包含已暂存或未暂存的�
 依赖图包含 runtime、optional、dev 和 peer 边；重命名同时考虑旧、新路径。
 新增包目录必须注册，即使它只是非发布测试目标。
 
-`ci:release` 不带 `--package` 时选择 8 个发布工作区，排除私有本地通知。
+`ci:release` 不带 `--package` 时选择 8 个 `publishable` 工作区，排除尚待首发的 `pi-notify`。
 它只验证源码，不打包、不发布、不改版本；定向依赖闭包和复用规则见
 [发布验证](RELEASING.md#scoped-verification-and-trusted-source-reuse)。
 

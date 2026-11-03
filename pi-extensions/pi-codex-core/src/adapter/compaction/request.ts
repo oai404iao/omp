@@ -9,6 +9,7 @@ import { rewriteNativeOpenAiTools } from "../../provider-native-tools.js";
 import { CODEX_COMPACTION_TRIGGER_TYPE } from "../../providers/openai-codex/constants.js";
 import { applyConfiguredResponsesFeatureHeaders, buildSSEHeaders, buildWebSocketHeaders } from "../../providers/openai-codex/headers.js";
 import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOptions } from "../../providers/openai-codex/request-body.js";
+import { configurationUpdateEffort, requestThinkingLevel } from "../../providers/openai-codex/reasoning.js";
 import { createCodexRequestId } from "../../providers/openai-codex/request-metadata.js";
 import { buildCodexCompactionCheckpoint } from "./checkpoint.js";
 import { requestCodexCompactionTriggerWithTransport } from "./transport.js";
@@ -69,12 +70,12 @@ async function requestNativeCompaction(
 		apiKey: options.apiKey,
 		headers: options.headers,
 		signal: options.signal,
-		reasoning: options.reasoning,
+		reasoning: requestThinkingLevel(model, options.reasoning),
 		sessionId: options.sessionId,
 		requestIdentity,
 	}), settings, model);
 	if (requestIdentity) requestIdentity = {
-		...requestIdentity, model: model.id, reasoningEffort: body.reasoning?.effort, compaction: options.compaction,
+		...requestIdentity, model: model.id, reasoningEffort: configurationUpdateEffort(body) ?? body.reasoning?.effort, compaction: options.compaction,
 	};
 	const webSearch = settings.modelProfile?.effective.tools.webSearch;
 	body = rewriteNativeOpenAiTools(body, {

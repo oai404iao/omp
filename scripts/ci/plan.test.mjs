@@ -60,12 +60,12 @@ test("documentation remains policy-only but unknown/shared/toolchain paths fall 
   assert.equal(tasksForPlan(affectedPlan([], [], sha)).length, 1);
 });
 
-test("subagent and all Codex packages activate integrations; local notify is testable alone", () => {
+test("subagent and all Codex packages activate integrations; bootstrap notify is testable alone", () => {
   for (const entry of testPackages.filter(entry => entry.id.startsWith("pi-codex-") || entry.id === "pi-subagent")) {
     assert.deepEqual(affectedPlan([`${entry.directory}/index.ts`], [], sha).suites, ["composition", "consumers"]);
   }
-  const local = affectedPlan(["pi-extensions/pi-local-notify/index.ts"], [], sha);
-  assert.deepEqual(local.packages, ["pi-local-notify"]);
+  const local = affectedPlan(["pi-extensions/pi-notify/index.ts"], [], sha);
+  assert.deepEqual(local.packages, ["pi-notify"]);
   assert.deepEqual(local.suites, []);
   assert.deepEqual(affectedPlan(["tests/codex/fixture.json"], [], sha).suites, ["composition", "consumers"]);
 });
@@ -78,7 +78,7 @@ test("NUL diff handles deletes, renames and copies without path splitting", () =
 
 test("affected planning uses merge-base, rename endpoints, deleted paths, and base graph edges", () => {
   const repo = fixture();
-  const local = testPackages.find(entry => entry.id === "pi-local-notify");
+  const local = testPackages.find(entry => entry.id === "pi-notify");
   const telegram = testPackages.find(entry => entry.id === "pi-telegram-notify");
   const manifest = readPackage(local);
   manifest.optionalDependencies = { [telegram.name]: "1.0.0" };
@@ -91,27 +91,27 @@ test("affected planning uses merge-base, rename endpoints, deleted paths, and ba
   const head = repo.commit();
   const value = createPlan({ mode: "affected", base, head, root: repo.root });
   assert.equal(value.full, false);
-  assert.deepEqual(value.packages, ["pi-local-notify", "pi-telegram-notify"]);
+  assert.deepEqual(value.packages, ["pi-notify", "pi-telegram-notify"]);
   assert.equal(value.sourceSha, head);
   repo.git("rm", `${local.directory}/renamed file.ts`);
   const deletion = repo.commit();
-  assert.deepEqual(createPlan({ mode: "affected", base: head, head: deletion, root: repo.root }).packages, ["pi-local-notify"]);
+  assert.deepEqual(createPlan({ mode: "affected", base: head, head: deletion, root: repo.root }).packages, ["pi-notify"]);
   // A dirty working tree does not change the immutable revision plan.
   repo.write("unknown-file", "unstaged");
-  assert.deepEqual(createPlan({ mode: "affected", base: head, head: deletion, root: repo.root }).packages, ["pi-local-notify"]);
+  assert.deepEqual(createPlan({ mode: "affected", base: head, head: deletion, root: repo.root }).packages, ["pi-notify"]);
 });
 
 test("missing revisions/diff/graph safely fall back, but invalid registrations fail", () => {
   const repo = fixture();
   assert.equal(createPlan({ mode: "affected", base: "missing", root: repo.root }).full, true);
   assert.equal(createPlan({ mode: "affected", base: repo.base, head: "missing", root: repo.root }).sourceSha, "unknown");
-  repo.git("rm", "pi-extensions/pi-local-notify/package.json");
+  repo.git("rm", "pi-extensions/pi-notify/package.json");
   const missingManifestHead = repo.commit();
   // Current checkout registration must remain valid even when an explicit historic head is incomplete.
-  repo.write("pi-extensions/pi-local-notify/package.json", JSON.stringify(readPackage(testPackages.find(entry => entry.id === "pi-local-notify"))));
+  repo.write("pi-extensions/pi-notify/package.json", JSON.stringify(readPackage(testPackages.find(entry => entry.id === "pi-notify"))));
   assert.equal(createPlan({ mode: "affected", base: repo.base, head: missingManifestHead, root: repo.root }).full, true);
   const broken = fixture();
-  broken.write("pi-extensions/pi-local-notify/package.json", JSON.stringify({ name: "wrong", scripts: { check: "check" } }));
+  broken.write("pi-extensions/pi-notify/package.json", JSON.stringify({ name: "wrong", scripts: { check: "check" } }));
   assert.throws(() => createPlan({ mode: "affected", base: broken.base, head: broken.commit(), root: broken.root }), /registration/);
   let calls = 0;
   const value = createPlan({ mode: "affected", base: repo.base, git: args => {
@@ -131,14 +131,15 @@ test("every planning mode fails before fallback if the current checkout has an u
   }
 });
 
-test("release plans use canonical runtime/optional closure, never local notify", () => {
+test("release plans use canonical runtime/optional closure, never bootstrap notify", () => {
   const value = createPlan({ mode: "release", packageName: "@oai404iao/pi-codex-tools", git: () => sha });
   assert.deepEqual(value.packages, ["pi-codex-runtime", "pi-codex-tools"]);
   assert.deepEqual(value.suites, ["composition", "consumers", "infrastructure"]);
   const notify = createPlan({ mode: "release", packageName: "@oai404iao/pi-telegram-notify", git: () => sha });
   assert.deepEqual(notify.suites, ["infrastructure"]);
   assert.equal(createPlan({ mode: "release", packageName: "", git: () => sha }).packages.length, 8);
-  assert.throws(() => createPlan({ mode: "release", packageName: "@oai404iao/pi-local-notify", git: () => sha }), /Unapproved/);
+  assert.throws(() => createPlan({ mode: "release", packageName: "@oai404iao/pi-notify", git: () => sha }), /Unapproved/);
+  assert.throws(() => validatePlan({ ...notify, packages: ["pi-notify"] }), /release/);
 });
 
 test("CLI and plan validation reject conflicting/invalid/under-scoped input", () => {

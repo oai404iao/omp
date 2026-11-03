@@ -14,14 +14,15 @@ Run commands from the repository root unless stated otherwise.
 - `pnpm-workspace.yaml` defines the release workspaces. Tools has completed
   bootstrap activation and uses guarded publishing. The root `pnpm-lock.yaml`
   is the only project lockfile; do not add npm or per-package locks.
-- `pi-extensions/pi-local-notify/` is private and outside the release workspace.
-  Its checks use root-installed tooling; do not add it to publication batches.
+- `pi-extensions/pi-notify/` is a release workspace in `bootstrap` status.
+  Prepare its first tarball with the local bootstrap flow; normal publishing
+  excludes it until registry evidence and a separately reviewed activation.
 
 | Task | Command |
 | --- | --- |
 | Check one workspace package | `pnpm --filter @oai404iao/<package> run check` |
-| Check local-only notifications | `pnpm run check:local-notify` |
-| Check all extensions, including local-only notifications | `pnpm run check` |
+| Check combined notifications | `pnpm run check:notify` |
+| Check all workspace packages | `pnpm run check` |
 | Check Codex module/dependency boundaries | `pnpm run check:architecture` |
 | Test cross-package Codex behavior | `pnpm run test:codex-composition` |
 | Verify licenses and packaged files | `pnpm run license:check` and `pnpm run pack:check` |

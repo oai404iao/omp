@@ -45,10 +45,11 @@ test("failed policy blocks expensive tasks and a pool failure still reports othe
 
 test("single-task mode skips policy but rejects any task outside the selected plan", async () => {
   const calls = [];
-  const result = await executePlan(full(), { task: "package:pi-local-notify", runner: async (command, { task }) => {
-    calls.push(task); assert.deepEqual(command.slice(0, 3), ["pnpm", "--dir", "pi-extensions/pi-local-notify"]); return 0;
+  const result = await executePlan(full(), { task: "package:pi-notify", runner: async (command, { task }) => {
+    calls.push(task); assert.deepEqual(command,
+      ["pnpm", "--filter", "@oai404iao/pi-notify", "--fail-if-no-match", "run", "check"]); return 0;
   } });
-  assert.deepEqual(calls, ["package:pi-local-notify"]);
+  assert.deepEqual(calls, ["package:pi-notify"]);
   assert.equal(result.tasks.length, 1);
   await assert.rejects(executePlan(full(), { task: "unknown" }), /not present/);
   const release = createPlan({ mode: "release", packageName: "@oai404iao/pi-telegram-notify", git: () => "a".repeat(40) });

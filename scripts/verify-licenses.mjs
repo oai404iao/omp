@@ -190,6 +190,7 @@ for (const name of [
   "pi-codex-minimal-tools",
   "pi-subagent",
   "pi-telegram-notify",
+  "pi-notify",
 ]) {
   check(
     projectLicense.equals(read(`pi-extensions/${name}/LICENSE`)),
@@ -374,4 +375,4 @@ if (errors.length > 0) {
 
 console.log("✓ project and package license files are present");
 console.log("✓ verified third-party license snapshots and source hashes match");
-console.log("✓ private packages retain their publication guards");
+console.log("✓ package license and release-status checks pass");

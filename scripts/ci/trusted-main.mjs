@@ -11,7 +11,7 @@ const workflowPath = ".github/workflows/ci.yml";
 export const coverageWorkflowSha256 = "5d7b96ae0ef46a2a8d5d0e8beb1728fcb11d11fe2ca53d4dcc4590adf1260cc7";
 export const expectedJobNames = [
   "Verification plan", "Repository policy",
-  ...[...workspaces.map(entry => entry.directory), "pi-extensions/pi-local-notify"]
+  ...workspaces.map(entry => entry.directory)
     .map(directory => `Package / ${basename(directory)}`),
   ...["composition", "consumers", "infrastructure"].map(suite => `Suite / ${suite}`),
   "Compatibility / Node 22.19.0 / Pi floor",

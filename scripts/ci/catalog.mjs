@@ -2,12 +2,7 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { root, workspaces } from "../workspaces.mjs";
 
-// Local notifications are deliberately tested but never a release workspace.
-export const testPackages = [...workspaces, {
-  name: "@oai404iao/pi-local-notify",
-  directory: "pi-extensions/pi-local-notify",
-  private: true,
-}].map(entry => ({ ...entry, id: basename(entry.directory) }))
+export const testPackages = workspaces.map(entry => ({ ...entry, id: basename(entry.directory) }))
   .sort((a, b) => a.id.localeCompare(b.id));
 
 export const suites = ["composition", "consumers", "infrastructure"];
@@ -21,9 +16,7 @@ export const taskCatalog = new Map([
   ["policy", { id: "policy", commands: policyScripts.map(script => ["pnpm", "run", script]) }],
   ...testPackages.map(entry => [`package:${entry.id}`, {
     id: `package:${entry.id}`,
-    commands: [entry.private
-      ? ["pnpm", "--dir", entry.directory, "run", "check"]
-      : ["pnpm", "--filter", entry.name, "--fail-if-no-match", "run", "check"]],
+    commands: [["pnpm", "--filter", entry.name, "--fail-if-no-match", "run", "check"]],
   }]),
   ...Object.entries({ composition: "test:codex-composition", consumers: "test:codex-packages",
     infrastructure: "test:release-scripts" })

@@ -12,7 +12,7 @@ OMP 使用 Pi 的宿主配置，同时各扩展保留自己的配置契约。
 | Codex 每模型行为 | 同目录 `models.json`，由 runtime 的 schema/catalog 解释 |
 | 子代理角色、模型和工具上限 | [subagent 配置](../pi-extensions/pi-subagent/README.md)，不是 Codex 的 `models.json` |
 | Telegram 目标及通知策略 | [telegram-notify 配置](../pi-extensions/pi-telegram-notify/README.md) |
-| Kitty/tmux 桌面通知 | [local-notify 配置](../pi-extensions/pi-local-notify/README.md) |
+| pi-notify 的通道及 Telegram 凭据 | [pi-notify 配置](../pi-extensions/pi-notify/README.md)，均在 `extensions/pi-notify/config.json` |
 
 Pi 的个人 `settings.json` 和受信任项目 `.pi/settings.json` 控制资源加载。
 这并不意味着每个扩展的自有配置都支持项目覆盖。

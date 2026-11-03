@@ -43,6 +43,9 @@ for (const requested of job.orders) {
   assert.equal(new Set(commands).size, commands.length);
   if (requested.includes(prefix + "pi-subagent")) assert.ok(commands.includes("subagents"));
   if (requested.includes(prefix + "pi-telegram-notify")) assert.ok(commands.includes("telegram-notify"));
+  if (requested.includes(prefix + "pi-notify")) {
+    for (const command of ["notify", "notify-test"]) assert.ok(commands.includes(command));
+  }
   const ctx = { cwd: job.cwd, hasUI: false, sessionManager: { getSessionId: () => "release-consumer" } };
   result.runtime.getActiveTools = () => [];
   result.runtime.setActiveTools = () => {};

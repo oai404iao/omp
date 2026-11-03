@@ -9,10 +9,10 @@ import { convertResponsesTools } from "@oai404iao/pi-codex-runtime/internal/prov
 import { responseGrammarProperties, supportsGrammar } from "@oai404iao/pi-codex-runtime/internal/providers/responses/grammar";
 import { CODEX_TOOL_CALL_PROVIDERS, WEB_SEARCH_RESULTS_INCLUDE, WEB_SEARCH_SOURCES_INCLUDE } from "./constants.js";
 import { stripResponsesLiteImageDetails } from "./lite.js";
-import { clampCodexThinkingLevel, clampReasoningEffort } from "./reasoning.js";
+import { clampReasoningEffort, requestEffortBaseline, supportsEffortUpdates } from "./reasoning.js";
 import { type ResponsesBody, type NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { loadModelSettings, type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
-import { clampThinkingLevel } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { requestPrefix } from "./request-prefix.js";
 
 // Sampling overrides must not change the reviewed request envelope or enable
@@ -66,7 +66,8 @@ export function buildRequestBody<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
 	profile: CodexRequestProfile,
-	options?: SimpleStreamOptions & {
+	options?: Omit<SimpleStreamOptions, "reasoning"> & {
+		reasoning?: ModelThinkingLevel;
 		ownsNativeTool?: NativeToolOwnership;
 		imageGeneration?: false | "standalone";
 		modelSettings?: ResolvedCodexModelSettings;
@@ -90,9 +91,6 @@ export function buildRequestBody<TApi extends Api>(
 			profile.patchTransport === "custom" && tool.type === "function" && options?.toolProtocols?.has(tool.name)
 				? { ...options.toolProtocols.get(tool.name)!.customTool } : tool)
 		: [];
-	const messages = convertResponsesMessages(model, context, new Set([...CODEX_TOOL_CALL_PROVIDERS, model.provider]), {
-		includeSystemPrompt: false, grammarToolInputProperties: requestGrammarProperties({ tools }, context.tools, options?.toolProtocols),
-	});
 	const lite = profile.responsesMode === "lite";
 	const liteTools = (): unknown[] => {
 		const namespaces = new Map<string, {
@@ -149,11 +147,8 @@ export function buildRequestBody<TApi extends Api>(
 		if (verbosity) body.text = { verbosity };
 	}
 	if (lite) {
-		stripResponsesLiteImageDetails(messages);
-		body.input = [...requestPrefix(requestIdentity?.threadId, context.systemPrompt, liteTools()), ...messages];
 		body.reasoning = { context: "all_turns" };
 	} else {
-		body.input = [...requestPrefix(requestIdentity?.threadId, context.systemPrompt), ...messages];
 		body.tools = tools;
 	}
 
@@ -178,9 +173,7 @@ export function buildRequestBody<TApi extends Api>(
 	}
 
 	const clampedReasoning = options?.reasoning
-		? profile.responsesMode === "standard" && model.api === "openai-responses"
-			? clampThinkingLevel(model, options.reasoning)
-			: clampCodexThinkingLevel(model as Model<Api>, options.reasoning)
+		? clampThinkingLevel(model, options.reasoning)
 		: undefined;
 	if (model.api === "openai-responses") {
 		const samplingLevel = clampThinkingLevel(model, clampedReasoning ?? "off");
@@ -208,7 +201,6 @@ export function buildRequestBody<TApi extends Api>(
 	if (reasoningEffort !== undefined && model.reasoning) {
 		const effort = clampedReasoning === undefined || clampedReasoning === "off"
 			? reasoningEffort : model.thinkingLevelMap?.[reasoningEffort as ThinkingLevel] ?? reasoningEffort;
-		if (effort === null) return body;
 		const reasoning = body.reasoning ?? {};
 		reasoning.effort = clampReasoningEffort(model.id, effort);
 		const summary = (options as { reasoningSummary?: ReasoningSummary | null } | undefined)?.reasoningSummary
@@ -221,6 +213,16 @@ export function buildRequestBody<TApi extends Api>(
 		if (capabilities?.supportsReasoningSummary && profile.reasoningSummary !== "none") reasoning.summary = profile.reasoningSummary;
 		body.reasoning = reasoning;
 	}
+	const selectedEffort = body.reasoning?.effort;
+	// Prewarm has no durable reply boundary; retain its developer/tool-only prefix.
+	const appendEffort = supportsEffortUpdates(model) && selectedEffort !== undefined && !chatGPTSignIn && context.messages.length > 0;
+	const messages = convertResponsesMessages(model, context, new Set([...CODEX_TOOL_CALL_PROVIDERS, model.provider]), {
+		includeSystemPrompt: false, grammarToolInputProperties: requestGrammarProperties({ tools }, context.tools, options?.toolProtocols),
+		configurationUpdateEffort: appendEffort ? selectedEffort : undefined,
+	});
+	if (lite) stripResponsesLiteImageDetails(messages);
+	body.input = [...requestPrefix(requestIdentity?.threadId, context.systemPrompt, lite ? liteTools() : undefined), ...messages];
+	if (appendEffort) body.reasoning!.effort = requestEffortBaseline(model, context, selectedEffort);
 
 	return body;
 }
