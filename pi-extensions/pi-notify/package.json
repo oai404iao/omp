@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-notify",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Configurable Kitty and Telegram notifications for Pi.",
   "repository": {
     "type": "git",
