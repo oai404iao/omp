@@ -14,9 +14,10 @@ Run commands from the repository root unless stated otherwise.
 - `pnpm-workspace.yaml` defines the release workspaces. Tools has completed
   bootstrap activation and uses guarded publishing. The root `pnpm-lock.yaml`
   is the only project lockfile; do not add npm or per-package locks.
-- `pi-extensions/pi-notify/` is a release workspace in `bootstrap` status.
-  Prepare its first tarball with the local bootstrap flow; normal publishing
-  excludes it until registry evidence and a separately reviewed activation.
+- `pi-extensions/pi-notify/` uses guarded publishing; its verified `0.1.0`
+  first-publication identity is immutable. Read its
+  [activation evidence](docs/audits/pi-notify-bootstrap-activation.md) before
+  release work; do not repeat bootstrap publication.
 
 | Task | Command |
 | --- | --- |

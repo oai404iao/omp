@@ -41,6 +41,10 @@
     "@oai404iao/pi-codex-tools@0.1.0-alpha.1": {
       "gitHead": "b9deaba6ba07d87c048e474b2ddc977f3bd2b442",
       "integrity": "sha512-JVp6//UJsdANPVdEGDLeBLHn7CM/hfFsq0O0vR7BicrUBQHiBJL93ziPJAYdKD5BrlkAMvizsCgkgwwMkV2/pw=="
+    },
+    "@oai404iao/pi-notify@0.1.0": {
+      "gitHead": "915f7e4811de6f737607005f4da758fe86393c14",
+      "integrity": "sha512-SPF7Z27yvQ5TGfBHqsTqT7SlUAQ/NbKKXoVwo4jGmgsYCedaqtNmtjb3rJMuGBDLklaqm913goo7mdSsSZbrhQ=="
     }
   }
 }
