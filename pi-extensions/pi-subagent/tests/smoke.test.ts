@@ -29,16 +29,11 @@ test("real root SDK delivers wait messages as context, forks into a fresh tree, 
 	} });
 	// This test uses the actual extension loader, not the fixture controller.
 	await f.coordinator.shutdown();
-	const previous = process.env.PI_CODING_AGENT_DIR;
-	process.env.PI_CODING_AGENT_DIR = f.agentDir;
-	t.after(() => {
-		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
-		else process.env.PI_CODING_AGENT_DIR = previous;
-	});
 	const create: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 		const services = await createAgentSessionServices({
 			cwd, agentDir: f.agentDir, modelRuntime: f.modelRuntime,
-			resourceLoaderOptions: { noExtensions: true, extensionFactories: [{ name: "subagent", factory: extension }] },
+			resourceLoaderOptions: { noExtensions: true, extensionFactories: [{ name: "subagent",
+				factory: pi => extension(pi, { agentDir: f.agentDir }) }] },
 		});
 		return {
 			...await createAgentSessionFromServices({

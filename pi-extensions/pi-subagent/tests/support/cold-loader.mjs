@@ -1,15 +1,28 @@
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-const [cwd, countText, sdkModule, aiModule] = process.argv.slice(2);
-process.env.PI_CODING_AGENT_DIR = cwd;
+const [cwd, countText, sdkModule, aiModule, directoryMode] = process.argv.slice(2);
+const explicitDirectory = directoryMode === "explicit";
+process.env.PI_CODING_AGENT_DIR = explicitDirectory ? join(cwd, "conflicting-agent") : cwd;
 const { createAgentSessionFromServices, createAgentSessionServices, ModelRuntime, SessionManager } =
-	await import(sdkModule ?? "@earendil-works/pi-coding-agent");
-const { createAssistantMessageEventStream } = await import(aiModule ?? "@earendil-works/pi-ai");
+	await import(sdkModule || "@earendil-works/pi-coding-agent");
+const { createAssistantMessageEventStream } = await import(aiModule || "@earendil-works/pi-ai");
 const count = Number(countText);
 mkdirSync(cwd, { recursive: true });
 writeFileSync(join(cwd, "subagent.json"), JSON.stringify({ maxConcurrentAgents: count, openAIIdentity: true }));
 writeFileSync(join(cwd, "settings.json"), JSON.stringify({ retry: { enabled: false } }));
+let extensionPath = resolve(import.meta.dirname, "../../index.ts");
+if (explicitDirectory) {
+	mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+	writeFileSync(join(process.env.PI_CODING_AGENT_DIR, "subagent.json"), JSON.stringify({ maxDepth: 0 }));
+	mkdirSync(join(cwd, "agents"), { recursive: true });
+	writeFileSync(join(cwd, "agents", "worker.md"),
+		"---\nname: worker\ndescription: Explicit-directory worker\ntools: none\n---\nAnswer the task.\n");
+	const wrapperPath = join(cwd, "explicit-subagent.ts");
+	writeFileSync(wrapperPath, `import extension from ${JSON.stringify(extensionPath)};
+		export default pi => extension(pi, { agentDir: ${JSON.stringify(cwd)} });`);
+	extensionPath = wrapperPath;
+}
 const modelRuntime = await ModelRuntime.create({
 	authPath: join(cwd, "auth.json"), modelsPath: null,
 	modelsStorePath: join(cwd, "model-store.json"), allowModelNetwork: false,
@@ -35,7 +48,7 @@ modelRuntime.registerProvider("scripted", {
 });
 const services = await createAgentSessionServices({ cwd, agentDir: cwd, modelRuntime,
 	resourceLoaderOptions: { noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
-		additionalExtensionPaths: [resolve(import.meta.dirname, "../../index.ts")] } });
+		additionalExtensionPaths: [extensionPath] } });
 assert.deepEqual(services.diagnostics, []);
 const manager = SessionManager.create(cwd, join(cwd, "sessions"));
 const { session } = await createAgentSessionFromServices({ services, sessionManager: manager,
@@ -62,6 +75,7 @@ try {
 	};
 	await Promise.all(Array.from({ length: count }, (_, index) => call("spawn_agent", {
 		task_name: `worker_${index}`, message: "offline fixture", fork_turns: "none",
+		...(explicitDirectory ? { agent_type: "worker" } : {}),
 	})));
 	await idle();
 	assert.equal(requests, count);
