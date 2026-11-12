@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { globSync, mkdirSync, mkdtempSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { readManifest, registry, root, workspaces } from "./workspaces.mjs";
 import { piFloor, piVersion } from "./pi-baselines.mjs";
@@ -7,50 +7,13 @@ import { readPnpmLock } from "./pnpm-lock.mjs";
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const lock = readPnpmLock(resolve(root, "pnpm-lock.yaml"));
+const scratch = resolve(process.env.HOME, ".local/state/agents/tmp");
+mkdirSync(scratch, { recursive: true });
+const packDirectory = mkdtempSync(resolve(scratch, "omp-pack-check-"));
 
 const errors = [];
 const seenNames = new Set();
 const testedPiVersion = piFloor;
-const requiredRuntimeFiles = {
-  "@oai404iao/pi-codex-minimal-tools": ["subagent-inline.ts", "THIRD_PARTY_NOTICES.md"],
-  "@oai404iao/pi-codex-runtime": [
-    "LICENSES/Apache-2.0.txt",
-    "LICENSES/OpenAI-Codex-NOTICE.txt",
-    "THIRD_PARTY_NOTICES.md",
-    "provenance/openai-codex-eb9dceba-reserved-tools.json",
-    "provenance/openai-codex-ddea03ad-astra.json",
-    "provenance/openai-codex-40eac3ce-sol-luna.json",
-    "config.schema.json",
-    "models.schema.json",
-    "src/model-catalog/default-models.json",
-    "src/codex-reserved-tools.ts",
-  ],
-  "@oai404iao/pi-codex-core": [
-    "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "THIRD_PARTY_NOTICES.md",
-    "provenance/openai-codex-eb9dceba-reserved-tools.json",
-    "provenance/openai-codex-ddea03ad-astra.json",
-    "provenance/openai-codex-40eac3ce-sol-luna.json",
-  ],
-  "@oai404iao/pi-codex-tools": [
-    "LICENSES/Apache-2.0.txt", "LICENSES/OpenAI-Codex-NOTICE.txt", "THIRD_PARTY_NOTICES.md",
-    "provenance/openai-codex-eb9dceba-reserved-tools.json",
-    "src/providers/codex-apply-patch.lark",
-  ],
-  "@oai404iao/pi-codex-web-search": [
-    "THIRD_PARTY_NOTICES.md",
-  ],
-  "@oai404iao/pi-codex-imagegen": [
-    "THIRD_PARTY_NOTICES.md",
-  ],
-  "@oai404iao/pi-subagent": [
-    "LICENSES/DeepSeek-Harness-MIT.txt",
-    "THIRD_PARTY_NOTICES.md",
-    "provenance/deepseek-harness-4d03472.json",
-    "config.example.json",
-    "config.schema.json",
-  ],
-  "@oai404iao/pi-telegram-notify": ["config.example.json", "config.schema.json"],
-};
 
 function report(message) {
   errors.push(message);
@@ -157,7 +120,7 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
 
   const packed = spawnSync(
     pnpm,
-    ["--dir", directory, "pack", "--dry-run", "--json", "--ignore-scripts"],
+    ["--dir", directory, "pack", "--pack-destination", packDirectory, "--json", "--ignore-scripts"],
     {
       cwd: root,
       encoding: "utf8",
@@ -174,31 +137,35 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   if (!packOutput) continue;
 
   const packedPaths = new Set(packOutput.files.map((file) => normalizePackagePath(file.path)));
-  if (expectedName === "@oai404iao/pi-codex-minimal-tools") {
-    const allowed = new Set(["index.ts", "subagent-inline.ts", "package.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]);
-    for (const path of packedPaths) {
-      if (!allowed.has(path)) report(`${manifest.name}: composition tarball must not contain ${path}`);
-    }
-  } else if (["@oai404iao/pi-codex-web-search", "@oai404iao/pi-codex-imagegen"].includes(expectedName)) {
-    const allowed = new Set(["index.ts", "src/index.ts", "package.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]);
-    for (const path of packedPaths) {
-      if (!allowed.has(path)) report(`${manifest.name}: compatibility tarball must not contain ${path}`);
-    }
-    if (!packedPaths.has("src/index.ts")) report(`${manifest.name}: tarball is missing compatibility factory src/index.ts`);
-  } else if (expectedName.startsWith("@oai404iao/pi-codex-")) {
-    for (const path of readdirSync(resolve(root, directory, "src"), { recursive: true })) {
-      if (!path.endsWith(".ts")) continue;
-      const runtimePath = `src/${normalizePackagePath(path)}`;
-      if (!packedPaths.has(runtimePath)) report(`${manifest.name}: tarball is missing runtime module ${runtimePath}`);
+  const archive = spawnSync("tar", ["-tzf", resolve(packDirectory, packOutput.filename)], { encoding: "utf8" });
+  if (archive.status !== 0) {
+    report(`${manifest.name}: cannot inspect actual archive: ${archive.stderr}`);
+    continue;
+  }
+  const archivePaths = archive.stdout.trim().split("\n").filter(path => !path.endsWith("/"))
+    .map(path => path.replace(/^package\//, "")).sort();
+  if (JSON.stringify(archivePaths) !== JSON.stringify([...packedPaths].sort())) {
+    report(`${manifest.name}: actual tarball differs from pack file listing`);
+  }
+  const packageRoot = resolve(root, directory);
+  const expectedPaths = new Set(["package.json", "README.md", "LICENSE"]);
+  for (const pattern of manifest.files ?? []) {
+    const matches = [...globSync(pattern.replace(/\/$/, ""), { cwd: packageRoot })];
+    if (!matches.length) report(`${manifest.name}: files entry matches nothing: ${pattern}`);
+    for (const path of matches) {
+      if (statSync(resolve(packageRoot, path)).isDirectory()) {
+        for (const entry of readdirSync(resolve(packageRoot, path), { recursive: true, withFileTypes: true })) {
+          if (entry.isFile()) expectedPaths.add(normalizePackagePath(
+            `${entry.parentPath.slice(packageRoot.length + 1)}/${entry.name}`));
+        }
+      } else expectedPaths.add(normalizePackagePath(path));
     }
   }
-  for (const required of [
-    "package.json",
-    "README.md",
-    "LICENSE",
-    ...(requiredRuntimeFiles[expectedName] ?? []),
-  ]) {
-    if (!packedPaths.has(required)) report(`${manifest.name}: tarball is missing ${required}`);
+  for (const path of expectedPaths) {
+    if (!packedPaths.has(path)) report(`${manifest.name}: tarball is missing declared file ${path}`);
+  }
+  for (const path of packedPaths) {
+    if (!expectedPaths.has(path)) report(`${manifest.name}: tarball contains undeclared file ${path}`);
   }
   for (const extension of manifest.pi?.extensions ?? []) {
     const entry = normalizePackagePath(extension);
@@ -221,7 +188,8 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
     }
     if (
       path === "tsconfig.json"
-      || /^(?:test|tests|reference)\//.test(path)
+      || /(^|\/)(?:test|tests|reference)\//.test(path)
+      || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
       || /(^|\/)AGENTS\.md$/i.test(path)
       || /^docs\/(?:audits|plans)\//.test(path)
     ) {
