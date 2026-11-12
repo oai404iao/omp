@@ -17,6 +17,7 @@ function fixture(t, options = {}) {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const scripts = join(directory, "scripts"), bin = join(directory, "bin");
   for (const path of [scripts, bin, join(directory, "release-locks")]) mkdirSync(path);
+  writeFileSync(join(directory, "package.json"), JSON.stringify({ devDependencies: { npm: "11.19.0" } }));
   for (const file of ["prepare-release-artifacts.mjs", "publish-release-artifacts.mjs", "release-batch.mjs",
     "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs", "targeted-release.mjs", "initial-codex-bootstrap.mjs"]) {
     copyFileSync(join(root, "scripts", file), join(scripts, file));
@@ -47,6 +48,7 @@ function fixture(t, options = {}) {
   writeFileSync(join(bin, "npm"), `#!/usr/bin/env node
 const fs = require("node:fs"), cp = require("node:child_process"), crypto = require("node:crypto");
 const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("11.19.0"); process.exit(0); }
 fs.appendFileSync(process.env.CALL_LOG, "npm " + args.join(" ") + "\\n");
 const registry = JSON.parse(fs.readFileSync(process.env.FIXTURE_REGISTRY, "utf8"));
 if (args[0] === "publish") {
