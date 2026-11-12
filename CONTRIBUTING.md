@@ -196,9 +196,9 @@ audit 门禁均未关闭。旧 PR 在创建后 30 天内仍可能继续自动 re
 ## 查询 Codex 架构限制
 
 `check:architecture` 检查本地模块边（包括 type import）、兼容入口的反向依赖、
-直接／传递层级限制和源码行数。provider runtime 不得通过中间模块绕到工具实现或
-本地图像／主题工具。新 Codex 源码模块上限 400 行；现有超限例外记录在
-`scripts/codex-architecture.json`，应缩小或移除，不能扩张。
+直接／传递层级限制。provider runtime 不得通过中间模块绕到工具实现或
+本地图像／主题工具。源码行数预算只产生非阻断警告；基线记录在
+`scripts/codex-architecture.json`。
 
 仅开发使用的 `typescript-ast` alias 提供 TypeScript 5.9 compiler API 做语法解析，
 不替换工作区的 TypeScript 7 编译器。组合、broker 和生命周期改动另见

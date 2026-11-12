@@ -60,10 +60,9 @@ Live model tests are separate from CI; do not run them without explicit authoriz
 - Behavioral tests belong with their implementation owner. Cross-capability
   integration and neutral fixtures belong in `tests/codex/`, not owner tests
   that import another capability.
-- Codex source boundaries and line budgets are checked by
-  `scripts/check-codex-architecture.mjs`; reviewed exceptions live in
-  `scripts/codex-architecture.json`. New Codex source modules must stay within
-  400 lines; reduce existing exceptions rather than enlarging them.
+- Codex source boundaries are enforced by `scripts/check-codex-architecture.mjs`.
+  Its line budgets are advisory warnings; reviewed baselines live in
+  `scripts/codex-architecture.json`.
 - Preserve the shared `extensions/pi-codex-minimal-tools/` configuration paths.
   Runtime owns the canonical schemas/catalog. Do not invent per-capability
   configuration directories or infer support for unknown model IDs.
