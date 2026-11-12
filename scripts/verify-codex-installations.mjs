@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify } from "yaml";
 import { piVersion } from "./pi-baselines.mjs";
@@ -40,12 +40,34 @@ function pnpm(args, cwd) {
   return result.stdout;
 }
 
-function assertContainedTree(path, consumer) {
+function assertContainedTree(path, consumer, omitOptional = false) {
   for (const entry of readdirSync(path)) {
     const file = join(path, entry);
     const stat = lstatSync(file);
-    if (stat.isSymbolicLink()) assert.ok(realpathSync(file).startsWith(`${consumer}/`), `external link: ${file}`);
-    else if (stat.isDirectory()) assertContainedTree(file, consumer);
+    if (stat.isSymbolicLink()) {
+      try {
+        assert.ok(realpathSync(file).startsWith(`${consumer}/`), `external link: ${file}`);
+      } catch (error) {
+        const store = join(consumer, "node_modules/.pnpm");
+        if (error.code !== "ENOENT" || !omitOptional
+          || file !== join(store, "node_modules/@oai404iao/pi-codex-runtime")) throw error;
+        // pnpm can retain this hoisted link when --no-optional omits its
+        // runtime snapshot. Its target must still stay inside this consumer.
+        const target = resolve(dirname(file), readlinkSync(file));
+        assert.ok(target.startsWith(`${store}/`), `external omitted runtime link: ${file}`);
+        const parts = target.slice(store.length + 1).split("/");
+        assert.ok(parts.length === 4 && parts[0].startsWith("@oai404iao+pi-codex-runtime@")
+          && parts.slice(1).join("/") === "node_modules/@oai404iao/pi-codex-runtime",
+        `unexpected omitted runtime target: ${target}`);
+        let ancestor = dirname(target);
+        for (;;) {
+          try { lstatSync(ancestor); break; }
+          catch (missing) { if (missing.code !== "ENOENT") throw missing; }
+          ancestor = dirname(ancestor);
+        }
+        assert.ok(realpathSync(ancestor).startsWith(`${consumer}/`), `external omitted runtime ancestor: ${ancestor}`);
+      }
+    } else if (stat.isDirectory()) assertContainedTree(file, consumer, omitOptional);
   }
 }
 
@@ -91,7 +113,18 @@ function install(label, requested) {
   // The projection already validates reviewed artifact identities. pnpm 12's
   // policy recheck otherwise needs registry metadata even for a frozen lock.
   pnpm(["install", "--store-dir", storeDirectory, "--frozen-lockfile", "--offline", "--trust-lockfile", "--ignore-scripts", "--prod", ...(omitOptional ? ["--no-optional"] : [])], path);
-  assertContainedTree(join(path, "node_modules"), path);
+  if (omitOptional) {
+    const hoisted = join(path, "node_modules/.pnpm/node_modules/@oai404iao/pi-codex-runtime");
+    try { lstatSync(hoisted); }
+    catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      // Exercise pnpm's dangling optional-hoist shape even on installations
+      // that do not retain the link; no runtime snapshot is materialized.
+      mkdirSync(dirname(hoisted), { recursive: true });
+      symlinkSync("../../@oai404iao+pi-codex-runtime@omitted-fixture/node_modules/@oai404iao/pi-codex-runtime", hoisted);
+    }
+  }
+  assertContainedTree(join(path, "node_modules"), path, omitOptional);
   assert.deepEqual(readdirSync(join(path, "node_modules/@oai404iao")).sort(), [...installed].map(n => n.slice(prefix.length)).sort());
   for (const name of installed) {
     assert.ok(realpathSync(join(path, "node_modules", name)).startsWith(path), `${name} leaked from the workspace`);
