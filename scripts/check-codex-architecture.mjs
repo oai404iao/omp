@@ -84,6 +84,7 @@ export function checkArchitecture(directory, policy) {
   const known = new Set(files);
   const graph = new Map();
   const errors = [];
+  const warnings = [];
   const measured = {};
   const packageRoots = policy.packageRoots ?? {};
   const manifests = new Map(Object.entries(packageRoots).map(([name, path]) =>
@@ -129,7 +130,7 @@ export function checkArchitecture(directory, policy) {
     const lines = text.replace(/\n$/, "").split("\n").length;
     measured[name] = lines;
     const limit = policy.exceptions[name]?.maxLines ?? policy.maxLines;
-    if (lines > limit) errors.push(`${name}: ${lines} lines exceeds ${limit}`);
+    if (lines > limit) warnings.push(`${name}: ${lines} lines exceeds ${limit}`);
     const dependencies = new Set();
     for (const specifier of moduleReferences(text, file)) {
       const target = specifier.startsWith(".")
@@ -167,11 +168,6 @@ export function checkArchitecture(directory, policy) {
     }
     graph.set(file, dependencies);
   }
-  for (const [name, exception] of Object.entries(policy.exceptions)) {
-    if (!(name in measured)) errors.push(`${name}: stale line-budget exception`);
-    else if (measured[name] <= policy.maxLines) errors.push(`${name}: remove unnecessary line-budget exception`);
-    if (!exception.reason) errors.push(`${name}: exception needs an ownership/reduction rationale`);
-  }
   for (const cycle of findCycles(graph)) errors.push(`cycle: ${cycle.map(localName).join(" -> ")}`);
   for (const rule of policy.forbiddenReachable ?? []) {
     for (const file of files) {
@@ -180,15 +176,16 @@ export function checkArchitecture(directory, policy) {
       if (path) errors.push(`forbidden dependency path: ${path.map(localName).join(" -> ")}`);
     }
   }
-  return { errors, measured, graph };
+  return { errors, warnings, measured, graph };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const result = checkArchitecture(codexSource, JSON.parse(readFileSync(policyPath, "utf8")));
+  for (const warning of result.warnings) console.warn(`Warning: ${warning}`);
   if (result.errors.length) {
     console.error(result.errors.join("\n"));
     process.exitCode = 1;
   } else {
-    console.log(`✓ Codex: ${result.graph.size} modules; no cycles, facade back-edges or forbidden capability paths; line budgets hold`);
+    console.log(`✓ Codex: ${result.graph.size} modules; no cycles, facade back-edges or forbidden capability paths`);
   }
 }

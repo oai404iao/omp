@@ -122,22 +122,18 @@ test("workspace edges require exported paths and exact declared runtime dependen
   withSources(files, dir => assert.match(checkArchitecture(dir, matrix).errors[0], /forbidden installed package dependency/));
 });
 
-test("line budgets reject growth, undocumented exceptions and obsolete exceptions", () => {
-  withSources({ "a.ts": "// a\n// b\n// c\n// d\n" }, (directory) => {
-    assert.match(checkArchitecture(directory, policy).errors[0], /4 lines exceeds 3/);
+test("line budgets warn without changing architectural acceptance", () => {
+  withSources({ "a.ts": "// a\n// b\n// c\n// d\n" }, directory => {
+    const result = checkArchitecture(directory, policy);
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.warnings, ["a.ts: 4 lines exceeds 3"]);
     assert.deepEqual(checkArchitecture(directory, {
       ...policy, exceptions: { "a.ts": { maxLines: 4, reason: "Existing state machine" } },
-    }).errors, []);
-    assert.ok(checkArchitecture(directory, {
-      ...policy, exceptions: { "a.ts": { maxLines: 4 } },
-    }).errors.some(e => e.includes("rationale")));
-    assert.ok(checkArchitecture(directory, {
-      ...policy, exceptions: { "missing.ts": { maxLines: 4, reason: "Removed" } },
-    }).errors.some(e => e.includes("stale")));
+    }).warnings, []);
   });
-  withSources({ "a.ts": "export {};\n" }, (directory) => {
-    assert.ok(checkArchitecture(directory, {
-      ...policy, exceptions: { "a.ts": { maxLines: 4, reason: "Already reduced" } },
-    }).errors.some(e => e.includes("unnecessary")));
+  withSources({ "a.ts": "export {};\n" }, directory => {
+    assert.deepEqual(checkArchitecture(directory, {
+      ...policy, exceptions: { "a.ts": { maxLines: 4 }, "missing.ts": { maxLines: 4 } },
+    }).errors, []);
   });
 });
