@@ -90,6 +90,7 @@ test("preparation never repacks a locked published version after an E404 lookup"
   try {
     const scripts = join(temporary, "scripts"), bin = join(temporary, "bin");
     mkdirSync(scripts); mkdirSync(bin); mkdirSync(join(temporary, "release-locks"));
+    writeFileSync(join(temporary, "package.json"), JSON.stringify({ devDependencies: { npm: "11.19.0" } }));
     for (const file of ["prepare-release-artifacts.mjs", "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs", "targeted-release.mjs"]) {
       copyFileSync(join(root, "scripts", file), join(scripts, file));
     }
@@ -113,6 +114,7 @@ if [ "$1" = "status" ]; then exit 0; fi
 exit 1
 `);
     writeFileSync(join(bin, "npm"), `#!/bin/sh
+if [ "$1" = "--version" ]; then printf '11.19.0\\n'; exit 0; fi
 printf 'npm %s\\n' "$*" >> "$CALL_LOG"
 printf '{"error":{"code":"E404"}}\\n'
 exit 1

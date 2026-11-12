@@ -21,6 +21,7 @@ function prepareFixture(t, unexpectedFilename) {
     copyFileSync(join(root, "scripts", file), join(scripts, file));
   }
   writeFileSync(join(temporary, ".gitignore"), "release-artifacts/\ncalls.log\n");
+  writeFileSync(join(temporary, "package.json"), JSON.stringify({ devDependencies: { npm: "11.19.0" } }));
   writeFileSync(join(temporary, "fixture/package.json"), JSON.stringify(manifest));
   writeFileSync(join(temporary, "fixture/index.js"), "export const fixture = true;\n");
   writeFileSync(join(temporary, "release-locks/npm-published-artifacts.json"), JSON.stringify({
@@ -38,6 +39,7 @@ function prepareFixture(t, unexpectedFilename) {
   // Only the registry is mocked in the successful case: git archive and pnpm
   // produce the real immutable release tarball, without any network request.
   writeFileSync(join(bin, "npm"), `#!/bin/sh
+if [ "$1" = "--version" ]; then printf '11.19.0\\n'; exit 0; fi
 printf 'npm %s\\n' "$*" >> "$CALL_LOG"
 if [ "$1" = "view" ]; then printf '{"error":{"code":"E404"}}\\n'; exit 1; fi
 printf 'Unexpected npm operation\\n' >&2

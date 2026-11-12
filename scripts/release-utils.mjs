@@ -5,6 +5,14 @@ import { resolve } from "node:path";
 import { registry, root } from "./workspaces.mjs";
 
 export const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmVersion = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).devDependencies?.npm;
+if (typeof npmVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(npmVersion)) {
+  throw new Error("release tooling requires an exact npm devDependency pin");
+}
+const npmClient = spawnSync(npm, ["--version"], { cwd: root, encoding: "utf8" });
+if (npmClient.status !== 0 || npmClient.stdout.trim() !== npmVersion) {
+  throw new Error(`release tooling requires npm ${npmVersion}; run through pnpm with dependencies installed`);
+}
 const onlineRegistryOptions = ["--prefer-online", "--prefer-offline=false", "--offline=false"];
 const publishedArtifactLock = JSON.parse(
   readFileSync(resolve(root, "release-locks/npm-published-artifacts.json"), "utf8"),
@@ -58,7 +66,11 @@ export function lookupPublishedVersion(name, version) {
     throw new Error(`npm view failed for ${name}@${version}: ${output.trim()}`);
   }
 
-  const value = JSON.parse(result.stdout);
+  const response = JSON.parse(result.stdout);
+  if (Array.isArray(response) && response.length !== 1) {
+    throw new Error(`npm returned ambiguous version metadata for ${name}@${version}`);
+  }
+  const value = Array.isArray(response) ? response[0] : response;
   const publishedVersion = typeof value === "string" ? value : value?.version;
   const gitHead = typeof value === "object" && value ? value.gitHead : undefined;
   const integrity = typeof value === "object" && value

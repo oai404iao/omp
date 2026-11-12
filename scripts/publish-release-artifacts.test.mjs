@@ -33,6 +33,7 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
     const resultPath = join(temporaryDirectory, "result.json");
     const callLog = join(temporaryDirectory, "calls.log");
     mkdirSync(binaryDirectory);
+    writeFileSync(join(temporaryDirectory, "package.json"), JSON.stringify({ devDependencies: { npm: "11.19.0" } }));
     const scripts = join(temporaryDirectory, "scripts");
     mkdirSync(scripts);
     for (const name of ["publish-release-artifacts.mjs", "release-batch.mjs", "release-dependencies.mjs", "release-utils.mjs", "initial-codex-bootstrap.mjs", "targeted-release.mjs"]) {
@@ -86,6 +87,7 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
       `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("11.19.0"); process.exit(0); }
 fs.appendFileSync(process.env.CALL_LOG, "npm " + args.join(" ") + "\\n");
 function isDelayed(kind, target, attempts) {
   if (!target || args[1] !== target || !attempts) return false;

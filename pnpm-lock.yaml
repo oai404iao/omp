@@ -246,6 +246,9 @@ importers:
       "@types/node":
         specifier: 26.6.6
         version: 26.6.6
+      npm:
+        specifier: 11.19.0
+        version: 11.19.0
       tsx:
         specifier: 4.23.15
         version: 4.23.15
@@ -1678,6 +1681,79 @@ packages:
       tarball: https://registry.npmjs.org/node-fetch/-/node-fetch-3.3.2.tgz
     engines:
       node: ^12.20.0 || ^14.13.1 || >=16.0.0
+  npm@11.19.0:
+    resolution:
+      integrity: sha512-SDd/hHg3KqHE5Ht2NHWxNYNtqCQ2pXAPLl6OtQhPyED5PHsRfrOtO199MZTIG2cQoQ1ZRI9t28shrD+2cr3AAw==
+      tarball: https://registry.npmjs.org/npm/-/npm-11.19.0.tgz
+    engines:
+      node: ^20.17.0 || >=22.9.0
+    hasBin: true
+    bundledDependencies:
+      - "@isaacs/string-locale-compare"
+      - "@npmcli/arborist"
+      - "@npmcli/config"
+      - "@npmcli/fs"
+      - "@npmcli/map-workspaces"
+      - "@npmcli/metavuln-calculator"
+      - "@npmcli/package-json"
+      - "@npmcli/promise-spawn"
+      - "@npmcli/redact"
+      - "@npmcli/run-script"
+      - "@sigstore/tuf"
+      - abbrev
+      - archy
+      - cacache
+      - chalk
+      - ci-info
+      - fastest-levenshtein
+      - fs-minipass
+      - glob
+      - graceful-fs
+      - hosted-git-info
+      - ini
+      - init-package-json
+      - is-cidr
+      - json-parse-even-better-errors
+      - libnpmaccess
+      - libnpmdiff
+      - libnpmexec
+      - libnpmfund
+      - libnpmorg
+      - libnpmpack
+      - libnpmpublish
+      - libnpmsearch
+      - libnpmteam
+      - libnpmversion
+      - make-fetch-happen
+      - minimatch
+      - minipass
+      - minipass-pipeline
+      - ms
+      - node-gyp
+      - nopt
+      - npm-audit-report
+      - npm-install-checks
+      - npm-package-arg
+      - npm-pick-manifest
+      - npm-profile
+      - npm-registry-fetch
+      - npm-user-validate
+      - p-map
+      - pacote
+      - parse-conflict-json
+      - proc-log
+      - qrcode-terminal
+      - read
+      - semver
+      - spdx-expression-parse
+      - ssri
+      - supports-color
+      - tar
+      - text-table
+      - tiny-relative-date
+      - treeverse
+      - validate-npm-package-name
+      - which
   openai@7.19.0:
     resolution:
       integrity: sha512-MX2s3u2L5racTO0CC/SWpCOasJQBCJrqLKXK+l82cAhdeF8mPMBEe/gxMm0ZFa2xpKpOFLRjxv5afYEZbBXmbQ==
@@ -2768,6 +2844,7 @@ snapshots:
       data-uri-to-buffer: 4.0.1
       fetch-blob: 3.2.0
       formdata-polyfill: 4.0.10
+  npm@11.19.0: {}
   openai@7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.10.2)(ws@8.21.3):
     optionalDependencies:
       "@aws-sdk/credential-provider-node": 3.972.84
