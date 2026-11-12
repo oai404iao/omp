@@ -1,17 +1,24 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { registry, root } from "./workspaces.mjs";
 
-export const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+const localNpm = resolve(root, "node_modules/.bin", npmExecutable);
+export const npm = existsSync(localNpm) ? localNpm : npmExecutable;
 const npmVersion = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).devDependencies?.npm;
 if (typeof npmVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(npmVersion)) {
   throw new Error("release tooling requires an exact npm devDependency pin");
 }
-const npmClient = spawnSync(npm, ["--version"], { cwd: root, encoding: "utf8" });
-if (npmClient.status !== 0 || npmClient.stdout.trim() !== npmVersion) {
-  throw new Error(`release tooling requires npm ${npmVersion}; run through pnpm with dependencies installed`);
+let npmClientValidated = false;
+function assertNpmClient() {
+  if (npmClientValidated) return;
+  const npmClient = spawnSync(npm, ["--version"], { cwd: root, encoding: "utf8" });
+  if (npmClient.status !== 0 || npmClient.stdout.trim() !== npmVersion) {
+    throw new Error(`release tooling requires npm ${npmVersion}; run through pnpm with dependencies installed`);
+  }
+  npmClientValidated = true;
 }
 const onlineRegistryOptions = ["--prefer-online", "--prefer-offline=false", "--offline=false"];
 const publishedArtifactLock = JSON.parse(
@@ -40,6 +47,7 @@ export function tagFor(name, version) {
 }
 
 export function lookupPublishedVersion(name, version) {
+  assertNpmClient();
   const result = spawnSync(
     npm,
     [
@@ -118,6 +126,7 @@ export function assertLockedPublishedArtifact(name, version, published) {
 }
 
 export function lookupDistTags(name) {
+  assertNpmClient();
   const result = spawnSync(
     npm,
     ["view", name, "dist-tags", "--json", ...onlineRegistryOptions, "--registry", registry],
@@ -138,6 +147,7 @@ export function lookupDistTags(name) {
 }
 
 export function lookupPublishedVersions(name) {
+  assertNpmClient();
   const result = spawnSync(
     npm,
     ["view", name, "versions", "--json", ...onlineRegistryOptions, "--registry", registry],
