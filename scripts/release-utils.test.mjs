@@ -18,15 +18,36 @@ export const registry = "https://registry.npmjs.org/";`);
   writeFileSync(join(directory, "release-locks/npm-published-artifacts.json"), JSON.stringify({
     schemaVersion: 1, registry: "https://registry.npmjs.org/", releases: {},
   }));
-  writeFileSync(join(bin, "npm"), `#!/usr/bin/env node
-if (process.argv[2] === "--version") { console.log(${JSON.stringify(options.clientVersion ?? "11.19.0")}); }
+  const npmMock = version => `#!/usr/bin/env node
+if (process.argv[2] === "--version") { console.log(${JSON.stringify(version)}); }
 else { console.log(${JSON.stringify(JSON.stringify(response))}); process.exit(${options.status ?? 0}); }
-`);
+`;
+  writeFileSync(join(bin, "npm"), npmMock(options.clientVersion ?? "11.19.0"));
   chmodSync(join(bin, "npm"), 0o755);
-  return spawnSync(process.execPath, ["--input-type=module", "-e", `
-    import { lookupPublishedVersion } from ${JSON.stringify(join(scripts, "release-utils.mjs"))};
-    console.log(JSON.stringify(lookupPublishedVersion("@fixture/package", "1.0.0")));
-  `], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  if (options.localClientVersion) {
+    const localBin = join(directory, "node_modules/.bin");
+    mkdirSync(localBin, { recursive: true });
+    writeFileSync(join(localBin, "npm"), npmMock(options.localClientVersion));
+    chmodSync(join(localBin, "npm"), 0o755);
+  }
+  const operation = options.operation ?? "lookupPublishedVersion";
+  const code = operation === "planner" ? `
+    const cp = await import("node:child_process");
+    const spawnSync = cp.default.spawnSync;
+    cp.default.spawnSync = (command, ...args) => {
+      if (String(command).includes("npm")) throw new Error("planner must not invoke npm");
+      return spawnSync(command, ...args);
+    };
+    (await import("node:module")).syncBuiltinESMExports();
+    await import(${JSON.stringify(join(root, "scripts/ci/plan.mjs"))});
+    console.log("loaded");
+  ` : `
+    import * as release from ${JSON.stringify(join(scripts, "release-utils.mjs"))};
+    console.log(JSON.stringify(release[${JSON.stringify(operation)}]("@fixture/package", "1.0.0")));
+  `;
+  return spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+    encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
 }
 
 const metadata = { version: "1.0.0", gitHead: "source", "dist.integrity": "sha512-fixture" };
@@ -55,9 +76,25 @@ test("empty, multiple and mismatched metadata fail closed", { skip: process.plat
 });
 
 test("npm client must match the exact repository pin", { skip: process.platform === "win32" }, t => {
-  for (const options of [{ clientVersion: "12.0.0" }, { pin: "^11.19.0" }]) {
+  for (const options of [
+    ...["lookupPublishedVersion", "lookupDistTags", "lookupPublishedVersions"]
+      .map(operation => ({ operation, clientVersion: "12.0.0" })),
+    { pin: "^11.19.0" },
+  ]) {
     const child = lookup(t, metadata, options);
     assert.notEqual(child.status, 0);
     assert.match(child.stderr, /requires npm 11.19.0|requires an exact npm devDependency pin/);
   }
+});
+
+test("plain node can import the CI planner without a pinned npm client", { skip: process.platform === "win32" }, t => {
+  const child = lookup(t, metadata, { operation: "planner", clientVersion: "12.0.0" });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stdout.trim(), "loaded");
+});
+
+test("plain node registry lookups prefer the installed local npm over the host client", { skip: process.platform === "win32" }, t => {
+  const child = lookup(t, metadata, { clientVersion: "12.0.0", localClientVersion: "11.19.0" });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(JSON.parse(child.stdout).version, "1.0.0");
 });
