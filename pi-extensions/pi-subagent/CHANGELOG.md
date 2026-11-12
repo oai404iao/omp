@@ -1,5 +1,12 @@
 # @oai404iao/pi-subagent
 
+## 1.4.1
+
+### Patch Changes
+
+- 9e2c47c: Allow SDK applications to pass an explicit agent directory to the subagent extension, and share the resolved directory across settings, roles and child runtimes.
+- f2dfa3e: Allow integration loader injection and verify one awaited load per activation with independent inline instances for child runtimes.
+
 ## 1.4.0
 
 ### Minor Changes
