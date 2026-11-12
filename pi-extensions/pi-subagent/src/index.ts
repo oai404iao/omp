@@ -13,8 +13,11 @@ import { loadCodexIntegration } from "./codex-integration.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-export default async function subagentExtension(pi: ExtensionAPI, options: { agentDir?: string } = {}): Promise<void> {
-	const codexIntegration = await loadCodexIntegration();
+export default async function subagentExtension(pi: ExtensionAPI, options: {
+	agentDir?: string;
+	loadCodexIntegration?: typeof loadCodexIntegration;
+} = {}): Promise<void> {
+	const codexIntegration = await (options.loadCodexIntegration ?? loadCodexIntegration)();
 	let coordinator: SubagentCoordinator | undefined;
 	let initializationError: unknown;
 	let dashboardOpen = false;
