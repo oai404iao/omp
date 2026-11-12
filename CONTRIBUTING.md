@@ -62,7 +62,7 @@ pnpm install --frozen-lockfile --ignore-scripts
 
 更新 Pi 基线时，一并更新开发依赖、peer 范围、锁文件、兼容说明和测试，
 不得把最低版本降到已测试基线以下。检查会验证实际解析到的 SDK，不只看 peer 声明。
-日志、复用条件和测试限制见 [Pi 兼容性](docs/pi-compatibility.md)。
+日志和测试限制见 [Pi 兼容性](docs/pi-compatibility.md)。
 
 ### 排查隔离消费者失败
 
@@ -154,27 +154,16 @@ revision 计划比较不可变 Git 提交，**不包含已暂存或未暂存的�
 | 触发方式 | 行为覆盖 |
 | --- | --- |
 | PR | affected 计划，仅 Node 24 / Pi target |
-| main push、手动 CI | 全量计划，Node 22.19.0 / 24.x × Pi floor / target |
+| main push、手动 CI | Node 24 / target 全量计划，另加 Node 22.19.0 / floor 兼容检查 |
 
 仓库 policy 和 production audit 每次都运行。policy 成功后，选中的包和共享套件
 分别进入有界矩阵。main 的完整检查仍可能在合并后发现 PR 范围之外的兼容回归。
 
 Node 24/target 的规范检查直接使用已提交根锁和独立 agent 目录，在包／套件 job 中只执行一次；
-选中 consumers 时始终 exhaustive。其他 3 个兼容角色保留独立快照和锁准备，使用
-`OMP_CODEX_CONSUMER_MODE=smoke`：仍打包全部 6 个 Codex 包，验证隔离 bundle 的实际
-SDK、loader 和 inline re-export。普通本地 `ci`、`test:codex-packages`、`ci:pi-matrix`
-默认保持 exhaustive；非法 consumer mode 直接失败。
-
-### floor 什么时候能复用 target
-
-远程 CI 显式设置 `OMP_PI_REUSE_TARGET=1`。只有**同一源码、同一 Node 版本**的完整
-target 成功是强制伴随条件，且 Pi 版本、所有投影工作区／根 manifest、完整应用锁均相等时，
-floor 才能复用行为测试。只比较版本号不够。
-
-即使复用，floor 仍重新生成锁、验证 integrity、frozen install、检查实际 SDK／CLI、
-检查打包并运行隔离消费者 smoke。任一输入不同就执行该角色所配置 consumer mode 的完整套件。
-最终 aggregate 要求伴随 target 的完整覆盖；不能脱离它单独启用 floor 复用。
-本地显式启用复用的 `all` 先运行 target，target 失败绝不复用。
+PR 选中 consumers 时运行 smoke，main/manual 保留 exhaustive。附加 floor 角色保留独立快照、
+锁投影、integrity 校验和 frozen install，随后验证实际 SDK、所有包 check、composition 和
+consumer smoke，不重复 policy 或发布基础设施测试。本地 `ci:pi-matrix` 的两个 Pi 角色
+执行相同的分层兼容检查；普通 `ci`、`test:codex-packages` 默认保持 exhaustive。
 
 ### required contexts 和证据
 

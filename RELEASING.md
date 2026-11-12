@@ -159,7 +159,7 @@ composition 和 consumer 套件。独立 Telegram 发布无需重跑无关 Codex
 只读 publish 验证 job 用 `actions: read` 查询规范 GitHub CI。仅当发布 SHA 的**最新
 main push run／attempt**成功，且以下全部完成，才允许复用源码行为结果：
 
-- 9 个包 job、3 个共享套件、3 个附加兼容角色；
+- 全部包 job、3 个共享套件、Node 22.19.0 / floor 附加兼容角色；
 - 4 个既有 aggregate contexts 和 `Trusted main coverage / v1`；
 - `.github/workflows/ci.yml` 的内容匹配 `scripts/ci/trusted-main.mjs` 固定的已审阅 SHA-256；
 - API 完整分页、repository／head 身份、每个 job 的 run／attempt／SHA 均一致；live main 仍等于发布 SHA。

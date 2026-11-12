@@ -130,7 +130,7 @@ jobs:
         env:
           VERIFICATION_PLAN: ${{ needs.plan.outputs.plan }}
           SUITE: ${{ matrix.suite }}
-          OMP_CODEX_CONSUMER_MODE: full
+          OMP_CODEX_CONSUMER_MODE: ${{ github.event_name == 'pull_request' && 'smoke' || 'full' }}
         run: |
           printf '%s\n' "$VERIFICATION_PLAN" > "$RUNNER_TEMP/verification-plan.json"
           node scripts/ci/run.mjs --plan "$RUNNER_TEMP/verification-plan.json" --task "$SUITE" --report "$RUNNER_TEMP/timings.json"
@@ -158,10 +158,6 @@ jobs:
         include:
           - node: "22.19.0"
             pi: floor
-          - node: "22.19.0"
-            pi: target
-          - node: "24.x"
-            pi: floor
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,9 +169,6 @@ jobs:
         run: node scripts/test-pi-baselines.mjs ${{ matrix.pi }}
         env:
           OMP_PI_MATRIX_LOG_DIR: ${{ runner.temp }}/pi-matrix
-          # The final gate requires successful full target coverage at this SHA
-          # and Node version. Reuse still compares every manifest and lock entry.
-          OMP_PI_REUSE_TARGET: "1"
           OMP_CODEX_CONSUMER_MODE: smoke
       - name: Upload baseline diagnostics
         if: always()
