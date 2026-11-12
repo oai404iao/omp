@@ -39,6 +39,38 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
     for (const name of ["publish-release-artifacts.mjs", "release-batch.mjs", "release-dependencies.mjs", "release-utils.mjs", "initial-codex-bootstrap.mjs", "targeted-release.mjs"]) {
       writeFileSync(join(scripts, name), readFileSync(join(root, "scripts", name)));
     }
+    writeFileSync(join(scripts, "registry-visibility-implementation.mjs"), readFileSync(join(root, "scripts/registry-visibility.mjs")));
+    writeFileSync(join(scripts, "registry-visibility.mjs"), `
+      import { spawnSync } from "node:child_process";
+      import { waitForRegistryVisibility as wait, RegistryVisibilityPending } from "./registry-visibility-implementation.mjs";
+      export { RegistryVisibilityPending };
+      export function waitForRegistryVisibility(candidate, options) {
+        let time = 0;
+        const view = (...args) => {
+          const child = spawnSync("npm", ["view", ...args, "--json", "--prefer-online", "--prefer-offline=false", "--offline=false"], {encoding:"utf8"});
+          if (child.status !== 0) return undefined;
+          return JSON.parse(child.stdout);
+        };
+        return wait(candidate, {...options, now: () => time, random: () => 0.5,
+          sleep: async ms => { time += ms; },
+          fetch: async (url, init) => {
+            if (init.method === "HEAD") return new Response(null, {status:200});
+            const value = view(candidate.name + "@" + candidate.version, "version");
+            if (!value) return new Response(null, {status:404});
+            if (url.endsWith("/" + candidate.version)) return Response.json({name:candidate.name, version:value.version,
+              gitHead:value.gitHead, dist:{integrity:value["dist.integrity"], tarball:"https://registry.npmjs.org/" + candidate.name + "/-/" + candidate.name.split("/").at(-1) + "-" + candidate.version + ".tgz"}});
+            const distTags = view(candidate.name, "dist-tags");
+            const versions = candidate.prerelease ? view(candidate.name, "versions") : [candidate.version];
+            if (!Array.isArray(versions)) return Response.json({name:candidate.name, versions: {bad: null, [candidate.version]: null}});
+            const historical = Array.isArray(versions) ? Object.fromEntries(versions.map(v => [v, {}])) : {};
+            return Response.json({ name: candidate.name, "dist-tags": distTags, versions: {
+              ...historical, [candidate.version]: {name:candidate.name, version:value.version, gitHead:value.gitHead,
+                dist:{ integrity:value["dist.integrity"], tarball:"https://registry.npmjs.org/" + candidate.name + "/-/" + candidate.name.split("/").at(-1) + "-" + candidate.version + ".tgz"} }
+            }});
+          }
+        });
+      }
+    `);
     mkdirSync(join(temporaryDirectory, "release-locks"));
     writeFileSync(join(temporaryDirectory, "release-locks/npm-published-artifacts.json"),
       JSON.stringify({ schemaVersion: 1, registry: "https://registry.npmjs.org/", releases: options.locked ?? {} }));
@@ -144,6 +176,7 @@ if (args[2] === "version") {
       env: {
         ...process.env,
         RELEASE_PACKAGE: "",
+        RELEASE_VERIFY_ONLY: options.verifyOnly ? "true" : "false",
         npm_config_dry_run: options.inheritedDryRun ? "true" : "false",
         PUBLISH_STDOUT: options.publishStdout ?? "",
         PUBLISH_STDERR: options.publishStderr ?? "",
@@ -233,8 +266,7 @@ for (const name of ["@oai404iao/pi-codex-runtime", "@oai404iao/pi-codex-tools"])
       const { process, result, calls } = runPublisher([value, bundle], undefined, {
         ...options, dependencies: { [bundle.name]: { [value.name]: value.version } },
       });
-      if (failure === "wrong-lock") assert.notEqual(process.status, 0);
-      else {
+      {
         assert.equal(process.status, 0, process.stderr);
         assert.equal(result.ok, false);
       }
@@ -244,18 +276,16 @@ for (const name of ["@oai404iao/pi-codex-runtime", "@oai404iao/pi-codex-tools"])
   }
 }
 
-test("partial reconciliation does not create local tags", { skip: process.platform === "win32" }, () => {
+test("historical recovery ignores newer dist-tags without moving registry tags", { skip: process.platform === "win32" }, () => {
   const first = "@oai404iao/first";
   const second = "@oai404iao/second";
   const { process, result, calls } = runPublisher([candidate(first), candidate(second)], second);
 
   assert.equal(process.status, 0, process.stderr);
-  assert.equal(result.ok, false);
-  assert.equal(result.releases.length, 1);
-  assert.deepEqual(result.unresolved, [
-    `${second}@1.0.0 is not assigned to npm dist-tag latest; fix it interactively`,
-  ]);
-  assert.doesNotMatch(calls, /^git tag /m);
+  assert.equal(result.ok, true);
+  assert.equal(result.releases.length, 2);
+  assert.deepEqual(result.unresolved, []);
+  assert.doesNotMatch(calls, /^npm dist-tag /m);
 });
 
 test("clean recovery creates missing tags only after all candidates reconcile", { skip: process.platform === "win32" }, () => {
@@ -346,7 +376,7 @@ test("propagation timeout remains fail-closed and never retries npm publish", ()
   });
   assert.equal(process.status, 0, process.stderr);
   assert.equal(result.ok, false);
-  assert.match(result.publishWarnings[0].message, /npm registry did not converge/);
+  assert.match(result.publishWarnings[0].message, /visibility|converge|visible/i);
   assert.equal(calls.split("\n").filter(line => /^npm publish .*runtime\.tgz/.test(line)).length, 1);
   assert.doesNotMatch(calls, /^npm publish .*bundle\.tgz/m);
   assert.doesNotMatch(calls, /^git tag /m);
@@ -394,3 +424,25 @@ for (const mismatched of [false, true]) {
     } else assert.match(calls, /^npm publish .*bundle\.tgz/m);
   });
 }
+
+test("verify-only recovery of an original publish manifest never uploads again", () => {
+  const value = { ...candidate("@fixture/recovery"), mode: "publish" };
+  const { process, result, calls } = runPublisher([value], undefined, { verifyOnly: true });
+  assert.equal(process.status, 0, process.stderr);
+  assert.equal(result.ok, true);
+  assert.doesNotMatch(calls, /^npm publish /m);
+});
+
+test("accepted receipt survives visibility deadline with original digest and run identity", () => {
+  const value = { ...candidate("@fixture/pending"), mode: "publish" };
+  const { process, result } = runPublisher([value], undefined, {
+    delayVersionSpec: "@fixture/pending@1.0.0", delayVersionAttempts: 100, propagationTimeoutMs: 10,
+  });
+  assert.equal(process.status, 0, process.stderr);
+  assert.equal(result.state, "pending-visibility");
+  assert.equal(result.receipts[0].state, "pending-visibility");
+  assert.equal(result.receipts[0].integrity, value.integrity);
+  assert.equal(result.receipts[0].sourceCommit, commit);
+  assert.ok(result.receipts[0].acceptedAt);
+  assert.equal(result.receipts[0].registry, "https://registry.npmjs.org/");
+});

@@ -1,21 +1,20 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   currentCommit,
   existingTagCommit,
   git,
-  lookupDistTags,
-  lookupPublishedVersions,
   lockedPublishedArtifact,
   lookupPublishedVersion,
   npm,
   assertLockedPublishedArtifact,
 } from "./release-utils.mjs";
 import { registry, root } from "./workspaces.mjs";
-import { publishOrderedBatch, validateReleaseBatch, verifyPackedCandidate } from "./release-batch.mjs";
+import { validateReleaseBatch, verifyPackedCandidate } from "./release-batch.mjs";
 import { hasInitialBootstrapLatestAlias, isInitialCodexBootstrap } from "./initial-codex-bootstrap.mjs";
 import { verifyDependencySource } from "./targeted-release.mjs";
+import { waitForRegistryVisibility, RegistryVisibilityPending } from "./registry-visibility.mjs";
 
 const [manifestArgument, resultArgument] = process.argv.slice(2);
 if (!manifestArgument || !resultArgument) {
@@ -37,28 +36,13 @@ function positiveMilliseconds(name, fallback) {
   return value;
 }
 
-const propagationTimeoutMs = positiveMilliseconds("NPM_REGISTRY_PROPAGATION_TIMEOUT_MS", 180_000);
-const propagationInitialDelayMs = positiveMilliseconds("NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS", 2_000);
-const propagationMaxDelayMs = positiveMilliseconds("NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS", 15_000);
+const propagationTimeoutMs = positiveMilliseconds("NPM_REGISTRY_PROPAGATION_TIMEOUT_MS", 1_800_000);
+const propagationInitialDelayMs = positiveMilliseconds("NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS", 5_000);
+const propagationMaxDelayMs = positiveMilliseconds("NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS", 30_000);
 if (propagationInitialDelayMs > propagationMaxDelayMs) {
   throw new Error("NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS must not exceed NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS");
 }
 
-function wait(milliseconds) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
-}
-
-class RegistryPropagationPending extends Error {}
-
-function lookupCandidateVersion(candidate) {
-  try {
-    return lookupPublishedVersion(candidate.name, candidate.version);
-  } catch (error) {
-    throw new RegistryPropagationPending(
-      `npm metadata lookup failed for ${candidate.name}@${candidate.version}: ${String(error.message ?? error)}`,
-    );
-  }
-}
 
 if (manifest.schemaVersion !== 1 || manifest.commit !== commit) {
   throw new Error(`release artifact commit ${String(manifest.commit)} does not match checkout ${commit}`);
@@ -86,17 +70,10 @@ for (const candidate of candidates) {
   }
 }
 
-function verifyCandidateTags(candidate) {
+function verifyCandidateTags(candidate, metadata) {
   const pending = [];
   const unresolved = [];
-  let distTags;
-  try {
-    distTags = lookupDistTags(candidate.name);
-  } catch (error) {
-    throw new RegistryPropagationPending(
-      `npm dist-tag lookup failed for ${candidate.name}: ${String(error.message ?? error)}`,
-    );
-  }
+  const distTags = metadata.distTags;
   if (distTags[candidate.distTag] !== candidate.version) {
     pending.push(
       `${candidate.name}@${candidate.version} is not assigned to npm dist-tag ${candidate.distTag}`,
@@ -108,7 +85,7 @@ function verifyCandidateTags(candidate) {
     if (candidate.mode === "recover" && isInitialCodexBootstrap(candidate)
       && locked?.gitHead === candidate.sourceCommit && locked?.integrity === candidate.integrity) {
       try {
-        initialAlias = hasInitialBootstrapLatestAlias(candidate, distTags, lookupPublishedVersions(candidate.name));
+        initialAlias = hasInitialBootstrapLatestAlias(candidate, distTags, metadata.versions);
       } catch {
         unresolved.push(`Cannot verify initial bootstrap version history for ${candidate.name}`);
       }
@@ -122,148 +99,106 @@ function verifyCandidateTags(candidate) {
   return { pending, unresolved };
 }
 
-function verifyCandidateRegistryState(candidate) {
-  const published = lookupCandidateVersion(candidate);
-  if (candidate.mode === "verify") {
-    verifyDependencySource(candidate, published, commit);
-    return;
-  }
-  if (!published.exists) {
-    throw new RegistryPropagationPending(
-      `Dependency release is not registry-visible with the expected identity: ${candidate.name}`,
-    );
-  }
-  if (published.gitHead !== candidate.sourceCommit) {
-    throw new Error(`Dependency release is not registry-visible with the expected identity: ${candidate.name}`);
-  }
-  assertLockedPublishedArtifact(candidate.name, candidate.version, published);
-  if (published.integrity !== candidate.integrity) {
-    throw new Error(`Published integrity mismatch: ${candidate.name}`);
-  }
-  const tagErrors = verifyCandidateTags(candidate);
-  if (tagErrors.unresolved.length > 0) throw new Error(tagErrors.unresolved.join("; "));
-  if (tagErrors.pending.length > 0) throw new RegistryPropagationPending(tagErrors.pending.join("; "));
+const receipts = [];
+const verified = new Set();
+const publishWarnings = [];
+let pendingVisibility = false;
+function saveResult(extra = {}) {
+  writeFileSync(resultPath, `${JSON.stringify({ schemaVersion: 1, commit, ok: false,
+    releases: [], unresolved: [], publishWarnings, receipts, ...extra }, null, 2)}\n`);
 }
-
-function verifyNewlyPublishedCandidate(candidate) {
-  const startedAt = Date.now();
-  let attempt = 1;
-  let delayMs = propagationInitialDelayMs;
-  for (;;) {
-    try {
-      verifyCandidateRegistryState(candidate);
-      if (attempt > 1) {
-        console.log(
-          `✓ npm registry converged for ${candidate.name}@${candidate.version} after ${attempt} attempts`,
-        );
-      }
-      return;
-    } catch (error) {
-      if (!(error instanceof RegistryPropagationPending)) throw error;
-      const elapsedMs = Date.now() - startedAt;
-      const remainingMs = propagationTimeoutMs - elapsedMs;
-      if (remainingMs <= 0) {
-        throw new Error(
-          `npm registry did not converge for ${candidate.name}@${candidate.version} within `
-          + `${propagationTimeoutMs}ms: ${error.message}`,
-        );
-      }
-      const nextDelayMs = Math.min(delayMs, remainingMs);
-      console.log(
-        `… waiting for npm registry propagation of ${candidate.name}@${candidate.version} `
-        + `(attempt ${attempt}, retry in ${nextDelayMs}ms): ${error.message}`,
+saveResult();
+for (const candidate of candidates) {
+  try {
+    const tagCommit = existingTagCommit(candidate.tag);
+    if (tagCommit && tagCommit !== candidate.sourceCommit) {
+      throw new Error(`tag ${candidate.tag} points to ${tagCommit}, expected ${candidate.sourceCommit}`);
+    }
+    if (candidate.mode === "publish" && process.env.RELEASE_VERIFY_ONLY !== "true") {
+      const tarballPath = resolve(manifestPath, "..", candidate.filename);
+      const published = spawnSync(
+        npm,
+        [
+          "publish",
+          tarballPath,
+          "--ignore-scripts",
+          "--dry-run=false",
+          "--access",
+          "public",
+          "--provenance",
+          "--tag",
+          candidate.distTag,
+          "--registry",
+          registry,
+        ],
+        { cwd: root, encoding: "utf8" },
       );
-      wait(nextDelayMs);
-      delayMs = Math.min(delayMs * 2, propagationMaxDelayMs);
-      attempt += 1;
+      if (published.status !== 0) {
+        throw new Error((published.stderr || published.stdout || published.error?.message || "npm publish failed").trim());
+      }
+      // Keep npm's receipt visible; exit zero alone does not establish a registry write.
+      if (published.stdout) process.stdout.write(published.stdout);
+      if (published.stderr) process.stderr.write(published.stderr);
+
+      receipts.push({ name: candidate.name, version: candidate.version, registry,
+        sourceCommit: candidate.sourceCommit, integrity: candidate.integrity,
+        runId: process.env.GITHUB_RUN_ID ?? null, acceptedAt: new Date().toISOString(), state: "accepted" });
+      saveResult();
+      if (process.env.GITHUB_STEP_SUMMARY) {
+        appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\nAccepted npm upload (not yet install-verified): \`${JSON.stringify(receipts.at(-1))}\`\n`);
+      }
+      console.log(`accepted ${candidate.name}@${candidate.version}; receipt: ${resultPath}`);
     }
+    await waitForRegistryVisibility(candidate, {
+      registry, timeoutMs: propagationTimeoutMs,
+      initialDelayMs: propagationInitialDelayMs, maxDelayMs: propagationMaxDelayMs,
+      warning: message => console.warn(`::warning::${message}; run ${process.env.GITHUB_RUN_ID ?? "local"}; receipt ${resultPath}`),
+      log: message => console.log(message),
+      verify(metadata) {
+        assertLockedPublishedArtifact(candidate.name, candidate.version, metadata);
+        if (candidate.mode === "verify") return;
+        const errors = verifyCandidateTags(candidate, metadata);
+        if (errors.unresolved.length) throw new Error(errors.unresolved.join("; "));
+        // Historical recovery never moves latest/next backwards.
+        if (candidate.mode === "publish" && process.env.RELEASE_VERIFY_ONLY !== "true" && errors.pending.length) {
+          throw new RegistryVisibilityPending(errors.pending.join("; "));
+        }
+      },
+    });
+    verified.add(candidate.name);
+    const receipt = receipts.find(r => r.name === candidate.name);
+    if (receipt) { receipt.state = "verified"; receipt.verifiedAt = new Date().toISOString(); }
+    saveResult();
+  } catch (error) {
+    pendingVisibility = error instanceof RegistryVisibilityPending;
+    const receipt = receipts.find(r => r.name === candidate.name);
+    if (receipt && pendingVisibility) receipt.state = "pending-visibility";
+    publishWarnings.push({ name: candidate.name, message: String(error.message ?? error),
+      state: pendingVisibility ? "pending-visibility" : "failed" });
+    saveResult({ state: pendingVisibility ? "pending-visibility" : "failed" });
+    break;
   }
 }
-
-const publishWarnings = publishOrderedBatch(candidates, {
-  publish(candidate) {
-    const tarballPath = resolve(manifestPath, "..", candidate.filename);
-    const published = spawnSync(
-      npm,
-      [
-        "publish",
-        tarballPath,
-        "--ignore-scripts",
-        "--dry-run=false",
-        "--access",
-        "public",
-        "--provenance",
-        "--tag",
-        candidate.distTag,
-        "--registry",
-        registry,
-      ],
-      { cwd: root, encoding: "utf8" },
-    );
-    if (published.status !== 0) {
-      throw new Error((published.stderr || published.stdout || published.error?.message || "npm publish failed").trim());
-    }
-    // Keep npm's receipt visible; exit zero alone does not establish a registry write.
-    if (published.stdout) process.stdout.write(published.stdout);
-    if (published.stderr) process.stderr.write(published.stderr);
-  },
-  verify(candidate) {
-    if (candidate.mode === "publish") verifyNewlyPublishedCandidate(candidate);
-    else verifyCandidateRegistryState(candidate);
-  },
-});
 
 const releases = [];
 const tagsToCreate = [];
 const unresolved = [];
 for (const candidate of candidates) {
-  if (candidate.mode === "verify") {
-    try {
-      verifyCandidateRegistryState(candidate);
-    } catch (error) {
-      unresolved.push(String(error.message ?? error));
-    }
+  if (!verified.has(candidate.name)) {
+    unresolved.push(`${candidate.name}@${candidate.version} is not verified`);
     continue;
   }
-  const candidateUnresolved = [];
-  const published = lookupPublishedVersion(candidate.name, candidate.version);
-  if (!published.exists) {
-    candidateUnresolved.push(`${candidate.name}@${candidate.version} is not published`);
-    unresolved.push(...candidateUnresolved);
-    continue;
-  }
-  if (published.gitHead !== candidate.sourceCommit) {
-    candidateUnresolved.push(
-      `${candidate.name}@${candidate.version} has npm gitHead ${published.gitHead ?? "(missing)"}, expected ${candidate.sourceCommit}`,
-    );
-    unresolved.push(...candidateUnresolved);
-    continue;
-  }
-  assertLockedPublishedArtifact(candidate.name, candidate.version, published);
-  if (published.integrity !== candidate.integrity) {
-    unresolved.push(`${candidate.name}@${candidate.version} has mismatched published integrity`);
-    continue;
-  }
-
-  const tagErrors = verifyCandidateTags(candidate);
-  candidateUnresolved.push(
-    ...tagErrors.pending.map(message => `${message}; fix it interactively`),
-    ...tagErrors.unresolved,
-  );
-
+  if (candidate.mode === "verify") continue;
   const tagCommit = existingTagCommit(candidate.tag);
   if (tagCommit && tagCommit !== candidate.sourceCommit) {
     throw new Error(`tag ${candidate.tag} points to ${tagCommit}, expected ${candidate.sourceCommit}`);
-  }
-  if (candidateUnresolved.length > 0) {
-    unresolved.push(...candidateUnresolved);
-    continue;
   }
 
   releases.push({
     name: candidate.name,
     version: candidate.version,
     tag: candidate.tag,
+    sourceCommit: candidate.sourceCommit,
     notes: candidate.notes,
     prerelease: candidate.prerelease === true,
   });
@@ -289,6 +224,8 @@ const result = {
   releases,
   unresolved,
   publishWarnings,
+  receipts,
+  state: ok ? "verified" : pendingVisibility ? "pending-visibility" : "failed",
 };
 writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
 

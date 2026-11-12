@@ -22,6 +22,19 @@ function fixture(t, options = {}) {
     "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs", "targeted-release.mjs", "initial-codex-bootstrap.mjs"]) {
     copyFileSync(join(root, "scripts", file), join(scripts, file));
   }
+  writeFileSync(join(scripts, "registry-visibility.mjs"), `
+    import { lookupPublishedVersion, lookupDistTags } from "./release-utils.mjs";
+    export class RegistryVisibilityPending extends Error {}
+    export async function waitForRegistryVisibility(candidate, {verify}) {
+      const metadata = lookupPublishedVersion(candidate.name, candidate.version);
+      if (!metadata.exists || metadata.gitHead !== candidate.sourceCommit || metadata.integrity !== candidate.integrity) {
+        throw new Error("identity or integrity mismatch");
+      }
+      if (candidate.mode !== "verify") metadata.distTags = lookupDistTags(candidate.name);
+      await verify(metadata);
+      return metadata;
+    }
+  `);
   const manifests = {};
   const entries = Object.entries(names).map(([short, name]) => {
     mkdirSync(join(directory, short));

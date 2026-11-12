@@ -205,22 +205,46 @@ pnpm run release:verify-installations release-artifacts/manifest.json
 | 失败表现 | 处理方式 |
 | --- | --- |
 | `npm publish` exit 0／receipt 成功，但读回缺失 | exit 0 不等于发布证据。检查 npm 输出和注册表状态，不能自动再 publish |
-| 新发布版本暂不可见 | 只重试只读 registry 检查；默认每个新包最多等待 3 分钟，使用 `--prefer-online` 和有上限的指数退避 |
+| 新发布版本暂不可见 | 只重试只读 registry 检查；默认每个候选最多等待 30 分钟，使用 `--prefer-online` 和有上限的指数退避；耗尽后记为 `pending-visibility`，不是发布失败，也不能重发 |
 | release lock 已记为 published，但查询 E404 | 视为待验证，停止准备；不打包、不重发，不能删锁绕过 |
-| 批次只发出一部分 | 停止后续发布，对账已发布包的 `gitHead`，不创建任何新 tags／Releases；干净重跑只发布仍缺失版本，恢复缺失 tags／Releases |
+| 批次只发出一部分 | 停止后续发布，不创建任何新 tags／Releases；用原始制品执行下述 verify-only 恢复，不能把 accepted 或 pending 当成重发许可；仍未上传的候选需另获正常发布授权 |
 | `latest`／`next` 错误 | 失败并提示交互修复；OIDC workflow 和本地 verifier 都不静默改 registry tags |
 | 相同版本的 tarball-facing 文件自 npm `gitHead` 后改变 | 拒绝恢复；添加 changeset，发布新版本，不把不同 payload 冒充恢复 |
 | 已有 Git tag 指向错误源码 | 停止调查，不覆盖 tag 身份 |
-| tags／GitHub Releases 最终化中断 | 对账全部通过后原子推 tags；已存在 Release 跳过，可安全重试最终化 |
+| tags／GitHub Releases 最终化中断 | 对账全部通过后原子推 tags；已有 tag 必须指向相同 source commit。已有 Release 核实 tag、标题、notes、draft 和 prerelease；仅补空标题／notes 或缺失 prerelease 标记，冲突或 draft 拒绝，不覆盖非空内容 |
 
-发布器显式禁用继承的 npm dry-run 配置，并在 job 日志中保留 publish receipt。
+发布器显式禁用继承的 npm dry-run 配置，每次上传后立即持久化 `result.json` receipt。
+`accepted` 表示 npm 接受了上传，`verified` 才表示读回 identity／integrity／dist-tag 全部一致。
+`pending-visibility` 保留未验证状态，workflow 正常结束但跳过全部 Git tags／GitHub Releases；
+实际发布或身份冲突仍失败。受保护 job 最多运行 330 分钟，以覆盖 9 个候选的等待。
 成功 publish 后只重试读取，不盲目重复不可逆命令。传播等待由以下变量控制：
 
 | 变量 | workflow 默认值 |
 | --- | --- |
-| `NPM_REGISTRY_PROPAGATION_TIMEOUT_MS` | `180000` |
-| `NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS` | `2000` |
-| `NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS` | `15000` |
+| `NPM_REGISTRY_PROPAGATION_TIMEOUT_MS` | `1800000` |
+| `NPM_REGISTRY_PROPAGATION_INITIAL_DELAY_MS` | `5000` |
+| `NPM_REGISTRY_PROPAGATION_MAX_DELAY_MS` | `30000` |
+
+### 使用原始制品只读恢复
+
+获授权后，在同一个 `main` SHA 手动 dispatch `publish.yml`，填写原始发布运行 ID 到
+`recovery_run`，`package` 必须与原 manifest 的目标完全一致（全批则留空），仍须
+`confirm=publish` 和 `npm-publish` environment 审批。恢复运行必须与原运行的 SHA
+完全相同；main 已前进、原制品过期或不存在时此路径拒绝，不从其他 SHA／仓库补取，
+也不重新打包替代原始证据。
+
+verify job 先通过 GitHub API 核实原运行属于本仓库、同仓 head、`publish.yml`、
+`workflow_dispatch`、`main` 和当前 `GITHUB_SHA`，且已结束；然后仅下载该运行原始
+`npm-release-{sha}` artifact。恢复保留 fresh policy、audit、源码证据和所有发布门禁，
+跳过重新打包和依赖 registry 下载的消费者安装，改为验证原 `consumer-verification.json`
+与 manifest、源码、tarball hashes 的绑定。受保护 publisher 设置
+`RELEASE_VERIFY_ONLY=true`，禁止所有 npm 上传（包括原批次未上传的候选），只轮询核实。
+只有整批 verified 才最终化 tags／Releases；仍 pending 时可再次只读恢复。
+
+每次受保护 job 无论成功或失败，都会尝试保存 `.release-input/result.json`、manifest、
+消费者 receipt 和 tarballs 到 `npm-release-recovery-{sha}-{attempt}` artifact（保留 14 天），
+并追加 job summary。原始 `npm-release-{sha}` 同样保留 14 天；恢复输入指定原始准备运行，
+不是任意 receipt artifact，恢复记录用来调查 accepted／pending 和失败边界。
 
 release lock 比较注册表 `gitHead` 与 SHA-512，是已经发布的证据，不能修改已锁值来
 “修好”失败。变更锁值必须另行开展 source／registry 调查；历史记录不能删除或替换。
