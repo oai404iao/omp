@@ -56,6 +56,16 @@ test("single-task mode skips policy but rejects any task outside the selected pl
   await assert.rejects(executePlan(release, { task: "composition" }), /not present/);
 });
 
+test("infrastructure executes release and CI tests once each", async () => {
+  const calls = [];
+  const result = await executePlan(full(), { task: "infrastructure", runner: async command => {
+    calls.push(command);
+    return 0;
+  } });
+  assert.equal(result.status, "passed");
+  assert.deepEqual(calls, [["pnpm", "run", "test:release-scripts"], ["pnpm", "run", "test:ci"]]);
+});
+
 test("runner exceptions, missing exit status, and child signals cannot report success", async () => {
   for (const runner of [async () => { throw new Error("spawn failed"); }, async () => undefined,
     async () => ({ code: null, signal: "SIGTERM" })]) {

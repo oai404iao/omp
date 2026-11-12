@@ -134,15 +134,17 @@ revision 计划比较不可变 Git 提交，**不包含已暂存或未暂存的�
 | 改动／状态 | 检查范围 |
 | --- | --- |
 | 包目录改动 | 该包，以及在 merge base 和 head 两份依赖图中的递归消费者 |
-| 任意 Codex 包或 subagent 被选中 | 加入完整 composition 和 exhaustive 源码消费者套件 |
+| 任意 Codex 包或 subagent 被选中 | 加入 composition 和源码消费者套件（远端 PR smoke，main exhaustive） |
 | `tests/codex/` 改动 | composition 和 consumers |
-| 共享基础设施、锁／工具链、未分类路径 | 全量回退 |
+| `scripts/`、`.github/` | infrastructure；实际被 composition／consumers 使用的脚本同时选择对应套件 |
+| workspace catalog、共享 setup-ci action、锁／工具链、未分类路径 | 全量回退 |
 | 明确分类的仓库文档、changeset Markdown | 可以只运行 policy |
 | Git 历史不足 | 全量回退 |
 | 包注册或计划非法 | 失败，不静默跳过 |
 
 依赖图包含 runtime、optional、dev 和 peer 边；重命名同时考虑旧、新路径。
 新增包目录必须注册，即使它只是非发布测试目标。
+infrastructure 分别运行一次 `test:release-scripts` 和 `test:ci`，两者不重复收集测试文件。
 
 `ci:release` 不带 `--package` 时选择 9 个 `publishable` 工作区，包含 `pi-notify`。
 它只验证源码，不打包、不发布、不改版本；定向依赖闭包和复用规则见
