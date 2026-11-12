@@ -1,5 +1,11 @@
 # @oai404iao/pi-telegram-notify
 
+## 1.0.1
+
+### Patch Changes
+
+- 7ce78c1: Update the Pi development target to 1.4.0 and refresh development dependencies while retaining support for Pi 1.2.0.
+
 ## 1.0.0
 
 ### Major Changes
