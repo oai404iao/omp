@@ -49,10 +49,10 @@ test("manifest-derived allowlist accepts a real archive including implicit READM
   assert.match(result.output, /5 files/);
 });
 
-test("npmignore cannot silently exclude source declared by a directory allowlist", () => {
-  const result = verify({ "src/hidden.ts": "export {};", "src/.npmignore": "hidden.ts\n" });
+test("an explicitly declared source file must exist before packing", () => {
+  const result = verify({}, { files: ["index.ts", "src/", "src/missing.ts", "LICENSE"] });
   assert.equal(result.status, 1, result.output);
-  assert.match(result.output, /tarball is missing declared file src\/hidden\.ts/);
+  assert.match(result.output, /files entry matches nothing: src\/missing\.ts/);
 });
 
 test("a sensitive config nested under an allowed source directory is rejected", () => {
