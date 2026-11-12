@@ -17,10 +17,13 @@ export function codexConsumerMatrix(mode = "full") {
     ["all", ["pi-codex-core", "pi-codex-tools", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "web_search", "image_generation"], true],
     ["bundle", ["pi-codex-minimal-tools"], ["apply_patch", "web_search", "image_generation"], true],
     ["duplicate", ["pi-codex-minimal-tools", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "web_search", "image_generation"], true],
+    ["subagent", ["pi-subagent"], [], false],
+    ["subagent-no-optional", ["pi-subagent"], [], false],
   ];
   return {
     mode,
-    consumers: mode === "full" ? consumers : consumers.filter(([label]) => label === "bundle"),
+    consumers: mode === "full" ? consumers : consumers.filter(([label]) =>
+      ["runtime", "core", "tools", "web", "image", "bundle", "subagent", "subagent-no-optional"].includes(label)),
     reverseOrders: mode === "full",
     capabilityMasks: mode === "full" ? [0, 1, 2, 3, 4, 5, 6] : [],
     separateRuntimeCopies: mode === "full",

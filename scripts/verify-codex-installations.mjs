@@ -13,10 +13,10 @@ import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
 import { codexConsumerMatrix } from "./codex-consumer-matrix.mjs";
 
 const matrix = codexConsumerMatrix(process.env.OMP_CODEX_CONSUMER_MODE);
-console.log(`Codex consumer mode: ${matrix.mode}; packing all six packages; ${matrix.consumers.length} isolated consumer install(s)`);
+console.log(`Codex consumer mode: ${matrix.mode}; packing all seven packages; ${matrix.consumers.length} isolated consumer install(s)`);
 // This integration probe validates the selected workspace Pi baseline.
 const prefix = "@oai404iao/";
-const names = ["pi-codex-runtime", "pi-codex-core", "pi-codex-tools", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools"];
+const names = ["pi-codex-runtime", "pi-codex-core", "pi-codex-tools", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools", "pi-subagent"];
 const manifests = new Map(names.map(name => [prefix + name, readManifest(`pi-extensions/${name}`)]));
 // pnpm may choose another store when the OS temporary directory is on a
 // different filesystem. Offline fixtures must reuse the root install's store.
@@ -54,13 +54,15 @@ function closure(requested) {
   function visit(name) {
     if (found.has(name)) return;
     found.add(name);
-    for (const dep of Object.keys(manifests.get(name).dependencies ?? {})) if (manifests.has(dep)) visit(dep);
+    const manifest = manifests.get(name);
+    for (const dep of Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies })) if (manifests.has(dep)) visit(dep);
   }
   for (const name of requested) visit(prefix + name);
   return found;
 }
 
 function install(label, requested) {
+  const omitOptional = label === "subagent-no-optional";
   const path = join(directory, label);
   mkdirSync(path);
   const included = closure(requested);
@@ -73,15 +75,25 @@ function install(label, requested) {
     "the installed dependency closure must match unified tools and compatibility entries");
   const consumer = isolatedConsumerLock(`fixture-${label}`, included, manifests, packed,
     readPnpmLock(join(root, "pnpm-lock.yaml")));
+  const installed = new Set(included);
+  if (omitOptional) {
+    // Keep the real optional edge and tarball snapshot in the frozen lock, but
+    // do not promote runtime to a direct production dependency of the fixture.
+    const runtime = prefix + "pi-codex-runtime";
+    assert.ok(manifests.get(prefix + "pi-subagent").optionalDependencies?.[runtime]);
+    delete consumer.manifest.dependencies[runtime];
+    delete consumer.lock.importers["."].dependencies[runtime];
+    installed.delete(runtime);
+  }
   writeFileSync(join(path, "package.json"), JSON.stringify(consumer.manifest));
   writeFileSync(join(path, "pnpm-workspace.yaml"), stringify(consumer.workspace));
   writePnpmLock(join(path, "pnpm-lock.yaml"), consumer.lock);
   // The projection already validates reviewed artifact identities. pnpm 12's
   // policy recheck otherwise needs registry metadata even for a frozen lock.
-  pnpm(["install", "--store-dir", storeDirectory, "--frozen-lockfile", "--offline", "--trust-lockfile", "--ignore-scripts", "--prod"], path);
+  pnpm(["install", "--store-dir", storeDirectory, "--frozen-lockfile", "--offline", "--trust-lockfile", "--ignore-scripts", "--prod", ...(omitOptional ? ["--no-optional"] : [])], path);
   assertContainedTree(join(path, "node_modules"), path);
-  assert.deepEqual(readdirSync(join(path, "node_modules/@oai404iao")).sort(), [...included].map(n => n.slice(prefix.length)).sort());
-  for (const name of included) {
+  assert.deepEqual(readdirSync(join(path, "node_modules/@oai404iao")).sort(), [...installed].map(n => n.slice(prefix.length)).sort());
+  for (const name of installed) {
     assert.ok(realpathSync(join(path, "node_modules", name)).startsWith(path), `${name} leaked from the workspace`);
   }
   if (requested.includes("pi-codex-minimal-tools")) {
@@ -126,6 +138,16 @@ try {
   }
   for (const [label, requested, tools, core] of matrix.consumers) {
     const path = install(label, requested);
+    if (requested.includes("pi-subagent")) {
+      const result = spawnSync(process.execPath, [fileURLToPath(new URL("./subagent-consumer-probe.mjs", import.meta.url)), path, piVersion(), label], {
+        cwd: path, encoding: "utf8", timeout: 90000,
+        env: { ...process.env, PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_CODING_AGENT_DIR: join(path, "agent") },
+      });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      checks++;
+      rmSync(path, { recursive: true, force: true });
+      continue;
+    }
     const entries = requested.flatMap(name =>
       (manifests.get(prefix + name).pi?.extensions ?? []).map(entry => join(path, "node_modules", prefix + name, entry)));
     runProbes(label, matrix.reverseOrders && entries.length > 1 ? [entries, [...entries].reverse()] : [entries], tools, core);
