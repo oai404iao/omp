@@ -32,7 +32,7 @@ test("independent-process branched session cannot own or stop the original activ
 	const originalTree = f.coordinator.treeStore.snapshot.id;
 	const manager = SessionManager.open(f.manager.getSessionFile()!);
 	manager.createBranchedSession(manager.getLeafId()!);
-	const other = new SubagentCoordinator(f.pi, f.packageRoot, f.settings, f.agentDir);
+	const other = new SubagentCoordinator(f.pi, f.packageRoot, f.codexIntegration, f.settings, f.agentDir);
 	t.after(() => other.shutdown());
 	const caller = other.attachRoot({ ...f.context, sessionManager: manager });
 	assert.notEqual(other.treeStore.snapshot.id, originalTree);

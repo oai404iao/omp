@@ -118,6 +118,7 @@ for (const method of ["appendModelChange", "appendThinkingLevelChange"] as const
 			forkTurns: "none", settings: f.settings, anchorId: "",
 		};
 		await assert.rejects(createChildRuntime({
+			codexIntegration: f.codexIntegration,
 			descriptor, sessionManager: manager, parentSession: f.manager, modelRuntime: f.modelRuntime,
 			agentDir: f.agentDir, packageRoot: f.packageRoot, projectTrusted: true, tools: [], hooks: () => {},
 		}), error => error instanceof SelectionPersistenceError && error.cause === failure);

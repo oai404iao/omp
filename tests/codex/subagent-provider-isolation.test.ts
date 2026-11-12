@@ -11,6 +11,7 @@ import { SubagentCoordinator, type AgentCaller } from "../../pi-extensions/pi-su
 import { DEFAULT_SETTINGS } from "../../pi-extensions/pi-subagent/src/config.js";
 import { withCompositionDirectory, writeCompositionConfig } from "./support/composition-host.js";
 import { deferred } from "./support/provider-lifecycle-test-support.js";
+import { createCodexSubagentInlineExtension } from "../../pi-extensions/pi-codex-runtime/src/subagent-inline.js";
 
 function successfulResponse(text: string) {
 	const item = { type: "message", id: `msg_${text}`, role: "assistant", status: "completed",
@@ -69,7 +70,8 @@ test("real inherited core/tools leave the parent provider live after siblings, c
 		let coordinator!: SubagentCoordinator;
 		let caller!: AgentCaller;
 		const captureRoot: ExtensionFactory = pi => {
-			coordinator = new SubagentCoordinator(pi, packageRoot, { ...DEFAULT_SETTINGS, inheritExtensions: true }, cwd);
+			coordinator = new SubagentCoordinator(pi, packageRoot,
+				{ status: "ready", create: createCodexSubagentInlineExtension }, { ...DEFAULT_SETTINGS, inheritExtensions: true }, cwd);
 			pi.on("session_start", (_event, ctx) => { caller = coordinator.attachRoot(ctx); });
 		};
 		const services = await createAgentSessionServices({

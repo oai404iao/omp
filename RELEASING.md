@@ -32,7 +32,7 @@ pnpm run changeset
 pnpm run changeset:sync
 ```
 
-同步器递归覆盖 runtime／optional 工作区依赖的消费者，包括 subagent 对兼容 bundle
+同步器递归覆盖 runtime／optional 工作区依赖的消费者，包括 subagent 对 Codex runtime
 的 optional 依赖。已有显式消费者 changeset 优先，不手改生成的
 `.changeset/workspace-dependent-releases*.md`。
 

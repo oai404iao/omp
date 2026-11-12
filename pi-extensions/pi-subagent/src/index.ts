@@ -9,10 +9,12 @@ import { MESSAGE_CUSTOM_TYPE } from "./store.ts";
 import { renderAgentMessage } from "./render.ts";
 import { openDashboard } from "./dashboard.ts";
 import { independentTreeContext } from "./tree-context.ts";
+import { loadCodexIntegration } from "./codex-integration.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-export default function subagentExtension(pi: ExtensionAPI): void {
+export default async function subagentExtension(pi: ExtensionAPI): Promise<void> {
+	const codexIntegration = await loadCodexIntegration();
 	let coordinator: SubagentCoordinator | undefined;
 	let initializationError: unknown;
 	let dashboardOpen = false;
@@ -30,7 +32,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		coordinator = undefined;
 		try {
 			const { settings } = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
-			const controller = new SubagentCoordinator(pi, PACKAGE_ROOT, settings);
+			const controller = new SubagentCoordinator(pi, PACKAGE_ROOT, codexIntegration, settings);
 			const root = controller.attachRoot(ctx);
 			const catalog = controller.catalog(root);
 			coordinator = controller;
