@@ -18,6 +18,8 @@ test("default and explicit full retain the exhaustive consumer matrix", () => {
       ["all", ["pi-codex-core", "pi-codex-tools", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "web_search", "image_generation"], true],
       ["bundle", ["pi-codex-minimal-tools"], ["apply_patch", "web_search", "image_generation"], true],
       ["duplicate", ["pi-codex-minimal-tools", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen"], ["apply_patch", "web_search", "image_generation"], true],
+      ["subagent", ["pi-subagent"], [], false],
+      ["subagent-no-optional", ["pi-subagent"], [], false],
     ],
     reverseOrders: true,
     capabilityMasks: [0, 1, 2, 3, 4, 5, 6],
@@ -28,11 +30,20 @@ test("default and explicit full retain the exhaustive consumer matrix", () => {
   assert.deepEqual(codexConsumerMatrix("full"), expected);
 });
 
-test("smoke selects the bundle with core and all tools without exhaustive sweeps", () => {
+test("smoke loads each package directly once plus a genuine omit-optional subagent", () => {
   const smoke = codexConsumerMatrix("smoke");
   assert.deepEqual(smoke, {
     mode: "smoke",
-    consumers: [["bundle", ["pi-codex-minimal-tools"], ["apply_patch", "web_search", "image_generation"], true]],
+    consumers: [
+      ["runtime", ["pi-codex-runtime"], [], false],
+      ["core", ["pi-codex-core"], [], true],
+      ["tools", ["pi-codex-tools"], ["apply_patch", "web_search", "image_generation"], false],
+      ["web", ["pi-codex-web-search"], ["web_search"], false],
+      ["image", ["pi-codex-imagegen"], ["image_generation"], false],
+      ["bundle", ["pi-codex-minimal-tools"], ["apply_patch", "web_search", "image_generation"], true],
+      ["subagent", ["pi-subagent"], [], false],
+      ["subagent-no-optional", ["pi-subagent"], [], false],
+    ],
     reverseOrders: false,
     capabilityMasks: [],
     separateRuntimeCopies: false,
