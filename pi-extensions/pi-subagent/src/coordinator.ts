@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { discoverAgents, type AgentDiscoveryResult } from "./agents.ts";
 import { DEFAULT_SETTINGS } from "./config.ts";
+import type { CodexIntegration } from "./codex-integration.ts";
 import { prepareChildSession, persistPreparedSession } from "./providers.ts";
 import { createChildRuntime, resolveExecutionProfile, runtimeFromRegistry, SelectionPersistenceError } from "./runtime.ts";
 import { AgentOperationQueue, ExecutionLimiter } from "./scheduler.ts";
@@ -87,6 +88,7 @@ export class SubagentCoordinator implements DashboardSource {
 	constructor(
 		private readonly pi: ExtensionAPI,
 		private readonly packageRoot: string,
+		private readonly codexIntegration: CodexIntegration,
 		readonly settings: SubagentSettings = { ...DEFAULT_SETTINGS },
 		private readonly agentDir: string = getAgentDir(),
 	) {
@@ -760,6 +762,7 @@ export class SubagentCoordinator implements DashboardSource {
 				assertAgentOpen(this.treeStore.snapshot, initiator.path);
 				assertAgentOpen(this.treeStore.snapshot, path);
 				run.runtime = await createChildRuntime({
+					codexIntegration: this.codexIntegration,
 					descriptor: record.descriptor, sessionManager: manager,
 					parentSession: this.session(record.descriptor.parentPath),
 					modelRuntime: caller.modelRuntime, agentDir: this.agentDir, packageRoot: this.packageRoot,

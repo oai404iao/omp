@@ -125,6 +125,8 @@ codemode 或嵌套工具执行。
 [配置示例](config.example.json)和 [JSON Schema](config.schema.json)。如使用示例中的
 `"$schema": "./config.schema.json"`，请将 Schema 一起复制到配置文件旁。
 
+可选适配器来自精确固定的 `@oai404iao/pi-codex-runtime/subagent-inline`，不依赖完整工具组合包。
+扩展激活时等待一次加载完成，所有子代理及冷恢复复用该结果；包存在但加载损坏会明确失败。
 `openAIIdentity` 不会安装 Codex 工具或改变提供方认证；需要身份适配器而可选适配器缺失时，
 会在模型执行前失败。安装 Codex 适配器后，子代理后续请求还会跟随主会话的 Fast 模式，
 不依赖 `openAIIdentity` 或 `inheritExtensions`，也能穿过非 Responses 父代理传递。

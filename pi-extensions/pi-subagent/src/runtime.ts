@@ -13,6 +13,7 @@ import type { AgentDescriptor } from "./types.ts";
 import { recordChildSelection, SelectionPersistenceError, type SessionView } from "./providers.ts";
 import { ensureCodexLineage } from "./task-attribution.ts";
 import { createChildModelRuntime } from "./model-runtime.ts";
+import type { CodexIntegration } from "./codex-integration.ts";
 
 export { SelectionPersistenceError } from "./providers.ts";
 
@@ -102,6 +103,7 @@ async function withSelectionPersistence<T>(session: SessionManager, create: () =
 }
 
 export async function createChildRuntime(options: {
+	codexIntegration: CodexIntegration;
 	descriptor: AgentDescriptor;
 	sessionManager: SessionManager;
 	parentSession: SessionView;
@@ -118,25 +120,17 @@ export async function createChildRuntime(options: {
 	const factories: InlineExtension[] = [];
 	const openAIIdentity = descriptor.settings.openAIIdentity &&
 		["openai-responses", "openai-codex-responses", "pi-virtual"].includes(model.api);
-	try {
-		let available = true;
-		try {
-			import.meta.resolve("@oai404iao/pi-codex-minimal-tools/subagent-inline");
-		} catch (error) {
-			if (!(error instanceof Error && "code" in error && error.code === "ERR_MODULE_NOT_FOUND")) throw error;
-			if (openAIIdentity) throw error;
-			available = false;
-		}
-		if (available) {
-			const integration = await import("@oai404iao/pi-codex-minimal-tools/subagent-inline");
-			if (descriptor.settings.openAIIdentity) ensureCodexLineage(options.sessionManager, options.parentSession, descriptor);
-			factories.push(integration.createCodexSubagentInlineExtension({
-				parentSessionManager: options.parentSession, openAIIdentity,
-			}));
-		}
-	} catch (cause) {
-		if (!openAIIdentity) throw cause;
-		throw new Error("openAIIdentity requires @oai404iao/pi-codex-minimal-tools/subagent-inline", { cause });
+	const integration = options.codexIntegration;
+	if (integration.status === "failed") {
+		const reason = integration.cause instanceof Error ? integration.cause.message : String(integration.cause);
+		throw new Error(`pi-subagent Codex integration failed to load: ${reason}`, { cause: integration.cause });
+	}
+	if (integration.status === "absent" && openAIIdentity) {
+		throw new Error("openAIIdentity requires @oai404iao/pi-codex-runtime/subagent-inline");
+	}
+	if (integration.status === "ready") {
+		if (descriptor.settings.openAIIdentity) ensureCodexLineage(options.sessionManager, options.parentSession, descriptor);
+		factories.push(integration.create({ parentSessionManager: options.parentSession, openAIIdentity }));
 	}
 	factories.push(
 		{ name: "pi-subagent-context", factory: pi => {

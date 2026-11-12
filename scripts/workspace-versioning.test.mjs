@@ -88,8 +88,8 @@ test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagate
     for (const name of ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools", "pi-subagent"]) {
       assert.notEqual(after.get(`@oai404iao/${name}`).version, before.get(`@oai404iao/${name}`).version);
     }
-    assert.equal(after.get("@oai404iao/pi-subagent").optionalDependencies["@oai404iao/pi-codex-minimal-tools"],
-      after.get("@oai404iao/pi-codex-minimal-tools").version);
+    assert.equal(after.get("@oai404iao/pi-subagent").optionalDependencies["@oai404iao/pi-codex-runtime"],
+      after.get("@oai404iao/pi-codex-runtime").version);
     for (const [name, manifest] of after) {
       assert.equal(manifest.private, before.get(name).private, `${name}: versioning must preserve privacy`);
     }
@@ -198,7 +198,7 @@ test(`bootstrap preservation of ${source} release keeps the initial version and 
   assert.equal(after.get(toolsName).dependencies[runtimeName], after.get(runtimeName).version);
   const consumers = source === runtimeName
     ? ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools", "pi-subagent"]
-    : ["pi-codex-minimal-tools", "pi-subagent"];
+    : ["pi-codex-minimal-tools"];
   for (const name of consumers) {
     const fullName = `@oai404iao/${name}`;
     assert.notEqual(after.get(fullName).version, f.before.get(fullName).version, `${name}: consumers must still bump`);
@@ -206,6 +206,7 @@ test(`bootstrap preservation of ${source} release keeps the initial version and 
   assert.deepEqual(f.exactPinEdits(after, after), []);
   if (source === runtimeName) assert.throws(() => f.exactPinEdits(f.before, after), /consumer version bump/,
       "public pin repair must not acquire an unvalidated exemption");
+  else assert.deepEqual(after.get("@oai404iao/pi-subagent"), f.before.get("@oai404iao/pi-subagent"));
   const changelog = readFileSync(f.changelog, "utf8");
   assert.equal(changelog.split(`## ${after.get(toolsName).version}\n`).length, 2);
   if (source === runtimeName) {

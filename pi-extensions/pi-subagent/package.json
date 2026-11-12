@@ -38,7 +38,7 @@
     "typebox": "*"
   },
   "optionalDependencies": {
-    "@oai404iao/pi-codex-minimal-tools": "5.1.3"
+    "@oai404iao/pi-codex-runtime": "3.0.2"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "1.4.0",

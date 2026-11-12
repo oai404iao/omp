@@ -10,6 +10,8 @@ import { ModelRuntime, ModelRegistry, SessionManager, type ExtensionAPI, type Ex
 import { SubagentCoordinator } from "../../src/coordinator.ts";
 import { DEFAULT_SETTINGS } from "../../src/config.ts";
 import type { SubagentSettings } from "../../src/types.ts";
+import { createCodexSubagentInlineExtension } from "../../../pi-codex-runtime/src/subagent-inline.ts";
+import type { CodexIntegration } from "../../src/codex-integration.ts";
 
 export const usage = {
 	input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
@@ -76,6 +78,7 @@ export async function fixture(t: TestContext, options: {
 	persistent?: boolean;
 	trusted?: boolean;
 	modelApi?: Model<any>["api"];
+	codexIntegration?: CodexIntegration;
 } = {}) {
 	const root = tempRoot(t);
 	const agentDir = join(root, "agent");
@@ -119,17 +122,18 @@ export async function fixture(t: TestContext, options: {
 	} as unknown as ExtensionContext;
 	const settings = { ...DEFAULT_SETTINGS, ...options.settings };
 	const packageRoot = resolve(import.meta.dirname, "../..");
-	let coordinator = new SubagentCoordinator(pi, packageRoot, settings, agentDir);
+	const codexIntegration: CodexIntegration = options.codexIntegration ?? { status: "ready", create: createCodexSubagentInlineExtension };
+	let coordinator = new SubagentCoordinator(pi, packageRoot, codexIntegration, settings, agentDir);
 	let caller = coordinator.attachRoot(context);
 	t.after(async () => { await coordinator.shutdown(); });
 	const restart = async () => {
 		await coordinator.shutdown();
-		coordinator = new SubagentCoordinator(pi, packageRoot, settings, agentDir);
+		coordinator = new SubagentCoordinator(pi, packageRoot, codexIntegration, settings, agentDir);
 		caller = coordinator.attachRoot(context);
 		return { coordinator, caller };
 	};
 	return {
-		root, agentDir, modelRuntime, model, manager, context, pi, settings, packageRoot, requests, events,
+		root, agentDir, modelRuntime, model, manager, context, pi, settings, packageRoot, requests, events, codexIntegration,
 		get coordinator() { return coordinator; }, get caller() { return caller; }, restart,
 		async idle() { await waitUntil(() => coordinator.activeCount === 0); },
 	};
