@@ -9,20 +9,12 @@ import { isPiDependency, piFloorArtifacts, piVersion } from "./pi-baselines.mjs"
 import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
 import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
 import { root, workspaces } from "./workspaces.mjs";
-import { baselineCiScripts } from "./pi-ci-policy.mjs";
 
 const selector = process.argv[2] ?? "all";
 if (!["all", "floor", "target"].includes(selector) || process.argv.length > 3) {
   throw new Error("usage: test-pi-baselines.mjs [all|floor|target]");
 }
 const baselines = selector === "all" ? ["floor", "target"] : [selector];
-const reuseSetting = process.env.OMP_PI_REUSE_TARGET ?? "0";
-assert.ok(["0", "1"].includes(reuseSetting), "OMP_PI_REUSE_TARGET must be 0 or 1");
-// A standalone floor role may reuse its required companion target job in CI.
-// Local `all` still runs both suites unless explicitly opted in; when opted in,
-// only reuse a target suite that actually succeeded in this invocation.
-if (selector === "all" && reuseSetting === "1") baselines.reverse();
-let targetPassed = false;
 const resultsParent = process.env.OMP_PI_MATRIX_LOG_DIR;
 if (resultsParent) mkdirSync(resultsParent, { recursive: true });
 const results = mkdtempSync(join(resultsParent ?? tmpdir(), "omp-pi-matrix-results-"));
@@ -40,6 +32,7 @@ for (const baseline of baselines) {
   const fd = openSync(log, "w");
   const env = {
     ...process.env, OMP_PI_BASELINE: baseline, PI_OFFLINE: "1", PI_TELEMETRY: "0",
+    OMP_CODEX_CONSUMER_MODE: "smoke",
     PI_CODING_AGENT_DIR: join(cwd, ".fixture-agent"),
   };
   const run = (command, args) => {
@@ -66,8 +59,6 @@ for (const baseline of baselines) {
     writeSync(fd, `Node ${process.version}; Pi ${baseline} ${piVersion(baseline)}\nSource SHA-256: ${fingerprint}\n`);
     run("git", ["init", "-b", "main"]);
     const entries = [{ name: "workspace-root", directory: "." }, ...workspaces];
-    const manifests = () => entries.map(entry => JSON.parse(readFileSync(join(cwd, entry.directory, "package.json"), "utf8")));
-    const sourceManifests = manifests();
     if (baseline === "floor") {
       for (const entry of entries) {
         const path = join(cwd, entry.directory, "package.json");
@@ -91,19 +82,9 @@ for (const baseline of baselines) {
       writePnpmLock(path, lock);
     }
     run("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"]);
-    const scripts = baselineCiScripts({
-      baseline, reuseTarget: reuseSetting === "1" && (selector === "floor" || targetPassed),
-      sourceLock, projectedLock: readPnpmLock(join(cwd, "pnpm-lock.yaml")),
-      sourceManifests, projectedManifests: manifests(),
-    });
-    if (scripts[0] !== "ci") {
-      writeSync(fd, "Identical target/floor manifests and application lock: reusing required companion target behavior tests; retaining installed-SDK, packaging and consumer smoke checks.\n");
-      // Even if the caller requested full consumers, reuse only needs a smoke.
-      env.OMP_CODEX_CONSUMER_MODE = "smoke";
-    }
+    const scripts = ["check:pi-baseline", "check", "test:codex-composition", "test:codex-packages"];
     for (const script of scripts) run("pnpm", ["run", script]);
-    if (baseline === "target") targetPassed = true;
-    console.log(`✓ Pi ${baseline} ${piVersion(baseline)}: ${scripts[0] === "ci" ? "CI" : "lock-equivalent target reuse + smoke"} passed (${log})`);
+    console.log(`✓ Pi ${baseline} ${piVersion(baseline)}: packages, composition and consumer smoke passed (${log})`);
   } catch (error) {
     failed.push(baseline);
     console.error(String(error));

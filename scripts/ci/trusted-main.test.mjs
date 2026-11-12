@@ -59,7 +59,7 @@ async function check(input, hook) {
 test("full-coverage workflow graph is pinned, not accepted solely by job names", () => {
   assert.equal(createHash("sha256").update(source).digest("hex"), coverageWorkflowSha256,
     "Review the CI coverage graph and update its trusted-main digest together");
-  assert.equal(expectedJobNames.length, 22);
+  assert.equal(expectedJobNames.length, 20);
   assert.equal(new Set(expectedJobNames).size, expectedJobNames.length);
 });
 

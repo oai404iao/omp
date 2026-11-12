@@ -40,19 +40,18 @@ test("package and suite matrices are bounded and gated by fresh policy", () => {
     assert.match(run.run, /git diff --exit-code/);
   }
   assert.equal(workflow.jobs.suites.steps.find(step => step.env?.OMP_CODEX_CONSUMER_MODE)
-    .env.OMP_CODEX_CONSUMER_MODE, "full");
+    .env.OMP_CODEX_CONSUMER_MODE, "${{ github.event_name == 'pull_request' && 'smoke' || 'full' }}");
   assert.equal(testPackages.length, 9);
   assert.deepEqual(suites, ["composition", "consumers", "infrastructure"]);
 });
 
-test("the canonical target is distributed once; remaining compatibility roles retain guarded reuse", () => {
+test("the canonical target is distributed once; compatibility checks the floor", () => {
   const compatibility = workflow.jobs.compatibility;
   assert.equal(compatibility.if, "github.event_name != 'pull_request'");
   assert.deepEqual(compatibility.strategy.matrix.include, [
-    { node: "22.19.0", pi: "floor" }, { node: "22.19.0", pi: "target" }, { node: "24.x", pi: "floor" },
+    { node: "22.19.0", pi: "floor" },
   ]);
   const baseline = compatibility.steps.find(step => step.run?.startsWith("node scripts/test-pi-baselines"));
-  assert.equal(baseline.env.OMP_PI_REUSE_TARGET, "1");
   assert.equal(baseline.env.OMP_CODEX_CONSUMER_MODE, "smoke");
   assert.ok(policyScripts.includes("check:pi-baseline"));
   assert.equal(workflow.env.PI_OFFLINE, "1");

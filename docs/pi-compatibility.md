@@ -17,8 +17,7 @@
 不再支持 1.2.0 之前的 Pi，包括 0.99.1；没有旧 SDK 回退。
 版本变化见 [Pi v1.4.0 changelog](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/CHANGELOG.md)。
 Floor 重新生成 Pi 1.2.0 投影锁，target 使用提交的 Pi 1.4.0 根锁。
-远端行为复用必须比较整个应用锁与 manifests，不可仅比较版本字符串。
-本地 matrix 默认完整执行。Supply-chain release-age 例外只覆盖迁移明确选定的七个 Pi 1.2.0
+每个 baseline 都运行包检查、composition 和 consumer smoke，不复用行为测试。Supply-chain release-age 例外只覆盖迁移明确选定的七个 Pi 1.2.0
 精确产物，其他检查及 integrity hashes 仍然有效。
 
 <a id="commands"></a>
@@ -60,26 +59,17 @@ pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-script
 | 场景 | 覆盖范围 |
 | --- | --- |
 | Pull request | Node 24 / target affected plan；policy 始终执行，包与 shared suites 分 job |
-| Main push / 手动运行 | Node 22.19.0 和 24.x × 两种 Pi 锁角色，完整覆盖及日志 |
-| Node 24 / target consumer | 选中时 exhaustive |
-| 其他远端兼容腿 | 保留 snapshot/锁准备与隔离 bundle consumer smoke |
-| 普通本地 baseline 命令 | 独立 tracked 快照，默认 exhaustive，无默认行为复用 |
+| Main push / 手动运行 | Node 24 / target 全量；附加 Node 22.19.0 / floor 分层兼容检查 |
+| Node 24 / target consumer | PR 为 smoke，main/manual 为 exhaustive |
+| 附加 floor 角色 | 保留 snapshot/锁准备、实际 SDK、包 check、composition 与 consumer smoke |
+| 普通本地 baseline 命令 | 两种 Pi 角色分别用独立 tracked 快照执行分层兼容检查 |
 
 Canonical target job 使用提交的根锁和隔离 agent 目录，不多做一次 checkout 安装。
 四个既有 required contexts 汇总 plan 与所有所需工作，不表示 PR 额外跑过另外三个兼容组合。
 配置好 workflow 也不等于本次远端任务已经通过。
 
-`OMP_PI_REUSE_TARGET=1` 是显式优化，仅限同 source revision、同 Node 且要求完整 target 成功的调用者。
-远端 aggregates 要求 target package/suite jobs 完整通过，main/manual 的小 affected plan 不能替代 full coverage。
-Floor 完成锁投影、hash 校验、冻结安装后，须同时满足：
-
-- Pi 版本一致；
-- 根与所有 workspace manifests 一致；
-- 完整 application lock 深度相等，包括 settings、importers、package identities、integrity 和 peer/dependency snapshots。
-
-不匹配则按该腿指定 consumer mode 运行普通 suite。匹配仍运行 `check:pi-baseline`、`pack:check` 与 consumer smoke。
-显式启用的本地 `all` 先跑 target，仅复用成功结果；单独 opted-in floor 依赖必须成功的 companion target。
-默认不复用行为测试；失败、缺失或不完整的 companion 不能变成成功。
+兼容副本不运行 policy 或发布基础设施测试；这些由 canonical target 的全量计划覆盖。
+Floor 仍保留投影锁、integrity 校验、冻结安装与实际 SDK 检查。
 
 <a id="pi-12-lifecycle-and-tool-contracts"></a>
 
@@ -214,7 +204,8 @@ Grammar eligibility 同样使用有效 context。通知和 cleanup 保持 `agent
 
 ## 没有验证什么
 
-Main/manual matrix 的范围为 Node 22.19.0 / 24.x 与 Pi floor 1.2.0 / target 1.4.0，按上述规则做 guarded reuse 与非 canonical smoke。
+Main/manual 验证 Node 24.x / Pi target 1.4.0 与 Node 22.19.0 / Pi floor 1.2.0，
+并非 Node × Pi 的完整笛卡尔积。
 PR 合并前仅验证 Node 24/target，不代表已执行其他远端组合，更不覆盖所有未来 Node/Pi 版本。
 旧审计中的 0.84.2/0.85.1 等基线仅为历史记录。
 
