@@ -98,6 +98,10 @@ codemode 或嵌套工具执行。
 扩展只读取，不改写这些文件。修改后 `/reload` 会刷新配置和角色目录，**同时停止现有工作**，
 不要把它当成正在执行任务时的热更新。
 
+SDK 宿主通过 inline factory 加载时，可调用 `subagentExtension(pi, { agentDir })`
+显式传入与 `createAgentSessionServices` 相同的目录。Pi 1.2–1.4 的扩展上下文不暴露该目录；
+仅给 SDK 服务传 `agentDir` 不会自动传给此扩展。普通扩展加载仍使用 Pi 的 `getAgentDir()`。
+
 完整默认配置：
 
 ```json

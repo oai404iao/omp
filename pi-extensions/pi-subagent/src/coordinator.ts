@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { uuidv7, type Model } from "@earendil-works/pi-ai";
 import {
-	getAgentDir, SessionManager, type AgentSessionRuntime, type BoundaryResult, type ExtensionAPI,
+	SessionManager, type AgentSessionRuntime, type BoundaryResult, type ExtensionAPI,
 	type ExtensionContext, type ExtensionFactory, type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import { discoverAgents, type AgentDiscoveryResult } from "./agents.ts";
@@ -90,7 +90,7 @@ export class SubagentCoordinator implements DashboardSource {
 		private readonly packageRoot: string,
 		private readonly codexIntegration: CodexIntegration,
 		readonly settings: SubagentSettings = { ...DEFAULT_SETTINGS },
-		private readonly agentDir: string = getAgentDir(),
+		private readonly agentDir: string,
 	) {
 		this.limiter = new ExecutionLimiter(settings.maxConcurrentAgents);
 	}

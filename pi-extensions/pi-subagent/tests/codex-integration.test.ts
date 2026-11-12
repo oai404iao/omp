@@ -17,6 +17,13 @@ for (const count of [2, 8]) {
 	});
 }
 
+test("explicit application agentDir overrides conflicting child-process environment through reload and cold resume", t => {
+	const result = spawnSync(process.execPath, [resolve(import.meta.dirname, "support/cold-loader.mjs"),
+		tempRoot(t), "2", "", "", "explicit"],
+		{ encoding: "utf8", timeout: 90000, env: subprocessEnv });
+	assert.equal(result.status, 0, `${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
+});
+
 test("jiti resolution distinguishes absent packages from damaged installed integrations", async t => {
 	const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
 	const jitiPath = sdkRequire.resolve("jiti");

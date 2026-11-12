@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionContext, SessionManager } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext, type SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadSettings } from "./config.ts";
 import { SubagentCoordinator } from "./coordinator.ts";
 import { formatAgentCatalog } from "./agents.ts";
@@ -13,7 +13,7 @@ import { loadCodexIntegration } from "./codex-integration.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-export default async function subagentExtension(pi: ExtensionAPI): Promise<void> {
+export default async function subagentExtension(pi: ExtensionAPI, options: { agentDir?: string } = {}): Promise<void> {
 	const codexIntegration = await loadCodexIntegration();
 	let coordinator: SubagentCoordinator | undefined;
 	let initializationError: unknown;
@@ -31,8 +31,9 @@ export default async function subagentExtension(pi: ExtensionAPI): Promise<void>
 		await coordinator?.shutdown();
 		coordinator = undefined;
 		try {
-			const { settings } = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
-			const controller = new SubagentCoordinator(pi, PACKAGE_ROOT, codexIntegration, settings);
+			const agentDir = options.agentDir ?? getAgentDir();
+			const { settings } = loadSettings({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted(), agentDir });
+			const controller = new SubagentCoordinator(pi, PACKAGE_ROOT, codexIntegration, settings, agentDir);
 			const root = controller.attachRoot(ctx);
 			const catalog = controller.catalog(root);
 			coordinator = controller;

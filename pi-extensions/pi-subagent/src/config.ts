@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { AgentScope, SubagentSettings } from "./types.ts";
 
 export const CONFIG_FILE_NAME = "subagent.json";
@@ -27,7 +27,7 @@ const CONFIG_KEYS = new Set([
 interface LoadSettingsOptions {
 	cwd: string;
 	projectTrusted: boolean;
-	agentDir?: string;
+	agentDir: string;
 }
 
 export interface LoadedSettings {
@@ -149,7 +149,7 @@ function applyConfig(
 export function loadSettings(options: LoadSettingsOptions): LoadedSettings {
 	let settings: SubagentSettings = { ...DEFAULT_SETTINGS };
 	const sources: string[] = [];
-	const userPath = join(options.agentDir ?? getAgentDir(), CONFIG_FILE_NAME);
+	const userPath = join(options.agentDir, CONFIG_FILE_NAME);
 	const userConfig = readConfig(userPath);
 	if (userConfig) {
 		settings = applyConfig(settings, userConfig, userPath);
