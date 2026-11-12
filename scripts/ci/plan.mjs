@@ -37,7 +37,7 @@ function fullPlan(mode, sourceSha, reason) {
   return plan(mode, sourceSha, allPackages, suites, [reason], true);
 }
 
-// Only explicitly non-runtime repository documentation is exempt from fallback.
+// Documentation does not select behavioral suites.
 function policyOnlyPath(path) {
   return /^(README|CONTRIBUTING|RELEASING|SECURITY|AGENTS)\.md$/.test(path) ||
     /^docs\/.*\.md$/.test(path) || /^\.changeset\/[^/]+\.md$/.test(path) ||
@@ -59,6 +59,22 @@ export function affectedPlan(paths, graphs, sourceSha) {
       reasons.push(`Shared Codex test change: ${path}`);
     } else if (policyOnlyPath(path)) {
       reasons.push(`Policy-only documentation: ${path}`);
+    } else if (path === "scripts/workspaces.mjs") {
+      return fullPlan("affected", sourceSha, `Full fallback: shared workspace catalog ${path}`);
+    } else if (path.startsWith(".github/actions/setup-ci/")) {
+      return fullPlan("affected", sourceSha, `Full fallback: shared CI toolchain ${path}`);
+    } else if (path.startsWith("scripts/") || path.startsWith(".github/")) {
+      selectedSuites.add("infrastructure");
+      reasons.push(`Infrastructure change: ${path}`);
+      // These scripts are also executed by the behavioral suites.
+      if (["scripts/test-codex-composition.mjs", "scripts/check-codex-architecture.mjs"].includes(path)) {
+        selectedSuites.add("composition");
+      }
+      if (["scripts/verify-codex-installations.mjs", "scripts/codex-consumer-matrix.mjs",
+        "scripts/codex-loader-probe.mjs", "scripts/subagent-consumer-probe.mjs",
+        "scripts/isolated-consumer-lock.mjs", "scripts/pnpm-lock.mjs", "scripts/pi-baselines.mjs"].includes(path)) {
+        selectedSuites.add("consumers");
+      }
     } else {
       return fullPlan("affected", sourceSha, `Full fallback: unclassified or shared path ${path}`);
     }

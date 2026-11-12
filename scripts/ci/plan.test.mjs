@@ -51,13 +51,42 @@ test("documentation remains policy-only but unknown/shared/toolchain paths fall 
     assert.deepEqual(tasksForPlan(value).map(entry => entry.id), ["policy"]);
   }
   for (const path of ["unknown", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
-    ".github/workflows/ci.yml", "scripts/ci/plan.mjs", "tsconfig.json", "docs/config.json",
+    "scripts/workspaces.mjs", ".github/actions/setup-ci/action.yml", "tsconfig.json", "docs/config.json",
     "pi-extensions/new-package/index.ts"]) {
     const value = affectedPlan([path], [], sha);
     assert.equal(value.full, true, path);
     assert.match(value.reasons[0], /Full fallback/);
   }
   assert.equal(tasksForPlan(affectedPlan([], [], sha)).length, 1);
+});
+
+test("infrastructure changes do not select package or consumer checks without a shared dependency", () => {
+  for (const path of ["scripts/ci/plan.mjs", "scripts/release-utils.mjs", "scripts/verify-packages.test.mjs",
+    ".github/workflows/ci.yml", ".github/dependabot.yml"]) {
+    const value = affectedPlan([path, "CONTRIBUTING.md"], [], sha);
+    assert.equal(value.full, false, path);
+    assert.deepEqual(value.packages, [], path);
+    assert.deepEqual(value.suites, ["infrastructure"], path);
+  }
+});
+
+test("behavioral script dependencies select their suites and mixed changes preserve all work", () => {
+  for (const path of ["scripts/test-codex-composition.mjs", "scripts/check-codex-architecture.mjs"]) {
+    assert.deepEqual(affectedPlan([path], [], sha).suites, ["composition", "infrastructure"]);
+  }
+  for (const path of ["scripts/verify-codex-installations.mjs", "scripts/codex-consumer-matrix.mjs",
+    "scripts/codex-loader-probe.mjs", "scripts/subagent-consumer-probe.mjs",
+    "scripts/isolated-consumer-lock.mjs", "scripts/pnpm-lock.mjs", "scripts/pi-baselines.mjs"]) {
+    assert.deepEqual(affectedPlan([path], [], sha).suites, ["consumers", "infrastructure"], path);
+  }
+  const paths = ["scripts/ci/plan.mjs", "pi-extensions/pi-notify/index.ts"];
+  const mixed = affectedPlan(paths, [], sha);
+  assert.deepEqual(mixed.packages, ["pi-notify"]);
+  assert.deepEqual(mixed.suites, ["infrastructure"]);
+  assert.deepEqual(affectedPlan([...paths, "tests/codex/fixture.json"], [], sha).suites,
+    ["composition", "consumers", "infrastructure"]);
+  assert.equal(affectedPlan([...paths, "unknown"], [], sha).full, true);
+  assert.equal(affectedPlan([...paths, "pnpm-lock.yaml"], [], sha).full, true);
 });
 
 test("subagent and all Codex packages activate integrations; notify is testable alone", () => {

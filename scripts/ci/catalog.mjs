@@ -18,9 +18,10 @@ export const taskCatalog = new Map([
     id: `package:${entry.id}`,
     commands: [["pnpm", "--filter", entry.name, "--fail-if-no-match", "run", "check"]],
   }]),
-  ...Object.entries({ composition: "test:codex-composition", consumers: "test:codex-packages",
-    infrastructure: "test:release-scripts" })
+  ...Object.entries({ composition: "test:codex-composition", consumers: "test:codex-packages" })
     .map(([id, script]) => [id, { id, commands: [["pnpm", "run", script]] }]),
+  ["infrastructure", { id: "infrastructure", commands: ["test:release-scripts", "test:ci"]
+    .map(script => ["pnpm", "run", script]) }],
 ]);
 
 export function readPackage(entry, directory = root) {
