@@ -1,15 +1,27 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import {
-  dependentChangeset, exactPinEdits, generatedId, syncDependentChangesets,
-  versionWorkspace, workspaceManifests,
-} from "./workspace-versioning.mjs";
-import { root, workspaces } from "./workspaces.mjs";
+import { dependentChangeset, exactPinEdits, generatedId } from "./workspace-versioning.mjs";
+import { root } from "./workspaces.mjs";
+
+const runtimeName = "@fixture/runtime";
+const toolsName = "@fixture/capability";
+const bundleName = "@fixture/bundle";
+const consumerName = "@fixture/optional-consumer";
+const unrelatedName = "@fixture/unrelated";
+
+function fixtureManifests() {
+  return new Map([
+    [runtimeName, { version: "1.0.0" }],
+    [toolsName, { version: "2.0.0", dependencies: { [runtimeName]: "1.0.0" } }],
+    [bundleName, { version: "3.0.0", dependencies: { [toolsName]: "2.0.0" } }],
+    [consumerName, { version: "4.0.0", optionalDependencies: { [bundleName]: "3.0.0" } }],
+    [unrelatedName, { version: "5.0.0" }],
+  ].map(([name, manifest]) => [name, { name, private: false, ...manifest }]));
+}
 
 const graph = new Map([
   ["runtime", { version: "1.0.0" }],
@@ -46,105 +58,85 @@ test("pin repair preserves exact dependency and optional dependency versions wit
 });
 
 for (const prerelease of [false, true]) {
-test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagates runtime-only release through capabilities, bundle and subagent`, async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "omp-version-fixture-"));
-  try {
-    mkdirSync(join(cwd, ".changeset"));
-    writeFileSync(join(cwd, "pnpm-lock.yaml"), readFileSync(join(root, "pnpm-lock.yaml")));
-    writeFileSync(join(cwd, "pnpm-workspace.yaml"), readFileSync(join(root, "pnpm-workspace.yaml")));
-    writeFileSync(join(cwd, "package.json"), JSON.stringify({
-      name: "fixture", private: true,
-    }));
-    writeFileSync(join(cwd, ".changeset/config.json"), readFileSync(join(root, ".changeset/config.json")));
-    const original = workspaceManifests();
-    const before = structuredClone(original);
-    before.get("@oai404iao/pi-codex-runtime").private = true;
-    for (const entry of workspaces) {
-      mkdirSync(join(cwd, entry.directory), { recursive: true });
-      writeFileSync(join(cwd, entry.directory, "package.json"), JSON.stringify(before.get(entry.name)));
-    }
-    symlinkSync(join(root, "node_modules"), join(cwd, "node_modules"), "dir");
-    writeFileSync(join(cwd, ".gitignore"), "node_modules/\n");
-    writeFileSync(join(cwd, ".changeset/runtime-only.md"), '---\n"@oai404iao/pi-codex-runtime": patch\n---\n\nRuntime fixture.\n');
-    const git = args => {
-      const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-    };
-    git(["init", "-b", "main"]);
-    git(["add", "."]);
-    git(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture"]);
-    const pre = command => {
-      const result = spawnSync(join(cwd, "node_modules/.bin/changeset"), ["pre", command, ...(command === "enter" ? ["next"] : [])], { cwd, encoding: "utf8" });
-      assert.equal(result.status, 0, result.stdout + result.stderr);
-    };
-    if (prerelease) pre("enter");
-    await assert.rejects(syncDependentChangesets(cwd), /missing or stale/);
-    await syncDependentChangesets(cwd, true);
-    await assert.doesNotReject(syncDependentChangesets(cwd));
-    const generated = readFileSync(join(cwd, ".changeset", `${generatedId}.md`), "utf8");
-    assert.ok(generated.includes('"@oai404iao/pi-subagent": patch'));
+test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagates dependency and transitive optional releases`, async () => {
+  const f = await versioningFixture({ privateRuntime: true });
+  const { cwd, before, syncDependentChangesets, versionWorkspace, workspaceManifests } = f;
+  const pre = command => {
+    const result = spawnSync(join(cwd, "node_modules/.bin/changeset"), ["pre", command, ...(command === "enter" ? ["next"] : [])], { cwd, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  };
+  if (prerelease) pre("enter");
+  await assert.rejects(syncDependentChangesets(cwd), /missing or stale/);
+  await syncDependentChangesets(cwd, true);
+  await assert.doesNotReject(syncDependentChangesets(cwd));
+  const generated = readFileSync(join(cwd, ".changeset", `${generatedId}.md`), "utf8");
+  for (const name of [toolsName, bundleName, consumerName]) assert.ok(generated.includes(`"${name}": patch`));
+  await versionWorkspace(cwd, { updateLock: false });
+  const after = workspaceManifests(cwd);
+  for (const name of [runtimeName, toolsName, bundleName, consumerName]) {
+    assert.notEqual(after.get(name).version, before.get(name).version);
+  }
+  assert.equal(after.get(consumerName).optionalDependencies[bundleName], after.get(bundleName).version);
+  assert.deepEqual(after.get(unrelatedName), before.get(unrelatedName));
+  for (const [name, manifest] of after) {
+    assert.equal(manifest.private, before.get(name).private, `${name}: versioning must preserve privacy`);
+  }
+  assert.deepEqual(exactPinEdits(after, after), []);
+  await versionWorkspace(cwd, { updateLock: false });
+  assert.deepEqual(workspaceManifests(cwd), after);
+  if (prerelease) {
+    assert.match(after.get(toolsName).version, /-next\./);
+    const historyPath = join(cwd, ".changeset/pre", `${generatedId}.md`);
+    const history = readFileSync(historyPath, "utf8");
+    writeFileSync(join(cwd, ".changeset/capability-next.md"), `---\n"${toolsName}": patch\n---\n\nNext capability fixture.\n`);
     await versionWorkspace(cwd, { updateLock: false });
-    const after = workspaceManifests(cwd);
-    for (const name of ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools", "pi-subagent"]) {
-      assert.notEqual(after.get(`@oai404iao/${name}`).version, before.get(`@oai404iao/${name}`).version);
+    const next = workspaceManifests(cwd);
+    assert.equal(next.get(runtimeName).version, after.get(runtimeName).version);
+    for (const name of [toolsName, bundleName, consumerName]) {
+      assert.notEqual(next.get(name).version, after.get(name).version);
     }
-    assert.equal(after.get("@oai404iao/pi-subagent").optionalDependencies["@oai404iao/pi-codex-runtime"],
-      after.get("@oai404iao/pi-codex-runtime").version);
-    for (const [name, manifest] of after) {
-      assert.equal(manifest.private, before.get(name).private, `${name}: versioning must preserve privacy`);
-    }
-    assert.deepEqual(exactPinEdits(after, after), []);
+    assert.equal(readFileSync(historyPath, "utf8"), history);
     await versionWorkspace(cwd, { updateLock: false });
-    assert.deepEqual(workspaceManifests(cwd), after);
-    if (prerelease) {
-      assert.match(after.get("@oai404iao/pi-codex-core").version, /-next\./);
-      const historyPath = join(cwd, ".changeset/pre", `${generatedId}.md`);
-      const history = readFileSync(historyPath, "utf8");
-      writeFileSync(join(cwd, ".changeset/web-next.md"), '---\n"@oai404iao/pi-codex-web-search": patch\n---\n\nNext web fixture.\n');
-      await versionWorkspace(cwd, { updateLock: false });
-      const next = workspaceManifests(cwd);
-      assert.equal(next.get("@oai404iao/pi-codex-runtime").version, after.get("@oai404iao/pi-codex-runtime").version);
-      assert.equal(next.get("@oai404iao/pi-codex-core").version, after.get("@oai404iao/pi-codex-core").version);
-      assert.notEqual(next.get("@oai404iao/pi-codex-web-search").version, after.get("@oai404iao/pi-codex-web-search").version);
-      assert.equal(readFileSync(historyPath, "utf8"), history);
-      await versionWorkspace(cwd, { updateLock: false });
-      assert.deepEqual(workspaceManifests(cwd), next);
-      pre("exit");
-      await versionWorkspace(cwd, { updateLock: false });
-      const stable = workspaceManifests(cwd);
-      assert.doesNotMatch(stable.get("@oai404iao/pi-codex-core").version, /-/);
-      assert.deepEqual(exactPinEdits(stable, stable), []);
-    }
-    assert.deepEqual(workspaceManifests(), original, "fixture must not change real workspace versions");
-  } finally { rmSync(cwd, { recursive: true, force: true }); }
+    assert.deepEqual(workspaceManifests(cwd), next);
+    pre("exit");
+    await versionWorkspace(cwd, { updateLock: false });
+    const stable = workspaceManifests(cwd);
+    for (const manifest of stable.values()) assert.doesNotMatch(manifest.version, /-/);
+    assert.deepEqual(exactPinEdits(stable, stable), []);
+  }
 });
 }
 
-const toolsName = "@oai404iao/pi-codex-tools";
-const runtimeName = "@oai404iao/pi-codex-runtime";
-
-async function bootstrapFixture({
-  status = "bootstrap", private: isPrivate = false, locked = {},
-  source = runtimeName, prerelease = false, existingChangelog = true,
+async function versioningFixture({
+  status = "publishable", private: isPrivate = false, locked = {},
+  source = runtimeName, prerelease = false, existingChangelog = false, privateRuntime = false,
 } = {}) {
   const scratch = join(process.env.HOME, ".local/state/agents/tmp");
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
-  const cwd = mkdtempSync(join(scratch, "omp-bootstrap-version-"));
-  // Retain task fixtures for diagnosis; do not remove agent scratch directories.
+  const cwd = mkdtempSync(join(scratch, "omp-workspace-version-"));
   mkdirSync(join(cwd, ".changeset"));
   mkdirSync(join(cwd, "release-locks"));
   mkdirSync(join(cwd, "scripts"));
-  for (const path of ["pnpm-lock.yaml", "pnpm-workspace.yaml", ".changeset/config.json"]) {
-    writeFileSync(join(cwd, path), readFileSync(join(root, path)));
-  }
+  writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\nimporters: {}\n");
+  writeFileSync(join(cwd, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
+  writeFileSync(join(cwd, ".changeset/config.json"), JSON.stringify({
+    changelog: "@changesets/cli/changelog", commit: false, fixed: [], linked: [],
+    access: "public", baseBranch: "main", updateInternalDependencies: "patch",
+    privatePackages: { version: true, tag: false }, ignore: [],
+  }));
   writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "fixture", private: true }));
-  const before = workspaceManifests();
+  const before = fixtureManifests();
   before.get(toolsName).private = isPrivate;
-  for (const entry of workspaces) {
+  before.get(runtimeName).private = privateRuntime;
+  const entries = [...before.keys()].map((name, index) => ({
+    name, directory: `packages/package-${index}`,
+    releaseStatus: name === toolsName ? status : "publishable",
+  }));
+  for (const entry of entries) {
     mkdirSync(join(cwd, entry.directory), { recursive: true });
     writeFileSync(join(cwd, entry.directory, "package.json"), JSON.stringify(before.get(entry.name)));
   }
-  const changelog = join(cwd, "pi-extensions/pi-codex-tools/CHANGELOG.md");
+  const changelog = join(cwd, entries.find(entry => entry.name === toolsName).directory, "CHANGELOG.md");
   if (existingChangelog) writeFileSync(changelog,
     `# ${toolsName}\n\n## ${before.get(toolsName).version}\n\nExisting bootstrap notes for ${toolsName}@${before.get(toolsName).version}.\n`);
   const lockPath = join(cwd, "release-locks/npm-published-artifacts.json");
@@ -157,7 +149,6 @@ async function bootstrapFixture({
   for (const script of ["workspace-versioning.mjs", "release-dependencies.mjs", "lock-integrity.mjs", "pnpm-lock.mjs"]) {
     writeFileSync(join(cwd, "scripts", script), readFileSync(join(root, "scripts", script)));
   }
-  const entries = workspaces.map(entry => entry.name === toolsName ? { ...entry, releaseStatus: status } : entry);
   writeFileSync(join(cwd, "scripts/workspaces.mjs"), `
     import { readFileSync } from "node:fs";
     import { join } from "node:path";
@@ -175,12 +166,12 @@ async function bootstrapFixture({
     assert.equal(result.status, 0, result.stderr);
   }
   const versioning = await import(pathToFileURL(join(cwd, "scripts/workspace-versioning.mjs")).href);
-  return { cwd, before, changelog, lockPath, ...versioning };
+  return { cwd, before, entries, changelog, lockPath, ...versioning };
 }
 
 for (const source of [runtimeName, toolsName]) {
 test(`bootstrap preservation of ${source} release keeps the initial version and bumps consumers`, async t => {
-  const f = await bootstrapFixture({ source, existingChangelog: source === runtimeName });
+  const f = await versioningFixture({ status: "bootstrap", source, existingChangelog: source === runtimeName });
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {
     calls.push({ url: String(url), options });
@@ -192,21 +183,19 @@ test(`bootstrap preservation of ${source} release keeps the initial version and 
   await f.versionWorkspace(f.cwd, { updateLock: false, preserveBootstrapVersion: toolsName });
   const after = f.workspaceManifests(f.cwd);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "https://registry.npmjs.org/%40oai404iao%2Fpi-codex-tools");
+  assert.equal(calls[0].url, "https://registry.npmjs.org/%40fixture%2Fcapability");
   assert.equal(calls[0].options.redirect, "error");
   assert.equal(after.get(toolsName).version, f.before.get(toolsName).version);
   assert.equal(after.get(toolsName).dependencies[runtimeName], after.get(runtimeName).version);
   const consumers = source === runtimeName
-    ? ["pi-codex-runtime", "pi-codex-core", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools", "pi-subagent"]
-    : ["pi-codex-minimal-tools"];
+    ? [runtimeName, bundleName, consumerName] : [bundleName, consumerName];
   for (const name of consumers) {
-    const fullName = `@oai404iao/${name}`;
-    assert.notEqual(after.get(fullName).version, f.before.get(fullName).version, `${name}: consumers must still bump`);
+    assert.notEqual(after.get(name).version, f.before.get(name).version, `${name}: consumers must still bump`);
   }
   assert.deepEqual(f.exactPinEdits(after, after), []);
   if (source === runtimeName) assert.throws(() => f.exactPinEdits(f.before, after), /consumer version bump/,
       "public pin repair must not acquire an unvalidated exemption");
-  else assert.deepEqual(after.get("@oai404iao/pi-subagent"), f.before.get("@oai404iao/pi-subagent"));
+  assert.deepEqual(after.get(unrelatedName), f.before.get(unrelatedName));
   const changelog = readFileSync(f.changelog, "utf8");
   assert.equal(changelog.split(`## ${after.get(toolsName).version}\n`).length, 2);
   if (source === runtimeName) {
@@ -216,7 +205,7 @@ test(`bootstrap preservation of ${source} release keeps the initial version and 
     assert.match(changelog, /Bootstrap fixture/);
     assert.equal(after.get(runtimeName).version, f.before.get(runtimeName).version);
   }
-  const bundleLog = readFileSync(join(f.cwd, "pi-extensions/pi-codex-minimal-tools/CHANGELOG.md"), "utf8");
+  const bundleLog = readFileSync(join(f.cwd, f.entries.find(entry => entry.name === bundleName).directory, "CHANGELOG.md"), "utf8");
   assert.ok(bundleLog.includes(`${toolsName}@${after.get(toolsName).version}`));
 });
 }
@@ -226,19 +215,19 @@ for (const failure of [
   "unrelated-release", "registry-error", "ambiguous-404", "network-error", "prerelease", "malformed-lock",
 ]) {
   test(`bootstrap preservation rejects ${failure} before writing anything`, async t => {
-    const key = `${toolsName}@${workspaceManifests().get(toolsName).version}`;
-    const f = await bootstrapFixture({
+    const key = `${toolsName}@${fixtureManifests().get(toolsName).version}`;
+    const f = await versioningFixture({
       status: failure === "blocked" ? "blocked" : "bootstrap",
       private: failure === "private",
       locked: failure === "locked" ? { [key]: {} }
         : failure === "historically-locked" ? { [`${toolsName}@0.0.1`]: {} } : {},
-      source: failure === "unrelated-release" ? "@oai404iao/pi-telegram-notify" : runtimeName,
+      source: failure === "unrelated-release" ? unrelatedName : runtimeName,
       prerelease: failure === "prerelease",
     });
     if (failure === "malformed-lock") writeFileSync(f.lockPath, "{}");
     const snapshot = () => JSON.stringify([
       [...f.workspaceManifests(f.cwd)],
-      workspaces.map(entry => readdirSync(join(f.cwd, entry.directory))
+      f.entries.map(entry => readdirSync(join(f.cwd, entry.directory))
         .filter(name => name.endsWith(".md")).map(name =>
           [entry.name, name, readFileSync(join(f.cwd, entry.directory, name), "utf8")])),
       readFileSync(f.lockPath, "utf8"),
