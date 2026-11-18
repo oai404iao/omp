@@ -26,13 +26,15 @@
 
 ## 复现与证据
 
-在已经按仓库锁文件安装依赖的 checkout 中运行：
+离线实验仅适用于固定 Pi 0.87.1 的
+[历史提交 `92c0a63`](https://github.com/oai404iao/omp/tree/92c0a63018406d9a2a6042ab4ac50340b6f578ac)，
+不属于当前工作区的检查。按该提交的锁文件安装依赖后运行：
 
 ```sh
 npm run test:codex-ablation
 ```
 
-入口为 [`scripts/codex-ablation/run.mjs`](../../scripts/codex-ablation/run.mjs)。
+入口为 [`scripts/codex-ablation/run.mjs`](https://github.com/oai404iao/omp/blob/92c0a63018406d9a2a6042ab4ac50340b6f578ac/scripts/codex-ablation/run.mjs)。
 要求 POSIX；截止期限清理测试在 Linux 验证。它会：
 
 1. 检查 Pi 精确版本为 0.87.1。
@@ -53,7 +55,7 @@ D2/D4/D5/D6/D7/D9 转为回归断言。D13/D14 保留内置实现的反例。
 
 ## A：组件消融
 
-源码：[`components.test.ts`](../../scripts/codex-ablation/components.test.ts)。
+历史源码：[`components.test.ts`](https://github.com/oai404iao/omp/blob/92c0a63018406d9a2a6042ab4ac50340b6f578ac/scripts/codex-ablation/components.test.ts)。
 每个 A 用例保持其余输入相同；比较结构而非随机 identity/timestamp。
 
 | 用例 / 移除项 | 实测变化 | 支持的结论 |
@@ -72,8 +74,8 @@ profile 能力。这是**复合协议对照，不是单因素消融**，不能�
 
 ## D：完整实现差分
 
-源码：[`differential.test.ts`](../../scripts/codex-ablation/differential.test.ts)、
-[`retry.test.ts`](../../scripts/codex-ablation/retry.test.ts)。
+历史源码：[`differential.test.ts`](https://github.com/oai404iao/omp/blob/92c0a63018406d9a2a6042ab4ac50340b6f578ac/scripts/codex-ablation/differential.test.ts)、
+[`retry.test.ts`](https://github.com/oai404iao/omp/blob/92c0a63018406d9a2a6042ab4ac50340b6f578ac/scripts/codex-ablation/retry.test.ts)。
 这些用例比较两个完整实现，**不属于组件移除实验**。
 
 以下记录初轮消融基线，修复后的差异见末节。
@@ -251,6 +253,8 @@ core/runtime 添加 patch changeset，并同步递归消费者 changeset；
   自定义端点、WS、`/compact` 不猜测压缩支持。不可用/失败则保持原 JSON 编码。
 
 ### 压缩实验
+
+在上述历史提交中运行以下命令；结果对应当时的压缩条件：
 
 ```sh
 npm run test:codex-compression
