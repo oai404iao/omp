@@ -3,14 +3,16 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
+import { stripTerminalSequences, type TUI } from "@earendil-works/pi-tui";
 import { createApplyPatchToolDefinition } from "@oai404iao/pi-codex-tools/internal/tools/apply-patch";
 
-test("apply_patch definition is compatible with pi-tool-renderer assumptions", () => {
+test("deferred apply_patch uses Pi’s fallback call, result and shell", () => {
 	const tool = createApplyPatchToolDefinition({ deferRendering: true }) as Record<string, any>;
 	assert.equal(tool.name, "apply_patch");
 	assert.ok(tool.parameters.properties.input);
 	assert.deepEqual(tool.parameters.required, ["input"]);
-	assert.equal(tool.renderShell, "self");
+	assert.equal(tool.renderShell, undefined);
 	assert.equal("renderCall" in tool, false);
 	assert.equal("renderResult" in tool, false);
 });
@@ -21,7 +23,6 @@ test("apply_patch renderer updates from a throttled filesystem preview", async (
 	const tool = createApplyPatchToolDefinition() as Record<string, any>;
 	const theme = {
 		fg(_color: string, text: string) { return text; },
-		bg(_color: string, text: string) { return text; },
 		bold(text: string) { return text; },
 	};
 	let resolvePreview: (() => void) | undefined;
@@ -51,7 +52,8 @@ test("apply_patch renderer updates from a throttled filesystem preview", async (
 	const component = tool.renderCall(args, theme, context);
 	await previewReady;
 	context.lastComponent = component;
-	const rendered = tool.renderCall(args, theme, context).render(120).join("\n");
+	assert.equal(tool.renderCall(args, theme, context), component);
+	const rendered = component.render(120).join("\n");
 	assert.match(rendered, /M existing\.txt/);
 	assert.match(rendered, /1→1 lines/);
 	const nextArgs = { input: `${args.input}+tail\n` };
@@ -72,24 +74,24 @@ test("apply_patch renderer updates from a throttled filesystem preview", async (
 	assert.match(tool.renderResult(result, { expanded: true }, theme, context).render(120).join("\n"), /M existing\.txt/);
 });
 
-test("apply_patch self rendering applies outputPad to cached calls and settled results", () => {
-	const tool = createApplyPatchToolDefinition() as Record<string, any>;
-	const theme = { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text,
-		bold: (text: string) => text };
-	const context = { state: {}, lastComponent: undefined, cwd: process.cwd(), executionStarted: true,
-		expanded: false, isError: false, outputPad: 0 };
-	const call = tool.renderCall(undefined, theme, context);
-	assert.equal(call.render(40).find((line: string) => line.trim()), "apply_patch applying".padEnd(40));
-	context.outputPad = 1;
-	assert.equal(tool.renderCall(undefined, theme, context), call);
-	assert.equal(call.render(40).find((line: string) => line.trim()), " apply_patch applying".padEnd(40));
-	const result = { content: [{ type: "text", text: "Done" }], details: { files: [{ kind: "add", path: "test.txt" }] } };
-	for (const outputPad of [0, 1]) {
-		context.outputPad = outputPad;
-		assert.equal(tool.renderResult(result, {}, theme, context).render(40)[0], `${" ".repeat(outputPad)}Applied`.padEnd(40));
-		assert.equal(call.render(40).find((line: string) => line.trim()), `${" ".repeat(outputPad)}apply_patch applied`.padEnd(40));
-		context.isError = true;
-		assert.equal(tool.renderResult(result, {}, theme, context).render(40)[0], `${" ".repeat(outputPad)}Done`.padEnd(40));
-		context.isError = false;
+test("Pi frames apply_patch call and result together with a single outputPad", () => {
+	initTheme("dark", false);
+	const tool = createApplyPatchToolDefinition();
+	for (const isError of [false, true]) {
+		const component = new ToolExecutionComponent("apply_patch", "call", {}, {}, tool,
+			{ requestRender() {} } as TUI, process.cwd());
+		component.markExecutionStarted();
+		component.updateResult({ content: [{ type: "text", text: isError ? "Patch failed" : "Done" }],
+			details: isError ? undefined : { files: [{ kind: "add", path: "test.txt" }] }, isError });
+		for (const outputPad of [0, 1]) {
+			component.setOutputPad(outputPad);
+			const pad = " ".repeat(outputPad);
+			assert.deepEqual(component.render(40).map(line => stripTerminalSequences(line).trimEnd()), [
+				"", "", // Pi’s tool separator and top padding
+				...(isError ? [`${pad}apply_patch failed`, `${pad}Patch failed`]
+					: [`${pad}apply_patch applied`, `${pad}A test.txt`, `${pad}Applied`]),
+				"", // bottom padding after the result
+			]);
+		}
 	}
 });

@@ -1,4 +1,4 @@
-import { Box, Container, Spacer, Text, type Component } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { previewApplyPatch, type ApplyPatchPreviewFile } from "./apply.js";
 
 const PREVIEW_INTERVAL_MS = 500;
@@ -12,17 +12,17 @@ interface PreviewRequest {
 	invalidate: () => void;
 }
 
-interface ApplyPatchRenderBox extends Box {
+class PatchCall extends Container {
 	preview?: RenderPreview;
 	request?: PreviewRequest;
 	requestKey?: string;
-	previewPending: boolean;
+	previewPending = false;
 	previewTimer?: ReturnType<typeof setTimeout>;
-	lastPreviewStartedAt: number;
-	executionStarted: boolean;
+	lastPreviewStartedAt = 0;
+	executionStarted = false;
 	settledFiles?: Array<{ kind: ApplyPatchPreviewFile["kind"]; path: string; moveTo?: string }>;
-	settledError: boolean;
-	settledSuccess: boolean;
+	settledError = false;
+	settledSuccess = false;
 }
 
 async function computePreview(request: PreviewRequest): Promise<RenderPreview> {
@@ -39,23 +39,9 @@ async function computePreview(request: PreviewRequest): Promise<RenderPreview> {
 	}
 }
 
-function createRenderBox(): ApplyPatchRenderBox {
-	return Object.assign(new Box(1, 1, (text: string) => text), {
-		previewPending: false,
-		lastPreviewStartedAt: 0,
-		executionStarted: false,
-		settledError: false,
-		settledSuccess: false,
-	});
-}
-
-function getRenderBox(state: Record<string, unknown>, lastComponent: Component | undefined): ApplyPatchRenderBox {
-	if (lastComponent instanceof Box) {
-		state.callComponent = lastComponent;
-		return lastComponent as ApplyPatchRenderBox;
-	}
-	if (state.callComponent instanceof Box) return state.callComponent as ApplyPatchRenderBox;
-	const component = createRenderBox();
+function getCallComponent(state: Record<string, unknown>): PatchCall {
+	if (state.callComponent instanceof PatchCall) return state.callComponent;
+	const component = new PatchCall();
 	state.callComponent = component;
 	return component;
 }
@@ -64,7 +50,7 @@ function requestKey(request: Omit<PreviewRequest, "invalidate">): string {
 	return `${request.complete ? "complete" : "partial"}\u0000${request.cwd}\u0000${request.input}`;
 }
 
-function schedulePreview(component: ApplyPatchRenderBox, immediate = false): void {
+function schedulePreview(component: PatchCall, immediate = false): void {
 	if (!component.request || component.previewPending) return;
 	if (component.previewTimer) {
 		if (!immediate) return;
@@ -92,7 +78,7 @@ function schedulePreview(component: ApplyPatchRenderBox, immediate = false): voi
 	component.previewTimer.unref?.();
 }
 
-function updatePreviewRequest(component: ApplyPatchRenderBox, request: PreviewRequest): void {
+function updatePreviewRequest(component: PatchCall, request: PreviewRequest): void {
 	const key = requestKey(request);
 	if (component.requestKey === key) return;
 	component.request = request;
@@ -125,12 +111,7 @@ function settledOperationLine(file: { kind: ApplyPatchPreviewFile["kind"]; path:
 	return `${theme.fg(markerColor, marker)} ${theme.fg("accent", path)}`;
 }
 
-function rebuildCall(component: ApplyPatchRenderBox, theme: any, expanded: boolean): ApplyPatchRenderBox {
-	component.setBgFn(component.settledError
-		? (text: string) => theme.bg("toolErrorBg", text)
-		: component.settledSuccess
-			? (text: string) => theme.bg("toolSuccessBg", text)
-			: (text: string) => theme.bg("toolPendingBg", text));
+function rebuildCall(component: PatchCall, theme: any, expanded: boolean): PatchCall {
 	component.clear();
 	const status = component.settledError
 		? "failed"
@@ -159,8 +140,7 @@ function rebuildCall(component: ApplyPatchRenderBox, theme: any, expanded: boole
 export function createApplyPatchRenderers() {
 	return {
 		renderCall(args: { input?: string } | undefined, theme: any, context: any) {
-			const component = getRenderBox(context.state, context.lastComponent);
-			component.setPaddingX(context.outputPad);
+			const component = getCallComponent(context.state);
 			if (context.executionStarted && !component.executionStarted) {
 				component.executionStarted = true;
 				if (component.previewTimer) clearTimeout(component.previewTimer);
@@ -183,8 +163,7 @@ export function createApplyPatchRenderers() {
 			content?: Array<{ type?: string; text?: string }>;
 			details?: { files?: Array<{ kind?: string; path?: string; moveTo?: string }> };
 		}, _options: unknown, theme: any, context: any) {
-			const component = getRenderBox(context.state, context.state.callComponent);
-			component.setPaddingX(context.outputPad);
+			const component = getCallComponent(context.state);
 			component.settledError = Boolean(context.isError);
 			component.settledSuccess = !context.isError;
 			if (!context.isError && Array.isArray(result.details?.files)) {
@@ -196,8 +175,8 @@ export function createApplyPatchRenderers() {
 			}
 			rebuildCall(component, theme, Boolean(context.expanded));
 			const message = result.content?.filter((item) => item.type === "text").map((item) => item.text ?? "").join("\n") ?? "";
-			if (context.isError) return message ? new Text(theme.fg("error", message), context.outputPad, 0) : new Container();
-			return new Text(theme.fg("success", context.expanded && message ? message : "Applied"), context.outputPad, 0);
+			if (context.isError) return message ? new Text(theme.fg("error", message), 0, 0) : new Container();
+			return new Text(theme.fg("success", context.expanded && message ? message : "Applied"), 0, 0);
 		},
 	};
 }

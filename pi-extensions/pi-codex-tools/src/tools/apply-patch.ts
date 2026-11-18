@@ -118,7 +118,6 @@ export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string
 
 export function createApplyPatchToolDefinition(options: { cwd?: string; deferRendering?: boolean } = {}) {
 	const definition: Record<string, unknown> = {
-		renderShell: "self",
 		name: "apply_patch",
 		label: "Apply Patch",
 		description: "Use apply_patch to edit files with the Codex patch format. A patch starts with *** Begin Patch, contains one or more Add, Update, or Delete file sections, and ends with *** End Patch.",

@@ -83,7 +83,7 @@ Floor 仍保留投影锁、integrity 校验、冻结安装与实际 SDK 检查�
 | 子代理 model runtime | Provider、virtual router、runtime key 隔离；Pi 1.2 constructor adapter 保留 root baseline，但不共享可变 remote-catalog refresh wrappers |
 | 扩展继承 | 继承的扩展重建 child callbacks，临时中间注册不是后代 baseline；原生/custom providers 与 root-bound virtual routes 保留 |
 | 启动取消 | 使用 Pi pending abort，不从 `started` preflight 抛出；未交付 envelope 等显式 follow-up，不回滚 context receipts |
-| 工具展示与流 | Patch self-shell renderers 使用 `outputPad`；流使用记录 response duration 的 `AssistantMessageEventStream` |
+| 工具展示与流 | Patch 使用 Pi 的标准工具容器；流使用记录 response duration 的 `AssistantMessageEventStream` |
 
 标准 OpenAI Responses 的 sampling 依次合并 model defaults、有效且 clamped 的 thinking-level overrides、
 request parameters，结构请求字段仍受保护。ChatGPT subscription 请求省略 temperature 与 output-token caps；
