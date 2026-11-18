@@ -177,19 +177,17 @@ pnpm 内部链接包括可执行链接只能留在 consumer 内，不能指向 c
 并以真实 SDK/loader 加载 core 与所有工具；不覆盖其余组合、逆序/重复加载扫描及配置掩码。
 未知模式失败。普通本地 CI 和 baseline 命令不默认降为 smoke。
 
-离线消融 `pnpm run test:codex-ablation` 比较固定组件与 Pi 0.87.1 内置 Codex stream，
-结果见[消融审计](audits/codex-ablation.md)，不是模型质量或延迟基准。
 Live 测试与 CI 分开，需显式授权和 `--execute provider/model`，不要为检查文档而运行。
 协议依据见 [reference 索引](../pi-extensions/pi-codex-runtime/reference/README.md)、
-[来源映射](../pi-extensions/pi-codex-runtime/reference/source-map.md)及[组合清理审计](audits/codex-composition-cleanup.md)。
+[来源映射](../pi-extensions/pi-codex-runtime/reference/source-map.md)。历史结果见
+[离线消融审计](audits/codex-ablation.md)和[组合清理审计](audits/codex-composition-cleanup.md)。
 
 <a id="release-status"></a>
 
 ## 发布状态与边界
 
-以 `scripts/workspaces.mjs` 为资格来源：当前八个发布工作区均为 `publishable`，
-tools 的 `0.1.0-alpha.1` 首发与独立激活已经完成，**不再等待 bootstrap**。
-旧文档中的七包/九包队列或 tools 待首发叙述是历史阶段，不是当前批次。
+以 [`scripts/workspaces.mjs`](../scripts/workspaces.mjs) 为发布资格来源。
+Tools 已完成首发与独立激活，走常规受保护发布流程。
 
 这不表示当前 manifest 的所有版本都已发布，也不授权发布。
 普通批次要求完整依赖闭包和依赖优先顺序；定向发布要求精确依赖已在 npm 验证。

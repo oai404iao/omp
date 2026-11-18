@@ -40,8 +40,6 @@
     "ci:pi-floor": "node scripts/test-pi-baselines.mjs floor",
     "ci:pi-target": "node scripts/test-pi-baselines.mjs target",
     "test:codex-packages": "node scripts/verify-codex-installations.mjs",
-    "test:codex-ablation": "node scripts/codex-ablation/run.mjs",
-    "test:codex-compression": "node --import tsx scripts/codex-ablation/compression.mjs",
     "test:codex-live": "node --import tsx scripts/codex-ablation/live.ts",
     "license:check": "node scripts/verify-licenses.mjs",
     "pack:check": "node scripts/verify-packages.mjs",

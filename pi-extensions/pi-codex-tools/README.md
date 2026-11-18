@@ -76,7 +76,7 @@ patch 被声明时，通过 Pi `prepareLoadout.hiddenDeclarations` 隐藏所选�
 - 写前验证与回滚保护不等于多文件事务或文件系统隔离。队列只协调参与同一机制的工具，不能阻止外部程序同时写入。
 - 未存在文件使用词法路径键；不同调用通过目录别名或 hardlink 不保证共享锁。各工具保持路径一致；并发替换目录/符号链接不是原子隔离。
 
-预览遵守 Pi `outputPad`（含零 padding）。`deferApplyPatchRendering:true` 可交给 Pi 回退 renderer。详细行为与安全检查见 [补丁行为（仓库）](https://github.com/oai404iao/omp/blob/main/pi-extensions/pi-codex-tools/reference/apply-patch-behavior.md)。
+Pi 的标准工具容器为补丁预览和结果统一应用背景与 `outputPad`（含零 padding）。`deferApplyPatchRendering:true` 可交给 Pi 回退 renderer。详细行为与安全检查见 [补丁行为（仓库）](https://github.com/oai404iao/omp/blob/main/pi-extensions/pi-codex-tools/reference/apply-patch-behavior.md)。
 
 ## 使用搜索
 
