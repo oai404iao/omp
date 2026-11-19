@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai/compat";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ProviderEventContext } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/stream-effects";
 import type { StreamEventShape } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { encodeWebSearchActivityTextSignature } from "@oai404iao/pi-codex-runtime/internal/providers/responses/signatures";

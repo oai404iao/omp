@@ -1,9 +1,7 @@
 # 文档组织与写作
 
-本项目参考 **Pi 1.2.0** 的文档组织，而不是复制其整套产品手册。
-研究来源为本机安装包 `@earendil-works/pi-coding-agent@1.2.0`，
-对应上游入口为 [Pi v1.2.0](https://github.com/earendil-works/pi/tree/v1.2.0/packages/coding-agent)。
-这一版本依据不代表上游此后没有更新。
+本项目参考 [Pi 宿主手册](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/docs/index.md)
+的组织方式，而不是复制其整套产品手册。宿主支持范围以 [Pi 兼容性](pi-compatibility.md)为准。
 
 ## 借鉴了什么
 
@@ -18,8 +16,7 @@
 | `docs/sdk.md`、`session-format.md` | 区分最短集成与完整持久化/上下文契约 | [Pi 兼容性](pi-compatibility.md)与[协议迁移](codex-wire-alignment.md)承载深层边界 |
 | `docs/security.md` / Project trust | 直接说明信任不是沙箱、权限如何生效 | [安全说明](../SECURITY.md)明确进程权限、外发与不可逆副作用 |
 
-研究完整阅读了以上文件，另阅读 Pi 根 README 与本项目对应指南、包配置/API 实现及测试。
-没有把参考文档的每个链接都变成本项目的新章节，也没有照搬不属于 OMP 的 CLI/SDK 产品能力。
+本项目只针对 OMP 说明相关流程；宿主安装和 CLI/SDK 的完整用法仍以 Pi 文档为准。
 
 ## 目录分层
 

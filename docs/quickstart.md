@@ -5,8 +5,7 @@
 
 ## 1. 准备环境
 
-已安装的 Pi 需要 **1.2.0 或更新版本**。本仓库的精确开发目标为 1.4.0，
-不是对所有未来版本已经通过测试的承诺。
+已安装的 Pi 需要 **1.5.2 或更新版本**；本仓库仅验证 **1.5.2**。
 
 ```bash
 pi --version
@@ -20,7 +19,7 @@ pnpm --version
 pnpm install --frozen-lockfile --ignore-scripts
 ```
 
-尚未安装 Pi 时，按 [Pi 快速开始](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/docs/quickstart.md)
+尚未安装 Pi 时，按 [Pi 快速开始](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/docs/quickstart.md)
 准备宿主。OMP 不替代 Pi 的安装、模型选择或登录流程。
 
 ## 2. 选择加载方式

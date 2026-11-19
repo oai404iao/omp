@@ -1,4 +1,4 @@
-import { type Api, type Context, type Model, type SimpleStreamOptions, type ThinkingLevel } from "@earendil-works/pi-ai/compat";
+import { type Api, type Context, type Model, type SimpleStreamOptions, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { type CodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { createCodexReservedNamespaceTool } from "@oai404iao/pi-codex-runtime/internal/codex-reserved-tools";
 import { resolveCodexRequestIdentity, type CodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
@@ -152,7 +152,7 @@ export function buildRequestBody<TApi extends Api>(
 		body.tools = tools;
 	}
 
-	// Match Pi 0.99.1's private isChatGPTSignIn predicate, not an auth selector.
+	// Mirror Pi's native Responses request-shaping predicate, not credential selection.
 	// Proxies and header-only auth must not be classified by token shape alone.
 	const chatGPTSignIn = model.provider === "openai"
 		&& model.baseUrl === "https://api.openai.com/v1"

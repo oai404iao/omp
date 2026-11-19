@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { globSync, mkdirSync, mkdtempSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { readManifest, registry, root, workspaces } from "./workspaces.mjs";
-import { piFloor, piVersion } from "./pi-baselines.mjs";
+import { isPiDependency, piVersion } from "./pi-version.mjs";
 import { readPnpmLock } from "./pnpm-lock.mjs";
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
@@ -13,7 +13,6 @@ const packDirectory = mkdtempSync(resolve(scratch, "omp-pack-check-"));
 
 const errors = [];
 const seenNames = new Set();
-const testedPiVersion = piFloor;
 
 function report(message) {
   errors.push(message);
@@ -85,15 +84,14 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   if (kind === "library" && manifest.pi?.extensions?.length) {
     report(`${manifest.name}: runtime library must not auto-register Pi extensions`);
   }
-  const expectedPiPeerRange = `>=${testedPiVersion}`;
-  const expectedPiDevBaseline = piVersion();
+  const expectedPiPeerRange = `>=${piVersion}`;
   for (const [dependency, range] of Object.entries(manifest.peerDependencies ?? {})) {
-    if (!dependency.startsWith("@earendil-works/pi-")) continue;
+    if (!isPiDependency(dependency)) continue;
     if (range !== expectedPiPeerRange) {
       report(`${manifest.name}: ${dependency} peer range must be ${expectedPiPeerRange}`);
     }
-    if (manifest.devDependencies?.[dependency] !== expectedPiDevBaseline) {
-      report(`${manifest.name}: ${dependency} development baseline must be ${expectedPiDevBaseline}`);
+    if (manifest.devDependencies?.[dependency] !== piVersion) {
+      report(`${manifest.name}: ${dependency} development baseline must be ${piVersion}`);
     }
   }
   if (

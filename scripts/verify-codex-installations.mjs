@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify } from "yaml";
-import { piVersion } from "./pi-baselines.mjs";
+import { piVersion } from "./pi-version.mjs";
 import { root, readManifest } from "./workspaces.mjs";
 import { isolatedConsumerLock } from "./isolated-consumer-lock.mjs";
 import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
@@ -14,7 +15,6 @@ import { codexConsumerMatrix } from "./codex-consumer-matrix.mjs";
 
 const matrix = codexConsumerMatrix(process.env.OMP_CODEX_CONSUMER_MODE);
 console.log(`Codex consumer mode: ${matrix.mode}; packing all seven packages; ${matrix.consumers.length} isolated consumer install(s)`);
-// This integration probe validates the selected workspace Pi baseline.
 const prefix = "@oai404iao/";
 const names = ["pi-codex-runtime", "pi-codex-core", "pi-codex-tools", "pi-codex-web-search", "pi-codex-imagegen", "pi-codex-minimal-tools", "pi-subagent"];
 const manifests = new Map(names.map(name => [prefix + name, readManifest(`pi-extensions/${name}`)]));
@@ -129,14 +129,17 @@ function install(label, requested) {
   for (const name of installed) {
     assert.ok(realpathSync(join(path, "node_modules", name)).startsWith(path), `${name} leaked from the workspace`);
   }
-  if (requested.includes("pi-codex-minimal-tools")) {
-    const smoke = join(path, "inline-smoke.mts");
+  if (label === "bundle") {
+    const require = createRequire(join(path, "package.json"));
+    assert.throws(() => require.resolve(`${prefix}pi-codex-minimal-tools/subagent-inline`), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
+  }
+  if (label === "runtime") {
+    const smoke = join(path, "runtime-smoke.mts");
     writeFileSync(smoke, `
       import assert from "node:assert/strict";
-      import * as legacy from "@oai404iao/pi-codex-minimal-tools/subagent-inline";
-      import * as runtime from "@oai404iao/pi-codex-runtime/subagent-inline";
-      assert.deepEqual(Object.keys(legacy).sort(), ["CODEX_IDENTITY_CUSTOM_TYPE", "createCodexSubagentInlineExtension"]);
-      assert.equal(legacy.createCodexSubagentInlineExtension, runtime.createCodexSubagentInlineExtension);
+      import { CODEX_IDENTITY_CUSTOM_TYPE, createCodexSubagentInlineExtension } from "@oai404iao/pi-codex-runtime/subagent-inline";
+      assert.equal(typeof CODEX_IDENTITY_CUSTOM_TYPE, "string");
+      assert.equal(typeof createCodexSubagentInlineExtension, "function");
     `);
     const smokeResult = spawnSync(join(root, "node_modules/.bin/tsx"), [smoke], {
       cwd: path, encoding: "utf8", timeout: 45000,
@@ -150,7 +153,7 @@ function install(label, requested) {
 function runProbes(label, orders, expectedTools, core) {
   const job = join(directory, "probe.json");
   writeFileSync(job, JSON.stringify({
-    version: piVersion(),
+    version: piVersion,
     probes: orders.map(paths => ({ label, cwd: consumers.get(label), paths, expectedTools, core })),
   }));
   const result = spawnSync(process.execPath, [fileURLToPath(new URL("./codex-loader-probe.mjs", import.meta.url)), job], {
@@ -172,7 +175,7 @@ try {
   for (const [label, requested, tools, core] of matrix.consumers) {
     const path = install(label, requested);
     if (requested.includes("pi-subagent")) {
-      const result = spawnSync(process.execPath, [fileURLToPath(new URL("./subagent-consumer-probe.mjs", import.meta.url)), path, piVersion(), label], {
+      const result = spawnSync(process.execPath, [fileURLToPath(new URL("./subagent-consumer-probe.mjs", import.meta.url)), path, piVersion, label], {
         cwd: path, encoding: "utf8", timeout: 90000,
         env: { ...process.env, PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_CODING_AGENT_DIR: join(path, "agent") },
       });
@@ -206,7 +209,7 @@ try {
     const allTools = ["apply_patch", "web_search", "image_generation"];
     runProbes("bundle", [[bundle, web], [web, bundle]], allTools, true);
   }
-  console.log(`✓ Codex (${matrix.mode}): ${checks} production tarball/Pi ${piVersion()} combinations; frozen offline pnpm install; no external links or capability leakage`);
+  console.log(`✓ Codex (${matrix.mode}): ${checks} production tarball/Pi ${piVersion} combinations; frozen offline pnpm install; no external links or capability leakage`);
 } finally {
   globalThis.fetch = previousFetch;
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

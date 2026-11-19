@@ -1,4 +1,4 @@
-import { type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import { type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { SSE_RESPONSE_HEADER_TIMEOUT_MS } from "./constants.js";
 import { type StreamEventShape } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { ProviderProtocolError } from "./errors.js";

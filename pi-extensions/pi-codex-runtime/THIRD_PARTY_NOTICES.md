@@ -11,10 +11,14 @@ revision `06a466935536f8c9bcacb2d5efc0fc021be1bdff`.
 `provenance/pi-openai-120-gpt6.json` records exact source and catalog hashes;
 the four selected chat descriptors are unchanged from the original evidence.
 
-The Pi 1.4.0 development catalog is checked at MIT-licensed revision
+The historical Pi 1.4.0 catalog is checked at MIT-licensed revision
 `4a080252f06caf63a525d7873c5d94d3c23887e0`.
 `provenance/pi-openai-140-gpt6.json` pins its exact catalog and descriptor hashes.
 The four selected descriptors add only `compat.supportsMidConvoEffort`.
+
+The installed Pi 1.5.2 catalog is checked at MIT-licensed revision
+`b4afdddf44e059c67ccf5097e5317d913521b470`. `provenance/pi-openai-152-gpt6.json`
+pins the registry archive integrity and exact catalog and descriptor hashes.
 
 Append-only effort-history serialization follows Apache-2.0 Codex revision
 `0585dcb5dbb276a78909fa8fd0b36310f16973f9` and MIT Pi 1.5.0 revision

@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
+import { expectedJobNames } from "./ci/trusted-main.mjs";
 import { root } from "./workspaces.mjs";
 
 const workflows = readdirSync(join(root, ".github/workflows"))
@@ -10,6 +11,7 @@ const workflows = readdirSync(join(root, ".github/workflows"))
   .map(path => [path, parse(readFileSync(join(root, ".github/workflows", path), "utf8"))]);
 const workflow = workflows.find(([path]) => path === "ci.yml")[1];
 const publish = workflows.find(([path]) => path === "publish.yml")[1];
+const setup = parse(readFileSync(join(root, ".github/actions/setup-ci/action.yml"), "utf8"));
 
 test("workflows never run privileged pull_request_target code or persist checkout credentials", () => {
   for (const [path, workflow] of workflows) {
@@ -34,6 +36,26 @@ test("PR verification has only read permissions and no publishing environment", 
       assert.ok(["read", "none"].includes(permission), id);
     }
     assert.equal(job.environment, undefined, id);
+  }
+});
+
+test("required check names alias the same coverage graph", () => {
+  const { verify, "trusted-main-coverage": coverage } = workflow.jobs;
+  assert.deepEqual(verify.strategy.matrix, { context: expectedJobNames.filter(name => name === "Verification / Required" || name.startsWith("Node ")) });
+  assert.equal(verify.name, "${{ matrix.context }}");
+  assert.deepEqual(verify.needs, ["plan", "policy", "packages", "suites"]);
+  assert.deepEqual(coverage.needs, [...verify.needs, "verify"]);
+});
+
+test("every CI job uses Node.js 24 directly or through the shared setup action", () => {
+  const nodeVersion = steps => steps.find(step => step.uses?.startsWith("actions/setup-node@"))?.with?.["node-version"];
+  assert.equal(nodeVersion(setup.runs.steps), "24.x");
+  for (const [id, job] of Object.entries(workflow.jobs)) {
+    if (!job.steps.some(step => step.uses === "./.github/actions/setup-ci")) {
+      assert.equal(nodeVersion(job.steps), "24.x", id);
+    } else {
+      assert.equal(nodeVersion(job.steps), undefined, `${id} must not override the shared setup`);
+    }
   }
 });
 

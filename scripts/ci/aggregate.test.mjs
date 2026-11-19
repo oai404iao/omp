@@ -12,18 +12,19 @@ function fixture(event = "push") {
   return { plan, event, sha: plan.sourceSha, needs: {
     plan: { result: "success", outputs }, policy: { result: "success" },
     packages: { result: "success" }, suites: { result: "success" },
-    compatibility: { result: event === "pull_request" ? "skipped" : "success" }, verify: { result: "success" },
+    verify: { result: "success" },
   } };
 }
 
-test("full main coverage and PR scope have explicit successful aggregation", () => {
+test("full main and manual coverage and PR scope have explicit successful aggregation", () => {
   assert.equal(verifyAggregate(fixture()), true);
   assert.equal(verifyAggregate({ ...fixture(), requireFull: true }), true);
+  assert.equal(verifyAggregate(fixture("workflow_dispatch")), true);
   assert.equal(verifyAggregate(fixture("pull_request")), true);
 });
 
 test("missing, failed, cancelled and accidentally skipped work cannot be green", () => {
-  for (const job of ["plan", "policy", "packages", "suites", "compatibility"]) {
+  for (const job of ["plan", "policy", "packages", "suites"]) {
     for (const result of [undefined, "failure", "cancelled", "skipped"]) {
       const input = fixture();
       input.needs[job].result = result;
@@ -55,7 +56,7 @@ test("only an explicitly empty selection permits skipped package and suite matri
   Object.assign(input.needs.packages, { result: "skipped" });
   Object.assign(input.needs.suites, { result: "skipped" });
   assert.equal(verifyAggregate(input), true);
-  input.event = "push";
-  input.needs.compatibility.result = "success";
-  assert.throws(() => verifyAggregate(input), /full verification/);
+  for (const event of ["push", "workflow_dispatch"]) {
+    assert.throws(() => verifyAggregate({ ...input, event }), /full verification/);
+  }
 });

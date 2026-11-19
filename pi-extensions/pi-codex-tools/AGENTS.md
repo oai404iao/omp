@@ -40,5 +40,5 @@ pnpm run check:architecture
 pnpm run test:codex-composition
 ```
 
-Use tarball checks for assets/exports and the Pi matrix for compatibility changes.
+Use tarball checks for assets/exports and `pnpm run ci` for compatibility changes.
 Do not run live endpoints or publish without explicit authorization.

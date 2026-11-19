@@ -16,7 +16,7 @@ OMP 使用 Pi 的宿主配置，同时各扩展保留自己的配置契约。
 
 Pi 的个人 `settings.json` 和受信任项目 `.pi/settings.json` 控制资源加载。
 这并不意味着每个扩展的自有配置都支持项目覆盖。
-宿主配置详见 [Pi Configuration](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/docs/configuration.md)。
+宿主配置详见 [Pi Configuration](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/docs/configuration.md)。
 
 ## 找到 Codex 实际读取的目录
 

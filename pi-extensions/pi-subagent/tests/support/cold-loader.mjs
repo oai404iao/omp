@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-const [cwd, countText, sdkModule, aiModule, directoryMode] = process.argv.slice(2);
+const [cwd, countText, directoryMode] = process.argv.slice(2);
 const explicitDirectory = directoryMode === "explicit";
 process.env.PI_CODING_AGENT_DIR = explicitDirectory ? join(cwd, "conflicting-agent") : cwd;
 const { createAgentSessionFromServices, createAgentSessionServices, ModelRuntime, SessionManager } =
-	await import(sdkModule || "@earendil-works/pi-coding-agent");
-const { createAssistantMessageEventStream } = await import(aiModule || "@earendil-works/pi-ai");
+	await import("@earendil-works/pi-coding-agent");
+const { createAssistantMessageEventStream } = await import("@earendil-works/pi-ai");
 const count = Number(countText);
 mkdirSync(cwd, { recursive: true });
 writeFileSync(join(cwd, "subagent.json"), JSON.stringify({ maxConcurrentAgents: count, openAIIdentity: true }));

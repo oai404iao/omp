@@ -1,4 +1,4 @@
-import { type Api, type AssistantMessage, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import { type Api, type AssistantMessage, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { type ServiceTier } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 

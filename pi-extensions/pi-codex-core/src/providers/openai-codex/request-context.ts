@@ -1,4 +1,4 @@
-import { type Context } from "@earendil-works/pi-ai/compat";
+import { type Context } from "@earendil-works/pi-ai";
 
 export function getLatestUserText(context: Context): string | undefined {
 	for (let i = context.messages.length - 1; i >= 0; i--) {

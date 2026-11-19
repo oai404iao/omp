@@ -1,4 +1,4 @@
-import { type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { type ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
 import { type CodexRequestIdentity } from "../../codex-wire-identity.js";
 import type { ToolProtocolSnapshot } from "../../tool-protocol.js";

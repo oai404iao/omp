@@ -48,16 +48,15 @@ function withSources(files, callback) {
   }
 }
 
-const policy = { maxLines: 3, exceptions: {}, facades: ["facade.ts"], forbidden: [] };
+const policy = { maxLines: 3, exceptions: {}, forbidden: [] };
 
-test("relative .js edges resolve to TS and cannot go back through facades", () => {
+test("relative .js edges resolve to TS and participate in cycle detection", () => {
   withSources({
-    "facade.ts": 'export { a } from "./impl/a.js";',
-    "impl/a.ts": 'import type { A } from "../facade.js";\nexport const a = 1;',
+    "index.ts": 'export { a } from "./impl/a.js";',
+    "impl/a.ts": 'import type { A } from "../index.js";\nexport const a = 1;',
   }, (directory) => {
     const { errors } = checkArchitecture(directory, policy);
-    assert.ok(errors.some(e => e.includes("compatibility facade")));
-    assert.ok(errors.some(e => e.includes("cycle:")));
+    assert.deepEqual(errors, ["cycle: impl/a.ts -> index.ts -> impl/a.ts"]);
   });
 });
 
@@ -72,12 +71,6 @@ test("missing modules and forbidden layer edges fail closed", () => {
     assert.equal(errors.length, 2);
     assert.match(errors[0], /unresolved local module/);
     assert.match(errors[1], /forbidden dependency/);
-  });
-});
-
-test("compatibility facades cannot accumulate implementation or singleton state", () => {
-  withSources({ "facade.ts": "export const cache = new Map();\n" }, (directory) => {
-    assert.ok(checkArchitecture(directory, policy).errors.some(e => e.includes("only re-exports")));
   });
 });
 

@@ -1,4 +1,4 @@
-import { type Api, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import { type Api, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { type CodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";

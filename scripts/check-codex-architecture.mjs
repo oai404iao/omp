@@ -121,12 +121,6 @@ export function checkArchitecture(directory, policy) {
   for (const file of files) {
     const name = localName(file);
     const text = readFileSync(file, "utf8");
-    if (policy.facades.includes(name)) {
-      const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-      if (source.statements.some(node => !ts.isExportDeclaration(node) || !node.moduleSpecifier)) {
-        errors.push(`${name}: compatibility facade must contain only re-exports`);
-      }
-    }
     const lines = text.replace(/\n$/, "").split("\n").length;
     measured[name] = lines;
     const limit = policy.exceptions[name]?.maxLines ?? policy.maxLines;
@@ -157,9 +151,6 @@ export function checkArchitecture(directory, policy) {
         }
       }
       const targetName = localName(target);
-      if (policy.facades.includes(targetName) && !policy.facades.includes(name)) {
-        errors.push(`${name}: implementation imports compatibility facade ${targetName}`);
-      }
       for (const rule of policy.forbidden ?? []) {
         if (name.startsWith(rule.from) && targetName.startsWith(rule.to)) {
           errors.push(`${name}: forbidden dependency on ${targetName}`);
@@ -186,6 +177,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.error(result.errors.join("\n"));
     process.exitCode = 1;
   } else {
-    console.log(`✓ Codex: ${result.graph.size} modules; no cycles, facade back-edges or forbidden capability paths`);
+    console.log(`✓ Codex: ${result.graph.size} modules; no cycles or forbidden capability paths`);
   }
 }

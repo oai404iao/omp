@@ -1,5 +1,5 @@
 import { type ProviderHeaders } from "@earendil-works/pi-ai";
-import { type Api, type Model } from "@earendil-works/pi-ai/compat";
+import { type Api, type Model } from "@earendil-works/pi-ai";
 import { type CodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { codexTurnStateFor, resolveCodexWireIdentity, type CodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";

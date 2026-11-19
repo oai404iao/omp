@@ -76,7 +76,7 @@ test("behavioral script dependencies select their suites and mixed changes prese
   }
   for (const path of ["scripts/verify-codex-installations.mjs", "scripts/codex-consumer-matrix.mjs",
     "scripts/codex-loader-probe.mjs", "scripts/subagent-consumer-probe.mjs",
-    "scripts/isolated-consumer-lock.mjs", "scripts/pnpm-lock.mjs", "scripts/pi-baselines.mjs"]) {
+    "scripts/isolated-consumer-lock.mjs", "scripts/pnpm-lock.mjs", "scripts/pi-version.mjs"]) {
     assert.deepEqual(affectedPlan([path], [], sha).suites, ["consumers", "infrastructure"], path);
   }
   const paths = ["scripts/ci/plan.mjs", "pi-extensions/pi-notify/index.ts"];

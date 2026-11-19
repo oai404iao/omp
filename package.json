@@ -36,9 +36,6 @@
     "test:ci": "node --test scripts/ci/*.test.mjs scripts/ci-policy.test.mjs",
     "test:codex-composition": "node scripts/test-codex-composition.mjs",
     "check:pi-baseline": "node scripts/check-pi-baseline.mjs",
-    "ci:pi-matrix": "node scripts/test-pi-baselines.mjs",
-    "ci:pi-floor": "node scripts/test-pi-baselines.mjs floor",
-    "ci:pi-target": "node scripts/test-pi-baselines.mjs target",
     "test:codex-packages": "node scripts/verify-codex-installations.mjs",
     "test:codex-live": "node --import tsx scripts/codex-ablation/live.ts",
     "license:check": "node scripts/verify-licenses.mjs",
@@ -47,13 +44,13 @@
     "release:bootstrap-artifacts": "node scripts/prepare-release-artifacts.mjs --include-bootstrap",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:verify-installations": "node scripts/verify-release-installations.mjs",
-    "test:release-scripts": "node --test scripts/registry-visibility.test.mjs scripts/verify-packages.test.mjs scripts/release-utils.test.mjs scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/prepare-release-artifacts.test.mjs scripts/targeted-release.test.mjs scripts/initial-codex-bootstrap.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs scripts/pi-baselines.test.mjs scripts/codex-consumer-matrix.test.mjs scripts/release-pr-ci-gate.test.mjs scripts/release-consumer*.test.mjs"
+    "test:release-scripts": "node --test scripts/registry-visibility.test.mjs scripts/verify-packages.test.mjs scripts/release-utils.test.mjs scripts/recovery-guard.test.mjs scripts/release-result.test.mjs scripts/publish-release-artifacts.test.mjs scripts/prepare-release-artifacts.test.mjs scripts/targeted-release.test.mjs scripts/initial-codex-bootstrap.test.mjs scripts/published-artifact-lock.test.mjs scripts/workspaces.test.mjs scripts/workspace-versioning.test.mjs scripts/isolated-consumer-lock.test.mjs scripts/pnpm-lock.test.mjs scripts/codex-consumer-matrix.test.mjs scripts/release-pr-ci-gate.test.mjs scripts/release-consumer*.test.mjs"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-coding-agent": "1.4.0",
-    "@earendil-works/pi-tui": "1.4.0",
+    "@earendil-works/pi-agent-core": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-coding-agent": "1.5.2",
+    "@earendil-works/pi-tui": "1.5.2",
     "@changesets/cli": "3.0.3",
     "@changesets/read": "1.0.1",
     "@oai404iao/pi-codex-core": "workspace:*",

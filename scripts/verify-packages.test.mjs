@@ -19,7 +19,7 @@ function verify(files = {}, extraManifest = {}) {
     export const workspaces = [{ name: "@fixture/extension", directory: "extension", releaseStatus: "publishable", kind: "extension" }];
     export const readManifest = directory => JSON.parse(readFileSync(resolve(root, directory, "package.json")));
   `);
-  writeFileSync(join(scripts, "pi-baselines.mjs"), 'export const piFloor = "1.2.0"; export const piVersion = () => "1.4.0";');
+  copyFileSync(new URL("./pi-version.mjs", import.meta.url), join(scripts, "pi-version.mjs"));
   writeFileSync(join(scripts, "pnpm-lock.mjs"), 'export const readPnpmLock = () => ({ importers: { extension: {} } });');
   const manifest = {
     name: "@fixture/extension", version: "1.0.0", type: "module", license: "MIT",

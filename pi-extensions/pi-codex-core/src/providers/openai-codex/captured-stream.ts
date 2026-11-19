@@ -1,4 +1,4 @@
-import type { Api, AssistantMessage, AssistantMessageEventStream, Model, SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import type { Api, AssistantMessage, AssistantMessageEventStream, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { processResponsesStream } from "@oai404iao/pi-codex-runtime/internal/providers/responses/stream";
 import type { CitationSource, WebSearchCitationSource } from "@oai404iao/pi-codex-runtime/internal/providers/responses/types";
 import { mapCodexEvents } from "./events.js";
