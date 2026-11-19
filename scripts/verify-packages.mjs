@@ -96,9 +96,9 @@ for (const { name: expectedName, directory, releaseStatus, kind } of workspaces)
   }
   if (
     manifest.name === "@oai404iao/pi-codex-core"
-    && manifest.dependencies?.undici !== "^8.12.3"
+    && manifest.dependencies?.undici !== "^8.12.4"
   ) {
-    report("@oai404iao/pi-codex-core: undici must remain on the audited ^8.12.3 baseline");
+    report("@oai404iao/pi-codex-core: undici must remain on the audited ^8.12.4 baseline");
   }
   if (
     manifest.publishConfig?.access !== "public"
