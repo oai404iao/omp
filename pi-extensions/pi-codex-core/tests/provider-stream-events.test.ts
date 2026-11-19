@@ -5,7 +5,8 @@ import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
 import { mapCodexEvents } from "../src/providers/openai-codex/events.js";
-import { WebSocketHandshakeError } from "../src/providers/openai-codex/errors.js";
+import { ProviderResponseError, WebSocketHandshakeError } from "../src/providers/openai-codex/errors.js";
+import { isRetryableWebSocketError, webSocketCompactionRetryDelayMs, webSocketRetryDelayMs } from "../src/providers/openai-codex/retry.js";
 import { closeProviderWebSocketSessions } from "../src/providers/openai-codex/websocket-session.js";
 import { resetCodexWireState } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import type { StreamEventShape } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
@@ -103,6 +104,101 @@ for (const type of ["error", "response.failed"]) {
 			}
 		}, /fixture failure/);
 		assert.deepEqual(observed, [event]);
+	});
+}
+
+for (const type of ["error", "response.failed"]) {
+	const eventWithHeaders = (errorHeaders: unknown, eventHeaders: unknown, code = "server_is_overloaded"): StreamEventShape => {
+		const error = { code, message: "fixture failure", headers: errorHeaders, type: "server_error", param: "fixture" };
+		return type === "error"
+			? { type, error, headers: eventHeaders, status_code: 503, sequence_number: 4 }
+			: { type, response: { error }, headers: eventHeaders };
+	};
+
+	for (const [name, nested, outer, expected] of [
+		["nested headers without event headers", { "rEtRy-AfTeR": 0.25 }, undefined, 250],
+		["nested seconds over event milliseconds", { "Retry-After": "0" }, { "retry-after-ms": 50 }, 0],
+		["nested milliseconds over nested seconds", { "Retry-After": "2", "Retry-After-Ms": " 25.5 " }, { "retry-after-ms": 50 }, 25.5],
+		["event headers without nested headers", undefined, { "retry-after-ms": 50 }, 50],
+		["invalid nested delay with valid event headers", { "retry-after": "not a delay" }, { "retry-after-ms": "50" }, 50],
+		["malformed nested values with valid event headers", { "retry-after-ms": ["10"] }, { "retry-after-ms": 50 }, 50],
+		["blank nested delay with valid event headers", { "retry-after-ms": " \t ", "Retry-After": " \t " }, { "retry-after-ms": 50 }, 50],
+		["negative nested delay with valid event headers", { "retry-after-ms": -1, "Retry-After": "-1" }, { "retry-after-ms": 50 }, 50],
+		["non-decimal nested delay with valid event headers", { "retry-after": "0x10" }, { "retry-after-ms": 50 }, 50],
+		["blank nested milliseconds with valid nested seconds", { "retry-after-ms": " ", "Retry-After": ".25" }, { "retry-after-ms": 50 }, 250],
+		["nested HTTP date", { "Retry-After": "Sun, 06 Nov 1994 08:49:37 GMT" }, { "retry-after-ms": 50 }, 0],
+		["nested RFC 850 date", { "Retry-After": "Sunday, 06-Nov-94 08:49:37 GMT" }, { "retry-after-ms": 50 }, 0],
+		["nested asctime date", { "Retry-After": "Sun Nov  6 08:49:37 1994" }, { "retry-after-ms": 50 }, 0],
+		["no valid delay", [], { "retry-after-ms": false }, undefined],
+	] as const) {
+		test(`${type} Retry-After: ${name}`, async () => {
+			const events = mapCodexEvents(source([eventWithHeaders(nested, outer)]));
+			await assert.rejects(events[Symbol.asyncIterator]().next(), error => {
+				assert.ok(error instanceof ProviderResponseError);
+				assert.equal(error.retryAfterMs, expected);
+				assert.equal(error.code, "server_is_overloaded");
+				assert.equal(error.message, type === "error" ? "Codex error: fixture failure" : "fixture failure");
+				assert.equal(error.status, type === "error" ? 503 : undefined);
+				assert.equal(error.errorType, type === "error" ? "server_error" : undefined);
+				assert.equal(Reflect.get(error, "sequenceNumber"), type === "error" ? 4 : undefined);
+				assert.equal(Reflect.get(error, "param"), "fixture");
+				return true;
+			});
+		});
+	}
+
+	test(`${type} delay is subject to both existing WebSocket retry bounds`, async () => {
+		const event = eventWithHeaders({ "retry-after-ms": 40 }, { "retry-after-ms": 0 });
+		await assert.rejects(mapCodexEvents(source([event]))[Symbol.asyncIterator]().next(), error => {
+			assert.equal(isRetryableWebSocketError(error), true);
+			for (const delay of [webSocketRetryDelayMs, webSocketCompactionRetryDelayMs]) {
+				assert.equal(delay(error, 1, { maxRetryDelayMs: 50 }), 40);
+				assert.throws(() => delay(error, 1, { maxRetryDelayMs: 20 }), /retry delay 40ms exceeds maxRetryDelayMs 20ms/);
+			}
+			return true;
+		});
+	});
+
+	test(`${type} Retry-After does not make terminal quota errors retryable`, async () => {
+		const event = eventWithHeaders({ "retry-after-ms": 0 }, undefined, "insufficient_quota");
+		await assert.rejects(mapCodexEvents(source([event]))[Symbol.asyncIterator]().next(), error => {
+			assert.equal(isRetryableWebSocketError(error), false);
+			return true;
+		});
+	});
+}
+
+for (const transport of ["sse", "websocket"] as const) {
+	test(`${transport} does not replay a started response with Retry-After advice`, async () => {
+		const events = [
+			{ type: "response.created", response: { id: "resp_started" } },
+			{ type: "response.failed", response: { error: { code: "server_is_overloaded", message: "Server overloaded", headers: { "retry-after-ms": 0 } } } },
+		];
+		const server = transport === "websocket" ? await startWebSocketServer([() => events]) : undefined;
+		let httpRequests = 0;
+		try {
+			const model = {
+				provider: "openai", api: "openai-responses", id: "gpt-5.5",
+				baseUrl: server?.url ?? "https://example.invalid/v1",
+				headers: {}, input: ["text"], reasoning: false,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			};
+			const message = await createProviderHarness().providers.openai.streamSimple(model, {
+				messages: [{ role: "user", content: "fixture", timestamp: 1 }], tools: [],
+			}, {
+				apiKey: "sk-fixture", transport, maxRetries: 1, maxRetryDelayMs: 1, env: { NO_PROXY: "*" },
+				fetch: async () => {
+					httpRequests++;
+					return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(""));
+				},
+			}).result();
+			assert.equal(message.stopReason, "error");
+			assert.equal(message.errorMessage, "Server overloaded");
+			assert.equal(httpRequests, transport === "sse" ? 1 : 0);
+			if (server) assert.equal(server.requests.length, 1);
+		} finally {
+			await server?.close();
+		}
 	});
 }
 

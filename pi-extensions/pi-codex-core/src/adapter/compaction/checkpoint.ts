@@ -41,19 +41,10 @@ export function isNativeCompactionItem(item: unknown): item is Record<string, un
 }
 
 function approxTokenCount(text: string): number {
-	const bytes = new TextEncoder().encode(text).byteLength;
-	return Math.ceil(bytes / APPROX_BYTES_PER_TOKEN);
+	return Math.ceil(Buffer.byteLength(text) / APPROX_BYTES_PER_TOKEN);
 }
 
-function responseItemTokenCount(item: Record<string, unknown>): number {
-	if (item.type === "message" && Array.isArray(item.content)) {
-		const tokens = item.content.reduce((total, part) => {
-			if (!part || typeof part !== "object") return total;
-			const text = (part as { text?: unknown }).text;
-			return typeof text === "string" ? total + approxTokenCount(text) : total;
-		}, 0);
-		return Math.max(1, tokens);
-	}
+function serializedTokenCount(item: Record<string, unknown>): number {
 	try {
 		return Math.max(1, approxTokenCount(JSON.stringify(item)));
 	} catch {
@@ -76,35 +67,36 @@ function truncateUtf8Prefix(text: string, maxBytes: number): string {
 	return result;
 }
 
-function truncateResponseMessage(
+function retainResponseMessage(
 	item: Record<string, unknown>,
+	parts: unknown[],
 	maxTokens: number,
-): Record<string, unknown> | undefined {
-	if (item.type !== "message" || !Array.isArray(item.content) || maxTokens <= 0) return undefined;
+): { item: Record<string, unknown>; tokens: number } | undefined {
 	let remaining = maxTokens;
 	const content: unknown[] = [];
-	for (const part of item.content) {
+	for (const part of parts) {
+		if (remaining <= 0) break;
 		if (!part || typeof part !== "object" || Array.isArray(part)) continue;
 		const record = part as Record<string, unknown>;
-		if (typeof record.text !== "string") {
-			content.push(part);
-			continue;
-		}
-		if (remaining <= 0) continue;
-		const tokenCount = approxTokenCount(record.text);
+		const text = (record.type === "input_text" || record.type === "output_text") && typeof record.text === "string"
+			? record.text : undefined;
+		// Charge the full wire payload for atomic parts, not an estimate of model billing.
+		const tokenCount = text === undefined ? serializedTokenCount(record) : Math.max(1, approxTokenCount(text));
 		if (tokenCount <= remaining) {
 			content.push(part);
 			remaining -= tokenCount;
-			continue;
+		} else if (text !== undefined) {
+			content.push({ ...record, text: truncateUtf8Prefix(text, remaining * APPROX_BYTES_PER_TOKEN) });
+			remaining = 0;
 		}
-		const text = truncateUtf8Prefix(record.text, remaining * APPROX_BYTES_PER_TOKEN);
-		if (text) content.push({ ...record, text });
-		remaining = 0;
 	}
-	return content.length > 0 ? { ...item, content } : undefined;
+	return content.length > 0 ? { item: { ...item, type: "message", content }, tokens: maxTokens - remaining } : undefined;
 }
 
-function retainedResponsesCompactionItem(item: unknown): Record<string, unknown> | undefined {
+function retainCompactionItem(
+	item: unknown,
+	remaining: number,
+): { item: Record<string, unknown>; tokens: number } | undefined {
 	if (!item || typeof item !== "object" || Array.isArray(item)) return undefined;
 	const record = item as Record<string, unknown>;
 	if (
@@ -112,7 +104,7 @@ function retainedResponsesCompactionItem(item: unknown): Record<string, unknown>
 		&& record.role === "user"
 		&& Array.isArray(record.content)
 	) {
-		return { ...record, type: "message" };
+		return retainResponseMessage(record, record.content, remaining);
 	}
 	if (record.type !== "agent_message" || !Array.isArray(record.content)) return undefined;
 	const first = record.content[0];
@@ -120,9 +112,9 @@ function retainedResponsesCompactionItem(item: unknown): Record<string, unknown>
 	if (typeof firstText === "string" && firstText.startsWith("Message Type: FINAL_ANSWER\n")) {
 		return undefined;
 	}
-	return responseItemTokenCount(record) <= CODEX_MAX_RETAINED_AGENT_MESSAGE_TOKENS
-		? record
-		: undefined;
+	const tokens = serializedTokenCount(record);
+	return tokens <= Math.min(remaining, CODEX_MAX_RETAINED_AGENT_MESSAGE_TOKENS)
+		? { item: record, tokens } : undefined;
 }
 
 /**
@@ -135,24 +127,13 @@ export function buildCodexCompactionCheckpoint(
 	input: unknown[],
 	compactionItem: unknown,
 ): unknown[] {
-	const candidates = input
-		.map(retainedResponsesCompactionItem)
-		.filter((item): item is Record<string, unknown> => !!item);
 	let remaining = CODEX_RETAINED_MESSAGE_TOKEN_BUDGET;
 	const retainedReversed: Record<string, unknown>[] = [];
-	for (let index = candidates.length - 1; index >= 0 && remaining > 0; index--) {
-		const item = candidates[index]!;
-		const tokenCount = responseItemTokenCount(item);
-		if (tokenCount <= remaining) {
-			retainedReversed.push(item);
-			remaining -= tokenCount;
-			continue;
-		}
-		const truncated = truncateResponseMessage(item, remaining);
-		if (truncated) {
-			retainedReversed.push(truncated);
-			remaining = 0;
-		}
+	for (let index = input.length - 1; index >= 0 && remaining > 0; index--) {
+		const retained = retainCompactionItem(input[index], remaining);
+		if (!retained) continue;
+		retainedReversed.push(retained.item);
+		remaining -= retained.tokens;
 	}
 	retainedReversed.reverse();
 	return [...retainedReversed, compactionItem];

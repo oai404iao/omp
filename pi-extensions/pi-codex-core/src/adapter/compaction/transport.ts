@@ -6,7 +6,7 @@ import { webSocketFallbackKey } from "../../providers/openai-codex/cache-key.js"
 import { CODEX_REMOTE_COMPACTION_STREAM_RETRIES } from "../../providers/openai-codex/constants.js";
 import { withResponsesLiteWebSocketMetadata } from "../../providers/openai-codex/lite.js";
 import { createPiTurnId, withSseRequestMetadata } from "../../providers/openai-codex/request-metadata.js";
-import { isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, isWebSocketUpgradeRejectedError, sleep, webSocketCompactionRetryDelayMs, webSocketStreamMaxRetries } from "../../providers/openai-codex/retry.js";
+import { isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, sleep, webSocketCompactionRetryDelayMs, webSocketSseFallbackPhase, webSocketStreamMaxRetries } from "../../providers/openai-codex/retry.js";
 import { type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { resolveResponsesUrl, resolveResponsesWebSocketUrl } from "../../providers/openai-codex/urls.js";
 import { websocketHttpFallbackSessions } from "../../providers/openai-codex/websocket-session.js";
@@ -54,7 +54,11 @@ export async function requestCodexCompactionTriggerWithTransport(
 		try {
 			return await requestCodexCompactionTrigger(
 				sseUrl, headers.sse, withSseRequestMetadata(body, requestMetadata), options.signal,
-				options.settings.codexRequestExtensions ? options.sessionId : undefined, model.provider,
+				{
+					sessionKey: options.settings.codexRequestExtensions ? options.sessionId : undefined,
+					provider: model.provider,
+					maxRetryDelayMs: options.maxRetryDelayMs,
+				},
 			);
 		} catch (error) {
 			if (!options.signal?.aborted) reportEndpointFailure(model, options.sessionId, [`responsesMode.${responsesMode}`, "transport.sse"], error);
@@ -102,9 +106,9 @@ export async function requestCodexCompactionTriggerWithTransport(
 		} catch (error) {
 			if (options.signal?.aborted) throw new Error("Request was aborted");
 			reportEndpointFailure(model, options.sessionId, [`responsesMode.${responsesMode}`, "transport.websocket"], error);
-			const upgradeRejected = isWebSocketUpgradeRejectedError(error);
-			if (transport === "auto" && upgradeRejected && allowsTransport(options.settings, model, options.sessionId, "sse")) {
-				if (fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
+			const fallbackPhase = webSocketSseFallbackPhase(error);
+			if (transport === "auto" && fallbackPhase && allowsTransport(options.settings, model, options.sessionId, "sse")) {
+				if (fallbackPhase === "websocket_upgrade_rejected" && fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
 				break;
 			}
 			const retryable = isWebSocketConnectionLimitReachedError(error) || isRetryableWebSocketError(error);

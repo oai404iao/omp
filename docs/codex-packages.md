@@ -70,7 +70,7 @@ Patch 通过 Pi `prepareLoadout` 隐藏选中的原生修改工具声明，不�
 
 上述继承和 Fast 倍数是兼容策略，不是实际账号权限或价格核验。Pi 拥有模型描述、认证和解析地址。
 不同 provider 的相近模型名不互相继承，没有 `openai-codex/gpt-6.1-sol` 自动映射。
-详见 [Pi 兼容性](pi-compatibility.md)。
+GPT-6.2 及其他内置条目见 [runtime 默认 profiles](../pi-extensions/pi-codex-runtime/README.md#内置兼容性默认值)。
 
 ### 全局与模型开关
 

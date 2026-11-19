@@ -84,6 +84,31 @@ for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 		}));
 }
 
+test("GPT-6.2 descriptors supplied by Pi use the bundled Standard wire profile", () =>
+	withCodexSettings({}, async cwd => {
+		const base = getBuiltinModels("openai").find(model => model.id === "gpt-6-astra");
+		assert(base);
+		const harness = createProviderHarness({ cwd, getToolProtocols: () => patchToolProtocols });
+		for (const id of ["gpt-6.2-astra", "gpt-6.2-sol"]) {
+			const result: AssistantMessage = await harness.providers.openai.streamSimple({ ...base, id }, {
+				messages: [{ role: "user", content: "fixture", timestamp: 1 }],
+				tools: [createApplyPatchToolDefinition()],
+			}, {
+				apiKey: "sk-fixture",
+				fetch: async (_url: unknown, init?: RequestInit) => {
+					assert.equal(new Headers(init?.headers).get("x-openai-internal-codex-responses-lite"), null);
+					const body = JSON.parse(String(init?.body));
+					assert.equal(body.model, id);
+					assert.deepEqual(body.tools.map((tool: { type: string; name: string }) => [tool.type, tool.name]), [["custom", "apply_patch"]]);
+					return new Response(`data: ${JSON.stringify({ type: "response.completed", response: {
+						id: "fixture", status: "completed", output: [], usage: { input_tokens: 1, output_tokens: 1 },
+					} })}\n\n`);
+				},
+			}).result();
+			assert.equal(result.stopReason, "stop", result.errorMessage ?? "");
+		}
+	}));
+
 test("GPT-6.1 Sol defaults match the GPT-5.6 Sol Lite capabilities", () =>
 	withCodexSettings({}, async cwd => {
 		const model = getBuiltinModels("openai").find(model => model.id === "gpt-6.1-sol");

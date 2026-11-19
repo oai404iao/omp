@@ -203,6 +203,11 @@ export async function startWebSocketServer(
 							Buffer.from(String((event as { $binary: unknown }).$binary)),
 							{ binary: true },
 						));
+					} else if (event && typeof event === "object" && "$close" in event) {
+						const frame = Buffer.from([0x88, 2, 0, 0]);
+						frame.writeUInt16BE(Number(event.$close), 2);
+						socket.end(frame);
+						break;
 					} else {
 						socket.write(encodeServerText(event));
 					}

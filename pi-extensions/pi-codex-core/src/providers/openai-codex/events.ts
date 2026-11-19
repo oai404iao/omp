@@ -4,6 +4,16 @@ import { ProviderResponseError, ProviderStreamEventCallbackError, friendlyUsageL
 import { retryAfterMsFromHeaders } from "./retry.js";
 import { type StreamEventShape } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 
+function retryAfterMsFromEventHeaders(headers: unknown): number | undefined {
+	if (!headers || typeof headers !== "object" || Array.isArray(headers)) return undefined;
+	return retryAfterMsFromHeaders(Object.fromEntries(
+		Object.entries(headers)
+			.filter((entry): entry is [string, string | number | boolean] =>
+				typeof entry[1] === "string" || typeof entry[1] === "number" || typeof entry[1] === "boolean")
+			.map(([name, value]) => [name, String(value)]),
+	));
+}
+
 export async function* mapCodexEvents(
 	events: AsyncIterable<StreamEventShape>,
 	sessionKey?: string,
@@ -44,14 +54,6 @@ export async function* mapCodexEvents(
 				: typeof event.status_code === "number"
 					? event.status_code
 					: undefined;
-			const eventHeaders = event.headers && typeof event.headers === "object" && !Array.isArray(event.headers)
-				? Object.fromEntries(
-						Object.entries(event.headers as Record<string, unknown>)
-							.filter((entry): entry is [string, string | number | boolean] =>
-								typeof entry[1] === "string" || typeof entry[1] === "number" || typeof entry[1] === "boolean")
-							.map(([name, value]) => [name, String(value)]),
-					)
-				: undefined;
 			const code = typeof nestedError?.code === "string"
 				? nestedError.code
 				: typeof event.code === "string"
@@ -71,18 +73,19 @@ export async function* mapCodexEvents(
 			if (typeof (nestedError as { param?: unknown })?.param === "string") Object.assign(error, { param: (nestedError as { param: string }).param });
 			if (typeof nestedError?.type === "string") error.errorType = nestedError.type;
 			if (status !== undefined) error.status = status;
-			error.retryAfterMs = retryAfterMsFromHeaders(eventHeaders);
+			error.retryAfterMs = retryAfterMsFromEventHeaders(nestedError?.headers) ?? retryAfterMsFromEventHeaders(event.headers);
 			if (typeof event.sequence_number === "number") error.sequenceNumber = event.sequence_number;
 			throw error;
 		}
 
 		if (type === "response.failed") {
-			const responseError = event.response?.error as { code?: unknown; message?: unknown } | undefined;
+			const responseError = event.response?.error as { code?: unknown; message?: unknown; headers?: unknown } | undefined;
 			const error = new ProviderResponseError(
 				typeof responseError?.message === "string" ? responseError.message : "OpenAI Responses request failed",
 			);
 			if (typeof responseError?.code === "string") error.code = responseError.code;
 			if (typeof (responseError as { param?: unknown })?.param === "string") Object.assign(error, { param: (responseError as { param: string }).param });
+			error.retryAfterMs = retryAfterMsFromEventHeaders(responseError?.headers) ?? retryAfterMsFromEventHeaders(event.headers);
 			throw error;
 		}
 

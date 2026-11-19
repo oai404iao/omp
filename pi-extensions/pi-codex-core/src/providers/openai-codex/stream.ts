@@ -20,7 +20,7 @@ import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOption
 import { getLatestUserText } from "./request-context.js";
 import { configurationUpdateEffort, requestThinkingLevel } from "./reasoning.js";
 import { createCodexRequestId, createPiTurnId, withSseRequestMetadata } from "./request-metadata.js";
-import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, isWebSocketUpgradeRejectedError, sleep, sseMaxRetries, sseRetryDelayMs, webSocketRetryDelayMs, webSocketStreamMaxRetries } from "./retry.js";
+import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, sleep, sseMaxRetries, sseRetryDelayMs, webSocketRetryDelayMs, webSocketSseFallbackPhase, webSocketStreamMaxRetries } from "./retry.js";
 import { fetchWithResponseHeaderTimeout, parseSSE, responseHeaderTimeoutMsFromOptions } from "./sse.js";
 import { type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { resolveResponsesUrl, resolveResponsesWebSocketUrl } from "./urls.js";
@@ -235,21 +235,20 @@ export function createCodexStream<TApi extends Api>(
 					} catch (error) {
 						if (error instanceof ProviderStreamEventCallbackError) throw error;
 						const aborted = options?.signal?.aborted;
-						const upgradeRejected = isWebSocketUpgradeRejectedError(error);
+						const fallbackPhase = webSocketSseFallbackPhase(error);
 						if (
-							transport === "auto"
-							&& !websocketStarted
-							&& upgradeRejected
+							transport === "auto" && !websocketStarted && !aborted
+							&& fallbackPhase
 							&& allowsTransport(settings, model, options?.sessionId, "sse")
 						) {
-							if (fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
+							if (fallbackPhase === "websocket_upgrade_rejected" && fallbackKey) websocketHttpFallbackSessions.add(fallbackKey);
 							appendAssistantMessageDiagnostic(
 								output,
 								createAssistantMessageDiagnostic("provider_transport_failure", error, {
 									configuredTransport,
 									fallbackTransport: "sse",
 									eventsEmitted: false,
-									phase: "websocket_upgrade_rejected",
+									phase: fallbackPhase,
 									retries: websocketRetries,
 									requestBytes: new TextEncoder().encode(bodyJson).byteLength,
 								}),

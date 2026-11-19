@@ -1,6 +1,6 @@
 # Source and license notices
 
-The four modern `openai` GPT-6 profiles use independently checked metadata
+The original four `openai` GPT-6 profiles use independently checked metadata
 from MIT-licensed Pi 0.99.1 (`d86654abb8862e201933517d6f1fce9f88dd117f`).
 `provenance/pi-openai-0991-gpt6.json` pins the generator and shipped catalog.
 The profiles select Standard/local capabilities; they do not copy model

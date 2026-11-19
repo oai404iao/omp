@@ -1,9 +1,9 @@
-import { WEBSOCKET_CONNECT_TIMEOUT_MS, WEBSOCKET_SEND_TIMEOUT_MS } from "./constants.js";
+import { WEBSOCKET_CONNECT_TIMEOUT_MS } from "./constants.js";
 import { prepareWebSocketRequestBodyForWire } from "./continuation.js";
 import { mapCodexEvents } from "./events.js";
 import { withWebSocketRequestMetadata } from "./request-metadata.js";
 import { type ResponsesBody, type WebSocketPrewarmRequest } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
-import { parseWebSocket, sendWebSocketRequest } from "./websocket-events.js";
+import { streamWebSocketRequest } from "./websocket-events.js";
 import { acquireWebSocket } from "./websocket-session.js";
 import { isBasePrewarmInput } from "./request-prefix.js";
 
@@ -39,16 +39,14 @@ export async function prewarmWebSocket(request: WebSocketPrewarmRequest): Promis
 		if (entry?.continuation) entry.continuation = undefined;
 		const requestBody = prewarmBody;
 		const wireBody = prepareWebSocketRequestBodyForWire(requestBody);
-		if (request.signal?.aborted) throw new Error("Request was aborted");
-		await sendWebSocketRequest(
+		const events = streamWebSocketRequest(
 			socket,
 			JSON.stringify({ type: "response.create", ...wireBody }),
 			request.signal,
-			WEBSOCKET_SEND_TIMEOUT_MS,
 		);
 		const responseItems: unknown[] = [];
 		let responseId: string | undefined;
-		for await (const event of mapCodexEvents(parseWebSocket(socket, request.signal), request.requestMetadata.codexRequestExtensions === false ? undefined : request.requestMetadata.sessionId)) {
+		for await (const event of mapCodexEvents(events, request.requestMetadata.codexRequestExtensions === false ? undefined : request.requestMetadata.sessionId)) {
 			if (event.type === "response.created" && event.response?.id) responseId = event.response.id;
 			if (event.type === "response.output_item.done" && event.item) responseItems.push(event.item);
 			if (

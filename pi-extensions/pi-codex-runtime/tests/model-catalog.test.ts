@@ -60,6 +60,20 @@ test("verified execution defaults and search policy are resolved without guessin
 	assert.equal(unknown.supportsReasoningSummary, false);
 }));
 
+test("exact GPT-6.2 OpenAI profiles inherit the Astra Standard policy", () => withAgentDir(() => {
+	const modern = { provider: "openai", api: "openai-responses" };
+	const astra = loadModelSettings({ ...modern, id: "gpt-6-astra" });
+	assert(astra.modelProfile);
+	for (const id of ["gpt-6.2-astra", "gpt-6.2-sol"]) {
+		const settings = loadModelSettings({ ...modern, id });
+		assert.equal(settings.providerShimActive, true);
+		assert.deepEqual(settings.modelProfile?.effective, astra.modelProfile.effective);
+		assert.deepEqual(settings.modelProfile?.sources, ["bundled"]);
+		assert.equal(loadModelSettings({ provider: "openai-codex", api: "openai-codex-responses", id }).providerShimActive, false);
+	}
+	assert.equal(loadModelSettings({ ...modern, id: "gpt-6.2-unknown" }).providerShimActive, false);
+}));
+
 test("deprecated routing config cannot change modern API or activate the legacy profile", () => withAgentDir(agentDir => {
 	writeModels(agentDir, { version: 1, models: [{
 		id: "openai/gpt-5.6-sol", responses: { endpoint: "codex" },

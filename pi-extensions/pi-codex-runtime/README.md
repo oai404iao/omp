@@ -204,9 +204,10 @@ ID 按精确、大小写不敏感的 `provider/model` 匹配，绝不按名称�
 | --- | --- |
 | `openai/gpt-6.1-sol` | 显式继承 `openai/gpt-5.6-sol`：Lite、auto WS/SSE、预热、standalone web/image、custom patch、原生压缩，Fast 可用（priority、2x 配置倍率） |
 | `openai/gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna` | 独立 Standard SSE profile、custom patch；远程搜索/生图、原生压缩、预热和 Fast 默认关闭 |
+| `openai/gpt-6.2-astra`、`openai/gpt-6.2-sol` | 两者都继承 `openai/gpt-6-astra` 的 Standard SSE 策略 |
 | `openai-codex/...` | 冻结的旧 provider 兼容条目，与现代 `openai` 分开；每会话一次迁移警告 |
 
-这些是兼容策略，**不是账号权限、端点可用性或 Fast 实际价格的保证**。Pi 提供真实模型描述、限制与价格。当前模型证据见随包的 `provenance/pi-openai-120-gpt6.json`；原 `pi-openai-0991-gpt6.json` 保留不变。
+这些是兼容策略，**不是账号权限、端点可用性或 Fast 实际价格的保证**。Pi 提供真实模型描述、限制与价格。锁定的 Pi 1.5.2 未内置这两个 GPT-6.2 描述符；只有 Pi 的模型目录或模型配置提供同名 `openai` 模型时，扩展 profile 才能生效。Pi 1.5.2 的目录证据见随包的 `provenance/pi-openai-152-gpt6.json`。
 
 ## 从旧配置迁移
 

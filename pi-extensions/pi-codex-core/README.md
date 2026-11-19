@@ -119,6 +119,7 @@ agent 目录规则、全部字段及迁移表见 [runtime 配置说明](https://
 | 旧 `openai-codex/...` | 单独保留其冻结兼容 profile，不因相似名称获得现代 profile 的能力 |
 
 custom patch 和 standalone web/image 的 profile 配置只有在相应 tools 能力已加载时才有工具实现。以上默认值不证明账号可访问 Lite、预留端点或 Fast，也不验证实际费用。
+GPT-6.2 的默认值和生效条件见 [runtime 内置兼容性默认值](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-runtime#内置兼容性默认值)。
 
 ### GPT-6 思考等级
 
@@ -148,9 +149,9 @@ custom patch 和 standalone web/image 的 profile 配置只有在相应 tools �
 | `sse` | 只用 HTTP 流 |
 | `websocket` | 复用 WS；请求是上一逻辑请求的精确前缀扩展时，安全使用 `previous_response_id` 增量 |
 | `websocket-cached` | 兼容别名，与 websocket 使用相同的安全续传规则 |
-| `auto` | 优先 WS 并重试暂时 WS 错误；只有 HTTP 426 升级拒绝触发会话内粘性的 SSE 回退 |
+| `auto` | 优先 WS 并重试暂时 WS 错误。HTTP 426 升级拒绝可使当前会话改用 SSE；在收到任何响应文本帧之前遇到 WS 1009（消息过大），只为本次请求改用 SSE |
 
-模型/请求错误、输出或上下文限制，以及升级完成后的连接错误，不会触发自动换传输。连接、续传和回退状态都按会话与 profile 隔离；失败重试不是无限制的“换路线再试”。
+两种回退都要求端点允许 SSE；其他请求错误、输出或上下文限制和连接故障不会自动换传输。流内的 `error` 和 `response.failed` 优先采用有效的错误内层 `Retry-After`，其次才用事件外层的值。此提示用于已有的传输重试，不会为已开始的普通模型流新增重试。
 
 启用 `responses.websocketPrewarm` 后，每次会话启动（含 resume/fork）后台安排一次 `generate:false` 最佳努力预热，不阻塞初始化。只发送稳定的 developer/工具前缀，**不发送恢复的聊天历史或待发用户消息**。首个真实请求会消费尚未结束的启动预热句柄；预热超时/失败不会在每条消息上反复重试。
 
@@ -160,7 +161,7 @@ custom patch 和 standalone web/image 的 profile 配置只有在相应 tools �
 
 `compaction:"responses"` 只通过当前 SSE/WS 的 Responses `compaction_trigger` 生成原生 checkpoint。旧 unary `/responses/compact` 客户端已移除，`responses-compact` 旧配置必须迁移。
 
-原生 checkpoint 是不透明状态，不是可单独发送的文字摘要。v4 不把压缩前消息留在模型上下文，但原始会话/UI 历史仍保存。回放检查原 provider、model、API 和有效 profile；不兼容时保留 checkpoint 并拒绝继续，绝不拿占位文本假装摘要。
+原生 checkpoint 是不透明状态，不是可单独发送的文字摘要。v4 用 checkpoint 替换压缩前的模型上下文，原始会话/UI 历史仍保存。checkpoint 中额外保留的用户历史有大小预算；图片必须完整放得下，不截断图片内容。回放检查原 provider、model、API 和有效 profile；不兼容时保留 checkpoint 并拒绝继续，绝不拿占位文本假装摘要。
 
 - 改为 `compaction:"pi"` 只改变以后如何生成摘要，不丢弃兼容的原生 checkpoint。
 - 仅从 Responses 生成策略改成 Pi，或关闭可选 Codex 元数据，可保持符合保护规则的回放；旧精确 `:wire-off` 缓存后缀会规范化。

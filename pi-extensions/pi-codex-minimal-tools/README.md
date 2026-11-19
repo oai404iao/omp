@@ -60,6 +60,7 @@ patch 声明生效时隐藏所选 Pi `edit`/`write` 的模型声明，但不移�
 | `openai/gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna` | Standard SSE、custom patch；远程工具、原生压缩、预热和 Fast 默认关闭 |
 
 这是兼容配置，不是实际端点权限、账号资格或 Fast 定价保证。其他 `openai-codex` Lite profile 单独保留，不从相似名字推断支持。未知或禁用模型继续使用 Pi 原生实现。
+GPT-6.2 的默认值和生效条件见 [runtime 内置兼容性默认值](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-runtime#内置兼容性默认值)。
 
 ### codemode 与 SDK
 
