@@ -1,5 +1,12 @@
 # @oai404iao/pi-subagent
 
+## 1.5.0
+
+### Minor Changes
+
+- da6f77a: Wake idle recipients, including the root, when a new agent message or completion arrives. An idle child resumes with its saved settings when a shared execution slot is free. Running agents still receive mail at safe conversation boundaries, and reopening a session does not trigger turns from old mail.
+- cc5ccc6: **Breaking change:** Require Pi 1.5.2 or newer. Pi 1.5.2 is the only tested host version; older Pi releases are no longer supported. Upgrade Pi before upgrading these packages.
+
 ## 1.4.1
 
 ### Patch Changes

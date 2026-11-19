@@ -1,5 +1,18 @@
 # @oai404iao/pi-codex-tools
 
+## 0.2.0
+
+### Minor Changes
+
+- cc5ccc6: **Breaking change:** Require Pi 1.5.2 or newer. Pi 1.5.2 is the only tested host version; older Pi releases are no longer supported. Upgrade Pi before upgrading these packages.
+
+### Patch Changes
+
+- bd4efeb: Render apply_patch previews and results together inside Pi’s standard tool background and padding.
+- Updated dependencies [89b1c79]
+- Updated dependencies [cc5ccc6]
+  - @oai404iao/pi-codex-runtime@3.1.0
+
 ## 0.1.2
 
 ### Patch Changes

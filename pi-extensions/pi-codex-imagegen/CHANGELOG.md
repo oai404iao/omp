@@ -1,5 +1,17 @@
 # @oai404iao/pi-codex-imagegen
 
+## 2.2.0
+
+### Minor Changes
+
+- cc5ccc6: **Breaking change:** Require Pi 1.5.2 or newer. Pi 1.5.2 is the only tested host version; older Pi releases are no longer supported. Upgrade Pi before upgrading these packages.
+
+### Patch Changes
+
+- Updated dependencies [bd4efeb]
+- Updated dependencies [cc5ccc6]
+  - @oai404iao/pi-codex-tools@0.2.0
+
 ## 2.1.3
 
 ### Patch Changes
