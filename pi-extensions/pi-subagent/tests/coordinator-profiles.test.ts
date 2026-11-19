@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentCaller } from "../src/coordinator.ts";
-import { MAX_PENDING_MESSAGES, MESSAGE_CUSTOM_TYPE } from "../src/store.ts";
+import { enqueueInState, MAX_PENDING_MESSAGES, MESSAGE_CUSTOM_TYPE } from "../src/store.ts";
 import { fixture, stream, usage, waitUntil } from "./support/fixture.ts";
 
 test("spawn profile inheritance is per-field and sticky followup does not track later caller changes", async t => {
@@ -105,7 +105,11 @@ test("existing completion outboxes to a closed parent remain durable and drain o
 	const caller: AgentCaller = {
 		...f.caller, path: "/root/parent", depth: 1, sessionManager: SessionManager.open(parent.sessionFile),
 	};
-	for (let n = 0; n < MAX_PENDING_MESSAGES; n++) f.coordinator.send(f.caller, "parent", `full ${n}`);
+	f.coordinator.treeStore.update(state => {
+		for (let n = 0; n < MAX_PENDING_MESSAGES; n++) enqueueInState(state, {
+			id: `old-${n}`, from: "/root", to: caller.path, kind: "message", text: `full ${n}`, createdAt: new Date().toISOString(),
+		});
+	});
 	await f.coordinator.spawn(caller, { task_name: "child", message: "child completion" });
 	await f.idle();
 	const childPath = "/root/parent/child";

@@ -37,7 +37,7 @@ test("seven-tool contract: plaintext closed schemas, required fields, defaults, 
 	assert.equal(Object.keys(TOOL_DESCRIPTIONS).length, 7);
 	assert.equal(createHash("sha256").update(JSON.stringify(TOOL_NAMES.map((name, index) => ({
 		name, description: TOOL_DESCRIPTIONS[name], parameters: schemas[index],
-	})))).digest("hex"), "848708d7eab348c43a6f88c52442d2c0d5356dde1393c8851ca4d91f9b268a54",
+	})))).digest("hex"), "d9877c3effba878ff3ad72ec02f2867cbe7afa7d5e1b3cb496678e9228549dae",
 	"Approved seven-tool description/schema snapshot changed; review the complete contract before updating.");
 });
 

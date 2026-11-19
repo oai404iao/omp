@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentCaller } from "../src/coordinator.ts";
 import { MESSAGE_CUSTOM_TYPE } from "../src/store.ts";
-import { assistant, deferred, fixture } from "./support/fixture.ts";
+import { assistant, deferred, fixture, waitUntil } from "./support/fixture.ts";
 
 test("fresh SDK selection write failure rejects an unaccepted spawn without reserving its identity", async t => {
 	const f = await fixture(t);
@@ -114,6 +114,7 @@ test("listing empty or old cold transcripts never initializes or migrates their 
 		...f.caller, path: "/root/parent", depth: 1, sessionManager: SessionManager.open(parent.sessionFile),
 	};
 	await f.coordinator.spawn(caller, { task_name: "child", message: "child" });
+	await waitUntil(() => f.requests.length === 3);
 	await f.idle();
 	const original = readFileSync(parent.sessionFile, "utf8");
 	const lines = original.trimEnd().split("\n");
@@ -130,6 +131,6 @@ test("listing empty or old cold transcripts never initializes or migrates their 
 		assert.equal(readFileSync(childFile, "utf8"), childBefore);
 		assert.equal(readFileSync(`${f.coordinator.treeStore.directory}/state.json`, "utf8"), state);
 	}
-	assert.equal(f.requests.length, 2);
+	assert.equal(f.requests.length, 3);
 	assert.equal(f.coordinator.activeCount, 0);
 });

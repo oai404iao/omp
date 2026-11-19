@@ -17,15 +17,15 @@ Parent conversation history is inherited by default through the latest completed
 
 Optionally select a configured agent_type, model (prefer provider/model-id), and thinking level. Each explicit execution field overrides the role's field, which otherwise inherits the caller's current selection. Responses report the effective selected pair, not a virtual model's future physical route. Child tools remain subject to the effective tool policy and delegation depth limit.
 
-The child can exchange messages with agents in the same root tree. Its final result is automatically queued to its parent without starting an idle parent turn. Use followup_task to give the same agent more work.`,
-	send_message: `Queue a plaintext message for an existing agent in the current root tree, including your parent or a sibling. Running agents receive messages at safe conversation boundaries. Idle agents retain messages until their next turn.
+Starting a child fails immediately if the tree is at capacity. The child's final success or error is queued to its structural parent and wakes it if idle, including /root. Interrupted runs send no completion.`,
+	send_message: `Durably queue a plaintext message for an existing agent in the current root tree, including /root, your parent, or a sibling. Running agents receive mail at safe conversation boundaries without interrupting their work. New mail wakes an idle recipient: /root starts a custom-message turn; a child resumes with its saved model and thinking level when a tree slot is available.
 
-This tool does not start a new turn, interrupt work, or wait for a reply. Use followup_task when you want an idle agent to perform more work.`,
+Pending mail can be delivered together in one turn. This tool returns after enqueueing, not after delivery or a reply. Use followup_task to assign an explicit task to a non-root agent or override its saved execution settings.`,
 	followup_task: `Give an existing non-root agent a plaintext follow-up task. If the agent is idle, start a new turn using its existing conversation and pending messages. If it is running, deliver the task at a safe conversation boundary without interrupting its work.
 
 A task arriving after the current run stops accepting input is retained for a subsequent run. Optional model and thinking override the target's saved selection persistently; omitted fields keep that selection, not the caller's or role's current defaults. A different configuration requires an idle target (PROFILE_CHANGE_REQUIRES_IDLE); identical configuration can be delivered while running. This changes execution configuration only, not role, prompt or permissions.
 
-This tool returns after acceptance, not after task completion. It cannot start a turn on /root or reactivate a closing/closed agent.`,
+This tool returns after acceptance, not after task completion. Starting an idle child this way fails immediately if the tree is at capacity. It cannot target /root or reactivate a closing/closed agent.`,
 	wait_agent: `Wait for activity in your own mailbox, including agent messages and completion notifications. Return immediately if input is already pending. New user input steered into the active turn also ends the wait.
 
 This tool does not wait for a selected agent, return message contents, consume messages, or start another agent. Message contents are delivered separately into your conversation at a safe boundary.

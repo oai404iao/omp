@@ -171,11 +171,12 @@ test("dashboard includes descendants once and orders parent before child", async
 		sessionManager: SessionManager.open(record.sessionFile),
 	};
 	await f.coordinator.spawn(parent, { task_name: "child", message: "Child work" });
+	await waitUntil(() => f.requests.length === 3);
 	await f.idle();
 	const agents = f.coordinator.getSnapshot().agents;
 	assert.deepEqual(agents.map(agent => agent.path), ["/root/parent", "/root/parent/child"]);
-	assert.equal(agents.reduce((sum, agent) => sum + agent.usage.totalTokens, 0), 4);
-	assert.equal(agents.reduce((sum, agent) => sum + agent.usage.requests, 0), 2);
+	assert.deepEqual(agents.map(agent => agent.usage.totalTokens), [4, 2]);
+	assert.deepEqual(agents.map(agent => agent.usage.requests), [2, 1]);
 });
 
 test("shutdown notifies and closes the old dashboard source without retaining observers", async t => {

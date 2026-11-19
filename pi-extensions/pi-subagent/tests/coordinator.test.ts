@@ -28,22 +28,58 @@ test("spawn accepts before completion, persists identity and final result, unloa
 	assert.equal(f.manager.getEntries().filter(entry => entry.type === "usage").length, 1);
 });
 
-test("send to idle child is queue-only; followup carries task and cold resumes same session", async t => {
+test("send to idle child cold resumes its session and coalesces queued messages", async t => {
 	const f = await fixture(t);
 	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "Initial work", fork_turns: "none" });
 	await f.idle();
 	const file = f.coordinator.treeStore.record("/root/worker").sessionFile;
 	assert.deepEqual(f.coordinator.send(f.caller, "worker", "extra context"), { accepted: true });
+	f.coordinator.send(f.caller, "worker", "another message");
 	assert.equal(f.requests.length, 1);
-	assert.equal(f.coordinator.activeCount, 0);
-	await f.coordinator.followup(f.caller, "worker", "Now continue");
+	await waitUntil(() => f.requests.length === 2);
 	await f.idle();
 	assert.equal(f.coordinator.treeStore.record("/root/worker").sessionFile, file);
 	assert.equal(f.requests.length, 2);
-	assert.match(JSON.stringify(f.requests[1]), /extra context/);
-	assert.match(JSON.stringify(f.requests[1]), /Now continue/);
+	assert.match(JSON.stringify(f.requests[1]), /extra context.*another message/);
 	assert.match(JSON.stringify(f.requests[1]), /Initial work/);
 	assert.equal(f.coordinator.treeStore.mailbox("/root/worker").length, 0);
+});
+
+for (const sendWhileFull of [false, true]) test(`child completion wakes its idle parent (ordinary mail waiting=${sendWhileFull})`, async t => {
+	const finish = deferred<string>();
+	const f = await fixture(t, { settings: { maxConcurrentAgents: 1 }, reply: (_ctx, n) =>
+		n === 2 ? finish.promise : `answer ${n}` });
+	await f.coordinator.spawn(f.caller, { task_name: "parent", message: "Start parent", fork_turns: "none" });
+	await f.idle();
+	const parent = f.coordinator.treeStore.record("/root/parent");
+	const caller: AgentCaller = {
+		...f.caller, path: "/root/parent", depth: 1, sessionManager: SessionManager.open(parent.sessionFile),
+	};
+	await f.coordinator.spawn(caller, { task_name: "worker", message: "Start child", fork_turns: "none" });
+	await waitUntil(() => f.requests.length === 2);
+	if (sendWhileFull) f.coordinator.send(f.caller, "parent", "queued while no slot was free");
+	await assert.rejects(f.coordinator.followup(f.caller, "parent", "Explicit work"), /capacity/);
+	assert.equal(f.coordinator.activeCount, 1);
+	assert.equal(f.requests.length, 2);
+	finish.resolve("nested result");
+	await waitUntil(() => f.requests.length === 3);
+	await f.idle();
+	assert.equal(f.requests.length, 3);
+	assert.match(JSON.stringify(f.requests[2]), sendWhileFull ? /queued while no slot was free.*nested result/ : /nested result/);
+	assert.doesNotMatch(JSON.stringify(f.requests[2]), /Explicit work/);
+	assert.equal(f.coordinator.treeStore.mailbox("/root/parent").length, 0);
+	assert.equal(f.coordinator.treeStore.mailbox("/root").at(-1)?.text, "answer 3");
+});
+
+for (const operation of ["close", "interrupt"] as const) test(`${operation} cancels an idle recipient's scheduled wake without deleting mail`, async t => {
+	const f = await fixture(t);
+	await f.coordinator.spawn(f.caller, { task_name: "worker", message: "Initial work" });
+	await f.idle();
+	f.coordinator.send(f.caller, "worker", "preserve this mail");
+	f.coordinator[operation](f.caller, "worker");
+	await new Promise<void>(resolve => setImmediate(resolve));
+	assert.equal(f.requests.length, 1);
+	assert.equal(f.coordinator.treeStore.mailbox("/root/worker")[0]?.text, "preserve this mail");
 });
 
 test("running messages and tasks enter a safe boundary without parallel model runs", async t => {
@@ -232,6 +268,7 @@ test("cold restart restores mailbox and identity without auto execution", async 
 	const record = structuredClone(f.coordinator.treeStore.record("/root/worker"));
 	f.coordinator.send(f.caller, "worker", "durable unread");
 	await f.restart();
+	await new Promise<void>(resolve => setImmediate(resolve));
 	assert.equal(f.requests.length, 1);
 	assert.equal(f.coordinator.treeStore.record("/root/worker").descriptor.id, record.descriptor.id);
 	await f.coordinator.followup(f.caller, "worker", "continue");

@@ -79,6 +79,10 @@ export class SubagentCoordinator implements DashboardSource {
 	private readonly operations = new AgentOperationQueue();
 	private readonly limiter: ExecutionLimiter;
 	private readonly waiters = new Map<string, Set<(reason: "mailbox" | "input" | "shutdown") => void>>();
+	private readonly mailWakes = new Map<string, Set<string>>();
+	private readonly startingMailRuns = new Set<string>();
+	private wakeDispatch?: ReturnType<typeof setImmediate>;
+	private rootWakeRetry?: ReturnType<typeof setTimeout>;
 	private readonly discovery = new Map<string, AgentDiscoveryResult>();
 	private closing = false;
 	private shutdownPromise?: Promise<void>;
@@ -91,6 +95,7 @@ export class SubagentCoordinator implements DashboardSource {
 		private readonly codexIntegration: CodexIntegration,
 		readonly settings: SubagentSettings = { ...DEFAULT_SETTINGS },
 		private readonly agentDir: string,
+		private readonly wakeRoot?: () => boolean,
 	) {
 		this.limiter = new ExecutionLimiter(settings.maxConcurrentAgents);
 	}
@@ -101,7 +106,19 @@ export class SubagentCoordinator implements DashboardSource {
 		return this.store;
 	}
 	get activeCount(): number { return this.limiter.count; }
-	setRootRunning(running: boolean): void { this.rootRunning = running; }
+	setRootRunning(running: boolean, aborted = false): void {
+		this.rootRunning = running;
+		if (aborted) this.mailWakes.delete(ROOT_TASK_PATH);
+		if (!running) this.scheduleMailWakes();
+	}
+
+	private acquire(): () => void {
+		const release = this.limiter.acquire();
+		return () => {
+			release();
+			this.scheduleMailWakes();
+		};
+	}
 
 	getSnapshot(): DashboardSnapshot {
 		if (this.closing) return {
@@ -178,8 +195,8 @@ export class SubagentCoordinator implements DashboardSource {
 					}
 				}
 			});
-			this.reconcile(ROOT_TASK_PATH, manager);
-			this.flushOutboxes();
+			this.reconcile(ROOT_TASK_PATH, manager, false);
+			this.flushOutboxes(false);
 		}
 		return this.root;
 	}
@@ -260,7 +277,7 @@ export class SubagentCoordinator implements DashboardSource {
 			if (!this.visible(caller.path)) throw new Error("caller is not on the active branch");
 			assertAgentOpen(this.treeStore.snapshot, caller.path);
 			if (this.treeStore.snapshot.agents[path]) throw new Error(`task name already used in this tree: ${path}`);
-			const release = this.limiter.acquire();
+			const release = this.acquire();
 			let transferred = false;
 			try {
 				const catalog = this.catalog(caller);
@@ -339,12 +356,13 @@ export class SubagentCoordinator implements DashboardSource {
 		checkSignal(signal);
 		validateMessage(text);
 		const path = this.resolve(caller, target);
+		const message = this.message(caller.path, path, "message", text);
 		this.treeStore.update(state => {
 			assertAgentOpen(state, caller.path);
 			assertAgentOpen(state, path);
-			enqueueInState(state, this.message(caller.path, path, "message", text));
+			enqueueInState(state, message);
 		});
-		this.wake(path, "mailbox");
+		this.mailArrived(message);
 		return { accepted: true };
 	}
 
@@ -420,7 +438,7 @@ export class SubagentCoordinator implements DashboardSource {
 			}
 			this.flushOutboxes();
 			if ((this.treeStore.record(path).outbox?.length ?? 0) >= 256) throw new Error("parent mailbox is full; collect pending results before starting more work");
-			const release = this.limiter.acquire();
+			const release = this.acquire();
 			let transferred = false;
 			try {
 				const session = this.session(path);
@@ -467,6 +485,7 @@ export class SubagentCoordinator implements DashboardSource {
 		if (path === ROOT_TASK_PATH || path === caller.path) throw new Error("cannot interrupt /root or yourself");
 		const previous_status = this.treeStore.record(path).status;
 		const run = this.active.get(path);
+		this.mailWakes.delete(path);
 		if (run) {
 			run.accepting = false;
 			run.restartAfterInterrupt = false;
@@ -505,6 +524,7 @@ export class SubagentCoordinator implements DashboardSource {
 			}
 		});
 		for (const target of paths) {
+			this.mailWakes.delete(target);
 			const run = this.active.get(target);
 			if (run) {
 				run.accepting = false;
@@ -667,8 +687,89 @@ export class SubagentCoordinator implements DashboardSource {
 		return this.treeStore.mailbox(path).filter(message => !message.canceledAt && this.visible(message.from));
 	}
 
+	private mailArrived(message: MailMessage, schedule = true): void {
+		const path = message.to;
+		this.wake(path, "mailbox");
+		if (!schedule || this.closing || (path === ROOT_TASK_PATH && !this.wakeRoot)) return;
+		let ids = this.mailWakes.get(path);
+		if (!ids) this.mailWakes.set(path, ids = new Set());
+		ids.add(message.id);
+		this.scheduleMailWakes();
+	}
+
+	private scheduleMailWakes(): void {
+		if (this.closing || this.wakeDispatch || !this.mailWakes.size) return;
+		// Coalesce arrivals and let Pi leave its current lifecycle hook before starting a turn.
+		this.wakeDispatch = setImmediate(() => {
+			this.wakeDispatch = undefined;
+			for (const path of this.mailWakes.keys()) {
+				if (path === ROOT_TASK_PATH) {
+					if (!this.rootRunning) {
+						try {
+							this.reconcile(path, this.rootCaller().sessionManager);
+							if (!this.hasWakeMail(path) || this.wakeRoot?.()) this.mailWakes.delete(path);
+							else if (!this.rootWakeRetry) {
+								// A manually compacting session can become idle without an agent_settled event.
+								this.rootWakeRetry = setTimeout(() => {
+									this.rootWakeRetry = undefined;
+									this.scheduleMailWakes();
+								}, 250).unref();
+							}
+						} catch (error) {
+							this.mailWakes.delete(path);
+							this.reportError(path, error);
+						}
+					}
+				} else if (this.activeCount < this.settings.maxConcurrentAgents &&
+					!this.active.has(path) && !this.startingMailRuns.has(path)) {
+					this.startingMailRuns.add(path);
+					void this.operations.run(path, () => this.startMailRun(path)).catch(error => {
+						this.reportError(path, error);
+					}).finally(() => { this.startingMailRuns.delete(path); });
+				}
+			}
+		});
+	}
+
+	private hasWakeMail(path: string, ids = this.mailWakes.get(path)): boolean {
+		return !!ids && this.pendingMessages(path).some(message => ids.has(message.id));
+	}
+
+	private async startMailRun(path: string): Promise<void> {
+		if (this.closing || this.active.has(path) || this.activeCount >= this.settings.maxConcurrentAgents) return;
+		if (!this.visible(path) || !this.hasWakeMail(path)) {
+			this.mailWakes.delete(path);
+			return;
+		}
+		let release: (() => void) | undefined;
+		let started: Promise<void>;
+		try {
+			const root = this.rootCaller();
+			if (this.treeStore.record(path).descriptor.agent.source === "project" && !root.projectTrusted) {
+				throw new Error("resuming a project-defined agent requires project trust");
+			}
+			const session = this.session(path);
+			this.reconcile(path, session);
+			const ids = this.mailWakes.get(path);
+			if (!this.hasWakeMail(path, ids)) return;
+			if ((this.treeStore.record(path).outbox?.length ?? 0) >= 256) {
+				throw new Error("parent mailbox is full; collect pending results before starting more work");
+			}
+			this.mailWakes.delete(path);
+			release = this.acquire();
+			started = this.start(path, root, session, release, undefined, ids);
+		} catch (error) {
+			// A failed start leaves durable mail intact, but does not repeatedly launch itself.
+			this.mailWakes.delete(path);
+			release?.();
+			this.reportError(path, error);
+			return;
+		}
+		await started.catch(() => {}); // The run already reports startup errors.
+	}
+
 	/** Receipts live with the actual context message, not with wait tool results. */
-	reconcile(path: string, session: SessionManager): void {
+	reconcile(path: string, session: SessionManager, schedule = true): void {
 		if (!this.store) return;
 		const ids = new Set<string>();
 		const file = session.getSessionFile();
@@ -688,7 +789,12 @@ export class SubagentCoordinator implements DashboardSource {
 		const fd = openSync(file, "r");
 		try { fsyncSync(fd); } finally { closeSync(fd); }
 		this.store.acknowledge(path, ids);
-		this.flushOutboxes();
+		const wakeIds = this.mailWakes.get(path);
+		if (wakeIds) {
+			for (const id of wakeIds) if (ids.has(id)) wakeIds.delete(id);
+			if (!wakeIds.size) this.mailWakes.delete(path);
+		}
+		this.flushOutboxes(schedule);
 	}
 
 	inboxMessage(path: string, session: SessionManager) {
@@ -725,14 +831,15 @@ export class SubagentCoordinator implements DashboardSource {
 			pi.on("turn_start", (_event, ctx) => this.reconcile(path, ctx.sessionManager as SessionManager));
 			pi.on("input", () => { this.notifyInput(path); return { action: "continue" as const }; });
 			pi.on("agent_start", () => { if (path === ROOT_TASK_PATH) this.rootRunning = true; });
-			pi.on("agent_settled", (_event, ctx) => {
-				this.reconcile(path, ctx.sessionManager as SessionManager);
-				if (path === ROOT_TASK_PATH) this.rootRunning = false;
+			pi.on("agent_settled", (event, ctx) => {
+				try { this.reconcile(path, ctx.sessionManager as SessionManager); }
+				finally { if (path === ROOT_TASK_PATH) this.setRootRunning(false, event.aborted); }
 			});
 		};
 	}
 
-	private start(path: string, initiator: AgentCaller, manager: SessionManager, release: () => void, signal?: AbortSignal): Promise<void> {
+	private start(path: string, initiator: AgentCaller, manager: SessionManager, release: () => void,
+		signal?: AbortSignal, wakeIds?: Set<string>): Promise<void> {
 		let accept!: () => void;
 		let reject!: (error: unknown) => void;
 		let accepted = false;
@@ -777,6 +884,10 @@ export class SubagentCoordinator implements DashboardSource {
 				caller.model = run.runtime.session.model;
 				caller.thinkingLevel = run.runtime.session.thinkingLevel;
 				checkSignal(run.abort.signal);
+				if (wakeIds && (this.closing || !this.visible(path) || !this.hasWakeMail(path, wakeIds))) {
+					reject(new Error("mail wake no longer applies to the active branch"));
+					return;
+				}
 				run.phase = "executing";
 				do {
 					const runId = uuidv7();
@@ -922,7 +1033,7 @@ export class SubagentCoordinator implements DashboardSource {
 		this.dashboardChanged();
 	}
 
-	private flushOutboxes(): void {
+	private flushOutboxes(schedule = true): void {
 		if (!this.store) return;
 		for (const [path, record] of Object.entries(this.store.snapshot.agents)) {
 			if (!this.visible(path)) continue;
@@ -933,7 +1044,7 @@ export class SubagentCoordinator implements DashboardSource {
 						state.agents[path]!.outbox = state.agents[path]!.outbox?.filter(entry => entry.id !== message.id);
 					});
 					if (message.to === ROOT_TASK_PATH || this.store.record(message.to).lifecycle === "open") {
-						this.wake(message.to, "mailbox");
+						this.mailArrived(message, schedule);
 					}
 				} catch (error) {
 					if (!errorText(error).startsWith("mailbox capacity reached")) this.reportError(path, error);
@@ -974,6 +1085,9 @@ export class SubagentCoordinator implements DashboardSource {
 	shutdown(): Promise<void> {
 		if (this.shutdownPromise) return this.shutdownPromise;
 		this.closing = true;
+		if (this.wakeDispatch) clearImmediate(this.wakeDispatch);
+		if (this.rootWakeRetry) clearTimeout(this.rootWakeRetry);
+		this.mailWakes.clear();
 		this.dashboardChanged();
 		this.dashboardListeners.clear();
 		this.dashboardReader.clear();
