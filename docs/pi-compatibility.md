@@ -82,7 +82,7 @@ Floor 仍保留投影锁、integrity 校验、冻结安装与实际 SDK 检查�
 | 子代理工具上限 | 角色 `tools` 使用精确名或 `$mutation`，不是 CLI pattern 或 `+name`/`-name`；未授权 MCP/resource helpers、晚注册和恢复声明不能扩大权限 |
 | 子代理 model runtime | Provider、virtual router、runtime key 隔离；Pi 1.2 constructor adapter 保留 root baseline，但不共享可变 remote-catalog refresh wrappers |
 | 扩展继承 | 继承的扩展重建 child callbacks，临时中间注册不是后代 baseline；原生/custom providers 与 root-bound virtual routes 保留 |
-| 启动取消 | 使用 Pi pending abort，不从 `started` preflight 抛出；未交付 envelope 等显式 follow-up，不回滚 context receipts |
+| 启动取消 | 使用 Pi pending abort，不从 `started` preflight 抛出；未交付 envelope 留待后续运行，不回滚 context receipts |
 | 工具展示与流 | Patch 使用 Pi 的标准工具容器；流使用记录 response duration 的 `AssistantMessageEventStream` |
 
 标准 OpenAI Responses 的 sampling 依次合并 model defaults、有效且 clamped 的 thinking-level overrides、
@@ -186,7 +186,8 @@ Legacy checkpoint 只回放未变换的 canonical input；若前面存在 contex
 Child 先应用完整 canonical projection，再选择已完成 turns；不撤销 omission/content replacement，
 不继承 parent system authority。完成结果来自 finalized events，而不是可变数组偏移。
 Grammar eligibility 同样使用有效 context。通知和 cleanup 保持 `agent_settled`。
-真实 SDK 回归测试覆盖有界 `agent_before_settle` continuation，不添加自动 parent wakeup 或 idle-command 替代。
+活跃运行的邮箱交付继续使用有界 `agent_before_settle` continuation。实时入箱的普通消息和完成通知
+可唤醒空闲收件人；`/root` 用 Pi custom 消息触发新轮次，不走用户输入或 idle command。
 
 <a id="checks-that-prevent-false-positives"></a>
 

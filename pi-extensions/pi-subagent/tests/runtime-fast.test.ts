@@ -54,13 +54,14 @@ for (const nonResponses of [false, true]) {
 }
 
 test("a Responses grandchild follows main Fast through an unloaded non-Responses parent", async t => {
-	const observed: boolean[] = [];
+	const parentFast: boolean[] = [];
+	const grandchildFast: boolean[] = [];
 	const f = await fixture(t, {
 		settings: { openAIIdentity: true },
 		modelApi: "anthropic-messages",
 		reply: () => {
 			const child = SessionManager.open(f.coordinator.treeStore.record("/root/worker").sessionFile);
-			observed.push(sessionFastMode(child.getSessionId(), false));
+			parentFast.push(sessionFastMode(child.getSessionId(), false));
 			return "done";
 		},
 	});
@@ -75,7 +76,7 @@ test("a Responses grandchild follows main Fast through an unloaded non-Responses
 		models: [{ id: "echo", name: "Echo", reasoning: false, input: ["text"],
 			cost: usage.cost, contextWindow: 100000, maxTokens: 1000 }],
 		streamSimple: (model, _context, options) => {
-			observed.push(sessionFastMode(options?.sessionId, false));
+			grandchildFast.push(sessionFastMode(options?.sessionId, false));
 			return stream(model, "done", options?.signal);
 		},
 	});
@@ -85,12 +86,16 @@ test("a Responses grandchild follows main Fast through an unloaded non-Responses
 	};
 	setFast(false);
 	await f.coordinator.spawn(caller, { task_name: "nested", message: "nested work", fork_turns: "none" });
+	await waitUntil(() => parentFast.length === 2);
 	await f.idle();
-	assert.deepEqual(observed, [true, false]);
+	assert.deepEqual(parentFast, [true, false]);
+	assert.deepEqual(grandchildFast, [false]);
 	setFast(true);
 	await f.coordinator.followup(f.caller, "/root/worker/nested", "continue");
+	await waitUntil(() => parentFast.length === 3);
 	await f.idle();
-	assert.deepEqual(observed, [true, false, true]);
+	assert.deepEqual(parentFast, [true, false, true]);
+	assert.deepEqual(grandchildFast, [false, true]);
 	const child = SessionManager.open(f.coordinator.treeStore.record("/root/worker/nested").sessionFile);
 	const saved = child.getEntries().find(entry => entry.type === "custom" && entry.customType === FAST_MODE_CUSTOM_TYPE);
 	assert.equal(saved?.type, "custom");

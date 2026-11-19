@@ -26,18 +26,24 @@ and publication boundaries.
 - Keep root and child definitions identical and `model-only`: the seven controls
   are not callable through codemode or nested tool execution. Do not restore
   retired tools, arguments or synchronous completion responses.
-- Spawn and follow-up return acceptance, not completion. `send_message` queues
-  context without starting an idle agent; `followup_task` carries the new task
-  and can start an idle non-root target.
+- Spawn and follow-up return acceptance, not completion. Follow-up carries an
+  explicit task, can override the saved execution profile, and cannot target `/root`.
+- Wake only after mail is durably enqueued. Start idle `/root` via a custom
+  message; resume an idle child with its saved profile. Batch arrivals without
+  overlapping runs for one agent. Do not wake closing/closed targets, wake after
+  controller shutdown, or wake merely from reopening existing pending mail.
 - `wait_agent` observes the caller's mailbox activity without consuming bodies
   or waiting for a selected child's terminal status. Deliver attributed context
   at safe boundaries after pending tool results; a timeout does not cancel work.
-- Completion goes to the structural parent, even for peer-initiated follow-up.
-  Interruption preserves identity/history/mail and affects only the current run.
+- Route success/error completion to the structural parent with the same wake
+  semantics, even for a mail-triggered run or peer-initiated follow-up. Interrupt
+  clears current wake requests, not identity/history/mail; interrupted runs send
+  no completion.
 - Paths are canonical `/root/...` or caller-relative, not UUIDs or filesystem
   paths. Task names stay reserved for the tree lifetime.
-- Concurrency counts active child runs across the whole tree; root is excluded,
-  waiting children retain slots, and admission fails immediately at capacity.
+- Concurrency counts active child runs across the whole tree; root is excluded
+  and children waiting within a turn retain slots. Explicit spawn/idle follow-up
+  fail at capacity; mail-triggered child runs wait for an available slot.
 - Forked history uses the compaction-aware completed-turn projection, excluding
   active assistant/tool suffixes, parent system authority and control records.
 

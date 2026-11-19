@@ -55,9 +55,9 @@ Broker 要求 ABI v2 和完全一致的 runtime 包版本；版本冲突显式�
 
 ## 子代理没有立即回复
 
-`spawn_agent` / `followup_task` 接受任务不等于完成；消息由上下文邮箱交付。
-先查看状态和邮箱，只有确实无独立工作时才等待。
-`send_message` 不会启动空闲代理；后续工作使用 `followup_task`。
+`spawn_agent` / `followup_task` 接受任务不等于完成；`send_message` 接收确认也不表示对方已读。
+新消息和完成通知可唤醒空闲代理（包括 `/root`）；子代理可能在等整树槽位，运行中的代理会在安全边界收信。
+先查看状态和邮箱，只有确实无独立工作时才等待。重开会话不会仅因旧消息而启动代理。
 取消不回滚文件修改，关闭代理也不是磁盘清理。
 完整工具与恢复语义见 [subagent README](../pi-extensions/pi-subagent/README.md)。
 

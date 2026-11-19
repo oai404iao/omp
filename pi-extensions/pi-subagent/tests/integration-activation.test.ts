@@ -97,11 +97,10 @@ test("activation awaits one integration load across session hooks; children and 
 	assert.equal(instances.length, 4);
 	assert.equal(new Set(instances).size, 4);
 	assert.equal(new Set(childSessions).size, 2, "cold resume preserves child session identity");
-	for (const [index, request] of f.requests.entries()) {
-		assert.ok(getCurrentSystemPrompt(request.messages).includes(`Instance ${index}, run 1`),
-			"each runtime must execute its own inline factory with fresh mutable state");
-	}
-	assert.equal(f.requests.length, 4);
+	const instancesSeen = f.requests.flatMap(request =>
+		getCurrentSystemPrompt(request.messages).match(/\bInstance \d+, run \d+\b/) ?? []);
+	assert.deepEqual(instancesSeen, ["Instance 0, run 1", "Instance 1, run 1", "Instance 2, run 1", "Instance 3, run 1"],
+		"each child runtime must execute its own inline factory with fresh mutable state");
 	await session.reload();
 	assert.equal(loads, 2, "a new extension activation performs its own single load");
 	await call("followup_task", { target: "first", message: "after reload" });
