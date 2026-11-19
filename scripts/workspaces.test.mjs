@@ -54,8 +54,8 @@ test("bootstrap packages stay out of guarded release artifacts", () => {
 });
 
 test("activated notify enters guarded artifacts with a notify-only targeted closure", () => {
-  assert.equal(workspaces.length, 9);
-  assert.equal(publishableWorkspaces.length, 9);
+  assert.equal(workspaces.length, 8);
+  assert.equal(publishableWorkspaces.length, 8);
   const notify = workspaces.find(entry => entry.name === "@oai404iao/pi-notify");
   assert.equal(notify.releaseStatus, "publishable");
   assert.deepEqual(workspaces.filter(entry => entry.releaseStatus === "bootstrap"), []);

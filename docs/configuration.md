@@ -11,7 +11,6 @@ OMP 使用 Pi 的宿主配置，同时各扩展保留自己的配置契约。
 | Codex 全局开关 | `<codex-agent-dir>/extensions/pi-codex-minimal-tools/config.json` |
 | Codex 每模型行为 | 同目录 `models.json`，由 runtime 的 schema/catalog 解释 |
 | 子代理角色、模型和工具上限 | [subagent 配置](../pi-extensions/pi-subagent/README.md)，不是 Codex 的 `models.json` |
-| Telegram 目标及通知策略 | [telegram-notify 配置](../pi-extensions/pi-telegram-notify/README.md) |
 | pi-notify 的通道及 Telegram 凭据 | [pi-notify 配置](../pi-extensions/pi-notify/README.md)，均在 `extensions/pi-notify/config.json` |
 
 Pi 的个人 `settings.json` 和受信任项目 `.pi/settings.json` 控制资源加载。
@@ -85,3 +84,13 @@ Standard/Lite 请求格式、可选 Codex 增强、SSE/WS 传输、Pi/native 压
 
 不要通过清空不透明检查点或修改 provider/model/profile 身份来绕过迁移错误。
 详见[协议迁移](codex-wire-alignment.md)和[排查问题](troubleshooting.md)。
+
+<a id="notification-migration"></a>
+
+### 从旧 Telegram 通知切换到 `pi-notify`
+
+`pi-telegram-notify` 不再随 OMP 源码维护，已发布的 npm 版本仍保留。
+要保留 Telegram 通知，按 [`pi-notify` 配置](../pi-extensions/pi-notify/README.md#环境与配置)，
+将旧 `extensions/pi-telegram-notify/config.json` 中的 Telegram 字段迁到新配置的 `telegram` 对象，
+将 `channel` 设为 `telegram`（仅 Telegram）或 `both`（也启用本地通知）。
+新插件不会自动读取或修改旧配置。启用新插件后停用旧插件，避免重复发送。

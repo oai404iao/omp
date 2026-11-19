@@ -22,7 +22,7 @@ function repositoryFixture() {
 test("catalog registers every release workspace exactly once", () => {
   validateCatalog();
   validateRepositoryCatalog();
-  assert.equal(testPackages.length, 9);
+  assert.equal(testPackages.length, 8);
   assert.deepEqual(testPackages.map(entry => entry.name).sort(),
     workspaces.map(entry => entry.name).sort());
   const local = testPackages.find(entry => entry.id === "pi-notify");
@@ -40,7 +40,7 @@ test("catalog registers every release workspace exactly once", () => {
 
 test("pnpm release workspace configuration exactly matches the release catalog", () => {
   const config = parse(readFileSync(resolve(root, "pnpm-workspace.yaml"), "utf8"));
-  assert.equal(workspaces.length, 9);
+  assert.equal(workspaces.length, 8);
   assert.deepEqual([...config.packages].sort(), workspaces.map(entry => entry.directory).sort());
   assert.ok(config.packages.includes("pi-extensions/pi-notify"));
 });

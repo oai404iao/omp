@@ -33,11 +33,11 @@ function fixture() {
   return { root, git, write, commit, base: commit() };
 }
 
-test("full plan contains nine package checks, all suites, and policy in stable order", () => {
+test("full plan contains eight package checks, all suites, and policy in stable order", () => {
   const value = createPlan({ git: () => `${sha}\n` });
-  assert.equal(value.packages.length, 9);
+  assert.equal(value.packages.length, 8);
   assert.deepEqual(value.suites, ["composition", "consumers", "infrastructure"]);
-  assert.equal(tasksForPlan(value).length, 13);
+  assert.equal(tasksForPlan(value).length, 12);
   assert.equal(tasksForPlan(value)[0].id, "policy");
   assert.deepEqual(value.packages, [...value.packages].sort());
   const outputs = githubOutputs(value);
@@ -105,29 +105,35 @@ test("NUL diff handles deletes, renames and copies without path splitting", () =
   assert.throws(() => parseDiff("R100\0before\0"), /diff/);
 });
 
-test("affected planning uses merge-base, rename endpoints, deleted paths, and base graph edges", () => {
+test("affected planning uses merge-base, rename endpoints, and deleted paths", () => {
   const repo = fixture();
-  const local = testPackages.find(entry => entry.id === "pi-notify");
-  const telegram = testPackages.find(entry => entry.id === "pi-telegram-notify");
-  const manifest = readPackage(local);
-  manifest.optionalDependencies = { [telegram.name]: "1.0.0" };
-  repo.write(`${local.directory}/package.json`, JSON.stringify(manifest));
-  repo.write(`${telegram.directory}/old file.ts`);
+  const before = "pi-extensions/pi-codex-web-search/old file.ts";
+  const after = "pi-extensions/pi-notify/renamed file.ts";
+  repo.write(before);
+  const mergeBase = repo.commit();
+  repo.write("pi-extensions/pi-codex-imagegen/base-only.ts");
   const base = repo.commit();
-  delete manifest.optionalDependencies;
-  repo.write(`${local.directory}/package.json`, JSON.stringify(manifest));
-  repo.git("mv", `${telegram.directory}/old file.ts`, `${local.directory}/renamed file.ts`);
+  repo.git("switch", "--detach", mergeBase);
+  repo.git("mv", before, after);
   const head = repo.commit();
   const value = createPlan({ mode: "affected", base, head, root: repo.root });
   assert.equal(value.full, false);
-  assert.deepEqual(value.packages, ["pi-notify", "pi-telegram-notify"]);
+  assert.deepEqual(value.packages, ["pi-codex-web-search", "pi-notify"]);
   assert.equal(value.sourceSha, head);
-  repo.git("rm", `${local.directory}/renamed file.ts`);
+  repo.git("rm", after);
   const deletion = repo.commit();
   assert.deepEqual(createPlan({ mode: "affected", base: head, head: deletion, root: repo.root }).packages, ["pi-notify"]);
   // A dirty working tree does not change the immutable revision plan.
   repo.write("unknown-file", "unstaged");
   assert.deepEqual(createPlan({ mode: "affected", base: head, head: deletion, root: repo.root }).packages, ["pi-notify"]);
+});
+
+test("affected planning includes consumers linked only in the base graph", () => {
+  const paths = ["pi-extensions/pi-codex-web-search/index.ts"];
+  const base = new Map([["pi-notify", new Set(["pi-codex-web-search"])]]);
+  const head = new Map();
+  assert.deepEqual(affectedPlan(paths, [head], sha).packages, ["pi-codex-web-search"]);
+  assert.deepEqual(affectedPlan(paths, [base, head], sha).packages, ["pi-codex-web-search", "pi-notify"]);
 });
 
 test("missing revisions/diff/graph safely fall back, but invalid registrations fail", () => {
@@ -164,13 +170,13 @@ test("release plans use canonical runtime/optional closure, including activated 
   const value = createPlan({ mode: "release", packageName: "@oai404iao/pi-codex-tools", git: () => sha });
   assert.deepEqual(value.packages, ["pi-codex-runtime", "pi-codex-tools"]);
   assert.deepEqual(value.suites, ["composition", "consumers", "infrastructure"]);
-  for (const id of ["pi-telegram-notify", "pi-notify"]) {
-    const notify = createPlan({ mode: "release", packageName: `@oai404iao/${id}`, git: () => sha });
-    assert.deepEqual(notify.packages, [id]);
-    assert.deepEqual(notify.suites, ["infrastructure"]);
+  const notify = createPlan({ mode: "release", packageName: "@oai404iao/pi-notify", git: () => sha });
+  assert.deepEqual(notify.packages, ["pi-notify"]);
+  assert.deepEqual(notify.suites, ["infrastructure"]);
+  assert.equal(createPlan({ mode: "release", packageName: "", git: () => sha }).packages.length, 8);
+  for (const id of ["pi-telegram-notify", "unapproved"]) {
+    assert.throws(() => createPlan({ mode: "release", packageName: `@oai404iao/${id}`, git: () => sha }), /Unapproved/);
   }
-  assert.equal(createPlan({ mode: "release", packageName: "", git: () => sha }).packages.length, 9);
-  assert.throws(() => createPlan({ mode: "release", packageName: "@oai404iao/unapproved", git: () => sha }), /Unapproved/);
 });
 
 test("CLI and plan validation reject conflicting/invalid/under-scoped input", () => {

@@ -409,47 +409,20 @@ test("Pi loads the package directory with its notification commands and configur
 	}
 });
 
-test("legacy directory alone exposes only its original commands and ignores the new channel", async (t) => {
+test("real Pi directory loading reads only pi-notify settings after reload", async (t) => {
 	const h = harness(t);
-	h.configure("local");
-	const loader = new DefaultResourceLoader({
-		cwd: h.agentDir, agentDir: h.agentDir,
-		noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
-		additionalExtensionPaths: [fileURLToPath(new URL("../../pi-telegram-notify/", import.meta.url))],
-	});
-	await loader.reload();
-	const loaded = loader.getExtensions();
-	try {
-		assert.deepEqual(loaded.errors, []);
-		assert.equal(loaded.extensions.length, 1);
-		const runner = new ExtensionRunner(loaded.extensions, loaded.runtime, h.agentDir,
-			SessionManager.inMemory(h.agentDir), {} as ModelRegistry);
-		const commands = runner.getRegisteredCommands();
-		assert.deepEqual(commands.map(command => command.name).sort(), ["telegram-notify", "telegram-notify:test"]);
-		await commands.find(command => command.name === "telegram-notify:test")!.handler("", h.ctx as Parameters<typeof commands[number]["handler"]>[1]);
-		assert.equal(h.requests.length, 1);
-		assert.ok(h.urls[0]!.includes("FAKE_LEGACY_TOKEN"));
-		assert.equal(h.writes.length, 0);
-	} finally {
-		loaded.runtime.invalidate();
-	}
-});
-
-test("real Pi directory loading preserves independent delivery in both orders and on reload", async (t) => {
-	const h = harness(t);
-	h.configure("both");
 	const eventBus = createEventBus();
-	const notifyPath = fileURLToPath(new URL("../", import.meta.url));
-	const legacyPath = fileURLToPath(new URL("../../pi-telegram-notify/", import.meta.url));
-	for (const paths of [[notifyPath, legacyPath], [legacyPath, notifyPath], [notifyPath, legacyPath]]) {
-		const loader = new DefaultResourceLoader({
-			cwd: h.agentDir, agentDir: h.agentDir, eventBus,
-			noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
-			additionalExtensionPaths: paths,
-		});
+	const loader = new DefaultResourceLoader({
+		cwd: h.agentDir, agentDir: h.agentDir, eventBus,
+		noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
+		additionalExtensionPaths: [fileURLToPath(new URL("../", import.meta.url))],
+	});
+	for (const [channel, expectedSends] of [["both", 1], ["local", 0], ["telegram", 1]] as const) {
+		h.configure(channel);
 		await loader.reload();
 		const loaded = loader.getExtensions();
 		assert.deepEqual(loaded.errors, []);
+		assert.equal(loaded.extensions.length, 1);
 		const session = SessionManager.inMemory(h.agentDir);
 		const runner = new ExtensionRunner(loaded.extensions, loaded.runtime, h.agentDir, session, {} as ModelRegistry);
 		const errors: string[] = [];
@@ -457,23 +430,18 @@ test("real Pi directory loading preserves independent delivery in both orders an
 		runner.setUIContext(runner.getUIContext(), "rpc");
 		try {
 			const names = runner.getRegisteredCommands().map((command) => command.name);
-			assert.deepEqual(names.sort(), ["notify", "notify-test", "telegram-notify", "telegram-notify:test"]);
+			assert.deepEqual(names.sort(), ["notify", "notify-test"]);
+			const before = h.requests.length;
 			await runner.emit({ type: "session_start", reason: "reload" });
 			await runner.emitBeforeAgentStart({ messageType: "user", prompt: "real runner task" }, { cwd: h.agentDir });
 			await runner.emit({ type: "ui_prompt_start", reason: "ui_prompt", kind: "confirm", title: "one dialog" });
-			h.configure("local");
-			await runner.emit({ type: "ui_prompt_start", reason: "ui_prompt", kind: "confirm", title: "legacy still enabled" });
-			h.configure("both");
-			writeFileSync(h.legacyPath, JSON.stringify({ enabled: false, botToken: "FAKE_LEGACY_TOKEN", chatId: "FAKE_LEGACY_CHAT" }));
-			await runner.emit({ type: "ui_prompt_start", reason: "ui_prompt", kind: "confirm", title: "new still enabled" });
-			writeFileSync(h.legacyPath, JSON.stringify({ botToken: "FAKE_LEGACY_TOKEN", chatId: "FAKE_LEGACY_CHAT" }));
 			await runner.emit({ type: "session_shutdown", reason: "reload" });
 			assert.deepEqual(errors, []);
+			assert.equal(h.requests.length - before, expectedSends);
 		} finally {
 			loaded.runtime.invalidate();
 		}
 	}
-	assert.equal(h.requests.length, 12, "each runtime sends independently through both packages");
-	assert.equal(h.urls.filter(url => url.includes("FAKE_NEW_TOKEN")).length, 6);
-	assert.equal(h.urls.filter(url => url.includes("FAKE_LEGACY_TOKEN")).length, 6);
+	assert.equal(h.requests.length, 2);
+	assert.ok(h.urls.every(url => url.includes("FAKE_NEW_TOKEN")));
 });

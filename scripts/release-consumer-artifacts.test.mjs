@@ -31,9 +31,9 @@ test("validation isolates fixture environments but defaults to production SHA an
   const f = fixture();
   assert.doesNotThrow(() => validateManifest(f.release, validation(f)));
   assert.throws(() => validateManifest(f.release, { ...validation(f), env: { GITHUB_SHA: "b".repeat(40) } }), /GITHUB_SHA/);
-  assert.throws(() => validateManifest(f.release, { ...validation(f), env: { RELEASE_PACKAGE: "@oai404iao/pi-telegram-notify" } }), /selection/);
+  assert.throws(() => validateManifest(f.release, { ...validation(f), env: { RELEASE_PACKAGE: "@oai404iao/pi-notify" } }), /selection/);
   for (const env of [{ GITHUB_SHA: "b".repeat(40), RELEASE_PACKAGE: "" },
-    { GITHUB_SHA: commit, RELEASE_PACKAGE: "@oai404iao/pi-telegram-notify" }]) {
+    { GITHUB_SHA: commit, RELEASE_PACKAGE: "@oai404iao/pi-notify" }]) {
     const script = `import assert from "node:assert/strict";
 import { validateManifest } from ${JSON.stringify(new URL("./release-consumer-artifacts.mjs", import.meta.url).href)};
 assert.throws(() => validateManifest(${JSON.stringify(f.release)}, {

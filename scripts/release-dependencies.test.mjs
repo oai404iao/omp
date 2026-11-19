@@ -52,8 +52,8 @@ test("the verified Codex packages, including tools, enter dependency-complete gu
     assert.ok(artifactWorkspaces().some(e => e.name === name));
     assert.ok(artifactWorkspaces(true).some(e => e.name === name));
   }
-  assert.equal(artifactWorkspaces().length, 9);
-  assert.equal(artifactWorkspaces(true).length, 9);
+  assert.equal(artifactWorkspaces().length, 8);
+  assert.equal(artifactWorkspaces(true).length, 8);
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces()));
   assert.doesNotThrow(() => assertReleaseDependencies(artifactWorkspaces(true)));
 });
