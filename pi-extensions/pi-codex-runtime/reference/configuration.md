@@ -18,8 +18,7 @@ See [Pi compatibility](../../../docs/pi-compatibility.md) for the host baseline.
 
 The extension adds:
 
-- Responses SSE, WebSocket, cached continuation, WebSocket retry, upgrade-only
-  SSE fallback, and WebSocket prewarm.
+- Responses SSE, WebSocket, cached continuation, bounded retries, and prewarm.
 - Standard Responses and the internal Codex Responses Lite envelope.
 - Codex freeform `apply_patch`, including streaming preview and exact replay.
 - Hosted Responses web search or standalone Codex `web.run`.
@@ -431,8 +430,8 @@ Astra profile updated from `ddea03ad049142943bdbf13e937b1d67e8c1ba0c`.
 disabled parallel calls and Fast availability with priority
 service tier and a 2x cost multiplier. This is a configured compatibility
 default, not upstream evidence of Lite entitlement, endpoint access or pricing.
-Pi still supplies its descriptor and authentication. Other GPT-6 profiles and
-legacy `openai-codex` profiles are unchanged.
+Pi still supplies its descriptor and authentication. For GPT-6.2 defaults, see
+the [bundled compatibility profiles](../README.md#内置兼容性默认值).
 
 The pre-Astra entries include equivalent `openai/...` and
 `openai-codex/...` IDs; the latter switch only the endpoint/auth shape to
@@ -549,10 +548,8 @@ WebSocket prewarm without changing the selected per-model profile. When it is
   `previous_response_id` input deltas.
 - `websocket-cached`: compatibility alias with the same safe continuation
   behavior.
-- `auto`: retry transient WebSocket failures, but use sticky per-session SSE
-  fallback only when the WebSocket upgrade is rejected with HTTP 426. Model,
-  request, output-limit, context-limit, and post-upgrade connection errors do
-  not change transports.
+- `auto`: prefer WebSocket, with limited SSE fallback as described in
+  [core transport behavior](../../pi-codex-core/README.md#传输预热与续传).
 
 Prewarm is scheduled once per session startup (including resume/fork), in the
 background without delaying session initialization. If the first WebSocket

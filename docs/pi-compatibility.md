@@ -132,7 +132,7 @@ custom patch、native Responses compaction、Fast（priority、2x 成本乘数�
 `openai/gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna` 使用 Standard SSE 与 local custom patch，
 默认不开搜索、图像生成、native 压缩、预热和 Fast。Standard reasoning clamps 委托 Pi，
 不替换 descriptors、limits 或 prices。
-未知 ID 保持 native；旧 `openai-codex` profiles 冻结，不新增 `openai-codex/gpt-6.1-sol`。
+GPT-6.2 是 [runtime 的精确匹配策略](../pi-extensions/pi-codex-runtime/README.md#内置兼容性默认值)，不替 Pi 注册模型。未知 ID 保持 native；旧 `openai-codex` profiles 冻结。
 
 SSE/WS 在归一化前向 Pi raw provider-event callback 转发事件，包括 terminal errors；合成 replay items 不是 raw events。
 Subagent `openAIIdentity` 覆盖 virtual selection，在物理 routing 前准备身份并跨冷恢复保留；

@@ -6,14 +6,14 @@ import test, { afterEach } from "node:test";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import type { Socket } from "node:net";
-import { parseWebSocket } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/websocket-events";
+import { isRetryableAssistantError } from "@earendil-works/pi-ai/compat";
+import { WebSocketMessageTooLargeError, streamWebSocketRequest } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/websocket-events";
 import { timeoutFromOption } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/timeouts";
 import { resetCodexWireState } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { buildWebSocketHeaders } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/headers";
 import { closeProviderWebSocketSessions } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/websocket-session";
 import { requestOpenAINativeCompaction } from "@oai404iao/pi-codex-core/internal/adapter/compaction/request";
 import { resolveResponsesWebSocketUrl } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/urls";
-import { sendWebSocketRequest } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/websocket-events";
 import { createProviderHarness as sharedProviderHarness } from "./support/openai-codex-test-support.js";
 import { readJsonRequest, startWebSocketServer, successEvents } from "./support/websocket-test-support.js";
 const createProviderHarness = () => sharedProviderHarness().providers;
@@ -244,25 +244,30 @@ test("joining a shared stalled handshake has an independent deadline and abort",
 	}
 });
 
+function mockWebSocket(send: (payload: string, callback?: (error?: Error) => void) => void) {
+	const listeners = new Map<string, (event: unknown) => void>();
+	const socket = {
+		readyState: 1, send, close() {},
+		addEventListener(name: string, listener: (event: unknown) => void) { listeners.set(name, listener); },
+		removeEventListener(name: string) { listeners.delete(name); },
+	};
+	return { socket, listeners };
+}
+
 test("zero disables WS idle timer; invalid timeouts fail before I/O", async (t) => {
 	assert.equal(timeoutFromOption(undefined, 15000, "timeout"), 15000);
 	assert.equal(timeoutFromOption(0, 15000, "timeout"), 0);
 	for (const invalid of [-1, Number.NaN, Infinity]) {
 		assert.throws(() => timeoutFromOption(invalid, 15000, "timeout"), /Invalid timeout/);
 	}
-	const listeners = new Map<string, (event: unknown) => void>();
-	const socket = {
-		readyState: 1, send() {}, close() {},
-		addEventListener(name: string, listener: (event: unknown) => void) { listeners.set(name, listener); },
-		removeEventListener(name: string) { listeners.delete(name); },
-	};
+	const { socket, listeners } = mockWebSocket((_payload, callback) => callback?.());
 	const timer = t.mock.method(globalThis, "setTimeout");
-	const iterator = parseWebSocket(socket, undefined, 0)[Symbol.asyncIterator]();
+	const iterator = streamWebSocketRequest(socket, "{}", undefined, 0, 42)[Symbol.asyncIterator]();
 	const next = iterator.next();
 	listeners.get("message")?.({ data: JSON.stringify({ type: "response.completed", response: { status: "completed" } }) });
 	assert.equal((await next).value.type, "response.completed");
 	await iterator.return?.();
-	assert.equal(timer.mock.calls.length, 0);
+	assert.deepEqual(timer.mock.calls.map(call => call.arguments[1]), [42]);
 	assert.equal(listeners.size, 0);
 });
 
@@ -280,17 +285,70 @@ test("provider NO_PROXY overrides a supplied WS proxy without touching ambient s
 	}
 });
 
-test("WebSocket request send has an abortable timeout", async () => {
-	const socket = {
-		send() {},
-		close() {},
-		addEventListener() {},
-		removeEventListener() {},
-	};
+test("WebSocket write without a callback is bounded by the send deadline", async () => {
+	const { socket, listeners } = mockWebSocket(() => {});
 	await assert.rejects(
-		sendWebSocketRequest(socket, "{}", undefined, 5),
+		streamWebSocketRequest(socket, "{}", undefined, 0, 5)[Symbol.asyncIterator]().next(),
 		/OpenAI Responses WebSocket send timed out after 5ms/,
 	);
+	assert.equal(listeners.size, 0);
+});
+
+test("WebSocket peer 1009 still wins when the write callback fails first", async () => {
+	const { socket, listeners } = mockWebSocket((_payload, callback) => callback?.(new Error("write EPIPE")));
+	const result = streamWebSocketRequest(socket, "{}", undefined, 0)[Symbol.asyncIterator]().next();
+	await new Promise<void>(resolve => setImmediate(resolve));
+	listeners.get("close")?.({ code: 1009 });
+	await assert.rejects(result, error => error instanceof WebSocketMessageTooLargeError && error.beforeResponseText);
+	assert.equal(listeners.size, 0);
+});
+
+test("WebSocket peer 1009 still wins when a transport error follows a successful write", async () => {
+	const { socket, listeners } = mockWebSocket((_payload, callback) => callback?.());
+	const result = streamWebSocketRequest(socket, "{}", undefined)[Symbol.asyncIterator]().next();
+	listeners.get("error")?.(new Error("connection reset"));
+	await new Promise<void>(resolve => setImmediate(resolve));
+	listeners.get("close")?.({ code: 1009 });
+	await assert.rejects(result, error => error instanceof WebSocketMessageTooLargeError && error.beforeResponseText);
+	assert.equal(listeners.size, 0);
+});
+
+test("WebSocket local receive-size errors are not treated as a rejected request", async () => {
+	const { socket, listeners } = mockWebSocket((_payload, callback) => callback?.());
+	const result = streamWebSocketRequest(socket, "{}", undefined)[Symbol.asyncIterator]().next();
+	listeners.get("error")?.(Object.assign(new Error("Max payload size exceeded"), { code: "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH" }));
+	listeners.get("close")?.({ code: 1009 });
+	await assert.rejects(result, /^Error: Max payload size exceeded$/);
+	assert.equal(listeners.size, 0);
+});
+
+test("WebSocket response text before the write callback rules out early 1009 fallback", async () => {
+	const { socket, listeners } = mockWebSocket(() => {
+		listeners.get("message")?.({ data: '{"type":"response.created","response":{"id":"started"}}' });
+		listeners.get("close")?.({ code: 1009 });
+	});
+	const iterator = streamWebSocketRequest(socket, "{}", undefined, 0)[Symbol.asyncIterator]();
+	assert.equal((await iterator.next()).value.type, "response.created");
+	await assert.rejects(iterator.next(), error => error instanceof WebSocketMessageTooLargeError && !error.beforeResponseText);
+	assert.equal(listeners.size, 0);
+});
+
+test("WebSocket write failure without a close remains a write error", async () => {
+	const { socket, listeners } = mockWebSocket((_payload, callback) => callback?.(new Error("write EPIPE")));
+	await assert.rejects(
+		streamWebSocketRequest(socket, "{}", undefined, 0, 5)[Symbol.asyncIterator]().next(),
+		/Failed to send OpenAI Responses WebSocket request: write EPIPE/,
+	);
+	assert.equal(listeners.size, 0);
+});
+
+test("WebSocket write failure followed by abort does not wait for a close", async () => {
+	const { socket, listeners } = mockWebSocket((_payload, callback) => callback?.(new Error("write EPIPE")));
+	const abort = new AbortController();
+	const result = streamWebSocketRequest(socket, "{}", abort.signal, 0)[Symbol.asyncIterator]().next();
+	abort.abort();
+	await assert.rejects(result, /Request was aborted/);
+	assert.equal(listeners.size, 0);
 });
 
 test("openai websocket transport performs an authenticated response.create request", async () => {
@@ -953,12 +1011,18 @@ test("OpenAI Responses WebSocket compaction accepts Pi-resolved Authorization wi
 	}
 });
 
-test("OpenAI Responses compaction auto fallback is sticky for later provider requests", async () => {
+for (const scenario of ["upgrade rejected", "early size close", "size close after text"] as const) test(`OpenAI Responses compaction auto transport: ${scenario}`, async () => {
 	writeSettings({ openaiTransport: "auto", compactionMode: "responses" });
 	let sseRequests = 0;
 	const compactionItem = { type: "compaction", encrypted_content: "fallback-state" };
+	const sticky = scenario === "upgrade rejected";
+	const lateClose = scenario === "size close after text";
 	const server = await startWebSocketServer([
-		() => ({ handshakeStatus: 426 }),
+		() => sticky ? { handshakeStatus: 426 } : [
+			...(lateClose ? [{ $rawText: "not json" }] : []),
+			{ $close: 1009 },
+		],
+		() => successEvents("resp_ws", "continued over websocket"),
 	], (request, response) => {
 		if (request.method !== "POST" || request.url !== "/v1/responses") {
 			response.writeHead(404).end();
@@ -1000,7 +1064,7 @@ test("OpenAI Responses compaction auto fallback is sticky for later provider req
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	} as any;
 	try {
-		await requestOpenAINativeCompaction(model, {
+		const compacted = requestOpenAINativeCompaction(model, {
 			systemPrompt: "",
 			messages: [{ role: "user", content: "compact me", timestamp: 1 }],
 			tools: [],
@@ -1009,16 +1073,24 @@ test("OpenAI Responses compaction auto fallback is sticky for later provider req
 			apiKey: "pi-resolved-api-key",
 			sessionId: "pi-session",
 			settings: loadSettings(),
+			maxRetries: 1,
+			maxRetryDelayMs: 5_500,
 		});
+		if (lateClose) {
+			await assert.rejects(compacted, /after response text arrived \(close code 1009\)/);
+		} else {
+			assert.deepEqual((await compacted).at(-1), compactionItem);
+		}
 		const result = await runOpenAIProvider(
 			createProviderHarness().openai,
 			server.url,
 			[{ role: "user", content: "after compact" }],
 		);
 
-		assert.equal(result.content[0]?.text, "continued over sse");
-		assert.equal(server.connections, 1);
-		assert.equal(sseRequests, 2);
+		assert.equal(result.content[0]?.text, sticky ? "continued over sse" : "continued over websocket");
+		assert.equal(server.connections, sticky ? 1 : 2);
+		assert.equal(server.requests.length, sticky ? 0 : 2);
+		assert.equal(sseRequests, sticky ? 2 : lateClose ? 0 : 1);
 	} finally {
 		await server.close();
 	}
@@ -1465,6 +1537,116 @@ test("openai auto switches immediately on HTTP 426 and remembers the fallback", 
 	}
 });
 
+test("openai auto falls back on an early 1009 only for the current request, replaying full context", async () => {
+	writeSettings({ openaiTransport: "auto" });
+	const httpRequests: Record<string, any>[] = [];
+	const httpAuth: Array<string | undefined> = [];
+	const server = await startWebSocketServer([
+		() => successEvents("resp_ws_1", "first response"),
+		() => [{ $close: 1009 }],
+		() => successEvents("resp_ws_3", "third response"),
+	], (request, response) => {
+		httpAuth.push(request.headers.authorization);
+		void (async () => {
+			httpRequests.push(await readJsonRequest(request, response));
+			for (const event of successEvents("resp_sse_2", "fallback response")) {
+				response.write(`data: ${JSON.stringify(event)}\n\n`);
+			}
+			response.end();
+		})();
+	});
+	try {
+		const provider = createProviderHarness().openai;
+		const first = { role: "user", content: "first prompt", timestamp: 1 };
+		const second = { role: "user", content: "second prompt", timestamp: 2 };
+		const firstResult = await runOpenAIProvider(provider, server.url, [first]);
+		const result = await runOpenAIProvider(provider, server.url, [first, firstResult, second], { maxRetries: 1 });
+		assert.equal(result.content[0]?.text, "fallback response");
+		assert.ok(result.diagnostics?.some((diagnostic: { details?: { phase?: string } }) =>
+			diagnostic.details?.phase === "websocket_message_too_large"));
+		assert.equal(server.connections, 1, "do not open another WebSocket for the oversized request");
+		assert.equal(server.requests.length, 2);
+		assert.equal(server.requests[1]?.previous_response_id, "resp_ws_1");
+		assert.equal(server.requests[1]?.input.length, 1);
+		assert.equal(httpRequests.length, 1);
+		assert.equal(httpRequests[0]?.previous_response_id, undefined);
+		assert.deepEqual(httpRequests[0]?.input.map((item: { role: string }) => item.role), ["user", "assistant", "user"]);
+		assert.equal(httpRequests[0]?.input[0]?.content[0]?.text, first.content);
+		assert.equal(httpRequests[0]?.input[2]?.content[0]?.text, second.content);
+		assert.deepEqual(httpAuth, ["Bearer pi-resolved-api-key"]);
+		assert.equal(server.handshakes[0]?.headers.authorization, httpAuth[0]);
+
+		const next = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "third prompt" }]);
+		assert.equal(next.content[0]?.text, "third response");
+		assert.equal(server.connections, 2);
+		assert.equal(server.requests[2]?.previous_response_id, undefined);
+		assert.equal(httpRequests.length, 1);
+	} finally {
+		await server.close();
+	}
+});
+
+for (const { name, transport, denySse, text } of [
+	{ name: "forced websocket", transport: "websocket" },
+	{ name: "forced websocket-cached", transport: "websocket-cached" },
+	{ name: "auto with SSE denied", denySse: true },
+	{ name: "auto after metadata", text: { type: "codex.response.metadata", headers: { "openai-model": "gpt-5.5" } } },
+	{ name: "auto after malformed text", text: { $rawText: "not json" } },
+	{ name: "auto after response.created", text: { type: "response.created", response: { id: "resp_partial" } } },
+]) test(`openai ${name} does not retry or fall back on 1009`, async () => {
+	let posts = 0;
+	const server = await startWebSocketServer([
+		() => [...(text ? [text] : []), { $close: 1009 }],
+		() => successEvents("resp_unexpected", "unexpected retry"),
+	], (_request, response) => {
+		posts++;
+		response.writeHead(400).end();
+	});
+	try {
+		writeSettings({
+			openaiTransport: "auto",
+			...(denySse ? { endpoint_config: [{ provider: "openai", baseUrl: server.url, transport: ["websocket"] }] } : {}),
+		});
+		const provider = createProviderHarness().openai;
+		const result = await runOpenAIProvider(provider, server.url, [{ role: "user", content: "hello" }], {
+			transport, maxRetries: 1, maxRetryDelayMs: 5_500,
+		});
+		assert.equal(result.stopReason, "error");
+		assert.match(result.errorMessage, text
+			? /after response text arrived \(close code 1009\)/
+			: /request exceeds the peer's message size limit \(close code 1009\)/);
+		assert.equal(isRetryableAssistantError(result), false);
+		assert.equal(server.connections, 1);
+		assert.equal(server.requests.length, 1);
+		assert.equal(posts, 0);
+	} finally {
+		await server.close();
+	}
+});
+
+test("openai auto keeps ordinary early WebSocket closes retryable without falling back", async () => {
+	writeSettings({ openaiTransport: "auto" });
+	let posts = 0;
+	const server = await startWebSocketServer([
+		() => [{ $close: 1001 }],
+	], (_request, response) => {
+		posts++;
+		response.writeHead(400).end();
+	});
+	try {
+		const result = await runOpenAIProvider(createProviderHarness().openai, server.url, [
+			{ role: "user", content: "hello" },
+		], { maxRetries: 0 });
+		assert.equal(result.stopReason, "error");
+		assert.match(result.errorMessage, /WebSocket closed 1001/);
+		assert.equal(isRetryableAssistantError(result), true);
+		assert.equal(server.requests.length, 1);
+		assert.equal(posts, 0);
+	} finally {
+		await server.close();
+	}
+});
+
 test("openai websocket-cached uses exact server output items and ignores internal metadata", async () => {
 	writeSettings({ openaiTransport: "websocket-cached" });
 	const serverItem = {
@@ -1618,13 +1800,17 @@ test("openai websocket serializes concurrent requests on one session connection"
 	}
 });
 
-test("startup WebSocket prewarm is one-shot and real turns append input deltas", async () => {
-	writeSettings({ openaiTransport: "websocket", openaiWebSocketPrewarm: true });
+for (const oversized of [false, true]) test(`startup WebSocket prewarm remains one-shot (1009=${oversized})`, async () => {
+	writeSettings({ openaiTransport: oversized ? "auto" : "websocket", openaiWebSocketPrewarm: true });
+	let httpRequests = 0;
 	const server = await startWebSocketServer([
-		() => successEvents("warm_1"),
+		() => oversized ? [{ $close: 1009 }] : successEvents("warm_1"),
 		() => successEvents("resp_1", "first response"),
 		() => successEvents("resp_2", "second response"),
-	]);
+	], (_request, response) => {
+		httpRequests++;
+		response.writeHead(400).end();
+	});
 	try {
 		const harness = createProviderHarnessWithEvents();
 		const model = {
@@ -1662,16 +1848,17 @@ test("startup WebSocket prewarm is one-shot and real turns append input deltas",
 
 		assert.equal(first.content[0]?.text, "first response");
 		assert.equal(second.content[0]?.text, "second response");
-		assert.equal(server.connections, 1);
+		assert.equal(server.connections, oversized ? 2 : 1);
 		assert.equal(server.requests.length, 3);
 		assert.equal(server.requests[0]?.generate, false);
 		assert.deepEqual(server.requests[0]?.input, []);
-		assert.equal(server.requests[1]?.previous_response_id, "warm_1");
+		assert.equal(server.requests[1]?.previous_response_id, oversized ? undefined : "warm_1");
 		assert.equal(server.requests[1]?.input[0]?.content[0]?.text, "hello");
 		assert.equal(server.requests[2]?.previous_response_id, "resp_1");
 		assert.equal(server.requests[2]?.input.length, 1);
 		assert.equal(server.requests[2]?.input[0]?.content[0]?.text, "again");
 		assert.equal(server.requests.filter((request) => request.generate === false).length, 1);
+		assert.equal(httpRequests, 0);
 	} finally {
 		await server.close();
 	}

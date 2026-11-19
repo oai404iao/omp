@@ -95,3 +95,9 @@ codex-api/src/{common,images}.rs
 Namespace 改编保留 Apache attribution 与既有不可变 provenance，新 image 声明有单独固定证据。
 不能把历史 source map 改写成声称它分析了这个较新 commit。
 完整索引见 [runtime reference](../pi-extensions/pi-codex-runtime/reference/README.md)。
+
+当前 core 的传输和压缩修复另参考了三处上游源码：
+[首帧前的 WS 消息过大错误](https://github.com/openai/codex/commit/bc3ccba6e1cbf466c29240edb8d1d0fa81638ad7)、
+[流式错误的退避提示](https://github.com/openai/codex/commit/513577302a9aacd217b128a701702a54b7e752b6)及
+[压缩保留媒体预算](https://github.com/openai/codex/blob/b9559ff737000a4fcf7a0e12c3353cca1ea4d008/codex-rs/core/src/compact_remote_v2_media.rs)。
+OMP 按现有端点授权决定是否回退；媒体预算估算的是本地保留数据大小，不是服务端计费 token。

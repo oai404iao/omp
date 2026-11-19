@@ -1,6 +1,7 @@
 import { type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { BASE_DELAY_MS, MAX_RETRIES, DEFAULT_WEBSOCKET_STREAM_MAX_RETRIES, MAX_WEBSOCKET_STREAM_MAX_RETRIES, PREVIOUS_RESPONSE_NOT_FOUND_CODE, WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE, WEBSOCKET_RETRY_BASE_DELAY_MS, WEBSOCKET_RETRY_MAX_DELAY_MS } from "./constants.js";
 import { NonRetryableProviderError, ProviderProtocolError, ProviderResponseError, WebSocketHandshakeError, isRetryableError, isTerminalQuotaError } from "./errors.js";
+import { WebSocketMessageTooLargeError } from "./websocket-events.js";
 
 export function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -23,21 +24,28 @@ export function sleep(ms: number, signal: AbortSignal | undefined): Promise<void
 }
 
 export function isRetryableEarlyWebSocketError(error: unknown): boolean {
+	if (error instanceof NonRetryableProviderError) return false;
 	const message = error instanceof Error ? error.message : String(error);
 	return /^WebSocket (error|closed)(?:\s|$)/.test(message);
 }
 
 export function retryAfterMsFromHeaders(headers: Record<string, string> | undefined): number | undefined {
 	if (!headers) return undefined;
-	const retryAfterMs = Object.entries(headers).find(([name]) => name.toLowerCase() === "retry-after-ms")?.[1];
-	if (retryAfterMs) {
+	const entries = Object.entries(headers);
+	const decimal = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+	const retryAfterMs = entries.find(([name]) => name.toLowerCase() === "retry-after-ms")?.[1].trim();
+	if (retryAfterMs && decimal.test(retryAfterMs)) {
 		const parsed = Number(retryAfterMs);
-		if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+		if (Number.isFinite(parsed)) return parsed;
 	}
-	const retryAfter = Object.entries(headers).find(([name]) => name.toLowerCase() === "retry-after")?.[1];
+	const retryAfter = entries.find(([name]) => name.toLowerCase() === "retry-after")?.[1].trim();
 	if (!retryAfter) return undefined;
-	const seconds = Number(retryAfter);
-	if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+	if (decimal.test(retryAfter)) {
+		const delay = Number(retryAfter) * 1000;
+		return Number.isFinite(delay) ? delay : undefined;
+	}
+	// Date.parse also accepts values like "-1" that aren't HTTP dates.
+	if (!/ \d{2}:\d{2}:\d{2} /.test(retryAfter)) return undefined;
 	const date = Date.parse(retryAfter);
 	return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
 }
@@ -86,6 +94,9 @@ function boundedRetryDelayMs(
 			`${transport} retry delay ${Math.round(delayMs)}ms exceeds maxRetryDelayMs ${Math.round(maxDelay)}ms`,
 		);
 	}
+	if (delayMs > 2_147_483_647) {
+		throw new NonRetryableProviderError(`${transport} retry delay exceeds Node.js timer range`);
+	}
 	return delayMs;
 }
 
@@ -97,9 +108,9 @@ export function sseMaxRetries(options: SimpleStreamOptions | undefined): number 
 export function sseRetryDelayMs(
 	attempt: number,
 	options: SimpleStreamOptions | undefined,
-	headers?: Record<string, string>,
+	retryAfter?: number | Record<string, string>,
 ): number {
-	const delay = retryAfterMsFromHeaders(headers) ?? BASE_DELAY_MS * 2 ** attempt;
+	const delay = (typeof retryAfter === "number" ? retryAfter : retryAfterMsFromHeaders(retryAfter)) ?? BASE_DELAY_MS * 2 ** attempt;
 	return boundedRetryDelayMs(delay, options, "SSE");
 }
 
@@ -150,11 +161,13 @@ export function isProviderNonTransportError(error: unknown): error is ProviderRe
 }
 
 export function isWebSocketUpgradeRejectedError(error: unknown): error is WebSocketHandshakeError {
-	// `auto` is capability negotiation, not a generic recovery path. HTTP 426
-	// explicitly tells the client that the WebSocket upgrade cannot be used.
-	// Model/request failures and transient connection errors must stay on the
-	// WebSocket path so an agent-level retry does not silently change transport.
 	return error instanceof WebSocketHandshakeError && error.status === 426;
+}
+
+export function webSocketSseFallbackPhase(error: unknown): "websocket_upgrade_rejected" | "websocket_message_too_large" | undefined {
+	if (isWebSocketUpgradeRejectedError(error)) return "websocket_upgrade_rejected";
+	if (error instanceof WebSocketMessageTooLargeError && error.beforeResponseText) return "websocket_message_too_large";
+	return undefined;
 }
 
 export function isWebSocketConnectionLimitReachedError(error: unknown): boolean {

@@ -1,12 +1,12 @@
 import { type Api, type Model } from "@earendil-works/pi-ai";
 import { webSocketCacheKey } from "../../providers/openai-codex/cache-key.js";
-import { WEBSOCKET_CONNECT_TIMEOUT_MS, WEBSOCKET_SEND_TIMEOUT_MS } from "../../providers/openai-codex/constants.js";
+import { WEBSOCKET_CONNECT_TIMEOUT_MS } from "../../providers/openai-codex/constants.js";
 import { buildCachedWebSocketRequestBody, prepareWebSocketRequestBodyForWire } from "../../providers/openai-codex/continuation.js";
 import { mapCodexEvents } from "../../providers/openai-codex/events.js";
 import { withWebSocketRequestMetadata } from "../../providers/openai-codex/request-metadata.js";
 import { isPreviousResponseNotFoundError, isRetryableEarlyWebSocketError } from "../../providers/openai-codex/retry.js";
 import { type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
-import { countWebSocketEvents, parseWebSocket, sendWebSocketRequest } from "../../providers/openai-codex/websocket-events.js";
+import { countWebSocketEvents, streamWebSocketRequest } from "../../providers/openai-codex/websocket-events.js";
 import { acquireWebSocket } from "../../providers/openai-codex/websocket-session.js";
 import { collectCodexCompactionStream } from "./collect.js";
 
@@ -58,15 +58,14 @@ export async function requestCodexCompactionTriggerWebSocket(
 		};
 
 		try {
-			await sendWebSocketRequest(
+			const events = streamWebSocketRequest(
 				socket,
 				JSON.stringify({ type: "response.create", ...wireRequestBody }),
 				signal,
-				WEBSOCKET_SEND_TIMEOUT_MS,
 			);
 			const result = await collectCodexCompactionStream(
 				mapCodexEvents(
-					countWebSocketEvents(parseWebSocket(socket, signal), () => {
+					countWebSocketEvents(events, () => {
 						eventCount++;
 					}),
 					requestMetadata.codexRequestExtensions === false ? undefined : requestMetadata.sessionId,

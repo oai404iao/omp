@@ -218,6 +218,7 @@ test("retry helpers parse dates, validate options and release settled sleep list
 	assert.equal(sseMaxRetries({ maxRetries: 1.9 }), 1);
 	assert.equal(sseRetryDelayMs(0, { maxRetryDelayMs: 0 }, { "retry-after": "120" }), 120000);
 	assert.throws(() => sseRetryDelayMs(0, undefined, { "retry-after": "120" }), /exceeds maxRetryDelayMs/);
+	assert.throws(() => sseRetryDelayMs(0, { maxRetryDelayMs: 0 }, { "retry-after": "2147484" }), /exceeds Node.js timer range/);
 	const abort = new AbortController();
 	await sleep(1, abort.signal);
 	assert.equal(getEventListeners(abort.signal, "abort").length, 0);
@@ -306,5 +307,31 @@ test("streaming compaction never retries terminal quota or malformed SSE events"
 		), /Quota exhausted|Invalid Codex SSE JSON/);
 		assert.equal(calls, 1);
 		assert.deepEqual(delays, []);
+	}
+});
+
+test("SSE compaction respects stream Retry-After during its existing retry", async (t) => {
+	const delays = stubRetrySleep(t);
+	const frame = `data: ${JSON.stringify({
+		type: "response.failed",
+		response: { error: { code: "server_is_overloaded", headers: { "Retry-After-Ms": "25" } } },
+	})}\n\n`;
+	const item = { type: "compaction", encrypted_content: "fixture" };
+	for (const maxRetryDelayMs of [10, 50]) {
+		delays.length = 0;
+		let calls = 0;
+		globalThis.fetch = async () => new Response(++calls === 1 ? frame : completion({ output: [item] }));
+		const result = requestCodexCompactionTrigger(
+			"https://example.invalid/responses", new Headers(), { input: [] } as any, undefined, { maxRetryDelayMs },
+		);
+		if (maxRetryDelayMs === 10) {
+			await assert.rejects(result, /exceeds maxRetryDelayMs/);
+			assert.equal(calls, 1);
+			assert.deepEqual(delays, []);
+		} else {
+			assert.deepEqual(await result, item);
+			assert.equal(calls, 2);
+			assert.deepEqual(delays, [25]);
+		}
 	}
 });

@@ -3,12 +3,12 @@ import { type CitationSource, type WebSearchCitationSource } from "@oai404iao/pi
 import { webSocketCacheKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";
 import type { ProviderStreamEffects } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/stream-effects";
-import { WEBSOCKET_CONNECT_TIMEOUT_MS, WEBSOCKET_IDLE_TIMEOUT_MS, WEBSOCKET_SEND_TIMEOUT_MS } from "./constants.js";
+import { WEBSOCKET_CONNECT_TIMEOUT_MS, WEBSOCKET_IDLE_TIMEOUT_MS } from "./constants.js";
 import { buildCachedWebSocketRequestBody, prepareWebSocketRequestBodyForWire } from "./continuation.js";
 import { withWebSocketRequestMetadata } from "./request-metadata.js";
 import { isPreviousResponseNotFoundError, isRetryableEarlyWebSocketError } from "./retry.js";
 import { type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
-import { countWebSocketEvents, parseWebSocket, sendWebSocketRequest, startWebSocketOutputOnFirstEvent } from "./websocket-events.js";
+import { countWebSocketEvents, startWebSocketOutputOnFirstEvent, streamWebSocketRequest } from "./websocket-events.js";
 import { acquireWebSocket } from "./websocket-session.js";
 import { assertSuccessfulOutput } from "./message.js";
 import { ProviderStreamEventCallbackError } from "./errors.js";
@@ -84,11 +84,11 @@ export async function processWebSocketStream<TApi extends Api>(
 		};
 
 		try {
-			await sendWebSocketRequest(
+			const events = streamWebSocketRequest(
 				socket,
 				JSON.stringify({ type: "response.create", ...wireRequestBody }),
 				options?.signal,
-				WEBSOCKET_SEND_TIMEOUT_MS,
+				idleTimeoutMs,
 			);
 			const startOutput = () => {
 				if (streamStarted) return;
@@ -98,7 +98,7 @@ export async function processWebSocketStream<TApi extends Api>(
 			};
 			const continuationResult = await processCapturedResponsesStream(
 				startWebSocketOutputOnFirstEvent(
-					countWebSocketEvents(parseWebSocket(socket, options?.signal, idleTimeoutMs), () => {
+					countWebSocketEvents(events, () => {
 						eventCount++;
 					}),
 					startOutput,

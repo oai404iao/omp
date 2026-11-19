@@ -264,4 +264,5 @@ The current `openai/gpt-6.1-sol` default is an explicit compatibility-policy
 exception: it inherits `openai/gpt-5.6-sol`, including Lite, standalone tools,
 native compaction, prewarm and Fast's priority/2x configuration. The pinned Pi
 metadata remains descriptor evidence only, not verification of these endpoints,
-account entitlement or Fast pricing. Other modern GPT-6 defaults stay Standard.
+account entitlement or Fast pricing. For GPT-6.2, see the [bundled compatibility
+profiles](../README.md#内置兼容性默认值); those profiles do not add Pi model descriptors.
