@@ -20,7 +20,6 @@
 | 单项兼容入口 | [web-search](../pi-extensions/pi-codex-web-search/README.md)、[imagegen](../pi-extensions/pi-codex-imagegen/README.md) |
 | 共享运行时库 | [runtime](../pi-extensions/pi-codex-runtime/README.md) |
 | 多代理协作 | [subagent](../pi-extensions/pi-subagent/README.md) |
-| Telegram 通知 | [telegram-notify](../pi-extensions/pi-telegram-notify/README.md) |
 | 本地／Telegram 通知 | [pi-notify](../pi-extensions/pi-notify/README.md) |
 
 ## 理解行为与兼容性

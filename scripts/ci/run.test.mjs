@@ -22,7 +22,7 @@ test("policy precedes the bounded pool; every task is timed and ordered determin
   } });
   assert.equal(peak, 2);
   assert.equal(result.status, "passed");
-  assert.equal(result.tasks.length, 13);
+  assert.equal(result.tasks.length, 12);
   assert.equal(result.tasks[0].id, "policy");
   for (const entry of result.tasks) {
     assert.equal(entry.status, "passed");
@@ -52,7 +52,7 @@ test("single-task mode skips policy but rejects any task outside the selected pl
   assert.deepEqual(calls, ["package:pi-notify"]);
   assert.equal(result.tasks.length, 1);
   await assert.rejects(executePlan(full(), { task: "unknown" }), /not present/);
-  const release = createPlan({ mode: "release", packageName: "@oai404iao/pi-telegram-notify", git: () => "a".repeat(40) });
+  const release = createPlan({ mode: "release", packageName: "@oai404iao/pi-notify", git: () => "a".repeat(40) });
   await assert.rejects(executePlan(release, { task: "composition" }), /not present/);
 });
 
@@ -81,7 +81,7 @@ test("explicit policy prerequisite mode runs the remaining bounded tasks only", 
   } });
   assert.equal(result.status, "passed");
   assert.equal(result.policySkipped, true);
-  assert.equal(result.tasks.length, 12);
+  assert.equal(result.tasks.length, 11);
   assert.ok(!calls.includes("policy"));
   assert.equal(parseRunArgs(["--skip-policy"]).skipPolicy, true);
   await assert.rejects(executePlan(full(), { skipPolicy: true, task: "policy" }), /skip-policy/);

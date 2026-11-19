@@ -14,7 +14,7 @@ test("target archive and historical registry dependency really install, load and
   const parent = join(homedir(), ".local/state/agents/tmp"); mkdirSync(parent, { recursive: true });
   const directory = mkdtempSync(join(parent, "release-historical-candidate-test-"));
   const commit = "a".repeat(40), historicalCommit = "b".repeat(40);
-  const dependencyName = "@oai404iao/pi-codex-runtime", targetName = "@oai404iao/pi-telegram-notify";
+  const dependencyName = "@oai404iao/pi-codex-runtime", targetName = "@oai404iao/pi-codex-tools";
   const dependency = { name: dependencyName, version: "1.0.0", type: "module",
     exports: { ".": "./index.ts", "./subagent-inline": "./inline.ts" },
     peerDependencies: { "@earendil-works/pi-coding-agent": ">=1.2.0" } };
@@ -44,7 +44,11 @@ export function createCodexSubagentInlineExtension() {}`,
   const targetArchive = archive(target, commit, { "index.ts": `
 import { historicalPayload } from "@oai404iao/pi-codex-runtime";
 if (historicalPayload !== "immutable registry payload") throw new Error("wrong dependency payload");
-export default pi => pi.registerCommand("telegram-notify", { description: "fixture", handler: async () => {} });`,
+export default pi => {
+  for (const name of ["apply_patch", "web_search", "image_generation"]) {
+    pi.registerTool({ name, parameters: { type: "object", properties: {} } });
+  }
+};`,
   }, "target");
   // The checkout keeps the exact dependency contract but has unreleased throwing code.
   for (const entry of entries) {

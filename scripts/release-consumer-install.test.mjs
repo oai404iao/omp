@@ -23,13 +23,17 @@ test("containment rejects external links including executable links", () => {
 
 test("offline immutable fixture really installs and executes its isolated Pi SDK loader", () => {
   const directory = scratch();
-  const name = "@oai404iao/pi-telegram-notify";
+  const name = "@oai404iao/pi-notify";
   const sourceCommit = "a".repeat(40);
   const manifest = { name, version: "1.0.0", type: "module", gitHead: sourceCommit,
     peerDependencies: { "@earendil-works/pi-coding-agent": ">=1.2.0" }, pi: { extensions: ["./index.ts"] } };
   mkdirSync(join(directory, "package"));
   writeFileSync(join(directory, "package/package.json"), JSON.stringify(manifest));
-  writeFileSync(join(directory, "package/index.ts"), `export default pi => { pi.registerCommand("telegram-notify", {description: "offline fixture", handler: async () => {}}); };`);
+  writeFileSync(join(directory, "package/index.ts"), `export default pi => {
+  for (const name of ["notify", "notify-test"]) {
+    pi.registerCommand(name, { description: "offline fixture", handler: async () => {} });
+  }
+};`);
   const path = join(directory, "fixture.tgz");
   assert.equal(spawnSync("tar", ["-czf", path, "package/"], { cwd: directory }).status, 0);
   const artifacts = new Map([[name, { path, integrity: digest(readFileSync(path)) }]]);

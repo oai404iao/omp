@@ -22,11 +22,6 @@ export const workspaces = [
     releaseStatus: "publishable",
   },
   {
-    name: "@oai404iao/pi-telegram-notify",
-    directory: "pi-extensions/pi-telegram-notify",
-    releaseStatus: "publishable",
-  },
-  {
     name: "@oai404iao/pi-notify",
     directory: "pi-extensions/pi-notify",
     releaseStatus: "publishable",

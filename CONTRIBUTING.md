@@ -47,7 +47,7 @@ pnpm install --frozen-lockfile --ignore-scripts
 不复制实现所属包的行为测试。`pack:check` 检查 npm tarball 的精确文件清单，
 确保扩展入口和运行时资源都被包含；更改打包路径或入口时必须运行。
 
-`ci` 先执行仓库策略，再以有界任务池运行 **9 个包检查和 3 个共享套件**，
+`ci` 先执行仓库策略，再以有界任务池运行 **各工作区包检查和 3 个共享套件**，
 覆盖完整参考计划。外层并发默认 2，可用 `pnpm run ci --concurrency 2` 调整为 1–8。
 包内测试也可能并发，提高外层并发前先检查内存占用。普通 CI 不执行真实模型测试；
 未经明确授权，不要运行 live model 测试。fixture 通过不能证明真实端点或账号权限可用。
@@ -116,7 +116,7 @@ pnpm run changeset:sync
 ```bash
 pnpm run ci:plan --base origin/main --head HEAD --shadow
 pnpm run ci:affected --base origin/main --head HEAD
-pnpm run ci:release --package @oai404iao/pi-telegram-notify
+pnpm run ci:release --package @oai404iao/pi-notify
 ```
 
 revision 计划比较不可变 Git 提交，**不包含已暂存或未暂存的本地改动**。
@@ -141,7 +141,7 @@ revision 计划比较不可变 Git 提交，**不包含已暂存或未暂存的�
 新增包目录必须注册，即使它只是非发布测试目标。
 infrastructure 分别运行一次 `test:release-scripts` 和 `test:ci`，两者不重复收集测试文件。
 
-`ci:release` 不带 `--package` 时选择 9 个 `publishable` 工作区，包含 `pi-notify`。
+`ci:release` 不带 `--package` 时选择所有 `publishable` 工作区。
 它只验证源码，不打包、不发布、不改版本；定向依赖闭包和复用规则见
 [发布验证](RELEASING.md#scoped-verification-and-trusted-source-reuse)。
 

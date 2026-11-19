@@ -189,7 +189,6 @@ const projectLicense = read("LICENSE");
 for (const name of [
   "pi-codex-minimal-tools",
   "pi-subagent",
-  "pi-telegram-notify",
   "pi-notify",
 ]) {
   check(

@@ -145,12 +145,12 @@ RELEASE_PACKAGE=@oai404iao/pi-subagent pnpm run release:artifacts
 ### 选择源码检查范围
 
 ```bash
-pnpm run ci:release --package @oai404iao/pi-telegram-notify
+pnpm run ci:release --package @oai404iao/pi-notify
 pnpm run ci:release
 ```
 
-单包命令检查目标及其规范 runtime／optional 工作区闭包；不带参数则检查全部 9 个
-`publishable` 工作区，包含 `pi-notify`。它不打包、不发布、不改版本、不绕过依赖前置条件。
+单包命令检查目标及其规范 runtime／optional 工作区闭包；不带参数则检查所有
+`publishable` 工作区。它不打包、不发布、不改版本、不绕过依赖前置条件。
 仓库 policy 和发布基础设施回归始终保留；任何 Codex／subagent 选择仍运行完整源码
 composition 和 consumer 套件。独立 Telegram 发布无需重跑无关 Codex 行为。
 
@@ -216,7 +216,7 @@ pnpm run release:verify-installations release-artifacts/manifest.json
 发布器显式禁用继承的 npm dry-run 配置，每次上传后立即持久化 `result.json` receipt。
 `accepted` 表示 npm 接受了上传，`verified` 才表示读回 identity／integrity／dist-tag 全部一致。
 `pending-visibility` 保留未验证状态，workflow 正常结束但跳过全部 Git tags／GitHub Releases；
-实际发布或身份冲突仍失败。受保护 job 最多运行 330 分钟，以覆盖 9 个候选的等待。
+实际发布或身份冲突仍失败。受保护 job 最多运行 330 分钟，以覆盖全批候选的等待。
 成功 publish 后只重试读取，不盲目重复不可逆命令。传播等待由以下变量控制：
 
 | 变量 | workflow 默认值 |
@@ -265,9 +265,9 @@ npm ownership、provenance、源码权利、tag 身份或仓库元数据不确�
 | `bootstrap` | 非 private | 仅本地一次性 `release:bootstrap-artifacts` |
 | `publishable` | 非 private | 正常受保护 workflow |
 
-当前登记 9 个 publishable 工作区：6 个 Codex 包，以及 subagent、telegram-notify、pi-notify。
+当前登记 8 个 publishable 工作区：6 个 Codex 包，以及 subagent、pi-notify。
 Notify 首发身份和激活前置条件见[核验记录](docs/audits/pi-notify-bootstrap-activation.md)。
-已移除的 external-thinking、keep-defaults、tree-continue 和未发布 Code Mode 实验不能进入新批次；
+已移除的 external-thinking、keep-defaults、tree-continue、telegram-notify 和未发布 Code Mode 实验不能进入新批次；
 历史 release locks 仍保留。此清单描述仓库资格，不是实时 registry inventory。
 
 包的 trusted publisher、environment 保护和 `NPM_PUBLISH_ENABLED` 是每次发布的前置条件，

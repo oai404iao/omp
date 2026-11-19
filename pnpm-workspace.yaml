@@ -6,7 +6,6 @@ packages:
   - pi-extensions/pi-codex-web-search
   - pi-extensions/pi-codex-imagegen
   - pi-extensions/pi-subagent
-  - pi-extensions/pi-telegram-notify
   - pi-extensions/pi-notify
 
 # Keep exact published pins while resolving matching development packages locally.
