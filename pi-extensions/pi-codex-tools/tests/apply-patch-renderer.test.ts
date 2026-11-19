@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -17,17 +17,12 @@ test("deferred apply_patch uses Pi’s fallback call, result and shell", () => {
 	assert.equal("renderResult" in tool, false);
 });
 
-test("apply_patch renderer updates from a throttled filesystem preview", async () => {
+test("apply_patch renderer updates from a throttled filesystem preview", async (t) => {
 	const cwd = mkdtempSync(join(tmpdir(), "pi-apply-patch-render-"));
-	writeFileSync(join(cwd, "existing.txt"), "before\n");
-	const tool = createApplyPatchToolDefinition() as Record<string, any>;
-	const theme = {
-		fg(_color: string, text: string) { return text; },
-		bold(text: string) { return text; },
-	};
+	let timeout: ReturnType<typeof setTimeout> | undefined;
 	let resolvePreview: (() => void) | undefined;
 	const previewReady = new Promise<void>((resolve, reject) => {
-		const timeout = setTimeout(() => reject(new Error("preview timed out")), 2000);
+		timeout = setTimeout(() => reject(new Error("preview timed out")), 2000);
 		resolvePreview = () => {
 			clearTimeout(timeout);
 			resolve();
@@ -42,6 +37,17 @@ test("apply_patch renderer updates from a throttled filesystem preview", async (
 		isError: false,
 		outputPad: 1,
 		invalidate() { resolvePreview?.(); },
+	};
+	t.after(() => {
+		clearTimeout(timeout);
+		clearTimeout(context.state.callComponent?.previewTimer);
+		rmSync(cwd, { recursive: true, force: true });
+	});
+	writeFileSync(join(cwd, "existing.txt"), "before\n");
+	const tool = createApplyPatchToolDefinition() as Record<string, any>;
+	const theme = {
+		fg(_color: string, text: string) { return text; },
+		bold(text: string) { return text; },
 	};
 	const args = { input: `*** Begin Patch
 *** Update File: existing.txt

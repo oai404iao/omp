@@ -80,7 +80,8 @@ assert.equal(runtime.CODEX_BROKER_CHANNEL, "@oai404iao/pi-codex:broker");
 assert.equal(runtime.CODEX_RUNTIME_VERSION, ${JSON.stringify(manifests.get("@oai404iao/pi-codex-runtime").version)});
 assert.equal(typeof inline.createCodexSubagentInlineExtension, "function");
 assert.equal(typeof inline.CODEX_IDENTITY_CUSTOM_TYPE, "string");`);
-      runner(join(root, "node_modules/.bin/tsx"), [smoke], cwd, env);
+      // Register the loader without tsx CLI's IPC socket in the consumer scratch path.
+      runner(process.execPath, ["--import", import.meta.resolve("tsx"), smoke], cwd, env);
     }
     assertContainedTree(join(cwd, "node_modules"), cwd);
   }

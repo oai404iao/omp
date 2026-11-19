@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,8 +36,17 @@ function harness(t: TestContext) {
 	const originalWrite = process.stdout.write;
 	const originalTTY = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
 	const originalEnv = process.env;
+	const originalFetch = globalThis.fetch;
 	mkdirSync(scratch, { recursive: true });
 	const agentDir = mkdtempSync(join(scratch, "pi-notify-extension-"));
+	t.after(() => {
+		process.stdout.write = originalWrite;
+		if (originalTTY) Object.defineProperty(process.stdout, "isTTY", originalTTY);
+		else Reflect.deleteProperty(process.stdout, "isTTY");
+		process.env = originalEnv;
+		globalThis.fetch = originalFetch;
+		rmSync(agentDir, { recursive: true, force: true });
+	});
 	process.env = { ...originalEnv, KITTY_WINDOW_ID: "1", PI_CODING_AGENT_DIR: agentDir };
 	const localConfigDir = join(agentDir, "extensions", "pi-notify");
 	const telegramConfigDir = join(agentDir, "extensions", "pi-telegram-notify");
@@ -45,7 +54,6 @@ function harness(t: TestContext) {
 	mkdirSync(telegramConfigDir, { recursive: true });
 	const legacyPath = join(telegramConfigDir, "config.json");
 	writeFileSync(legacyPath, JSON.stringify({ botToken: "FAKE_LEGACY_TOKEN", chatId: "FAKE_LEGACY_CHAT" }));
-	const originalFetch = globalThis.fetch;
 	const requests: string[] = [];
 	const urls: string[] = [];
 	globalThis.fetch = (async (url, init) => {
@@ -63,14 +71,6 @@ function harness(t: TestContext) {
 		}
 		return originalWrite.call(process.stdout, data);
 	}) as typeof process.stdout.write;
-	t.after(() => {
-		process.stdout.write = originalWrite;
-		if (originalTTY) Object.defineProperty(process.stdout, "isTTY", originalTTY);
-		else Reflect.deleteProperty(process.stdout, "isTTY");
-		process.env = originalEnv;
-		globalThis.fetch = originalFetch;
-	});
-
 	let branch: unknown[] = [];
 	let entries: unknown[] = [];
 	const ctx = {
@@ -421,14 +421,14 @@ test("real Pi directory loading reads only pi-notify settings after reload", asy
 		h.configure(channel);
 		await loader.reload();
 		const loaded = loader.getExtensions();
-		assert.deepEqual(loaded.errors, []);
-		assert.equal(loaded.extensions.length, 1);
-		const session = SessionManager.inMemory(h.agentDir);
-		const runner = new ExtensionRunner(loaded.extensions, loaded.runtime, h.agentDir, session, {} as ModelRegistry);
-		const errors: string[] = [];
-		runner.onError((error) => errors.push(error.error));
-		runner.setUIContext(runner.getUIContext(), "rpc");
 		try {
+			assert.deepEqual(loaded.errors, []);
+			assert.equal(loaded.extensions.length, 1);
+			const session = SessionManager.inMemory(h.agentDir);
+			const runner = new ExtensionRunner(loaded.extensions, loaded.runtime, h.agentDir, session, {} as ModelRegistry);
+			const errors: string[] = [];
+			runner.onError((error) => errors.push(error.error));
+			runner.setUIContext(runner.getUIContext(), "rpc");
 			const names = runner.getRegisteredCommands().map((command) => command.name);
 			assert.deepEqual(names.sort(), ["notify", "notify-test"]);
 			const before = h.requests.length;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
@@ -13,7 +13,7 @@ import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal
 
 const originalEnv = { dir: process.env.PI_CODING_AGENT_DIR, key: process.env.OPENAI_API_KEY };
 const originalFetch = globalThis.fetch;
-let cwd: string;
+let cwd: string | undefined;
 beforeEach(() => {
 	cwd = mkdtempSync(join(tmpdir(), "pi-native-openai-auth-"));
 	process.env.PI_CODING_AGENT_DIR = cwd;
@@ -29,6 +29,8 @@ afterEach(() => {
 		if (value === undefined) delete process.env[key!];
 		else process.env[key!] = value;
 	}
+	if (cwd !== undefined) rmSync(cwd, { recursive: true, force: true });
+	cwd = undefined;
 });
 
 const oauth = (expires = Date.now() + 3_600_000): Credential => ({
@@ -43,15 +45,17 @@ const completion = () => new Response(`data: ${JSON.stringify({
 async function runtimeWith(credential?: Credential, provider?: ReturnType<typeof openaiProvider>) {
 	const credentials = new InMemoryCredentialStore();
 	if (credential) await credentials.modify("openai", async () => credential);
+	const agentDir = cwd;
+	assert.ok(agentDir);
 	const runtime = await ModelRuntime.create({
-		credentials, modelsPath: null, modelsStorePath: join(cwd, "models-store.json"),
+		credentials, modelsPath: null, modelsStorePath: join(agentDir, "models-store.json"),
 		allowModelNetwork: false, refreshOnCreate: false,
 	});
 	registerResponsesProviderRuntime({
 		events: createEventBus(),
 		on() {},
 		registerProvider(name: string, config: any) { runtime.registerProvider(name, config); },
-	} as any, { getCurrentCwd: () => cwd });
+	} as any, { getCurrentCwd: () => agentDir });
 	if (provider) runtime.registerNativeProvider({ ...runtime.getProvider("openai")!, auth: provider.auth });
 	return { runtime, credentials };
 }

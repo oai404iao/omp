@@ -1,19 +1,21 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { applyPatch, previewApplyPatch } from "@oai404iao/pi-codex-tools/internal/patch/apply";
 import { parseApplyPatch, parseApplyPatchProgress } from "@oai404iao/pi-codex-tools/internal/patch/parser";
 import { executeApplyPatchTool } from "@oai404iao/pi-codex-tools/internal/tools/apply-patch";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 
-function tempDir(): string {
-	return mkdtempSync(join(tmpdir(), "pi-apply-patch-"));
+function tempDir(t: TestContext): string {
+	const dir = mkdtempSync(join(tmpdir(), "pi-apply-patch-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	return dir;
 }
 
-test("apply_patch rechecks abort after acquiring the shared mutation queue", async () => {
-	const cwd = tempDir();
+test("apply_patch rechecks abort after acquiring the shared mutation queue", async (t) => {
+	const cwd = tempDir(t);
 	const target = join(cwd, "queued.txt");
 	let release!: () => void;
 	const held = withFileMutationQueue(target, () => new Promise<void>((resolve) => { release = resolve; }));
@@ -29,8 +31,8 @@ test("apply_patch rechecks abort after acquiring the shared mutation queue", asy
 	assert.equal(existsSync(target), false);
 });
 
-test("apply_patch rejects distinct aliases rather than losing one of their edits", { timeout: 5000 }, async () => {
-	const cwd = tempDir();
+test("apply_patch rejects distinct aliases rather than losing one of their edits", { timeout: 5000 }, async (t) => {
+	const cwd = tempDir(t);
 	mkdirSync(join(cwd, "real"));
 	symlinkSync(join(cwd, "real"), join(cwd, "alias"), "dir");
 	writeFileSync(join(cwd, "real/file.txt"), "one\ntwo\n");
@@ -54,8 +56,8 @@ test("apply_patch rejects distinct aliases rather than losing one of their edits
 *** End Patch` }, cwd), /alias the same target/);
 });
 
-test("apply_patch rejects hardlink updates and move aliases before any effects", async () => {
-	const cwd = tempDir();
+test("apply_patch rejects hardlink updates and move aliases before any effects", async (t) => {
+	const cwd = tempDir(t);
 	writeFileSync(join(cwd, "a.txt"), "one\ntwo\n");
 	linkSync(join(cwd, "a.txt"), join(cwd, "b.txt"));
 	for (const actions of [
@@ -72,7 +74,7 @@ test("apply_patch rejects hardlink updates and move aliases before any effects",
 });
 
 test("apply_patch rejects inode replacement while waiting and releases the queue", { timeout: 5000 }, async (t) => {
-	const cwd = tempDir();
+	const cwd = tempDir(t);
 	const target = join(cwd, "file.txt");
 	writeFileSync(target, "before\n");
 	writeFileSync(join(cwd, "replacement.txt"), "before\n");
@@ -91,41 +93,55 @@ test("apply_patch rejects inode replacement while waiting and releases the queue
 	try {
 		await ready;
 		renameSync(join(cwd, "replacement.txt"), target);
-	} finally { release(); await held; }
+	} finally { release(); await held.finally(() => task.catch(() => {})); }
 	await rejected;
 	await withFileMutationQueue(target, async () => {});
 	assert.equal(readFileSync(target, "utf8"), "before\n");
 });
 
-test("apply_patch rejects missing aliases before waiting on native creation", { timeout: 5000 }, async () => {
-	const cwd = tempDir();
+test("apply_patch rejects missing aliases before waiting on native creation", { timeout: 5000 }, async (t) => {
+	const cwd = tempDir(t);
 	mkdirSync(join(cwd, "a"));
 	symlinkSync(join(cwd, "a"), join(cwd, "z"), "dir");
-	let release!: () => void;
 	let acquired!: () => void;
-	const ready = new Promise<void>((resolve) => { acquired = resolve; });
+	const ready = new Promise<void>(resolve => { acquired = resolve; });
+	let release!: () => void;
+	const released = new Promise<void>(resolve => { release = resolve; });
+	const controller = new AbortController();
 	const target = join(cwd, "a/file.txt");
 	const held = withFileMutationQueue(target, async () => {
 		acquired();
-		await new Promise<void>((resolve) => { release = resolve; });
+		await released;
 		writeFileSync(target, "native\n");
 	});
-	await ready;
+	// Leave time to drain the held queue before the runner's cleanup hook.
+	let watchdog!: ReturnType<typeof setTimeout>;
+	const deadline = new Promise<never>((_, reject) => {
+		watchdog = setTimeout(() => reject(new Error("patch did not reject before native creation")), 2_000);
+	});
+	let rejected: Promise<void> | undefined;
 	try {
-		await assert.rejects(executeApplyPatchTool({ input: `*** Begin Patch
+		await Promise.race([ready, deadline]);
+		rejected = assert.rejects(executeApplyPatchTool({ input: `*** Begin Patch
 *** Add File: a/file.txt
 +first
 *** Add File: z/file.txt
 +second
-*** End Patch` }, cwd), /alias the same target/);
+*** End Patch` }, cwd, controller.signal), /alias the same target/);
+		await Promise.race([rejected, deadline]);
 		assert.equal(existsSync(target), false);
-	} finally { release(); await held; }
+	} finally {
+		clearTimeout(watchdog);
+		controller.abort();
+		release();
+		await held.finally(() => rejected?.catch(() => {}));
+	}
 	await withFileMutationQueue(target, async () => {});
 	assert.equal(readFileSync(target, "utf8"), "native\n");
 });
 
-test("apply_patch permits repeated actions on the same lexical path", { timeout: 5000 }, async () => {
-	const cwd = tempDir();
+test("apply_patch permits repeated actions on the same lexical path", { timeout: 5000 }, async (t) => {
+	const cwd = tempDir(t);
 	await executeApplyPatchTool({ input: `*** Begin Patch
 *** Add File: a.txt
 +one
@@ -148,7 +164,7 @@ test("apply_patch permits repeated actions on the same lexical path", { timeout:
 });
 
 test("apply_patch rejects target identity drift after a native queue wait and releases its locks", { timeout: 5000 }, async (t) => {
-	const cwd = tempDir();
+	const cwd = tempDir(t);
 	mkdirSync(join(cwd, "z-real"));
 	symlinkSync(join(cwd, "z-real"), join(cwd, "z-alias"), "dir");
 	const first = join(cwd, "a.txt");
@@ -187,15 +203,15 @@ test("apply_patch rejects target identity drift after a native queue wait and re
 	try {
 		await snapshotsReady;
 		await withFileMutationQueue(created, async () => { writeFileSync(created, "native\n"); });
-	} finally { release(); await held; }
+	} finally { release(); await held.finally(() => task.catch(() => {})); }
 	await rejected;
 	await withFileMutationQueue(first, async () => {});
 	assert.equal(readFileSync(first, "utf8"), "before\n");
 	assert.equal(readFileSync(created, "utf8"), "native\n");
 });
 
-test("apply_patch refuses ambiguous dangling-link identities without effects", { timeout: 5000 }, async () => {
-	const cwd = tempDir();
+test("apply_patch refuses ambiguous dangling-link identities without effects", { timeout: 5000 }, async (t) => {
+	const cwd = tempDir(t);
 	symlinkSync(join(cwd, "missing"), join(cwd, "link"), "dir");
 	await assert.rejects(executeApplyPatchTool({
 		input: "*** Begin Patch\n*** Add File: link/file.txt\n+no\n*** End Patch",
@@ -203,8 +219,8 @@ test("apply_patch refuses ambiguous dangling-link identities without effects", {
 	assert.equal(existsSync(join(cwd, "missing/file.txt")), false);
 });
 
-test("overlapping patches order canonical locks consistently across reversed aliases", { timeout: 5000 }, async () => {
-	const cwd = tempDir();
+test("overlapping patches order canonical locks consistently across reversed aliases", { timeout: 5000 }, async (t) => {
+	const cwd = tempDir(t);
 	for (const name of ["a", "z"]) {
 		mkdirSync(join(cwd, name));
 		writeFileSync(join(cwd, name, "file.txt"), "original\n");
@@ -213,18 +229,19 @@ test("overlapping patches order canonical locks consistently across reversed ali
 	symlinkSync(join(cwd, "a"), join(cwd, "y"), "dir");
 	const patch = (paths: string[], marker: string) => `*** Begin Patch\n${paths.map((path) =>
 		`*** Update File: ${path}/file.txt\n@@\n+${marker}\n original`).join("\n")}\n*** End Patch`;
-	await Promise.all([
+	const results = await Promise.allSettled([
 		executeApplyPatchTool({ input: patch(["a", "z"], "first") }, cwd),
 		executeApplyPatchTool({ input: patch(["b", "y"], "second") }, cwd),
 	]);
+	for (const result of results) if (result.status === "rejected") throw result.reason;
 	const a = readFileSync(join(cwd, "a/file.txt"), "utf8");
 	assert.equal(readFileSync(join(cwd, "z/file.txt"), "utf8"), a);
 	assert.match(a, /first/);
 	assert.match(a, /second/);
 });
 
-test("apply_patch shares alias locks with native mutations and reads after acquisition", { timeout: 5000 }, async () => {
-	const cwd = tempDir();
+test("apply_patch shares alias locks with native mutations and reads after acquisition", { timeout: 5000 }, async (t) => {
+	const cwd = tempDir(t);
 	mkdirSync(join(cwd, "real"));
 	symlinkSync(join(cwd, "real"), join(cwd, "alias"), "dir");
 	const target = join(cwd, "real/file.txt");
@@ -240,7 +257,8 @@ test("apply_patch shares alias locks with native mutations and reads after acqui
 	await ready;
 	const task = executeApplyPatchTool({ input: "*** Begin Patch\n*** Update File: alias/file.txt\n@@\n-native\n+patched\n*** End Patch" }, cwd);
 	release();
-	await Promise.all([held, task]);
+	const results = await Promise.allSettled([held, task]);
+	for (const result of results) if (result.status === "rejected") throw result.reason;
 	assert.equal(readFileSync(target, "utf8"), "patched\n");
 });
 
@@ -317,8 +335,8 @@ plain
 *** End Patch`), /Expected update hunk/);
 });
 
-test("applyPatch adds, updates, deletes, and moves files", async () => {
-	const cwd = tempDir();
+test("applyPatch adds, updates, deletes, and moves files", async (t) => {
+	const cwd = tempDir(t);
 	writeFileSync(join(cwd, "update.txt"), "alpha\nold\nomega");
 	writeFileSync(join(cwd, "delete.txt"), "remove me");
 	const result = await applyPatch(`*** Begin Patch
@@ -348,8 +366,8 @@ test("applyPatch adds, updates, deletes, and moves files", async () => {
 	assert.equal(result.summary, "Success. Updated the following files:\nA added.txt\nM update.txt\nD delete.txt\nM moved.txt");
 });
 
-test("applyPatch accepts relative traversal and absolute paths outside cwd", async () => {
-	const root = tempDir();
+test("applyPatch accepts relative traversal and absolute paths outside cwd", async (t) => {
+	const root = tempDir(t);
 	const cwd = join(root, "workspace");
 	mkdirSync(cwd);
 	await applyPatch(`*** Begin Patch
@@ -365,8 +383,8 @@ test("applyPatch accepts relative traversal and absolute paths outside cwd", asy
 	assert.equal(readFileSync(absolutePath, "utf8"), "ok\n");
 });
 
-test("applyPatch validates all actions before changing files", async () => {
-	const cwd = tempDir();
+test("applyPatch validates all actions before changing files", async (t) => {
+	const cwd = tempDir(t);
 	await assert.rejects(
 		() => applyPatch(`*** Begin Patch
 *** Add File: ok.txt
@@ -383,8 +401,8 @@ test("applyPatch validates all actions before changing files", async () => {
 
 test("applyPatch rolls back committed files and mode bits after an I/O failure", {
 	skip: process.platform === "win32" || process.getuid?.() === 0,
-}, async () => {
-	const cwd = tempDir();
+}, async (t) => {
+	const cwd = tempDir(t);
 	const executable = join(cwd, "script.sh");
 	const locked = join(cwd, "locked");
 	writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -407,8 +425,8 @@ test("applyPatch rolls back committed files and mode bits after an I/O failure",
 	assert.equal(existsSync(join(locked, "fail.txt")), false);
 });
 
-test("applyPatch refuses to overwrite existing files with Add File", async () => {
-	const cwd = tempDir();
+test("applyPatch refuses to overwrite existing files with Add File", async (t) => {
+	const cwd = tempDir(t);
 	writeFileSync(join(cwd, "existing.txt"), "keep");
 	await assert.rejects(
 		() => applyPatch(`*** Begin Patch
@@ -420,8 +438,8 @@ test("applyPatch refuses to overwrite existing files with Add File", async () =>
 	assert.equal(readFileSync(join(cwd, "existing.txt"), "utf8"), "keep");
 });
 
-test("applyPatch refuses to overwrite existing files with Move to", async () => {
-	const cwd = tempDir();
+test("applyPatch refuses to overwrite existing files with Move to", async (t) => {
+	const cwd = tempDir(t);
 	writeFileSync(join(cwd, "source.txt"), "source");
 	writeFileSync(join(cwd, "target.txt"), "target");
 	await assert.rejects(
@@ -438,8 +456,8 @@ test("applyPatch refuses to overwrite existing files with Move to", async () => 
 	assert.equal(readFileSync(join(cwd, "target.txt"), "utf8"), "target");
 });
 
-test("applyPatch follows Codex cursor semantics for repeated update context", async () => {
-	const cwd = tempDir();
+test("applyPatch follows Codex cursor semantics for repeated update context", async (t) => {
+	const cwd = tempDir(t);
 	writeFileSync(join(cwd, "ambiguous.txt"), "same\nsame\n");
 	await applyPatch(`*** Begin Patch
 *** Update File: ambiguous.txt
@@ -450,8 +468,8 @@ test("applyPatch follows Codex cursor semantics for repeated update context", as
 	assert.equal(readFileSync(join(cwd, "ambiguous.txt"), "utf8"), "different\nsame\n");
 });
 
-test("applyPatch uses @@ context and ordered chunks to disambiguate repeated lines", async () => {
-	const cwd = tempDir();
+test("applyPatch uses @@ context and ordered chunks to disambiguate repeated lines", async (t) => {
+	const cwd = tempDir(t);
 	writeFileSync(join(cwd, "ordered.txt"), "class First\nsame\nclass Second\nsame\nlast\n");
 	await applyPatch(`*** Begin Patch
 *** Update File: ordered.txt
@@ -465,8 +483,8 @@ test("applyPatch uses @@ context and ordered chunks to disambiguate repeated lin
 	assert.equal(readFileSync(join(cwd, "ordered.txt"), "utf8"), "class First\nfirst\nclass Second\nsecond\nlast\n");
 });
 
-test("applyPatch preflights consecutive Add, Update, Move, and Update actions on virtual state", async () => {
-	const cwd = tempDir();
+test("applyPatch preflights consecutive Add, Update, Move, and Update actions on virtual state", async (t) => {
+	const cwd = tempDir(t);
 	const result = await applyPatch(`*** Begin Patch
 *** Add File: chain.txt
 +one
@@ -489,8 +507,8 @@ test("applyPatch preflights consecutive Add, Update, Move, and Update actions on
 	assert.equal(result.summary, "Success. Updated the following files:\nA chain.txt\nM chain.txt\nM moved.txt\nM moved.txt");
 });
 
-test("previewApplyPatch derives partial changes from the current filesystem without writing", async () => {
-	const cwd = tempDir();
+test("previewApplyPatch derives partial changes from the current filesystem without writing", async (t) => {
+	const cwd = tempDir(t);
 	writeFileSync(join(cwd, "existing.txt"), "before\n");
 	const preview = await previewApplyPatch(`*** Begin Patch
 *** Update File: existing.txt
@@ -508,8 +526,8 @@ test("previewApplyPatch derives partial changes from the current filesystem with
 	assert.equal(readFileSync(join(cwd, "existing.txt"), "utf8"), "before\n");
 });
 
-test("applyPatch supports End of File and fuzzy whitespace and punctuation matching", async () => {
-	const cwd = tempDir();
+test("applyPatch supports End of File and fuzzy whitespace and punctuation matching", async (t) => {
+	const cwd = tempDir(t);
 	writeFileSync(join(cwd, "fuzzy.txt"), "title\n  value – ‘quoted’   \nlast\n");
 	await applyPatch(`*** Begin Patch
 *** Update File: fuzzy.txt
@@ -524,8 +542,8 @@ test("applyPatch supports End of File and fuzzy whitespace and punctuation match
 	assert.equal(readFileSync(join(cwd, "fuzzy.txt"), "utf8"), "title\nupdated\nlast\ntail\n");
 });
 
-test("applyPatch preserves CRLF files when patch context uses LF", async () => {
-	const cwd = tempDir();
+test("applyPatch preserves CRLF files when patch context uses LF", async (t) => {
+	const cwd = tempDir(t);
 	writeFileSync(join(cwd, "crlf.txt"), "alpha\r\nold\r\nomega\r\n");
 	await applyPatch(`*** Begin Patch
 *** Update File: crlf.txt
@@ -538,9 +556,9 @@ test("applyPatch preserves CRLF files when patch context uses LF", async () => {
 	assert.equal(readFileSync(join(cwd, "crlf.txt"), "utf8"), "alpha\r\nnew\r\nomega\r\n");
 });
 
-test("applyPatch accepts paths through a symbolic-link ancestor", async () => {
-	const cwd = tempDir();
-	const outside = tempDir();
+test("applyPatch accepts paths through a symbolic-link ancestor", async (t) => {
+	const cwd = tempDir(t);
+	const outside = tempDir(t);
 	symlinkSync(outside, join(cwd, "link"), "dir");
 	await applyPatch(`*** Begin Patch
 *** Add File: link/escape.txt
@@ -549,9 +567,9 @@ test("applyPatch accepts paths through a symbolic-link ancestor", async () => {
 	assert.equal(readFileSync(join(outside, "escape.txt"), "utf8"), "allowed\n");
 });
 
-test("applyPatch refuses to mutate a final symbolic-link target", async () => {
-	const cwd = tempDir();
-	const outside = join(tempDir(), "outside.txt");
+test("applyPatch refuses to mutate a final symbolic-link target", async (t) => {
+	const cwd = tempDir(t);
+	const outside = join(tempDir(t), "outside.txt");
 	writeFileSync(outside, "outside\n");
 	symlinkSync(outside, join(cwd, "linked.txt"), "file");
 	await assert.rejects(
@@ -566,8 +584,8 @@ test("applyPatch refuses to mutate a final symbolic-link target", async () => {
 	assert.equal(readFileSync(outside, "utf8"), "outside\n");
 });
 
-test("executeApplyPatchTool returns Codex summary text and verification errors", async () => {
-	const cwd = tempDir();
+test("executeApplyPatchTool returns Codex summary text and verification errors", async (t) => {
+	const cwd = tempDir(t);
 	const result = await executeApplyPatchTool({ input: `*** Begin Patch
 *** Add File: added.txt
 +hello

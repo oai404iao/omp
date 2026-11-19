@@ -129,7 +129,8 @@ if (args[0] === "fetch" && args.includes("https://github.com/oai404iao/omp.git")
   const registryPath = join(directory, "registry.json");
   function saveRegistry() { writeFileSync(registryPath, JSON.stringify(registry)); }
   saveRegistry();
-  const env = { ...process.env, GITHUB_SHA: head, RELEASE_PACKAGE: names.target, PATH: `${bin}:${process.env.PATH}`,
+  const env = { HOME: directory, TMPDIR: directory, PATH: `${bin}:${process.env.PATH}`,
+    GITHUB_SHA: head, RELEASE_PACKAGE: names.target,
     CALL_LOG: join(directory, "calls.log"), FIXTURE_REGISTRY: registryPath, FIXTURE_PUBLIC_HEAD: head };
   function run(script, args = [], extraEnv = {}) {
     return spawnSync(process.execPath, [join(scripts, script), ...args], {
@@ -164,6 +165,7 @@ test("targeted publication consumes changed immutable dependency workspaces but 
   assert.equal(published.status, 0, published.stderr);
   assert.equal(f.result().ok, true);
   assert.deepEqual(f.result().releases.map(r => r.name), [names.target]);
+  assert.equal(f.result().receipts[0].runId, null);
   assert.equal(f.calls().split("\n").filter(line => line.startsWith("npm publish ")).length, 1);
   assert.doesNotMatch(f.calls(), /@fixture\/unrelated|npm view @fixture\/(?:bundle|runtime) dist-tags/);
   assert.equal(f.git("tag"), `${names.target}@1.0.0`);

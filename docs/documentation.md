@@ -30,6 +30,7 @@ docs/
   codex-packages.md                包组合与生命周期
   codex-wire-alignment.md          协议差异与升级动作
   pi-compatibility.md              基线和上下文/工具契约
+  testing.md                       测试设计、隔离验证与审查交接
   documentation.md                本文：组织依据与写法
   audits/                         保留历史核验证据
   plans/                          保留设计与迁移记录

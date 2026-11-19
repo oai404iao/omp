@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach, type TestContext } from "node:test";
@@ -13,8 +13,9 @@ import { requestCodexCompactionTrigger } from "@oai404iao/pi-codex-core/internal
 
 const originalFetch = globalThis.fetch;
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+let agentDir: string | undefined;
 beforeEach(() => {
-	const agentDir = mkdtempSync(join(tmpdir(), "pi-codex-sse-contract-"));
+	agentDir = mkdtempSync(join(tmpdir(), "pi-codex-sse-contract-"));
 	const configDir = join(agentDir, "extensions", "pi-codex-minimal-tools");
 	mkdirSync(configDir, { recursive: true });
 	writeFileSync(join(configDir, "config.json"), JSON.stringify({ openaiTransport: "sse" }));
@@ -26,6 +27,8 @@ afterEach(() => {
 	globalThis.fetch = originalFetch;
 	if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+	if (agentDir !== undefined) rmSync(agentDir, { recursive: true, force: true });
+	agentDir = undefined;
 });
 
 function completion(overrides: Record<string, unknown> = {}, type = "response.completed"): string {

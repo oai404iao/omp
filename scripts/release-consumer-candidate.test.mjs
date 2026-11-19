@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,9 +10,10 @@ import { verifyConsumerReceipt } from "./release-consumer-receipt.mjs";
 import { verifyReleaseInstallations } from "./verify-release-installations.mjs";
 import { registry } from "./workspaces.mjs";
 
-test("target archive and historical registry dependency really install, load and produce a complete receipt despite changed checkout code", async () => {
+test("target archive and historical registry dependency really install, load and produce a complete receipt despite changed checkout code", async t => {
   const parent = join(homedir(), ".local/state/agents/tmp"); mkdirSync(parent, { recursive: true });
   const directory = mkdtempSync(join(parent, "release-historical-candidate-test-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
   const commit = "a".repeat(40), historicalCommit = "b".repeat(40);
   const dependencyName = "@oai404iao/pi-codex-runtime", targetName = "@oai404iao/pi-codex-tools";
   const dependency = { name: dependencyName, version: "1.0.0", type: "module",

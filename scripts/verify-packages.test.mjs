@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-function verify(files = {}, extraManifest = {}) {
+function verify(t, files = {}, extraManifest = {}) {
   const scratch = join(process.env.HOME, ".local/state/agents/tmp");
   mkdirSync(scratch, { recursive: true });
   const root = mkdtempSync(join(scratch, "omp-pack-regression-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const scripts = join(root, "scripts");
   mkdirSync(scripts);
   copyFileSync(new URL("./verify-packages.mjs", import.meta.url), join(scripts, "verify-packages.mjs"));
@@ -43,32 +44,32 @@ function verify(files = {}, extraManifest = {}) {
   return { status: result.status, output: result.stdout + result.stderr };
 }
 
-test("manifest-derived allowlist accepts a real archive including implicit README and package.json", () => {
-  const result = verify();
+test("manifest-derived allowlist accepts a real archive including implicit README and package.json", t => {
+  const result = verify(t);
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, /5 files/);
 });
 
-test("an explicitly declared source file must exist before packing", () => {
-  const result = verify({}, { files: ["index.ts", "src/", "src/missing.ts", "LICENSE"] });
+test("an explicitly declared source file must exist before packing", t => {
+  const result = verify(t, {}, { files: ["index.ts", "src/", "src/missing.ts", "LICENSE"] });
   assert.equal(result.status, 1, result.output);
   assert.match(result.output, /files entry matches nothing: src\/missing\.ts/);
 });
 
-test("a sensitive config nested under an allowed source directory is rejected", () => {
-  const result = verify({ "src/config.json": '{"token":"fixture"}' });
+test("a sensitive config nested under an allowed source directory is rejected", t => {
+  const result = verify(t, { "src/config.json": '{"token":"fixture"}' });
   assert.equal(result.status, 1, result.output);
   assert.match(result.output, /sensitive or local-only path would be published: src\/config\.json/);
 });
 
-test("test source nested under an allowed source directory is rejected", () => {
-  const result = verify({ "src/worker.test.ts": "export {};" });
+test("test source nested under an allowed source directory is rejected", t => {
+  const result = verify(t, { "src/worker.test.ts": "export {};" });
   assert.equal(result.status, 1, result.output);
   assert.match(result.output, /development-only path would be published: src\/worker\.test\.ts/);
 });
 
-test("an implicit main entry cannot add an undeclared archive file", () => {
-  const result = verify({ "extra.js": "export {};" }, { main: "extra.js" });
+test("an implicit main entry cannot add an undeclared archive file", t => {
+  const result = verify(t, { "extra.js": "export {};" }, { main: "extra.js" });
   assert.equal(result.status, 1, result.output);
   assert.match(result.output, /tarball contains undeclared file extra\.js/);
 });

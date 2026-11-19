@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import test from "node:test";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import core from "@oai404iao/pi-codex-core";
 import tools from "@oai404iao/pi-codex-tools";
@@ -17,6 +18,7 @@ import { snapshotOwnedToolProtocols } from "@oai404iao/pi-codex-runtime/internal
 import {
 	compositionModel, createCompositionHost, withCompositionDirectory, writeCompositionConfig,
 } from "./support/composition-host.js";
+import { deferred } from "./support/provider-lifecycle-test-support.js";
 
 const cases = [
 	{ name: "bundle", factories: [bundle], tools: ["apply_patch", "image_generation", "web_search"], core: true },
@@ -383,6 +385,69 @@ for (const capability of [undefined, web, image]) {
 			} finally {
 				await host.emit("session_shutdown");
 				host.dispose();
+			}
+		}));
+}
+
+for (const replaceSession of [false, true]) {
+	test(replaceSession ? "a late Responses image cannot notify a replacement session" : "a Responses image notifies its own session",
+		{ timeout: 10_000 }, t => withCompositionDirectory(async directory => {
+			writeCompositionConfig(directory, { openaiTransport: "sse", openaiWebSocketPrewarm: false });
+			const host = createCompositionHost(directory);
+			const requestStarted = deferred<void>();
+			const releaseResponse = deferred<void>();
+			let pending: Promise<AssistantMessage> | undefined;
+			try {
+				const api = host.api();
+				image(api); core(host.api());
+				await host.emit("session_start");
+				const result: Promise<AssistantMessage> = host.providers.get("openai").streamSimple(host.ctx.model, {
+					messages: [{ role: "user", content: "fixture", timestamp: 0 }], tools: [],
+				}, {
+					apiKey: "fixture-only", transport: "sse", maxRetries: 0, signal: t.signal,
+					sessionId: host.ctx.sessionManager.getSessionId(),
+					fetch: async (url: string) => {
+						assert.equal(url, `${host.ctx.model.baseUrl}/responses`);
+						requestStarted.resolve();
+						await releaseResponse.promise;
+						const events = [
+							{ type: "response.created", response: { id: "resp_image" } },
+							{ ...imageEvent, output_index: 0 },
+							{ type: "response.completed", response: { id: "resp_image", status: "completed", output: [imageEvent.item] } },
+						];
+						return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+							headers: { "content-type": "text/event-stream" },
+						});
+					},
+				}).result();
+				pending = result;
+				await Promise.race([requestStarted.promise, result.then(output => {
+					assert.fail(`expected the SSE request to start: ${output.errorMessage ?? output.stopReason}`);
+				})]);
+				if (replaceSession) {
+					host.ctx.sessionManager = SessionManager.inMemory(directory);
+					await host.emit("session_start", { reason: "fork" });
+				}
+				releaseResponse.resolve();
+				const output = await result;
+				assert.equal(output.stopReason, "stop", output.errorMessage ?? "fixture response did not finish");
+				const path = getOpenAICodexLatestImagePath(directory);
+				assert.ok(path);
+				assert.deepEqual(readFileSync(path), Buffer.from(imageEvent.item.result, "base64"));
+				getCodexBroker(api).presentation.flush();
+				if (replaceSession) {
+					assert.deepEqual(host.messages, [], "old image display leaked into the replacement session");
+				} else {
+					assert.equal(host.messages.length, 1);
+					assert.equal(host.messages[0].customType, "codex-image-generation-display");
+					assert.equal(host.messages[0].details.savedImages[0].callId, imageEvent.item.id);
+				}
+			} finally {
+				releaseResponse.resolve();
+				try {
+					await pending;
+					await host.emit("session_shutdown");
+				} finally { host.dispose(); }
 			}
 		}));
 }
