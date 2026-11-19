@@ -44,8 +44,7 @@ pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-script
 | Pull request | Node 24 affected 计划；policy 始终执行，包与 shared suites 分 job；消费者用 smoke |
 | Main push / 手动运行 | Node 24 全量计划与 exhaustive 消费者 |
 
-所有任务均从根锁安装 Pi 1.5.2。四个既有 `Node … / Pi floor`、`Node … / Pi target`
-分支保护标签仅汇总同一套结果，不额外执行旧 Node 或 Pi 组合。
+验证使用根锁中的 Pi 1.5.2。分支保护要求 `Verification / Required` 汇总计划任务的结果。
 
 <a id="pi-lifecycle-and-tool-contracts"></a>
 

@@ -159,11 +159,10 @@ infrastructure 分别运行一次 `test:release-scripts` 和 `test:ci`，两者�
 Node 24 的规范检查使用根锁和独立 agent 目录，在包／套件 job 中执行；PR 选中 consumers 时
 运行 smoke，main/manual 保留 exhaustive。普通 `ci`、`test:codex-packages` 默认也保持 exhaustive。
 
-### required contexts 和证据
+### 必需检查和证据
 
-4 个既有 `Node … / Pi floor`、`Node … / Pi target` required contexts 是分支保护的聚合门禁别名，
-不代表额外的 Node 或 Pi 测试。计划任务失败、取消、缺失或意外跳过时，聚合失败；文档-only 的
-空选择须显式验证。不要用 workflow 级 path filter 跳过这些 contexts。
+`Verification / Required` 是 `main` 分支保护要求的聚合检查。计划任务失败、取消、缺失或意外跳过时，
+聚合失败；纯文档改动的空选择须显式验证。不要用 workflow 级 path filter 跳过这个检查。
 main push 另产出 `Trusted main coverage / v1`，供发布时验证源码覆盖。
 
 CI 上传包／套件耗时。调整分片时同时比较 wall time 和总 runner minutes，不必随包增长
@@ -176,7 +175,7 @@ Release PR 仍等待**当前精确 SHA** 的可信 main CI；发布可复用经�
 PR 改用 `--full`，并移除 publish 的源码复用条件，让选中检查总是执行。
 保留聚合门禁、制品消费者和所有发布安全门禁。修改 workflow 后，必须有意更新
 `scripts/ci/trusted-main.mjs` 的已审阅 workflow 摘要及策略测试；摘要不符时拒绝复用。
-4 个 required 名称和独立 Release PR 触发器无需改变。
+保留必需检查名称和独立 Release PR 触发器。
 
 <a id="dependency-pr-refreshes"></a>
 ## 处理依赖更新 PR

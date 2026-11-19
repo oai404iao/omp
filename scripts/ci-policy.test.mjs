@@ -39,10 +39,12 @@ test("PR verification has only read permissions and no publishing environment", 
   }
 });
 
-test("required check names alias the same coverage graph", () => {
+test("the required check always aggregates the planned coverage graph", () => {
   const { verify, "trusted-main-coverage": coverage } = workflow.jobs;
-  assert.deepEqual(verify.strategy.matrix, { context: expectedJobNames.filter(name => name === "Verification / Required" || name.startsWith("Node ")) });
-  assert.equal(verify.name, "${{ matrix.context }}");
+  assert.equal(verify.name, "Verification / Required");
+  assert.ok(expectedJobNames.includes(verify.name));
+  assert.equal(verify.if, "always()");
+  assert.equal(verify.strategy, undefined);
   assert.deepEqual(verify.needs, ["plan", "policy", "packages", "suites"]);
   assert.deepEqual(coverage.needs, [...verify.needs, "verify"]);
 });

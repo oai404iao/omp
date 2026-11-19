@@ -146,21 +146,11 @@ jobs:
           retention-days: 7
 
   verify:
-    # Keep the previous required names while branch protection moves to the new check.
-    name: ${{ matrix.context }}
+    name: Verification / Required
     needs: [plan, policy, packages, suites]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        context:
-          - Verification / Required
-          - Node 22.19.0 / Pi floor
-          - Node 22.19.0 / Pi target
-          - Node 24.x / Pi floor
-          - Node 24.x / Pi target
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
