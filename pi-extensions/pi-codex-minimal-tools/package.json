@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-minimal-tools",
-  "version": "5.1.3",
+  "version": "5.2.0",
   "description": "Composition package for Pi Codex Responses engine and tools",
   "repository": {
     "type": "git",
@@ -42,8 +42,8 @@
     "typebox": "*"
   },
   "dependencies": {
-    "@oai404iao/pi-codex-core": "3.0.2",
-    "@oai404iao/pi-codex-tools": "0.1.2"
+    "@oai404iao/pi-codex-core": "3.1.0",
+    "@oai404iao/pi-codex-tools": "0.2.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "1.5.2",

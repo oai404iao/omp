@@ -1,5 +1,13 @@
 # @oai404iao/pi-codex-runtime
 
+## 3.1.0
+
+### Minor Changes
+
+- 89b1c79: - Fall back to SSE on an early WebSocket size rejection when auto transport and endpoint policy allow it. Preserve Retry-After advice from both Responses error event shapes, and count retained media toward native compaction's history budget.
+  - Add exact Standard SSE profiles for `openai/gpt-6.2-astra` and `openai/gpt-6.2-sol`. Pi must provide the model descriptors; the extension does not register either model.
+- cc5ccc6: **Breaking change:** Require Pi 1.5.2 or newer. Pi 1.5.2 is the only tested host version; older Pi releases are no longer supported. Upgrade Pi before upgrading these packages.
+
 ## 3.0.2
 
 ### Patch Changes

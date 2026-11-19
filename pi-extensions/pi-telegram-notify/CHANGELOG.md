@@ -1,5 +1,15 @@
 # @oai404iao/pi-telegram-notify
 
+## 1.1.0
+
+### Minor Changes
+
+- cc5ccc6: **Breaking change:** Require Pi 1.5.2 or newer. Pi 1.5.2 is the only tested host version; older Pi releases are no longer supported. Upgrade Pi before upgrading these packages.
+
+### Patch Changes
+
+- 7ce78c1: Update the Pi development target to 1.4.0 and refresh development dependencies while retaining support for Pi 1.2.0.
+
 ## 1.0.0
 
 ### Major Changes

@@ -215,10 +215,10 @@ importers:
         version: 1.0.1
       "@earendil-works/pi-agent-core":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-ai":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-coding-agent":
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
@@ -264,7 +264,7 @@ importers:
   pi-extensions/pi-codex-core:
     dependencies:
       "@oai404iao/pi-codex-runtime":
-        specifier: 3.0.2
+        specifier: 3.1.0
         version: link:../pi-codex-runtime
       https-proxy-agent:
         specifier: ^9.1.0
@@ -303,12 +303,12 @@ importers:
   pi-extensions/pi-codex-imagegen:
     dependencies:
       "@oai404iao/pi-codex-tools":
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../pi-codex-tools
     devDependencies:
       "@earendil-works/pi-ai":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-coding-agent":
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
@@ -330,15 +330,15 @@ importers:
   pi-extensions/pi-codex-minimal-tools:
     dependencies:
       "@oai404iao/pi-codex-core":
-        specifier: 3.0.2
+        specifier: 3.1.0
         version: link:../pi-codex-core
       "@oai404iao/pi-codex-tools":
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../pi-codex-tools
     devDependencies:
       "@earendil-works/pi-ai":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-coding-agent":
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
@@ -361,7 +361,7 @@ importers:
     devDependencies:
       "@earendil-works/pi-ai":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-coding-agent":
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
@@ -370,7 +370,7 @@ importers:
         version: 26.6.6
       openai:
         specifier: 7.45.1
-        version: 7.45.1(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(ws@8.21.3)
+        version: 7.45.1(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(undici@8.12.4)(ws@8.21.3)
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -380,7 +380,7 @@ importers:
   pi-extensions/pi-codex-tools:
     dependencies:
       "@oai404iao/pi-codex-runtime":
-        specifier: 3.0.2
+        specifier: 3.1.0
         version: link:../pi-codex-runtime
       "@silvia-odwyer/photon-node":
         specifier: 0.3.4
@@ -388,7 +388,7 @@ importers:
     devDependencies:
       "@earendil-works/pi-ai":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-coding-agent":
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
@@ -410,12 +410,12 @@ importers:
   pi-extensions/pi-codex-web-search:
     dependencies:
       "@oai404iao/pi-codex-tools":
-        specifier: 0.1.2
+        specifier: 0.2.0
         version: link:../pi-codex-tools
     devDependencies:
       "@earendil-works/pi-ai":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-coding-agent":
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
@@ -443,10 +443,10 @@ importers:
     devDependencies:
       "@earendil-works/pi-agent-core":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-ai":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-coding-agent":
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
@@ -467,7 +467,7 @@ importers:
         version: 7.0.2
     optionalDependencies:
       "@oai404iao/pi-codex-runtime":
-        specifier: 3.0.2
+        specifier: 3.1.0
         version: link:../pi-codex-runtime
   pi-extensions/pi-telegram-notify:
     devDependencies:
@@ -2361,9 +2361,9 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
-  "@earendil-works/pi-agent-core@1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)":
+  "@earendil-works/pi-agent-core@1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)":
     dependencies:
-      "@earendil-works/pi-ai": 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+      "@earendil-works/pi-ai": 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       "@earendil-works/pi-schema": 1.5.2
     transitivePeerDependencies:
       - "@aws-sdk/credential-provider-node"
@@ -2425,7 +2425,7 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
-  "@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.22.0)":
+  "@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)":
     dependencies:
       "@anthropic-ai/sdk": 0.129.0
       "@aws-sdk/client-bedrock-runtime": 3.1127.0
@@ -2435,7 +2435,7 @@ snapshots:
       "@smithy/node-http-handler": 4.12.1
       http-proxy-agent: 9.1.0
       https-proxy-agent: 9.1.0
-      openai: 7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.22.0)
+      openai: 7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3)
       partial-json: 0.1.7
     transitivePeerDependencies:
       - "@aws-sdk/credential-provider-node"
@@ -2449,7 +2449,7 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
-  "@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)":
+  "@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.22.0)":
     dependencies:
       "@anthropic-ai/sdk": 0.129.0
       "@aws-sdk/client-bedrock-runtime": 3.1127.0
@@ -2459,7 +2459,7 @@ snapshots:
       "@smithy/node-http-handler": 4.12.1
       http-proxy-agent: 9.1.0
       https-proxy-agent: 9.1.0
-      openai: 7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3)
+      openai: 7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.22.0)
       partial-json: 0.1.7
     transitivePeerDependencies:
       - "@aws-sdk/credential-provider-node"
@@ -2902,22 +2902,24 @@ snapshots:
       "@smithy/signature-v4": 5.7.4
       undici: 8.12.3
       ws: 8.22.0
+  openai@7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.21.3):
+    optionalDependencies:
+      "@aws-sdk/credential-provider-node": 3.972.84
+      "@smithy/signature-v4": 5.7.4
+      undici: 8.12.4
+      ws: 8.21.3
   openai@7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(undici@8.12.4)(ws@8.22.0):
     optionalDependencies:
       "@aws-sdk/credential-provider-node": 3.972.84
       "@smithy/signature-v4": 5.7.4
       undici: 8.12.4
       ws: 8.22.0
-  openai@7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.3):
-    optionalDependencies:
-      "@aws-sdk/credential-provider-node": 3.972.84
-      "@smithy/signature-v4": 5.7.4
-      ws: 8.21.3
-  openai@7.45.1(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(ws@8.21.3):
+  openai@7.45.1(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(undici@8.12.4)(ws@8.21.3):
     optionalDependencies:
       "@aws-sdk/credential-provider-node": 3.972.84
       "@smithy/signature-v4": 5.7.4
       google-auth-library: 10.9.1
+      undici: 8.12.4
       ws: 8.21.3
   p-retry@4.6.2:
     dependencies:
