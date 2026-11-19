@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -12,8 +12,11 @@ function setup(t: TestContext) {
 	mkdirSync(scratch, { recursive: true });
 	const dir = mkdtempSync(join(scratch, "pi-notify-settings-"));
 	const originalEnv = process.env;
+	t.after(() => {
+		process.env = originalEnv;
+		rmSync(dir, { recursive: true, force: true });
+	});
 	process.env = { ...originalEnv, HOME: join(dir, "home"), XDG_CONFIG_HOME: join(dir, "xdg"), PI_CODING_AGENT_DIR: join(dir, "agent") };
-	t.after(() => { process.env = originalEnv; });
 	return {
 		dir,
 		write(value: unknown) {

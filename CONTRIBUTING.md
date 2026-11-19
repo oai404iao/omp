@@ -30,6 +30,7 @@ pnpm install --frozen-lockfile --ignore-scripts
 ## 选择要运行的检查
 
 开发时先做受影响检查，提交 PR 前做完整检查。以下命令均从仓库根目录执行。
+测试设计、Agent 协作与独立审查见[测试规范](docs/testing.md)。
 
 | 要做什么 | 命令 |
 | --- | --- |

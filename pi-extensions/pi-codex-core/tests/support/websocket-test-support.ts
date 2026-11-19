@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 
 import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 
 
 
@@ -71,9 +72,12 @@ export function encodeServerText(payload: unknown): Buffer {
 	return encodeServerFrame(JSON.stringify(payload));
 }
 
-export function decodeClientFrames(buffer: Uint8Array): { frames: string[]; remaining: Buffer } {
+type ClientFrame = { type: "text"; text: string } | { type: "pong" };
+const clientPong = Symbol("clientPong");
+
+function decodeClientFrames(buffer: Uint8Array): { frames: ClientFrame[]; remaining: Buffer } {
 	const source = Buffer.from(buffer);
-	const frames: string[] = [];
+	const frames: ClientFrame[] = [];
 	let offset = 0;
 	while (source.length - offset >= 2) {
 		const first = source[offset]!;
@@ -100,7 +104,8 @@ export function decodeClientFrames(buffer: Uint8Array): { frames: string[]; rema
 				payload[index] ^= mask[index % 4]!;
 			}
 		}
-		if (opcode === 0x1) frames.push(payload.toString("utf8"));
+		if (opcode === 0x1) frames.push({ type: "text", text: payload.toString("utf8") });
+		if (opcode === 0xa) frames.push({ type: "pong" });
 		offset += frameLength;
 	}
 	return { frames, remaining: Buffer.from(source.subarray(offset)) };
@@ -113,7 +118,7 @@ export type WebSocketResponse = unknown[] | {
 };
 
 export type WebSocketResponseSequence = WebSocketResponse | {
-	before?: (body: Record<string, any>, socket: import("node:stream").Duplex) => void | Promise<void>;
+	before?: (body: Record<string, any>, socket: Duplex) => void | Promise<void>;
 	events: unknown[];
 };
 
@@ -125,6 +130,7 @@ export async function startWebSocketServer(
 	requests: Record<string, any>[];
 	handshakes: IncomingMessage[];
 	connections: number;
+	ping(socket: Duplex, signal: AbortSignal): Promise<void>;
 	close(): Promise<void>;
 }> {
 	const requests: Record<string, any>[] = [];
@@ -181,7 +187,11 @@ export async function startWebSocketServer(
 			const decoded = decodeClientFrames(buffer);
 			buffer = decoded.remaining;
 			for (const frame of decoded.frames) {
-				const body = JSON.parse(frame) as Record<string, any>;
+				if (frame.type === "pong") {
+					socket.emit(clientPong);
+					continue;
+				}
+				const body = JSON.parse(frame.text) as Record<string, any>;
 				const response = responses[requests.length];
 				assert.ok(response, `Unexpected WebSocket request ${requests.length + 1}`);
 				requests.push(body);
@@ -193,6 +203,7 @@ export async function startWebSocketServer(
 				const events = Array.isArray(sequence) ? sequence : sequence.events;
 				if (!Array.isArray(sequence) && sequence.before) {
 					await sequence.before(body, socket);
+					if (socket.destroyed) return;
 				}
 				assert.ok(Array.isArray(events), "Request response must be an event list");
 				for (const event of events) {
@@ -225,6 +236,11 @@ export async function startWebSocketServer(
 		handshakes,
 		get connections() {
 			return connections;
+		},
+		async ping(socket, signal) {
+			const pong = once(socket, clientPong, { signal });
+			socket.write(Buffer.from([0x89, 0]));
+			await pong;
 		},
 		async close() {
 			for (const socket of sockets) socket.destroy();

@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { digest } from "./release-consumer-artifacts.mjs";
 import { verifyConsumerReceipt } from "./release-consumer-receipt.mjs";
 
-test("protected no-network receipt validator rejects candidate, manifest and publish-byte mutation", () => {
+test("protected no-network receipt validator rejects candidate, manifest and publish-byte mutation", t => {
   const parent = join(homedir(), ".local/state/agents/tmp"); mkdirSync(parent, { recursive: true });
   for (const mutate of [false, "archive", "manifest", "candidate", "commit"]) {
     const directory = mkdtempSync(join(parent, "release-receipt-test-"));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
     const manifestPath = join(directory, "manifest.json"), receiptPath = join(directory, "consumer-verification.json");
     const tarball = join(directory, "fixture.tgz"); writeFileSync(tarball, "tested bytes");
     const candidate = { name: "@oai404iao/fixture", version: "1.0.0", sourceCommit: "a".repeat(40),
@@ -28,9 +29,10 @@ test("protected no-network receipt validator rejects candidate, manifest and pub
   }
 });
 
-test("receipt consumer coverage requires unique complete standalone and combined candidate cases", () => {
+test("receipt consumer coverage requires unique complete standalone and combined candidate cases", t => {
   const parent = join(homedir(), ".local/state/agents/tmp"); mkdirSync(parent, { recursive: true });
   const directory = mkdtempSync(join(parent, "release-receipt-coverage-test-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
   const manifestPath = join(directory, "manifest.json"), receiptPath = join(directory, "consumer-verification.json");
   const names = ["@oai404iao/target", "@oai404iao/dependency"];
   const candidates = names.map(name => ({ name, version: "1.0.0", sourceCommit: "a".repeat(40),

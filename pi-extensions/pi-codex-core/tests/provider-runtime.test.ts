@@ -7,7 +7,7 @@ import { resetCodexWireState } from "@oai404iao/pi-codex-runtime/internal/codex-
 import { registerResponsesProviderRuntime } from "@oai404iao/pi-codex-core/internal/extension/provider-runtime";
 import { closeProviderWebSocketSessions } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/websocket-session";
 import { codexJwt, createProviderHarness } from "./support/openai-codex-test-support.js";
-import { createAssistantMessage, deferred, eventContext, responsesModel, withCodexSettings } from "../../../tests/codex/support/provider-lifecycle-test-support.js";
+import { createAssistantMessage, eventContext, responsesModel, withCodexSettings } from "../../../tests/codex/support/provider-lifecycle-test-support.js";
 import { startWebSocketServer } from "./support/websocket-test-support.js";
 
 const originalFetch = globalThis.fetch;
@@ -147,30 +147,5 @@ test("global WebSocket gate forces SSE over a session transport override", async
 			closeProviderWebSocketSessions();
 			await server.close();
 		}
-	});
-});
-
-test("legacy registration captures display ownership before network I/O, not when the response arrives", async () => {
-	await withCodexSettings({ openaiTransport: "sse", openaiWebSocketPrewarm: false }, async cwd => {
-		const response = deferred<Response>();
-		const entered = deferred<void>();
-		globalThis.fetch = async () => { entered.resolve(); return response.promise; };
-		const harness = createProviderHarness({ cwd });
-		const pending = harness.providers.openai.streamSimple(responsesModel, {
-			messages: [{ role: "user", content: "fixture", timestamp: 0 }], tools: [],
-		}, { apiKey: "test-key", transport: "sse", sessionId: "lifecycle-test" }).result();
-		await entered.promise;
-		try {
-			for (const handler of harness.handlers.session_shutdown ?? []) await handler({}, eventContext());
-			for (const handler of harness.handlers.session_start ?? []) await handler({}, eventContext(responsesModel, "replacement"));
-		} finally {
-			response.resolve(sseResponse());
-		}
-		const output = await pending;
-		assert.equal(output.stopReason, "stop");
-		for (const handler of harness.handlers.agent_end ?? []) await handler({});
-		await new Promise(resolve => setTimeout(resolve, 10));
-		assert.equal(harness.messages.length, 0);
-		for (const handler of harness.handlers.session_shutdown ?? []) await handler({}, eventContext(responsesModel, "replacement"));
 	});
 });

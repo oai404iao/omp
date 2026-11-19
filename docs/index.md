@@ -31,6 +31,7 @@
 ## 开发与发布
 
 - [贡献指南](../CONTRIBUTING.md)：环境、定向/完整检查、Changesets 和 PR。
+- [测试规范](testing.md)：行为断言、隔离验证、Agent 协作与审查交接。
 - [发布指南](../RELEASING.md)：版本 PR、定向发布、OIDC、不可变产物与失败恢复。
 - [文档组织与写作](documentation.md)：Pi 文档研究依据、本项目的信息分层与维护规则。
 

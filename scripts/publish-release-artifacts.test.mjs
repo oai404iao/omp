@@ -32,6 +32,7 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
     const manifestPath = join(temporaryDirectory, "manifest.json");
     const resultPath = join(temporaryDirectory, "result.json");
     const callLog = join(temporaryDirectory, "calls.log");
+    const environment = { PATH: `${binaryDirectory}:${process.env.PATH}`, HOME: temporaryDirectory, TMPDIR: temporaryDirectory };
     mkdirSync(binaryDirectory);
     writeFileSync(join(temporaryDirectory, "package.json"), JSON.stringify({ devDependencies: { npm: "11.19.0" } }));
     const scripts = join(temporaryDirectory, "scripts");
@@ -42,16 +43,17 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
     writeFileSync(join(scripts, "registry-visibility-implementation.mjs"), readFileSync(join(root, "scripts/registry-visibility.mjs")));
     writeFileSync(join(scripts, "registry-visibility.mjs"), `
       import { spawnSync } from "node:child_process";
+      import { appendFileSync } from "node:fs";
       import { waitForRegistryVisibility as wait, RegistryVisibilityPending } from "./registry-visibility-implementation.mjs";
       export { RegistryVisibilityPending };
-      export function waitForRegistryVisibility(candidate, options) {
+      export async function waitForRegistryVisibility(candidate, options) {
         let time = 0;
         const view = (...args) => {
           const child = spawnSync("npm", ["view", ...args, "--json", "--prefer-online", "--prefer-offline=false", "--offline=false"], {encoding:"utf8"});
           if (child.status !== 0) return undefined;
           return JSON.parse(child.stdout);
         };
-        return wait(candidate, {...options, now: () => time, random: () => 0.5,
+        const metadata = await wait(candidate, {...options, now: () => time, random: () => 0.5,
           sleep: async ms => { time += ms; },
           fetch: async (url, init) => {
             if (init.method === "HEAD") return new Response(null, {status:200});
@@ -69,6 +71,8 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
             }});
           }
         });
+        appendFileSync(process.env.CALL_LOG, "registry verified " + candidate.name + "@" + candidate.version + "\\n");
+        return metadata;
       }
     `);
     mkdirSync(join(temporaryDirectory, "release-locks"));
@@ -87,7 +91,7 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
         writeFileSync(join(stage, "package/package.json"), JSON.stringify({ ...manifest, gitHead: commit }));
         c.filename = `${c.name.split("/").at(-1)}.tgz`;
         const tar = join(temporaryDirectory, c.filename);
-        assert.equal(spawnSync("tar", ["-czf", tar, "-C", stage, "package"]).status, 0);
+        assert.equal(spawnSync("tar", ["-czf", tar, "-C", stage, "package"], { env: environment }).status, 0);
         c.integrity = `sha512-${createHash("sha512").update(readFileSync(tar)).digest("base64")}`;
       }
       registryPackages[`${c.name}@${c.version}`] = {
@@ -171,16 +175,16 @@ if (args[2] === "version") {
     );
 
     const child = spawnSync(process.execPath, [join(scripts, "publish-release-artifacts.mjs"), manifestPath, resultPath], {
-      cwd: root,
+      cwd: temporaryDirectory,
       encoding: "utf8",
       env: {
-        ...process.env,
+        ...environment,
+        ...(options.runId === undefined ? {} : { GITHUB_RUN_ID: options.runId }),
         RELEASE_PACKAGE: "",
         RELEASE_VERIFY_ONLY: options.verifyOnly ? "true" : "false",
         npm_config_dry_run: options.inheritedDryRun ? "true" : "false",
         PUBLISH_STDOUT: options.publishStdout ?? "",
         PUBLISH_STDERR: options.publishStderr ?? "",
-        PATH: `${binaryDirectory}:${process.env.PATH}`,
         CALL_LOG: callLog,
         FAKE_COMMIT: commit,
         GITHUB_SHA: commit,
@@ -301,16 +305,24 @@ test("clean recovery creates missing tags only after all candidates reconcile", 
 
 test("publisher reorders a shuffled batch and verifies dependency visibility before publishing dependents", () => {
   const runtime = "@oai404iao/runtime", bundle = "@oai404iao/bundle";
+  const runtimeSpec = `${runtime}@1.0.0`;
   const values = [bundle, runtime].map(name => ({ ...candidate(name), mode: "publish" }));
   const { process, result, calls } = runPublisher(values, undefined, {
     dependencies: { [bundle]: { [runtime]: "1.0.0" } },
   });
   assert.equal(process.status, 0, process.stderr);
   assert.equal(result.ok, true);
-  const publish = calls.split("\n").filter(line => line.startsWith("npm publish "));
-  assert.match(publish[0], /runtime\.tgz/);
-  assert.match(publish[1], /bundle\.tgz/);
-  assert.ok(calls.indexOf(`npm view ${runtime}@1.0.0`) < calls.indexOf(publish[1]));
+  const lines = calls.trim().split("\n");
+  const publish = lines.filter(line => line.startsWith("npm publish "));
+  assert.equal(publish.length, 2, calls);
+  assert.match(publish[0], /\/runtime\.tgz /);
+  assert.match(publish[1], /\/bundle\.tgz /);
+  const betweenUploads = lines.slice(lines.indexOf(publish[0]) + 1, lines.indexOf(publish[1]));
+  const lookup = betweenUploads.findIndex(line => line.startsWith(`npm view ${runtimeSpec} version `));
+  assert.notEqual(lookup, -1,
+    `Expected an exact-version lookup for ${runtimeSpec} between uploads:\n${calls}`);
+  assert.ok(betweenUploads.slice(lookup + 1).includes(`registry verified ${runtimeSpec}`),
+    `Expected verified identity and dist-tag for ${runtimeSpec} between uploads:\n${calls}`);
 });
 
 test("authorized publication overrides inherited dry-run and retains npm's receipt", () => {
@@ -322,6 +334,7 @@ test("authorized publication overrides inherited dry-run and retains npm's recei
   });
   assert.equal(process.status, 0, process.stderr);
   assert.equal(result.ok, true);
+  assert.equal(result.receipts[0].runId, null);
   assert.match(calls, /^npm publish .* --dry-run=false /m);
   assert.match(process.stdout, /\+ @fixture\/receipt@1\.0\.0/);
   assert.match(process.stderr, /npm notice Publishing with provenance/);
@@ -436,6 +449,7 @@ test("verify-only recovery of an original publish manifest never uploads again",
 test("accepted receipt survives visibility deadline with original digest and run identity", () => {
   const value = { ...candidate("@fixture/pending"), mode: "publish" };
   const { process, result } = runPublisher([value], undefined, {
+    runId: "fixture-run",
     delayVersionSpec: "@fixture/pending@1.0.0", delayVersionAttempts: 100, propagationTimeoutMs: 10,
   });
   assert.equal(process.status, 0, process.stderr);
@@ -443,6 +457,7 @@ test("accepted receipt survives visibility deadline with original digest and run
   assert.equal(result.receipts[0].state, "pending-visibility");
   assert.equal(result.receipts[0].integrity, value.integrity);
   assert.equal(result.receipts[0].sourceCommit, commit);
+  assert.equal(result.receipts[0].runId, "fixture-run");
   assert.ok(result.receipts[0].acceptedAt);
   assert.equal(result.receipts[0].registry, "https://registry.npmjs.org/");
 });

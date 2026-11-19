@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
 import { createServer } from "node:http";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import type { Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import { isRetryableAssistantError } from "@earendil-works/pi-ai/compat";
 import { WebSocketMessageTooLargeError, streamWebSocketRequest } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/websocket-events";
 import { timeoutFromOption } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/timeouts";
@@ -24,16 +25,19 @@ const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}
 import { loadSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 const originalPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
+const settingsRoots: string[] = [];
 
 afterEach(() => {
 	resetCodexWireState();
 	closeProviderWebSocketSessions();
 	if (originalPiCodingAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = originalPiCodingAgentDir;
+	for (const root of settingsRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 function writeSettings(value: Record<string, unknown>): void {
 	const root = mkdtempSync(join(tmpdir(), "pi-codex-ws-settings-"));
+	settingsRoots.push(root);
 	const agentDir = join(root, "agent");
 	const configDir = join(agentDir, "extensions", "pi-codex-minimal-tools");
 	mkdirSync(configDir, { recursive: true });
@@ -1774,29 +1778,55 @@ test("openai websocket rejects binary response frames", async () => {
 	}
 });
 
-test("openai websocket serializes concurrent requests on one session connection", async () => {
+test("openai websocket serializes concurrent requests on one session connection", { timeout: 5_000 }, async (t) => {
 	writeSettings({ openaiTransport: "websocket" });
+	const checkpoints = new EventEmitter<{ firstReceived: [Duplex]; secondReady: [] }>();
+	let releaseFirst!: () => void;
+	const holdFirst = new Promise<void>((resolve) => { releaseFirst = resolve; });
 	const server = await startWebSocketServer([
 		() => ({
-			async before() {
-				await new Promise((resolve) => setTimeout(resolve, 30));
+			before(_body, socket) {
+				checkpoints.emit("firstReceived", socket);
+				return holdFirst;
 			},
 			events: successEvents("resp_1", "first"),
 		}),
 		() => successEvents("resp_2", "second"),
 	]);
+	const abort = new AbortController();
+	const signal = AbortSignal.any([abort.signal, t.signal, AbortSignal.timeout(4_000)]);
+	const pending: Promise<unknown>[] = [];
 	try {
 		const provider = createProviderHarness().openai;
-		const [first, second] = await Promise.all([
-			runOpenAIProvider(provider, server.url, [{ role: "user", content: "first" }]),
-			runOpenAIProvider(provider, server.url, [{ role: "user", content: "second" }]),
-		]);
-		assert.equal(first.content[0]?.text, "first");
-		assert.equal(second.content[0]?.text, "second");
+		const options = { signal, maxRetries: 0, env: { NO_PROXY: "*" } };
+		const firstReceived = once(checkpoints, "firstReceived", { signal });
+		const first = runOpenAIProvider(provider, server.url, [{ role: "user", content: "first" }], options);
+		pending.push(first);
+		const [socket] = await firstReceived;
+		const secondReady = once(checkpoints, "secondReady", { signal });
+		const second = runOpenAIProvider(provider, server.url, [{ role: "user", content: "second" }], {
+			...options,
+			transformHeaders(headers: Record<string, string>) {
+				checkpoints.emit("secondReady");
+				return headers;
+			},
+		});
+		pending.push(second);
+		await secondReady;
+		// The pong travels behind any request already sent on this socket, without completing the first response.
+		await server.ping(socket, signal);
+		assert.equal(server.requests.length, 1, "second request reached the server before the first response completed");
+		releaseFirst();
+		const [firstResult, secondResult] = await Promise.all([first, second]);
+		assert.equal(firstResult.content[0]?.text, "first");
+		assert.equal(secondResult.content[0]?.text, "second");
 		assert.equal(server.connections, 1);
 		assert.equal(server.requests.length, 2);
 	} finally {
+		releaseFirst();
+		abort.abort();
 		await server.close();
+		await Promise.allSettled(pending);
 	}
 });
 

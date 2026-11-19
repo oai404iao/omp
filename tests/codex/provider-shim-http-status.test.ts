@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
@@ -17,6 +17,7 @@ import { codexJwt, createProviderHarness } from "./support/openai-codex-test-sup
 const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
 const originalPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
+const settingsRoots: string[] = [];
 
 function canonicalJson(value: unknown): string {
 	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -42,6 +43,7 @@ afterEach(() => {
 	globalThis.setTimeout = originalSetTimeout;
 	if (originalPiCodingAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = originalPiCodingAgentDir;
+	for (const root of settingsRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 beforeEach(() => {
@@ -106,6 +108,7 @@ async function runCodexProvider(
 
 function writeSettings(value: Record<string, unknown>): void {
 	const root = mkdtempSync(join(tmpdir(), "pi-codex-settings-"));
+	settingsRoots.push(root);
 	const agentDir = join(root, "agent");
 	const configDir = join(agentDir, "extensions", "pi-codex-minimal-tools");
 	mkdirSync(configDir, { recursive: true });

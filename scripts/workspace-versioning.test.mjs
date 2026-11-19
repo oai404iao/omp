@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
@@ -58,8 +58,8 @@ test("pin repair preserves exact dependency and optional dependency versions wit
 });
 
 for (const prerelease of [false, true]) {
-test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagates dependency and transitive optional releases`, async () => {
-  const f = await versioningFixture({ privateRuntime: true });
+test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagates dependency and transitive optional releases`, async t => {
+  const f = await versioningFixture(t, { privateRuntime: true });
   const { cwd, before, syncDependentChangesets, versionWorkspace, workspaceManifests } = f;
   const pre = command => {
     const result = spawnSync(join(cwd, "node_modules/.bin/changeset"), ["pre", command, ...(command === "enter" ? ["next"] : [])], { cwd, encoding: "utf8" });
@@ -107,13 +107,14 @@ test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagate
 });
 }
 
-async function versioningFixture({
+async function versioningFixture(t, {
   status = "publishable", private: isPrivate = false, locked = {},
   source = runtimeName, prerelease = false, existingChangelog = false, privateRuntime = false,
 } = {}) {
   const scratch = join(process.env.HOME, ".local/state/agents/tmp");
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const cwd = mkdtempSync(join(scratch, "omp-workspace-version-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, ".changeset"));
   mkdirSync(join(cwd, "release-locks"));
   mkdirSync(join(cwd, "scripts"));
@@ -171,7 +172,7 @@ async function versioningFixture({
 
 for (const source of [runtimeName, toolsName]) {
 test(`bootstrap preservation of ${source} release keeps the initial version and bumps consumers`, async t => {
-  const f = await versioningFixture({ status: "bootstrap", source, existingChangelog: source === runtimeName });
+  const f = await versioningFixture(t, { status: "bootstrap", source, existingChangelog: source === runtimeName });
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {
     calls.push({ url: String(url), options });
@@ -216,7 +217,7 @@ for (const failure of [
 ]) {
   test(`bootstrap preservation rejects ${failure} before writing anything`, async t => {
     const key = `${toolsName}@${fixtureManifests().get(toolsName).version}`;
-    const f = await versioningFixture({
+    const f = await versioningFixture(t, {
       status: failure === "blocked" ? "blocked" : "bootstrap",
       private: failure === "private",
       locked: failure === "locked" ? { [key]: {} }

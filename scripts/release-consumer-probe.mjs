@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 const job = JSON.parse(readFileSync(process.argv[2], "utf8"));
 globalThis.fetch = async () => { throw new Error("Network is forbidden in release loader probes"); };
 const sdkRoot = join(job.cwd, "node_modules/@earendil-works/pi-coding-agent");
-assert.ok(realpathSync(sdkRoot).startsWith(`${job.cwd}/`));
+assert.ok(realpathSync(sdkRoot).startsWith(`${realpathSync(job.cwd)}/`), `external link: ${sdkRoot}`);
 assert.equal(JSON.parse(readFileSync(join(sdkRoot, "package.json"))).version, job.version);
 const sdk = await import(pathToFileURL(join(sdkRoot, "dist/index.js")));
 assert.equal(sdk.VERSION, job.version);

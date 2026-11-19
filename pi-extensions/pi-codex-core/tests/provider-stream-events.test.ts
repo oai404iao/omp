@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
@@ -14,8 +14,9 @@ import { createProviderHarness, codexJwt } from "./support/openai-codex-test-sup
 import { startWebSocketServer, successEvents } from "./support/websocket-test-support.js";
 
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+let agentDir: string | undefined;
 beforeEach(() => {
-	const agentDir = mkdtempSync(join(tmpdir(), "pi-provider-events-"));
+	agentDir = mkdtempSync(join(tmpdir(), "pi-provider-events-"));
 	const configDir = join(agentDir, "extensions", "pi-codex-minimal-tools");
 	mkdirSync(configDir, { recursive: true });
 	writeFileSync(join(configDir, "config.json"), "{}");
@@ -26,6 +27,8 @@ afterEach(() => {
 	resetCodexWireState();
 	if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+	if (agentDir !== undefined) rmSync(agentDir, { recursive: true, force: true });
+	agentDir = undefined;
 });
 
 async function* source(events: StreamEventShape[]) {
