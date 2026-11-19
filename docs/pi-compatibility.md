@@ -9,40 +9,23 @@
 
 ## 当前支持范围
 
-| 角色 | 版本 | 用途 |
-| --- | --- | --- |
-| 支持下限 floor | 1.2.0 | 所有公开 Pi peer 均要求 `>=1.2.0` |
-| 开发目标 target | 1.4.0 | 根与工作区 devDependencies 精确固定 |
-
-不再支持 1.2.0 之前的 Pi，包括 0.99.1；没有旧 SDK 回退。
-版本变化见 [Pi v1.4.0 changelog](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/CHANGELOG.md)。
-Floor 重新生成 Pi 1.2.0 投影锁，target 使用提交的 Pi 1.4.0 根锁。
-每个 baseline 都运行包检查、composition 和 consumer smoke，不复用行为测试。Supply-chain release-age 例外只覆盖迁移明确选定的七个 Pi 1.2.0
-精确产物，其他检查及 integrity hashes 仍然有效。
+公开 Pi peer 要求 **`>=1.5.2`**；根与工作区开发依赖和 CI 只锁定验证 **Pi 1.5.2**。
+不支持更早版本，也不提供旧 SDK 回退；peer 范围允许安装更高版本，不表示这些版本已通过验证。
+宿主更新见 [Pi v1.5.2 发布记录](https://github.com/earendil-works/pi/releases/tag/v1.5.2)。
 
 <a id="commands"></a>
 
 ## 运行兼容检查
 
-在仓库根目录运行：
+使用 Node.js 24，在仓库根目录运行：
 
 ```bash
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm run ci
-pnpm run ci:pi-matrix
-# 或单独运行一种锁角色
-pnpm run ci:pi-floor
-pnpm run ci:pi-target
 ```
 
-Matrix 快照 **tracked 工作树文件**，包含已暂存新文件，但不复制任意 untracked 配置，
-也不会替调用者 stage 或 commit。新源码应先 stage，两次快照之间源文件必须保持不变。
-日志记录 Node、Pi 精确版本与 source SHA-256。可用 `OMP_PI_MATRIX_LOG_DIR` 指定独立日志集的父目录。
-
-每份副本有独立 `node_modules`；pnpm 链接只能留在 fixture 内，不能回指工作区或其他外部目录。
-Target 不改根 `pnpm-lock.yaml`。Floor 从根锁种子投影精确 floor dev pins，生成临时锁并干净安装，
-这一步可能读取 npm registry metadata，不保证离线生成锁。
-临时 fixture 锁不作为第二份项目锁提交。失败副本会移除但日志保留，任一角色失败则 matrix 失败，不自动重试。
+`ci` 校验实际解析的 SDK，并运行各包检查、跨包组合测试和隔离 tarball 消费者测试。
+消费者在独立目录安装，不能链接回工作区或其他外部目录。
 
 生产 consumer 使用已填充的 pnpm store：
 
@@ -58,29 +41,21 @@ pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-script
 
 | 场景 | 覆盖范围 |
 | --- | --- |
-| Pull request | Node 24 / target affected plan；policy 始终执行，包与 shared suites 分 job |
-| Main push / 手动运行 | Node 24 / target 全量；附加 Node 22.19.0 / floor 分层兼容检查 |
-| Node 24 / target consumer | PR 为 smoke，main/manual 为 exhaustive |
-| 附加 floor 角色 | 保留 snapshot/锁准备、实际 SDK、包 check、composition 与 consumer smoke |
-| 普通本地 baseline 命令 | 两种 Pi 角色分别用独立 tracked 快照执行分层兼容检查 |
+| Pull request | Node 24 affected 计划；policy 始终执行，包与 shared suites 分 job；消费者用 smoke |
+| Main push / 手动运行 | Node 24 全量计划与 exhaustive 消费者 |
 
-Canonical target job 使用提交的根锁和隔离 agent 目录，不多做一次 checkout 安装。
-四个既有 required contexts 汇总 plan 与所有所需工作，不表示 PR 额外跑过另外三个兼容组合。
-配置好 workflow 也不等于本次远端任务已经通过。
+验证使用根锁中的 Pi 1.5.2。分支保护要求 `Verification / Required` 汇总计划任务的结果。
 
-兼容副本不运行 policy 或发布基础设施测试；这些由 canonical target 的全量计划覆盖。
-Floor 仍保留投影锁、integrity 校验、冻结安装与实际 SDK 检查。
+<a id="pi-lifecycle-and-tool-contracts"></a>
 
-<a id="pi-12-lifecycle-and-tool-contracts"></a>
-
-## Pi 1.2 生命周期与工具
+## Pi 生命周期与工具
 
 | 边界 | 保留的契约 |
 | --- | --- |
 | `before_agent_start` | 覆盖 user 与 custom 触发，身份、prompt 跟踪和邮箱均处理；Telegram 自动通知只处理 user，custom 清除陈旧 prompt 摘要 |
 | `agent_settled` | 两类通知均抑制 aborted，包括 retry wait 取消但 final assistant 仍为 error；local 继续支持 custom 完成 |
 | 子代理工具上限 | 角色 `tools` 使用精确名或 `$mutation`，不是 CLI pattern 或 `+name`/`-name`；未授权 MCP/resource helpers、晚注册和恢复声明不能扩大权限 |
-| 子代理 model runtime | Provider、virtual router、runtime key 隔离；Pi 1.2 constructor adapter 保留 root baseline，但不共享可变 remote-catalog refresh wrappers |
+| 子代理 model runtime | Provider、virtual router、runtime key 隔离；后代通过私有构造器适配从 root baseline 创建，不共享可变 remote-catalog refresh wrappers |
 | 扩展继承 | 继承的扩展重建 child callbacks，临时中间注册不是后代 baseline；原生/custom providers 与 root-bound virtual routes 保留 |
 | 启动取消 | 使用 Pi pending abort，不从 `started` preflight 抛出；未交付 envelope 留待后续运行，不回滚 context receipts |
 | 工具展示与流 | Patch 使用 Pi 的标准工具容器；流使用记录 response duration 的 `AssistantMessageEventStream` |
@@ -148,9 +123,8 @@ OpenAI ChatGPT OAuth 和 API key 均遵循 Pi 原生认证/解析地址。
 请求增强与精确 endpoint capability allowlists 可配置；明确 unsupported 只禁用受影响 session/endpoint mode，
 不换凭证或 fallback 实现。详见[配置](configuration.md)。
 
-Pi 提供精确 OpenAI GPT-6 描述符，固定 0.99.1 与 1.2.0 catalogs 的这些 chat metadata 不变。
-1.4.0 target 的四个描述符仅增加 `compat.supportsMidConvoEffort`，没有修改模型限制、价格或本地 profiles；
-其独立[固定证据](../pi-extensions/pi-codex-runtime/provenance/pi-openai-140-gpt6.json)保留完整 catalog 与描述符 hash。
+Pi 提供 OpenAI GPT-6 描述符，OMP 不接管宿主模型目录。目录快照及其完整性记录见
+[runtime 来源映射](../pi-extensions/pi-codex-runtime/reference/source-map.md)；历史快照不定义当前支持的 Pi 版本。
 `openai/gpt-6.1-sol` 显式继承 `gpt-5.6-sol`：Lite、auto WS/SSE、prewarm、standalone web/image、
 custom patch、native Responses compaction、Fast（priority、2x 成本乘数）可用性。
 这是兼容策略，不证明端点权限或 Fast 价格。
@@ -158,7 +132,6 @@ custom patch、native Responses compaction、Fast（priority、2x 成本乘数�
 `openai/gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna` 使用 Standard SSE 与 local custom patch，
 默认不开搜索、图像生成、native 压缩、预热和 Fast。Standard reasoning clamps 委托 Pi，
 不替换 descriptors、limits 或 prices。
-[固定证据](../pi-extensions/pi-codex-runtime/provenance/pi-openai-120-gpt6.json)不证明真实账号或 Lite entitlement。
 未知 ID 保持 native；旧 `openai-codex` profiles 冻结，不新增 `openai-codex/gpt-6.1-sol`。
 
 SSE/WS 在归一化前向 Pi raw provider-event callback 转发事件，包括 terminal errors；合成 replay items 不是 raw events。
@@ -205,10 +178,8 @@ Grammar eligibility 同样使用有效 context。通知和 cleanup 保持 `agent
 
 ## 没有验证什么
 
-Main/manual 验证 Node 24.x / Pi target 1.4.0 与 Node 22.19.0 / Pi floor 1.2.0，
-并非 Node × Pi 的完整笛卡尔积。
-PR 合并前仅验证 Node 24/target，不代表已执行其他远端组合，更不覆盖所有未来 Node/Pi 版本。
-旧审计中的 0.84.2/0.85.1 等基线仅为历史记录。
+CI 仅覆盖 Node 24 和 Pi 1.5.2；包声明的 Node.js 最低版本仍为 22.19.0。
+旧审计中的基线仅为历史记录。
 
 常规 CI 不测试真实账号、计费端点、交互 UI 或发布。Core 协议快照是审查后的兼容契约，
 不是自动接受上游所有协议/模型变更。Live tests 独立且需显式授权。

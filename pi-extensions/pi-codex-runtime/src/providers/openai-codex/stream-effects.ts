@@ -1,4 +1,4 @@
-import type { AssistantMessage, AssistantMessageEventStream } from "@earendil-works/pi-ai/compat";
+import type { AssistantMessage, AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { StreamEventShape } from "./types.js";
 
 export interface ProviderEventContext {

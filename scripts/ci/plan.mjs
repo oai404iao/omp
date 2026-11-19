@@ -72,7 +72,7 @@ export function affectedPlan(paths, graphs, sourceSha) {
       }
       if (["scripts/verify-codex-installations.mjs", "scripts/codex-consumer-matrix.mjs",
         "scripts/codex-loader-probe.mjs", "scripts/subagent-consumer-probe.mjs",
-        "scripts/isolated-consumer-lock.mjs", "scripts/pnpm-lock.mjs", "scripts/pi-baselines.mjs"].includes(path)) {
+        "scripts/isolated-consumer-lock.mjs", "scripts/pnpm-lock.mjs", "scripts/pi-version.mjs"].includes(path)) {
         selectedSuites.add("consumers");
       }
     } else {

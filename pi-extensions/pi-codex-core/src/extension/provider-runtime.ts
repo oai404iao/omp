@@ -1,7 +1,6 @@
-import {
-	collapseSystemMessages, streamSimpleOpenAICodexResponses, streamSimpleOpenAIResponses,
-	type Api, type TranscriptContext, type Model, type SimpleStreamOptions,
-} from "@earendil-works/pi-ai/compat";
+import { collapseSystemMessages, type Api, type TranscriptContext, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+// Pi's extension loader maps pi-ai imports to a compatibility facade, which does not resolve API subpaths.
+import { streamSimpleOpenAICodexResponses, streamSimpleOpenAIResponses } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { installCodexIdentityLifecycle } from "@oai404iao/pi-codex-runtime/internal/codex-identity-extension";
 import { currentCodexTurn, resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";

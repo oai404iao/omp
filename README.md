@@ -5,8 +5,8 @@ Codex Responses 引擎、补丁与联网工具、多代理协作，以及 Telegr
 这是扩展集合与发布工作区，不是独立的代理应用。
 
 从[文档首页](docs/index.md)选择任务，或按[快速开始](docs/quickstart.md)从本地源码试用。
-当前支持的 Pi 下限为 **1.2.0**，开发目标为 **1.4.0**；仓库开发还需要 Node.js ≥22.19.0
-和 pnpm 12.4.1。
+要求 Pi **≥1.5.2**；[兼容性检查](docs/pi-compatibility.md)仅验证 **1.5.2**。仓库开发还需要
+Node.js ≥22.19.0 和 pnpm 12.4.1。
 
 <a id="packages"></a>
 
@@ -64,7 +64,7 @@ pnpm run check
 pnpm run ci
 ```
 
-修改 Pi 兼容性时还需 `pnpm run ci:pi-matrix`。
+使用 Node.js 24 运行检查，与 CI 保持一致。
 阅读[贡献指南](CONTRIBUTING.md)了解定向检查与 Changesets，阅读[发布指南](RELEASING.md)
 了解受保护发布和恢复流程。九个发布工作区的资格由 `scripts/workspaces.mjs` 管理；
 tools 首发及激活已完成，但后续消费者发布仍需单独授权、精确依赖验证与受保护调度。

@@ -9,16 +9,14 @@ function registryArtifacts(lock) {
 }
 
 /** Preserve reviewed hashes using exact tarball URL and version, never a range. */
-export function preserveRegistryIntegrity(previous, next, reviewedArtifacts = []) {
+export function preserveRegistryIntegrity(previous, next) {
   const known = new Map();
-  const previousArtifacts = registryArtifacts(previous).map(entry => ({
-    ...entry, integrity: entry.resolution.integrity,
-  }));
-  for (const entry of [...previousArtifacts, ...reviewedArtifacts]) {
-    if (!entry.resolved || !entry.integrity) continue;
+  for (const entry of registryArtifacts(previous)) {
+    const { integrity } = entry.resolution;
+    if (!integrity) continue;
     const key = `${entry.resolved}\0${entry.version}`;
-    if (known.has(key) && known.get(key) !== entry.integrity) throw new Error("Conflicting locked artifact integrity");
-    known.set(key, entry.integrity);
+    if (known.has(key) && known.get(key) !== integrity) throw new Error("Conflicting locked artifact integrity");
+    known.set(key, integrity);
   }
   const artifacts = registryArtifacts(next);
   // Reuse evidence for the same artifact even when it has another package key.

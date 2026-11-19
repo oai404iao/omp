@@ -159,8 +159,8 @@ composition 和 consumer 套件。独立 Telegram 发布无需重跑无关 Codex
 只读 publish 验证 job 用 `actions: read` 查询规范 GitHub CI。仅当发布 SHA 的**最新
 main push run／attempt**成功，且以下全部完成，才允许复用源码行为结果：
 
-- 全部包 job、3 个共享套件、Node 22.19.0 / floor 附加兼容角色；
-- 4 个既有 aggregate contexts 和 `Trusted main coverage / v1`；
+- 全部包 job 和 3 个共享套件（Node 24、Pi 1.5.2，使用根锁）；
+- `Verification / Required` 和 `Trusted main coverage / v1`；
 - `.github/workflows/ci.yml` 的内容匹配 `scripts/ci/trusted-main.mjs` 固定的已审阅 SHA-256；
 - API 完整分页、repository／head 身份、每个 job 的 run／attempt／SHA 均一致；live main 仍等于发布 SHA。
 
@@ -185,7 +185,7 @@ pnpm run release:verify-installations release-artifacts/manifest.json
 | `verify`／`recover` 候选 | 使用核实 registry identity 和 SHA-512 后获取的不可变 npm archive，不能替换成 checkout 重打包 |
 | 依赖契约 | 从各候选 source commit 读取 manifest；历史依赖／peer 必须适配审阅后的根锁，外部前置条件缺失或不符就停止 |
 | 消费者 | 将已核实 archive 加入现有 store；投影 frozen lock、离线安装、禁用生命周期脚本；运行消费者自己的 Pi SDK loader，并禁用网络 |
-| 组合覆盖 | 每个候选闭包、组合和反向加载、bundle inline exports；任何链接不得逃出消费者 |
+| 组合覆盖 | 每个候选闭包、组合和反向加载、runtime 公共导出；任何链接不得逃出消费者 |
 
 `consumer-verification.json` 将 manifest、source commits、artifact hashes 与消费者绑定。
 结束时再检查制品字节；上传和受保护 job 都验证 receipt 与待发 tarball hash。
@@ -193,7 +193,7 @@ pnpm run release:verify-installations release-artifacts/manifest.json
 
 源码构建的 `test:codex-packages` 是额外覆盖，不能证明历史 npm payload。
 此流程不放宽 ancestry、精确 pin、不可变 lock、dist-tag／恢复规则、审批、OIDC 分离
-或依赖优先串行发布要求。普通 CI 的 affected／target／floor 及复用契约见
+或依赖优先串行发布要求。普通 CI 的检查范围及复用契约见
 [贡献指南](CONTRIBUTING.md#remote-ci-scope)。
 
 <a id="recovery"></a>
@@ -274,10 +274,9 @@ Notify 首发身份和激活前置条件见[核验记录](docs/audits/pi-notify-
 所有未来发布仍须手动 dispatch 和维护者审批。配置读回不证明实际 OIDC 发布成功；
 不能为了验证配置而虚构或覆盖版本。
 
-公共和支持包的 peer 下限为 Pi 1.2.0，精确开发目标为 1.4.0。
-开放上界是有意的前向兼容策略，不是已验证所有未来 Pi 版本；新基线须经 CI 验证，
-发现不兼容时收紧范围。更新基线要同步开发依赖、peer、锁、说明和测试，并运行
-`pnpm run ci:pi-matrix` 检查实际 SDK 解析。详见 [Pi 兼容性](docs/pi-compatibility.md)。
+公共和支持包的 peer 下限为 Pi 1.5.2；开发和 CI 只验证 Pi 1.5.2。开放上界不是对更高 Pi
+版本的兼容认证。更新基线要同步开发依赖、peer、锁、说明和测试，并运行 `pnpm run ci`
+验证实际 SDK 和独立消费者。详见 [Pi 兼容性](docs/pi-compatibility.md)。
 
 <a id="npm-bootstrap-and-trusted-publishing"></a>
 ## 新包的一次性 bootstrap 与 trusted publishing

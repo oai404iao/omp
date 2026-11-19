@@ -28,9 +28,18 @@ test("bootstrap batches require included dependencies and exact pins", () => {
   assert.throws(() => assertReleaseDependencies(entries, entries, e => manifests[e.name]), /exactly pinned/);
 });
 
-test("the compatibility bundle cannot exclude its activated dependencies", () => {
-  const bundle = workspaces.find(e => e.name === "@oai404iao/pi-codex-minimal-tools");
-  assert.throws(() => assertReleaseDependencies([bundle]), /outside this artifact batch.*pi-codex-runtime/);
+test("the bundle requires core, tools, and their transitive runtime", () => {
+  const [bundle, core, tools, runtime] = ["minimal-tools", "core", "tools", "runtime"].map(short =>
+    workspaces.find(e => e.name === `@oai404iao/pi-codex-${short}`));
+  for (const dependency of [core, tools]) {
+    assert.throws(() => assertReleaseDependencies([bundle, core, tools, runtime].filter(e => e !== dependency)), {
+      message: `Workspace dependency is outside this artifact batch: ${bundle.name} -> ${dependency.name}`,
+    });
+  }
+  assert.throws(() => assertReleaseDependencies([bundle, core, tools]), {
+    message: `Workspace dependency is outside this artifact batch: ${bundle.name} -> ${core.name} -> ${runtime.name}`,
+  });
+  assert.doesNotThrow(() => assertReleaseDependencies([bundle, core, tools, runtime]));
 });
 
 test("the verified Codex packages, including tools, enter dependency-complete guarded batches", () => {

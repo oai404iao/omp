@@ -1,4 +1,4 @@
-import { type Api, type AssistantMessage, type Model } from "@earendil-works/pi-ai/compat";
+import { type Api, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
 import { buildProviderErrorMessage, ProviderResponseError } from "./errors.js";
 
 export function createInitialAssistantMessage<TApi extends Api>(model: Model<TApi>): AssistantMessage {

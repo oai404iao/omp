@@ -8,9 +8,8 @@
 | --- | --- |
 | [core](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-core#readme) | Standard/Lite Responses、SSE/WS、预热、原生压缩、诊断和 Fast 命令 |
 | [tools](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-tools#readme) | `apply_patch`、`web_search`、`image_generation`，含执行、显示与 `/image-gen` |
-| [runtime](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-runtime#readme) | 共享配置、schemas、精确模型目录、身份和会话 broker |
 
-包名、默认扩展工厂和 `@oai404iao/pi-codex-minimal-tools/subagent-inline` 保持支持。要求 Node.js ≥22.19.0；Pi peer 下限为 **1.2.0**，开发验证目标为 **1.4.0**。
+要求 Node.js ≥22.19.0、Pi ≥1.5.2；仅验证 Pi 1.5.2。
 
 ## 安装与开始使用
 
@@ -68,14 +67,7 @@ patch 声明生效时隐藏所选 Pi `edit`/`write` 的模型声明，但不移�
 
 启用原生 codemode/tool-search 时，core 跳过推测 WS 预热。没有原生 checkpoint 时可退回 Pi 文本压缩；已有不透明 checkpoint 时保留并拒绝重压缩。禁用两个编排工具后在原模型重试 `/compact`，或导航回 checkpoint 之前。
 
-SDK 公共入口保留：
-
-```typescript
-import { createCodexSubagentInlineExtension } from
-  "@oai404iao/pi-codex-minimal-tools/subagent-inline";
-```
-
-它再导出 runtime 的身份/Fast 继承集成，不加载完整组合包。可传 `parentSessionManager`，`openAIIdentity:false` 关闭 wire 身份集成但不关闭 Fast 继承。接入例子见 [runtime](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-runtime#readme)。
+SDK 创建子会话时，直接依赖 `@oai404iao/pi-codex-runtime`，并从它的 `./subagent-inline` 入口导入身份与 Fast 继承集成。见 [runtime 接入示例](https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-codex-runtime#readme)。
 
 <a id="configuration-and-installation"></a>
 

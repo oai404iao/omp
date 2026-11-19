@@ -19,7 +19,7 @@ for (const count of [2, 8]) {
 
 test("explicit application agentDir overrides conflicting child-process environment through reload and cold resume", t => {
 	const result = spawnSync(process.execPath, [resolve(import.meta.dirname, "support/cold-loader.mjs"),
-		tempRoot(t), "2", "", "", "explicit"],
+		tempRoot(t), "2", "explicit"],
 		{ encoding: "utf8", timeout: 90000, env: subprocessEnv });
 	assert.equal(result.status, 0, `${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
 });

@@ -5,7 +5,7 @@
 
 这是**异步多代理树**，不是调用后等待完整答案的同步 runner。实现独立适配 Codex
 multi-agent v2，工具参数使用普通明文 JSON，不使用加密参数。
-要求 Node.js ≥22.19.0、Pi ≥1.2.0；开发目标为 Pi 1.4.0。
+要求 Node.js ≥22.19.0、Pi ≥1.5.2；仅验证 Pi 1.5.2。
 
 <a id="install"></a>
 
@@ -99,7 +99,7 @@ codemode 或嵌套工具执行。
 不要把它当成正在执行任务时的热更新。
 
 SDK 宿主通过 inline factory 加载时，可调用 `subagentExtension(pi, { agentDir })`
-显式传入与 `createAgentSessionServices` 相同的目录。Pi 1.2–1.4 的扩展上下文不暴露该目录；
+显式传入与 `createAgentSessionServices` 相同的目录。Pi 扩展上下文不暴露该目录；
 仅给 SDK 服务传 `agentDir` 不会自动传给此扩展。普通扩展加载仍使用 Pi 的 `getAgentDir()`。
 
 完整默认配置：
@@ -475,7 +475,7 @@ Pi 不持久保存嵌套工具输出：活跃时可能可见，卸载或重启�
 代理的临时注册。子代理专属模型/路由须由继承扩展重建；选中模型缺失会明确失败。
 根的远程/个性化目录是快照，不是共享可变刷新包装器。
 
-Pi 1.2 私有运行时构造器适配集中在 [`src/model-runtime.ts`](src/model-runtime.ts)，
+模型运行时隔离使用的 Pi 私有构造器适配集中在 [`src/model-runtime.ts`](src/model-runtime.ts)，
 SDK 布局不兼容时失败，不回退到共享可变运行时。
 
 ### 文件布局与写入保证
@@ -512,9 +512,8 @@ Pi 进程同时控制同一棵树。
 旧树身份、收件箱、运行或待办任务。复制的树标记和 `parentSession` 不授予旧树控制权。
 新树执行前会收到权威英文上下文，说明旧路径属于旧树，必须重新 spawn。
 
-Pi 1.2.0 的 `/clone` 使用 `fork(leafId,{position:"at"})`，没有专用 clone 事件。
-判断基于会话身份/头部，不依赖事件 reason，不改写或反复追加复制历史。另一个独立进程
-派生历史不会停止原进程。
+判断 fork 或 clone 基于会话身份/头部，不依赖事件 reason，不改写或反复追加复制历史。
+另一个独立进程派生历史不会停止原进程。
 
 <a id="breaking-migration"></a>
 
@@ -578,7 +577,6 @@ Codex 跟踪基线为 `551bd409ebf03fc6ea0dcad0915368d8a493f012`（2026-10-06 �
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm --filter @oai404iao/pi-subagent run check
 pnpm run ci
-pnpm run ci:pi-matrix
 ```
 
 测试使用本地脚本模型和真实 Pi SDK 运行时，不使用真实模型凭据。测试通过不能证明实时

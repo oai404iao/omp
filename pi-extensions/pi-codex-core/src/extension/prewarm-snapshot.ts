@@ -1,4 +1,4 @@
-import { type Context, type ModelThinkingLevel } from "@earendil-works/pi-ai/compat";
+import { type Context, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { thinkingLevelFromUnknown } from "../providers/openai-codex/reasoning.js";
 import { activeToolSnapshot } from "./tool-snapshot.js";

@@ -348,8 +348,7 @@ export function registerNativeCompaction(
 			return {
 				compaction: {
 					summary: `${compactionSummary()}\n[native-checkpoint:${checkpointId}]`,
-					// Pi 0.87 appendCompaction supports null (retain-none); the
-					// CompactionResult declaration still incorrectly requires string.
+					// Pi persists null as retain-none, but the compaction hook requires a string type.
 					firstKeptEntryId: null as unknown as string,
 					tokensBefore: event.preparation.tokensBefore,
 					details: {

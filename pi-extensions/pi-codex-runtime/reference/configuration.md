@@ -3,7 +3,7 @@
 Codex-specific Responses support for Pi, driven by an exact per-model JSON
 catalog instead of model-name heuristics.
 
-Peer floor and development target: Pi 0.99.1.
+See [Pi compatibility](../../../docs/pi-compatibility.md) for the host baseline.
 
 > `@oai404iao/pi-codex-minimal-tools` is a composition-only package.
 > Runtime owns shared configuration and schemas; core, web-search and imagegen
@@ -47,10 +47,9 @@ Runtime owns Codex wire identity independently from Pi's session-file id:
 SSE, Responses Lite, WebSocket, native compaction, and standalone `web.run`
 are projections of the same request identity snapshot.
 
-The composition package also exports
-`@oai404iao/pi-codex-minimal-tools/subagent-inline`. Its named inline
-extension installs only identity lifecycle hooks for SDK-created child
-sessions; it does not register providers, tools, commands, or renderers.
+The inline extension from `@oai404iao/pi-codex-runtime/subagent-inline`
+installs identity and Fast lifecycle hooks for SDK-created child sessions;
+it does not register providers, tools, commands, or renderers.
 
 ## Install
 
@@ -479,9 +478,10 @@ actually in use.
 
 `openai-codex/gpt-6-sol` and `openai-codex/gpt-6-luna` use separately verified
 Lite profiles: developer placement, custom patch, standalone web/image,
-parallel calls disabled on the wire, and no reasoning summary. Pi 0.87.1 supplies
-their descriptors and `off -> none` mapping; no `ultra`, larger context,
-pricing multiplier or public-API cache TTL is inferred. Fast mode is disabled.
+parallel calls disabled on the wire, and no reasoning summary. Historical Pi
+0.87.1 evidence supplies the original descriptors and `off -> none` mapping;
+no `ultra`, larger context, pricing multiplier or public-API cache TTL is
+inferred. Fast mode is disabled.
 See `provenance/openai-codex-40eac3ce-sol-luna.json`. Source/fixture verification
 does not establish that a particular account can access these endpoints.
 

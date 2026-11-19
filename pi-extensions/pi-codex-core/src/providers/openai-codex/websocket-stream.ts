@@ -1,4 +1,4 @@
-import { type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import { type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { type CitationSource, type WebSearchCitationSource } from "@oai404iao/pi-codex-runtime/internal/providers/responses/types";
 import { webSocketCacheKey } from "./cache-key.js";
 import { processCapturedResponsesStream } from "./captured-stream.js";

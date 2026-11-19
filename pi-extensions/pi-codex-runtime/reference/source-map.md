@@ -53,7 +53,7 @@ locked Pi package supplies the audited bytes. It verifies exact chat model
 IDs, Standard Responses, grammar compatibility and image input, not Codex
 Lite or hosted/standalone service entitlements.
 
-The floor SDK catalog is pinned separately in
+The historical Pi 1.2.0 catalog is pinned separately in
 `provenance/pi-openai-120-gpt6.json` at Pi 1.2.0 revision
 `06a466935536f8c9bcacb2d5efc0fc021be1bdff`. Its four selected chat descriptors
 are unchanged; the complete catalog also contains a separate Decisions
@@ -63,11 +63,16 @@ root-exported thinking-level clamp. Pi's extension loader aliases the AI root,
 so core does not import that subpath. The original 0.99.1 source/catalog record
 remains historical evidence, not the installed baseline.
 
-The Pi 1.4.0 development target is recorded in
+The former Pi 1.4.0 development target is recorded in
 `provenance/pi-openai-140-gpt6.json` at revision
 `4a080252f06caf63a525d7873c5d94d3c23887e0`. Its selected chat descriptors
 add only `compat.supportsMidConvoEffort`; limits, costs and thinking maps are
-unchanged. The floor evidence and local profile selections remain intact.
+unchanged. The historical evidence and local profile selections remain intact.
+
+The [Pi 1.5.2 evidence](../provenance/pi-openai-152-gpt6.json) records the exact
+installed catalog and its registry archive. The catalog bytes match the
+[Pi 1.5.0 snapshot](../provenance/pi-openai-150-gpt6.json); the host baseline
+update does not change model profiles or infer new provider capabilities.
 
 | Source | Evidence |
 | --- | --- |
@@ -275,7 +280,8 @@ when auditing or modifying code. Paths below are relative to each owner's
 | Image capture, persistence, display | pi-codex-tools | `tools/image-generation/`, `utils/images.ts` |
 | Search client, schema and capture | pi-codex-tools | `tools/web-search.ts`, `tools/web-search/` |
 | Provider lifecycle and prewarm | pi-codex-core | `extension/{provider-runtime,startup-prewarm}.ts` |
-| Default composition | pi-codex-minimal-tools | root `index.ts`, `subagent-inline.ts` |
+| Default composition | pi-codex-minimal-tools | root `index.ts` |
+| Inline child session identity and Fast inheritance | pi-codex-runtime | `src/subagent-inline.ts` |
 
 Behavioral tests live in each owner's `tests/`; cross-capability activation,
 presentation and composition tests live in repository-root `tests/codex/`.

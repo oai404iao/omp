@@ -3,9 +3,9 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { clampThinkingLevel, getCurrentTools, getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import {
 	createAgentSessionFromServices, createAgentSessionRuntime, createAgentSessionServices,
-	createCodemodeExtension, createToolSearchExtension, ModelRuntime, SettingsManager,
+	createCodemodeExtension, createToolSearchExtension, SettingsManager,
 	type AgentSessionRuntime, type CreateAgentSessionRuntimeFactory, type ExtensionFactory,
-	type InlineExtension, type ModelRegistry, type SessionManager, type ToolDefinition,
+	type InlineExtension, type ModelRegistry, type ModelRuntime, type SessionManager, type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { buildToolCeiling, buildToolExclusions, resolveToolPolicy } from "./tool-policy.ts";
 import { TOOL_NAMES } from "./schemas.ts";
@@ -17,17 +17,16 @@ import type { CodexIntegration } from "./codex-integration.ts";
 
 export { SelectionPersistenceError } from "./providers.ts";
 
-// Pi exposes ModelRegistry in extension contexts, while SDK factories
-// accept ModelRuntime. Keep this compatibility boundary isolated here.
+// Pi exposes ModelRegistry in extensions but has no public runtime accessor.
+// Use its known own field and validate by shape: Pi's bundled host and extension SDK can be distinct modules.
 export function runtimeFromRegistry(registry: ModelRegistry): ModelRuntime {
-	for (const value of Object.values(registry as unknown as Record<string, unknown>)) {
-		if (value instanceof ModelRuntime) return value;
-		if (value && typeof value === "object" &&
-			typeof (value as ModelRuntime).getModel === "function" &&
-			typeof (value as ModelRuntime).streamSimple === "function" &&
-			typeof (value as ModelRuntime).getAuth === "function") return value as ModelRuntime;
+	const runtime = Object.getOwnPropertyDescriptor(registry, "runtime")?.value as Partial<ModelRuntime> | undefined;
+	if (runtime && typeof runtime === "object" &&
+		(["getModel", "getModels", "getAllModels", "getAvailable", "streamSimple", "getAuth"] as const)
+			.every(method => typeof runtime[method] === "function")) {
+		return runtime as ModelRuntime;
 	}
-	throw new Error("pi-subagent requires Pi 1.2.0's active ModelRuntime");
+	throw new Error("pi-subagent cannot access ModelRegistry.runtime: unsupported Pi SDK layout");
 }
 
 export function resolveModel(runtime: ModelRuntime, parent: Model<any> | undefined, override?: string): Model<any> {

@@ -18,7 +18,7 @@
 | `pi-codex-tools` | 分开的 patch、web-search、standalone imagegen 模块，含 grammar、执行与展示 | runtime |
 | `pi-codex-web-search` | 只加载搜索的兼容入口 | tools |
 | `pi-codex-imagegen` | 只加载图像生成的兼容入口 | tools |
-| `pi-codex-minimal-tools` | 默认完整组合与公开 `subagent-inline` 转导出 | runtime、core、tools |
+| `pi-codex-minimal-tools` | 默认完整组合 | core、tools |
 
 在仓库根目录试用完整组合：
 
@@ -38,7 +38,7 @@ Core 不注册三类工具，也不加载图像存储或搜索展示实现；保
 
 包发布 TypeScript 源码，供 Pi/TS-aware loader 使用，不承诺 plain Node 可直接导入。
 `./internal/*` 仅服务内部装配与 owner tests，不是稳定公共 API。
-旧组合包的公开 `./subagent-inline` 保留，转发 runtime 同名 subpath。
+SDK 子会话集成直接使用 `@oai404iao/pi-codex-runtime/subagent-inline`。
 
 <a id="model-and-configuration-behavior"></a>
 
@@ -158,7 +158,7 @@ pnpm run check:architecture
 根 `tests/codex/` 负责跨包集成与纯组合边界，不在 bundle 重复实现/测试行为。
 架构检查覆盖 type/re-export edges、循环、跨包导出路径、精确依赖和禁止的 optional/peer edges。
 
-`test:codex-packages` 将六个 Codex 包打包，在临时 consumer 内使用自身真实 Pi SDK/loader，
+`test:codex-packages` 将六个 Codex 包及 subagent 打包，在临时 consumer 内使用自身真实 Pi SDK/loader，
 覆盖 runtime、各能力、两两/全部组合、bundle、重复和逆序加载、不同物理 runtime 副本、shutdown/reload。
 所有 Codex 代码来自 tarball，不得回链源码；standalone auth/HTTP 是固定 fixture，不触真实端点。
 
@@ -172,10 +172,11 @@ pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-script
 pnpm 内部链接包括可执行链接只能留在 consumer 内，不能指向 checkout 或其他外部目录。
 `--trust-lockfile` 仅跳过 registry-metadata policy 复查，不跳过冻结锁与完整性。
 
-默认为 exhaustive。远端 Node 24/target 选中时运行完整组合矩阵，其他兼容腿用
-`OMP_CODEX_CONSUMER_MODE=smoke`：仍打包六包、离线隔离安装 bundle、校验链接和 inline re-export，
-并以真实 SDK/loader 加载 core 与所有工具；不覆盖其余组合、逆序/重复加载扫描及配置掩码。
-未知模式失败。普通本地 CI 和 baseline 命令不默认降为 smoke。
+`test:codex-packages` 与普通本地 `ci` 默认为 exhaustive；远端 Node 24 的 main/manual 检查也
+运行完整组合。PR 的 affected 计划选中消费者时，使用
+`OMP_CODEX_CONSUMER_MODE=smoke`：仍打包同一批包，校验隔离安装、链接与 runtime 集成，
+并以真实 SDK/loader 加载 core 与所有工具，但不运行完整组合、加载顺序与配置掩码扫描。
+两种模式均使用锁定的 Pi 1.5.2；未知模式失败。
 
 Live 测试与 CI 分开，需显式授权和 `--execute provider/model`，不要为检查文档而运行。
 协议依据见 [reference 索引](../pi-extensions/pi-codex-runtime/reference/README.md)、

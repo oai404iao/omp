@@ -20,7 +20,6 @@ export function verifyAggregate({ plan, needs, event, sha, requireFull = false }
     expect(key, selected.length > 0 ? "success" : "skipped");
   }
   assert.equal(needs.plan.outputs.full, String(plan.full), "full coverage output differs from plan");
-  expect("compatibility", event === "pull_request" ? "skipped" : "success");
   if (event !== "pull_request" || requireFull) {
     assert.equal(plan.mode, "full", "main/manual CI requires the full verification plan");
     assert.equal(plan.full, true, "full coverage is required");

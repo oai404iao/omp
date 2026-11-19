@@ -9,7 +9,7 @@ package-specific ownership and invariants are documented there.
 
 Run commands from the repository root unless stated otherwise.
 
-- Use Node.js >=22.19.0 and the pinned pnpm 12.4.1 (`package.json`).
+- Verify with Node.js 24 and the pinned pnpm 12.4.1 (`package.json`).
 - Install with `pnpm install --frozen-lockfile --ignore-scripts`.
 - `pnpm-workspace.yaml` defines the release workspaces. Tools has completed
   bootstrap activation and uses guarded publishing. The root `pnpm-lock.yaml`
@@ -30,7 +30,6 @@ Run commands from the repository root unless stated otherwise.
 | Test isolated Codex tarball consumers | `pnpm run test:codex-packages` |
 | Test release infrastructure | `pnpm run test:release-scripts` |
 | Complete verification before a PR | `pnpm run ci` |
-| Additional Pi compatibility verification | `pnpm run ci:pi-matrix` |
 
 Use affected checks during development; `ci` already includes the ordinary
 architecture, package, composition, release-script and license checks.
@@ -39,10 +38,7 @@ store; a missing artifact is a prerequisite failure, not permission to weaken
 isolation or fetch an unlocked replacement.
 
 For Pi compatibility changes, read [docs/pi-compatibility.md](docs/pi-compatibility.md).
-Also run `pnpm run ci:pi-matrix` for those changes.
-The current peer floor is Pi 1.2.0; the exact development target is Pi 1.4.0.
-The matrix snapshots tracked working-tree files: stage new source files before
-running it so they are included. Its floor preparation may access the registry.
+The full `ci` command verifies the resolved SDK and isolated consumers.
 Fixture success does not establish real endpoint access or account entitlement.
 Live model tests are separate from CI; do not run them without explicit authorization.
 
@@ -54,9 +50,8 @@ Live model tests are separate from CI; do not run them without explicit authoriz
   `pi-codex-tools` owns patch, web search and standalone image generation in
   separate internal modules. Both depend only on runtime, never each other.
   The old web-search/imagegen packages are selective compatibility entries into tools.
-- `pi-codex-minimal-tools` is pure composition plus the public
-  `./subagent-inline` re-export. Do not restore a monolith or duplicate schemas,
-  fixtures or implementations there.
+- `pi-codex-minimal-tools` is pure core/tools composition. Do not restore a
+  monolith or duplicate schemas, fixtures or implementations there.
 - Behavioral tests belong with their implementation owner. Cross-capability
   integration and neutral fixtures belong in `tests/codex/`, not owner tests
   that import another capability.

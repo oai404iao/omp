@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/earendil-works/pi",
+    "revision": "b4afdddf44e059c67ccf5097e5317d913521b470",
+    "tag": "v1.5.2",
+    "license": "MIT"
+  },
+  "catalogReference": {
+    "package": "@earendil-works/pi-ai",
+    "version": "1.5.2",
+    "path": "dist/providers/data/openai.json",
+    "sha256": "df2fe1f312051bbe29801ef903ab370c701a74a680f1370e96eb465eacd1d82d",
+    "fields": ["type", "id", "api", "input", "thinkingLevelMap", "contextWindow", "maxTokens", "compat"],
+    "tarball": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-1.5.2.tgz",
+    "integrity": "sha512-2tWPSnV3qzfiDIY3aWluBag3vC++Vs+VsXt/UquSU5onPMohPih72FUhIhaqmDdMYubOgB3Byl9uF4Vk40JLvQ=="
+  },
+  "models": ["openai/gpt-6.1-sol", "openai/gpt-6-astra", "openai/gpt-6-sol", "openai/gpt-6-luna"],
+  "chatDescriptorSha256": {
+    "gpt-6.1-sol": "1ce2a36d07f0b2777b6560235a19332a5018cae3e50417421118d5192c9890b0",
+    "gpt-6-astra": "d09330729cea10ff2f64a7014b41509c5c770b461db39549d2df3d2430e885fc",
+    "gpt-6-sol": "4d122f11bd9d209305a9251e150693025c49d1a413bca1aefc094fd78619bc4e",
+    "gpt-6-luna": "bca3e402716ebf6b03d677ba8a966f22a5ceec8993921e66ea619a92379248ab"
+  },
+  "decisions": [
+    "The complete OpenAI catalog shipped in Pi 1.5.2 is byte-for-byte identical to Pi 1.5.0, including the four selected chat descriptors and the separate Decisions classifier.",
+    "The existing catalog entries for other models, including gpt-6.1-terra, do not create Codex extension profiles."
+  ],
+  "limits": [
+    "Integrity-verified package and catalog evidence, not account access, endpoint acceptance or verified Fast pricing.",
+    "No new model profiles or endpoint capabilities are inferred."
+  ],
+  "localImplementations": ["pi-codex-runtime/src/model-catalog/default-models.json"]
+}

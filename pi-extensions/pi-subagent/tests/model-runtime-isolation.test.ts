@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { InMemoryCredentialStore, InMemoryModelsStore, type Model, type Provider } from "@earendil-works/pi-ai";
 import {
-	createAgentSessionFromServices, createAgentSessionServices, ModelRuntime, SessionManager, SettingsManager,
+	createAgentSessionFromServices, createAgentSessionServices, ModelRegistry, ModelRuntime, SessionManager, SettingsManager,
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { createChildModelRuntime } from "../src/model-runtime.ts";
+import { runtimeFromRegistry } from "../src/runtime.ts";
 import { deferred, stream, usage } from "./support/fixture.ts";
 
 const modelDefinition = {
@@ -21,6 +22,19 @@ async function rootRuntime() {
 	const runtime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false });
 	return { runtime, credentials };
 }
+
+test("the registry exposes its own runtime across SDK module instances, without guessing other fields", async () => {
+	const entry = import.meta.resolve("@earendil-works/pi-coding-agent");
+	const { ModelRegistry: HostRegistry } = await import(new URL("./core/model-registry.js?host", entry).href) as { ModelRegistry: typeof ModelRegistry };
+	const { ModelRuntime: HostRuntime } = await import(new URL("./core/model-runtime.js?host", entry).href) as { ModelRuntime: typeof ModelRuntime };
+	const runtime = await HostRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: false });
+	const registry = new HostRegistry(runtime);
+	assert.notEqual(HostRuntime, ModelRuntime);
+	assert.notEqual(HostRegistry, ModelRegistry);
+	assert.equal(runtimeFromRegistry(registry), runtime);
+	assert.throws(() => runtimeFromRegistry({ other: runtime } as unknown as ModelRegistry), /unsupported Pi SDK layout/);
+	assert.throws(() => runtimeFromRegistry({ runtime: {}, other: runtime } as unknown as ModelRegistry), /unsupported Pi SDK layout/);
+});
 
 function register(runtime: ModelRuntime, text: string) {
 	runtime.registerProvider("scripted", {

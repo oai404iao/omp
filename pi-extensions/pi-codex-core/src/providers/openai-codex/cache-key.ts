@@ -1,4 +1,4 @@
-import { type Api, type Model } from "@earendil-works/pi-ai/compat";
+import { type Api, type Model } from "@earendil-works/pi-ai";
 import type { ProviderEnv } from "@earendil-works/pi-ai";
 import { proxyForWebSocketUrl } from "./proxy.js";
 

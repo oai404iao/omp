@@ -1,4 +1,4 @@
-import { type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import { type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { BASE_DELAY_MS, MAX_RETRIES, DEFAULT_WEBSOCKET_STREAM_MAX_RETRIES, MAX_WEBSOCKET_STREAM_MAX_RETRIES, PREVIOUS_RESPONSE_NOT_FOUND_CODE, WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE, WEBSOCKET_RETRY_BASE_DELAY_MS, WEBSOCKET_RETRY_MAX_DELAY_MS } from "./constants.js";
 import { NonRetryableProviderError, ProviderProtocolError, ProviderResponseError, WebSocketHandshakeError, isRetryableError, isTerminalQuotaError } from "./errors.js";
 

@@ -4,7 +4,7 @@ import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFil
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify } from "yaml";
-import { piVersion } from "./pi-baselines.mjs";
+import { piVersion } from "./pi-version.mjs";
 import { writePnpmLock } from "./pnpm-lock.mjs";
 import { releaseConsumerCases, releaseConsumerLock } from "./release-consumer-lock.mjs";
 import { root } from "./workspaces.mjs";
@@ -57,7 +57,7 @@ export function installConsumers(candidates, manifests, artifacts, sourceLock, d
       assert.equal(installed.gitHead, candidates.find(c => c.name === name).sourceCommit);
     }
     const job = join(cwd, "loader-job.json");
-    writeFileSync(job, JSON.stringify({ cwd, version: piVersion(), manifests: Object.fromEntries(manifests),
+    writeFileSync(job, JSON.stringify({ cwd, version: piVersion, manifests: Object.fromEntries(manifests),
       orders: item.requested.length > 1 ? [item.requested, [...item.requested].reverse()] : [item.requested] }));
     runner(process.execPath, [fileURLToPath(new URL("./release-consumer-probe.mjs", import.meta.url)), job], cwd, env);
     if (item.included.has("@oai404iao/pi-codex-runtime")) {
@@ -80,15 +80,6 @@ assert.equal(runtime.CODEX_BROKER_CHANNEL, "@oai404iao/pi-codex:broker");
 assert.equal(runtime.CODEX_RUNTIME_VERSION, ${JSON.stringify(manifests.get("@oai404iao/pi-codex-runtime").version)});
 assert.equal(typeof inline.createCodexSubagentInlineExtension, "function");
 assert.equal(typeof inline.CODEX_IDENTITY_CUSTOM_TYPE, "string");`);
-      runner(join(root, "node_modules/.bin/tsx"), [smoke], cwd, env);
-    }
-    if (item.included.has("@oai404iao/pi-codex-minimal-tools")) {
-      const smoke = join(cwd, "inline-smoke.mts");
-      writeFileSync(smoke, `import assert from "node:assert/strict";
-import * as bundle from "@oai404iao/pi-codex-minimal-tools/subagent-inline";
-import * as runtime from "@oai404iao/pi-codex-runtime/subagent-inline";
-assert.deepEqual(Object.keys(bundle).sort(), ["CODEX_IDENTITY_CUSTOM_TYPE", "createCodexSubagentInlineExtension"]);
-assert.equal(bundle.createCodexSubagentInlineExtension, runtime.createCodexSubagentInlineExtension);`);
       runner(join(root, "node_modules/.bin/tsx"), [smoke], cwd, env);
     }
     assertContainedTree(join(cwd, "node_modules"), cwd);

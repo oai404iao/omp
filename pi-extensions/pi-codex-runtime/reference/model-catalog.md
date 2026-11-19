@@ -99,8 +99,9 @@ openai-codex-responses
 The extension registers its stream handler for the selected provider without
 supplying URL, auth, headers, or models. Supported Pi versions therefore
 compose the handler over the user's provider while dispatching it by the
-Responses API type. Pi 0.99.1, the peer floor, supplies Astra's model
-descriptor; this extension supplies only its exact Codex request profile.
+Responses API type. Pi supplies the model descriptors; this extension supplies
+only exact Codex request profiles. Legacy `openai-codex` profiles and persisted
+wire history are provider/protocol compatibility, not fallback to old Pi SDKs.
 
 If the API does not match, hosted tools, custom `apply_patch`, native
 compaction, and Fast are disabled. Standalone web/image and function
@@ -254,7 +255,8 @@ The `openai-codex/gpt-6-astra` delta was checked separately against
 
 Exact modern `openai` GPT-6 profiles are independently based on Pi 0.99.1 at
 `d86654abb8862e201933517d6f1fce9f88dd117f`, not copied from these legacy
-Codex profiles. See `provenance/pi-openai-0991-gpt6.json`. Standard SSE,
+Codex profiles. The [source map](source-map.md#gpt-6-astra-delta) distinguishes
+the historical evidence from the installed Pi catalog. Standard SSE,
 grammar-based local patch and local image input have descriptor evidence;
 remote tools, Lite, native compaction, prewarm and Fast are not inferred.
 

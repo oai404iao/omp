@@ -6,10 +6,7 @@
     "@oai404iao/pi-codex-tools": ["@oai404iao/pi-codex-runtime"],
     "@oai404iao/pi-codex-web-search": ["@oai404iao/pi-codex-tools"],
     "@oai404iao/pi-codex-imagegen": ["@oai404iao/pi-codex-tools"],
-    "@oai404iao/pi-codex-minimal-tools": [
-      "@oai404iao/pi-codex-runtime", "@oai404iao/pi-codex-core",
-      "@oai404iao/pi-codex-tools"
-    ]
+    "@oai404iao/pi-codex-minimal-tools": ["@oai404iao/pi-codex-core", "@oai404iao/pi-codex-tools"]
   },
   "sourceRoots": [
     "pi-codex-minimal-tools",
@@ -27,7 +24,6 @@
     "@oai404iao/pi-codex-web-search": "pi-codex-web-search",
     "@oai404iao/pi-codex-imagegen": "pi-codex-imagegen"
   },
-  "facades": ["pi-codex-minimal-tools/subagent-inline.ts"],
   "forbidden": [
     { "from": "pi-codex-runtime/src/", "to": "pi-codex-minimal-tools/" },
     { "from": "pi-codex-runtime/src/", "to": "pi-codex-core/src/" },

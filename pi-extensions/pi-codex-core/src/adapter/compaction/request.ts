@@ -1,5 +1,5 @@
 import { type ProviderHeaders } from "@earendil-works/pi-ai";
-import { type Api, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import { type Api, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { hasCodexRequestAuth, resolveCodexRequestAccountId, withResolvedAuthBaseUrl } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { resolveCodexRequestIdentity, type CodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";

@@ -1,4 +1,4 @@
-import { type Api, type Model } from "@earendil-works/pi-ai/compat";
+import { type Api, type Model } from "@earendil-works/pi-ai";
 import { webSocketCacheKey } from "../../providers/openai-codex/cache-key.js";
 import { WEBSOCKET_CONNECT_TIMEOUT_MS, WEBSOCKET_SEND_TIMEOUT_MS } from "../../providers/openai-codex/constants.js";
 import { buildCachedWebSocketRequestBody, prepareWebSocketRequestBodyForWire } from "../../providers/openai-codex/continuation.js";

@@ -10,13 +10,13 @@
 1. [安装锁定依赖](#setup)。
 2. 修改实现，并运行[对应包的检查](#checks)；跨能力行为测试放在 `tests/codex/`。
 3. 涉及包行为、公开配置、依赖或随包发布的文档时，[添加 changeset](#changesets)。
-4. 提交 PR 前运行 `pnpm run ci`；Pi 兼容性改动还须运行 `pnpm run ci:pi-matrix`。
+4. 提交 PR 前运行 `pnpm run ci`。
 5. 在 PR 中说明改动、实际检查结果和未覆盖范围，按[提交清单](#pull-requests)自查。
 
 <a id="setup"></a>
 ## 安装开发依赖
 
-使用 Node.js **>=22.19.0** 和仓库固定的 **pnpm 12.4.1**。在仓库根目录运行：
+使用 CI 同款 Node.js **24** 和仓库固定的 **pnpm 12.4.1**。在仓库根目录运行：
 
 ```bash
 pnpm install --frozen-lockfile --ignore-scripts
@@ -42,7 +42,6 @@ pnpm install --frozen-lockfile --ignore-scripts
 | 检查许可证／实际打包文件 | `pnpm run license:check` / `pnpm run pack:check` |
 | 检查发布基础设施／CI 规划器 | `pnpm run test:release-scripts` / `pnpm run test:ci` |
 | 提交 PR 前完整验证 | `pnpm run ci` |
-| Pi 兼容性改动的附加验证 | `pnpm run ci:pi-matrix` |
 
 各包的 `check` 包含类型检查，以及该包已有的测试。纯组合包的检查刻意只做类型检查，
 不复制实现所属包的行为测试。`pack:check` 检查 npm tarball 的精确文件清单，
@@ -55,11 +54,7 @@ pnpm install --frozen-lockfile --ignore-scripts
 
 ### 验证 Pi 兼容性
 
-当前 peer 下限（floor）为 **Pi 1.2.0**，精确开发目标（target）为 **Pi 1.4.0**，
-但保留两种锁验证角色：target 使用已提交的根锁，floor 重新生成投影锁。
-矩阵在独立副本中运行，不修改工作树；它复制的是**受 Git 跟踪的工作树文件**，
-因此新增源码须先暂存。floor 准备过程可能读取注册表元数据。
-
+**Pi 1.5.2** 是 peer 下限，也是开发与 CI 唯一锁定验证的版本。
 更新 Pi 基线时，一并更新开发依赖、peer 范围、锁文件、兼容说明和测试，
 不得把最低版本降到已测试基线以下。检查会验证实际解析到的 SDK，不只看 peer 声明。
 日志和测试限制见 [Pi 兼容性](docs/pi-compatibility.md)。
@@ -155,23 +150,19 @@ infrastructure 分别运行一次 `test:release-scripts` 和 `test:ci`，两者�
 
 | 触发方式 | 行为覆盖 |
 | --- | --- |
-| PR | affected 计划，仅 Node 24 / Pi target |
-| main push、手动 CI | Node 24 / target 全量计划，另加 Node 22.19.0 / floor 兼容检查 |
+| PR | Node 24 / Pi 1.5.2 的 affected 计划 |
+| main push、手动 CI | Node 24 / Pi 1.5.2 的全量计划 |
 
 仓库 policy 和 production audit 每次都运行。policy 成功后，选中的包和共享套件
 分别进入有界矩阵。main 的完整检查仍可能在合并后发现 PR 范围之外的兼容回归。
 
-Node 24/target 的规范检查直接使用已提交根锁和独立 agent 目录，在包／套件 job 中只执行一次；
-PR 选中 consumers 时运行 smoke，main/manual 保留 exhaustive。附加 floor 角色保留独立快照、
-锁投影、integrity 校验和 frozen install，随后验证实际 SDK、所有包 check、composition 和
-consumer smoke，不重复 policy 或发布基础设施测试。本地 `ci:pi-matrix` 的两个 Pi 角色
-执行相同的分层兼容检查；普通 `ci`、`test:codex-packages` 默认保持 exhaustive。
+Node 24 的规范检查使用根锁和独立 agent 目录，在包／套件 job 中执行；PR 选中 consumers 时
+运行 smoke，main/manual 保留 exhaustive。普通 `ci`、`test:codex-packages` 默认也保持 exhaustive。
 
-### required contexts 和证据
+### 必需检查和证据
 
-4 个既有 `Node … / Pi …` required contexts 都是计划聚合门禁，不代表 PR 额外跑了
-4 份兼容检查。计划任务失败、取消、缺失或意外跳过时，聚合失败；文档-only 的空选择
-须显式验证。无需改变 branch protection，但不能用 workflow 级 path filter 跳过这些 contexts。
+`Verification / Required` 是 `main` 分支保护要求的聚合检查。计划任务失败、取消、缺失或意外跳过时，
+聚合失败；纯文档改动的空选择须显式验证。不要用 workflow 级 path filter 跳过这个检查。
 main push 另产出 `Trusted main coverage / v1`，供发布时验证源码覆盖。
 
 CI 上传包／套件耗时。调整分片时同时比较 wall time 和总 runner minutes，不必随包增长
@@ -184,7 +175,7 @@ Release PR 仍等待**当前精确 SHA** 的可信 main CI；发布可复用经�
 PR 改用 `--full`，并移除 publish 的源码复用条件，让选中检查总是执行。
 保留聚合门禁、制品消费者和所有发布安全门禁。修改 workflow 后，必须有意更新
 `scripts/ci/trusted-main.mjs` 的已审阅 workflow 摘要及策略测试；摘要不符时拒绝复用。
-4 个 required 名称和独立 Release PR 触发器无需改变。
+保留必需检查名称和独立 Release PR 触发器。
 
 <a id="dependency-pr-refreshes"></a>
 ## 处理依赖更新 PR
@@ -197,8 +188,8 @@ audit 门禁均未关闭。旧 PR 在创建后 30 天内仍可能继续自动 re
 
 ## 查询 Codex 架构限制
 
-`check:architecture` 检查本地模块边（包括 type import）、兼容入口的反向依赖、
-直接／传递层级限制。provider runtime 不得通过中间模块绕到工具实现或
+`check:architecture` 检查本地模块边（包括 type import）和直接／传递层级限制。
+provider runtime 不得通过中间模块绕到工具实现或
 本地图像／主题工具。源码行数预算只产生非阻断警告；基线记录在
 `scripts/codex-architecture.json`。
 

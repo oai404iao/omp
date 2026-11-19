@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
-import type { Model } from "@earendil-works/pi-ai/compat";
+import type { Model } from "@earendil-works/pi-ai";
 import { mapCodexEvents } from "../src/providers/openai-codex/events.js";
 import { WebSocketHandshakeError } from "../src/providers/openai-codex/errors.js";
 import { closeProviderWebSocketSessions } from "../src/providers/openai-codex/websocket-session.js";

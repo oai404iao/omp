@@ -145,56 +145,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  compatibility:
-    name: Compatibility / Node ${{ matrix.node }} / Pi ${{ matrix.pi }}
-    needs: [plan, policy]
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix:
-        include:
-          - node: "22.19.0"
-            pi: floor
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-ci
-        with:
-          node: ${{ matrix.node }}
-      - name: Verify additional baseline
-        run: node scripts/test-pi-baselines.mjs ${{ matrix.pi }}
-        env:
-          OMP_PI_MATRIX_LOG_DIR: ${{ runner.temp }}/pi-matrix
-          OMP_CODEX_CONSUMER_MODE: smoke
-      - name: Upload baseline diagnostics
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: pi-${{ matrix.pi }}-node-${{ matrix.node }}
-          path: ${{ runner.temp }}/pi-matrix/
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Require a clean checkout
-        run: |
-          git diff --exit-code
-          test -z "$(git status --porcelain)"
-
   verify:
-    # Keep all four existing required contexts; none can hide a failed matrix.
-    name: Node ${{ matrix.node }} / Pi ${{ matrix.pi }}
-    needs: [plan, policy, packages, suites, compatibility]
+    name: Verification / Required
+    needs: [plan, policy, packages, suites]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ["22.19.0", "24.x"]
-        pi: [floor, target]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -211,7 +167,7 @@ jobs:
 
   trusted-main-coverage:
     name: Trusted main coverage / v1
-    needs: [plan, policy, packages, suites, compatibility, verify]
+    needs: [plan, policy, packages, suites, verify]
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5

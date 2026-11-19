@@ -71,9 +71,9 @@ and publication boundaries.
   Keep collaboration controls independently available subject to depth and
   concurrency checks. Do not reactivate extension-disabled tools or eagerly
   declare callable-only/deferred tools.
-- Keep explicit ceilings exact, including late MCP and resource tools. Pi 1.2's
-  CLI MCP allowlist exemption must not widen child registries; preserve the SDK
-  exclusions in `src/runtime.ts` and reject CLI patterns/modifiers in role lists.
+- Keep explicit ceilings exact, including late MCP and resource tools. Preserve
+  the SDK exclusions in `src/runtime.ts`; reject CLI patterns/modifiers in role
+  lists and do not let host allowlist exemptions widen child registries.
 - Preserve project trust when discovering child resources. Extension inheritance
   is opt-in; children disable codemode model calls and filter pi-subagent itself.
   Shared process/filesystem access is not an OS sandbox or isolated worktree.

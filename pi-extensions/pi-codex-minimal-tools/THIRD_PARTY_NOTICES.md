@@ -1,10 +1,9 @@
 # Dependency license notices
 
-This MIT-licensed package only composes the Codex capability extensions and
-re-exports the runtime's public `subagent-inline` API. It contains no copied
-Codex grammar, schema, protocol implementation or provenance snapshot.
+This MIT-licensed package only composes the Codex capability extensions.
+It contains no copied Codex grammar, schema, protocol implementation or provenance snapshot.
 
-The dependencies retain their own composite licenses, Apache-2.0 license and
+Direct and transitive dependencies retain their own composite licenses, Apache-2.0 license and
 upstream NOTICE snapshots, source modification notices and pinned provenance:
 
 - `@oai404iao/pi-codex-runtime`: schemas, model metadata and reserved-tool serialization.

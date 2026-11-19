@@ -31,7 +31,7 @@ function runtimeState(runtime: ModelRuntime): RuntimeState {
 		|| ![state.defaultBuiltins, state.extensionProviders, state.nativeExtensionProviders, state.virtualModels]
 			.every(value => value instanceof Map)
 		|| typeof state.rebuildProviders !== "function") {
-		throw new Error("pi-subagent requires Pi 1.2-compatible ModelRuntime isolation internals");
+		throw new Error("pi-subagent cannot isolate ModelRuntime: unsupported Pi SDK layout");
 	}
 	return state;
 }
@@ -71,7 +71,7 @@ function snapshotConfig(config: ProviderConfig, models: readonly AnyModel[]): Pr
 	};
 }
 
-/** Pi 1.2 has no public fork API for provider overlays, runtime keys or routers.
+/** Pi has no public fork API for provider overlays, runtime keys or routers.
  * Keep this layout-checked constructor adaptation separate from SDK lifecycle.
  * Only the root baseline is inherited: intermediate callbacks may outlive their
  * extension runtime. Inherited extensions recreate child-local registrations.
