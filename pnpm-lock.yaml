@@ -439,6 +439,11 @@ importers:
       "@earendil-works/pi-coding-agent":
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
+  pi-extensions/pi-rsi:
+    devDependencies:
+      "@earendil-works/pi-coding-agent":
+        specifier: 1.5.2
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
   pi-extensions/pi-subagent:
     devDependencies:
       "@earendil-works/pi-agent-core":

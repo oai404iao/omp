@@ -53,8 +53,15 @@ test("bootstrap packages stay out of guarded release artifacts", () => {
     entry => ({ name: entry.name, version: "1.0.0" })), /Unapproved/);
 });
 
+test("the local feedback extension stays private and outside release and bootstrap artifacts", () => {
+  const rsi = workspaces.find(entry => entry.name === "@oai404iao/pi-rsi");
+  assert.equal(rsi.releaseStatus, "blocked");
+  assert.equal(readManifest(rsi.directory).private, true);
+  assert(!artifactWorkspaces(true).includes(rsi));
+});
+
 test("activated notify enters guarded artifacts with a notify-only targeted closure", () => {
-  assert.equal(workspaces.length, 8);
+  assert.equal(workspaces.length, 9);
   assert.equal(publishableWorkspaces.length, 8);
   const notify = workspaces.find(entry => entry.name === "@oai404iao/pi-notify");
   assert.equal(notify.releaseStatus, "publishable");

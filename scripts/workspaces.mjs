@@ -26,6 +26,12 @@ export const workspaces = [
     directory: "pi-extensions/pi-notify",
     releaseStatus: "publishable",
   },
+  {
+    name: "@oai404iao/pi-rsi",
+    directory: "pi-extensions/pi-rsi",
+    releaseStatus: "blocked",
+    private: true,
+  },
 ];
 
 export function readManifest(directory) {

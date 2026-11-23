@@ -22,7 +22,7 @@ test("policy precedes the bounded pool; every task is timed and ordered determin
   } });
   assert.equal(peak, 2);
   assert.equal(result.status, "passed");
-  assert.equal(result.tasks.length, 12);
+  assert.equal(result.tasks.length, 13);
   assert.equal(result.tasks[0].id, "policy");
   for (const entry of result.tasks) {
     assert.equal(entry.status, "passed");
@@ -81,7 +81,7 @@ test("explicit policy prerequisite mode runs the remaining bounded tasks only", 
   } });
   assert.equal(result.status, "passed");
   assert.equal(result.policySkipped, true);
-  assert.equal(result.tasks.length, 11);
+  assert.equal(result.tasks.length, 12);
   assert.ok(!calls.includes("policy"));
   assert.equal(parseRunArgs(["--skip-policy"]).skipPolicy, true);
   await assert.rejects(executePlan(full(), { skipPolicy: true, task: "policy" }), /skip-policy/);
