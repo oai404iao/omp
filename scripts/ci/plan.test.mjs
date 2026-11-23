@@ -136,6 +136,28 @@ test("affected planning includes consumers linked only in the base graph", () =>
   assert.deepEqual(affectedPlan(paths, [base, head], sha).packages, ["pi-codex-web-search", "pi-notify"]);
 });
 
+test("a workspace privacy change compares each manifest only with a compatible catalog and runs full CI", () => {
+  const repo = fixture();
+  const entry = testPackages.find(entry => entry.id === "pi-rsi");
+  const manifest = readPackage(entry);
+  const path = `${entry.directory}/package.json`;
+  repo.write(path, JSON.stringify({ ...manifest, private: true }));
+  repo.write("scripts/workspaces.mjs", "// private workspace catalog");
+  const base = repo.commit();
+  repo.write(path, JSON.stringify(manifest));
+  repo.write("scripts/workspaces.mjs", "// bootstrap workspace catalog");
+  const head = repo.commit();
+  const plan = createPlan({ mode: "affected", base, head, root: repo.root });
+  assert.equal(plan.full, true);
+  assert.deepEqual(tasksForPlan(plan), tasksForPlan(createPlan({ mode: "full", head, root: repo.root })));
+
+  // A valid working tree must not conceal an invalid manifest in the requested head revision.
+  repo.write(path, JSON.stringify({ ...manifest, private: true }));
+  const invalidHead = repo.commit();
+  repo.write(path, JSON.stringify(manifest));
+  assert.throws(() => createPlan({ mode: "affected", base, head: invalidHead, root: repo.root }), /registration/);
+});
+
 test("missing revisions/diff/graph safely fall back, but invalid registrations fail", () => {
   const repo = fixture();
   assert.equal(createPlan({ mode: "affected", base: "missing", root: repo.root }).full, true);

@@ -29,8 +29,7 @@ export const workspaces = [
   {
     name: "@oai404iao/pi-rsi",
     directory: "pi-extensions/pi-rsi",
-    releaseStatus: "blocked",
-    private: true,
+    releaseStatus: "bootstrap",
   },
 ];
 

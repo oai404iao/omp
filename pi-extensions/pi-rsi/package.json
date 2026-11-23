@@ -1,7 +1,7 @@
 {
   "name": "@oai404iao/pi-rsi",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "private": false,
   "description": "Local feedback on user instructions in Pi sessions.",
   "repository": {
     "type": "git",
@@ -33,7 +33,7 @@
     "test": "tsx --test tests/*.test.ts",
     "check": "pnpm run typecheck && pnpm run test"
   },
-  "files": ["index.ts", "src/", "README.md", "LICENSE"],
+  "files": ["index.ts", "src/", "README.md", "LICENSE", "CHANGELOG.md"],
   "engines": {
     "node": ">=22.19.0"
   }
