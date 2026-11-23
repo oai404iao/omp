@@ -45,6 +45,10 @@
     "@oai404iao/pi-notify@0.1.0": {
       "gitHead": "915f7e4811de6f737607005f4da758fe86393c14",
       "integrity": "sha512-SPF7Z27yvQ5TGfBHqsTqT7SlUAQ/NbKKXoVwo4jGmgsYCedaqtNmtjb3rJMuGBDLklaqm913goo7mdSsSZbrhQ=="
+    },
+    "@oai404iao/pi-rsi@0.1.0": {
+      "gitHead": "e386242bab2084ce0294064ce4a6056097c28f1a",
+      "integrity": "sha512-d0NO7SXIS9O5zNMZv31LGXi7CZDcZ1Kh4GuajRzU12ZQslBFJ5Zs6pcPChcff6x3GCsJjvUiU5LVm3ta7pt0og=="
     }
   }
 }

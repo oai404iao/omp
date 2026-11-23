@@ -22,6 +22,7 @@ Node.js ≥22.19.0 和 pnpm 12.4.1。
 | 只启用搜索或图像生成 | [pi-codex-web-search](pi-extensions/pi-codex-web-search/README.md)、[pi-codex-imagegen](pi-extensions/pi-codex-imagegen/README.md) |
 | 创建、复用和协调子代理 | [pi-subagent](pi-extensions/pi-subagent/README.md) |
 | 接收 Kitty／Telegram 通知，支持双通道及 tmux 透传 | [pi-notify](pi-extensions/pi-notify/README.md) |
+| 给最近一条指令或会话树中的历史回答记录本地反馈 | [pi-rsi](pi-extensions/pi-rsi/README.md) |
 | 开发包间共享配置、身份或 broker 集成 | [pi-codex-runtime](pi-extensions/pi-codex-runtime/README.md)，库，不是扩展 |
 
 Core 本身不提供 `apply_patch`；需要补丁时同时加载 tools，或使用完整组合包。
@@ -42,8 +43,6 @@ pi -e ./pi-extensions/pi-subagent
 `-e` 只为本次启动加载扩展，不写入 Pi 的安装配置。使用 Codex 工具前，仍需在 Pi
 中配置模型和认证；加载扩展不代表账号拥有相应端点权限。
 从 npm 安装、组合加载及验证方法见[快速开始](docs/quickstart.md)。
-
-[pi-rsi](pi-extensions/pi-rsi/README.md) 可为最近一条指令记录本地反馈，也可通过 `/rsi tree` 选择当前会话的历史分支和回答。
 
 ## 升级前先读
 

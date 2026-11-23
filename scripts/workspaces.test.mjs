@@ -53,32 +53,23 @@ test("bootstrap packages stay out of guarded release artifacts", () => {
     entry => ({ name: entry.name, version: "1.0.0" })), /Unapproved/);
 });
 
-test("pi-rsi is the sole local bootstrap target and remains outside guarded releases", () => {
-  const rsi = workspaces.find(entry => entry.name === "@oai404iao/pi-rsi");
-  assert.deepEqual(workspaces.filter(entry => entry.releaseStatus === "bootstrap"), [rsi]);
-  assert.equal(readManifest(rsi.directory).private, false);
-  assert(artifactWorkspaces(true).includes(rsi));
-  assert(!artifactWorkspaces().includes(rsi));
-  assert.throws(() => targetedReleaseWorkspaces(rsi.name), /Unapproved/);
-  assert.deepEqual(targetedReleaseWorkspaces(rsi.name, workspaces, entry => readManifest(entry.directory),
-    { bootstrapTarget: true }), [rsi]);
-});
-
-test("activated notify enters guarded artifacts with a notify-only targeted closure", () => {
+test("activated standalone extensions have independent guarded targets, not bootstrap targets", () => {
   assert.equal(workspaces.length, 9);
-  assert.equal(publishableWorkspaces.length, 8);
-  const notify = workspaces.find(entry => entry.name === "@oai404iao/pi-notify");
-  assert.equal(notify.releaseStatus, "publishable");
-  const manifest = readManifest(notify.directory);
-  assert.notEqual(manifest.private, true);
-  const dependencies = Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies });
-  assert.deepEqual(dependencies.filter(name => workspaces.some(entry => entry.name === name)), []);
-  assert(publishableWorkspaces.includes(notify));
-  assert(artifactWorkspaces().includes(notify));
-  assert(artifactWorkspaces(true).includes(notify));
-  assert.deepEqual(targetedReleaseWorkspaces(notify.name), [notify]);
-  assert.throws(() => targetedReleaseWorkspaces(notify.name, workspaces, entry => readManifest(entry.directory),
-    { bootstrapTarget: true }), /Unapproved/);
+  assert.equal(publishableWorkspaces.length, 9);
+  for (const name of ["@oai404iao/pi-notify", "@oai404iao/pi-rsi"]) {
+    const target = workspaces.find(entry => entry.name === name);
+    assert.equal(target.releaseStatus, "publishable");
+    const manifest = readManifest(target.directory);
+    assert.notEqual(manifest.private, true);
+    const dependencies = Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies });
+    assert.deepEqual(dependencies.filter(dep => workspaces.some(entry => entry.name === dep)), []);
+    assert(publishableWorkspaces.includes(target));
+    assert(artifactWorkspaces().includes(target));
+    assert(artifactWorkspaces(true).includes(target));
+    assert.deepEqual(targetedReleaseWorkspaces(name), [target]);
+    assert.throws(() => targetedReleaseWorkspaces(name, workspaces, entry => readManifest(entry.directory),
+      { bootstrapTarget: true }), /Unapproved/);
+  }
 });
 
 test("verified Codex tools enters guarded artifacts and targeted publication after activation", () => {
