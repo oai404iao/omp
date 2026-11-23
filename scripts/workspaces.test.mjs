@@ -53,11 +53,15 @@ test("bootstrap packages stay out of guarded release artifacts", () => {
     entry => ({ name: entry.name, version: "1.0.0" })), /Unapproved/);
 });
 
-test("the local feedback extension stays private and outside release and bootstrap artifacts", () => {
+test("pi-rsi is the sole local bootstrap target and remains outside guarded releases", () => {
   const rsi = workspaces.find(entry => entry.name === "@oai404iao/pi-rsi");
-  assert.equal(rsi.releaseStatus, "blocked");
-  assert.equal(readManifest(rsi.directory).private, true);
-  assert(!artifactWorkspaces(true).includes(rsi));
+  assert.deepEqual(workspaces.filter(entry => entry.releaseStatus === "bootstrap"), [rsi]);
+  assert.equal(readManifest(rsi.directory).private, false);
+  assert(artifactWorkspaces(true).includes(rsi));
+  assert(!artifactWorkspaces().includes(rsi));
+  assert.throws(() => targetedReleaseWorkspaces(rsi.name), /Unapproved/);
+  assert.deepEqual(targetedReleaseWorkspaces(rsi.name, workspaces, entry => readManifest(entry.directory),
+    { bootstrapTarget: true }), [rsi]);
 });
 
 test("activated notify enters guarded artifacts with a notify-only targeted closure", () => {
@@ -65,7 +69,6 @@ test("activated notify enters guarded artifacts with a notify-only targeted clos
   assert.equal(publishableWorkspaces.length, 8);
   const notify = workspaces.find(entry => entry.name === "@oai404iao/pi-notify");
   assert.equal(notify.releaseStatus, "publishable");
-  assert.deepEqual(workspaces.filter(entry => entry.releaseStatus === "bootstrap"), []);
   const manifest = readManifest(notify.directory);
   assert.notEqual(manifest.private, true);
   const dependencies = Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies });

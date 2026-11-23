@@ -266,6 +266,8 @@ npm ownership、provenance、源码权利、tag 身份或仓库元数据不确�
 | `publishable` | 非 private | 正常受保护 workflow |
 
 当前登记 8 个 publishable 工作区：6 个 Codex 包，以及 subagent、pi-notify。
+`@oai404iao/pi-rsi@0.1.0` 仅进入本地首发准备：合并后从干净的公共 `main` 运行
+`RELEASE_PACKAGE=@oai404iao/pi-rsi pnpm run release:bootstrap-artifacts`，再按下方首发流程核验并发布指定 tarball。
 Notify 首发身份和激活前置条件见[核验记录](docs/audits/pi-notify-bootstrap-activation.md)。
 已移除的 external-thinking、keep-defaults、tree-continue、telegram-notify 和未发布 Code Mode 实验不能进入新批次；
 历史 release locks 仍保留。此清单描述仓库资格，不是实时 registry inventory。
