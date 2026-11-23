@@ -265,10 +265,9 @@ npm ownership、provenance、源码权利、tag 身份或仓库元数据不确�
 | `bootstrap` | 非 private | 仅本地一次性 `release:bootstrap-artifacts` |
 | `publishable` | 非 private | 正常受保护 workflow |
 
-当前登记 8 个 publishable 工作区：6 个 Codex 包，以及 subagent、pi-notify。
-`@oai404iao/pi-rsi@0.1.0` 仅进入本地首发准备：合并后从干净的公共 `main` 运行
-`RELEASE_PACKAGE=@oai404iao/pi-rsi pnpm run release:bootstrap-artifacts`，再按下方首发流程核验并发布指定 tarball。
-Notify 首发身份和激活前置条件见[核验记录](docs/audits/pi-notify-bootstrap-activation.md)。
+当前登记 9 个 publishable 工作区：6 个 Codex 包，以及 subagent、pi-notify 和 pi-rsi。
+独立扩展的首发身份见 [pi-notify 核验记录](docs/audits/pi-notify-bootstrap-activation.md)和
+[pi-rsi 核验记录](docs/audits/pi-rsi-bootstrap-activation.md)。
 已移除的 external-thinking、keep-defaults、tree-continue、telegram-notify 和未发布 Code Mode 实验不能进入新批次；
 历史 release locks 仍保留。此清单描述仓库资格，不是实时 registry inventory。
 
@@ -283,7 +282,7 @@ Notify 首发身份和激活前置条件见[核验记录](docs/audits/pi-notify-
 <a id="npm-bootstrap-and-trusted-publishing"></a>
 ## 新包的一次性 bootstrap 与 trusted publishing
 
-**这不是 tools 或 notify 的当前待办。** 以下仅适用于经单独批准、尚未发布且明确登记为
+以下仅适用于经单独批准、尚未发布且明确登记为
 `bootstrap` 的新包；现有包走常规发布／恢复。npm 包必须先存在，才能附加 trusted publisher。
 
 1. 重新核实包名可用性和所有权，完成权属审计及[一次性仓库准备](#one-time-github-preparation)。

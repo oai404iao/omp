@@ -41,6 +41,7 @@ for (const requested of job.orders) {
   assert.equal(result.runtime.pendingProviderRegistrations.length, core ? 2 : 0);
   const commands = result.extensions.flatMap(extension => [...extension.commands.keys()]);
   assert.equal(new Set(commands).size, commands.length);
+  assert.equal(commands.includes("rsi"), requested.includes(prefix + "pi-rsi"), "unexpected /rsi registration");
   if (requested.includes(prefix + "pi-subagent")) assert.ok(commands.includes("subagents"));
   if (requested.includes(prefix + "pi-notify")) {
     for (const command of ["notify", "notify-test"]) assert.ok(commands.includes(command));

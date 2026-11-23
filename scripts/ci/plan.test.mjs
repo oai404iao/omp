@@ -188,15 +188,17 @@ test("every planning mode fails before fallback if the current checkout has an u
   }
 });
 
-test("release plans use canonical runtime/optional closure, including activated notify", () => {
+test("release plans use canonical runtime/optional closure and isolate standalone extensions", () => {
   const value = createPlan({ mode: "release", packageName: "@oai404iao/pi-codex-tools", git: () => sha });
   assert.deepEqual(value.packages, ["pi-codex-runtime", "pi-codex-tools"]);
   assert.deepEqual(value.suites, ["composition", "consumers", "infrastructure"]);
-  const notify = createPlan({ mode: "release", packageName: "@oai404iao/pi-notify", git: () => sha });
-  assert.deepEqual(notify.packages, ["pi-notify"]);
-  assert.deepEqual(notify.suites, ["infrastructure"]);
-  assert.equal(createPlan({ mode: "release", packageName: "", git: () => sha }).packages.length, 8);
-  for (const id of ["pi-telegram-notify", "pi-rsi", "unapproved"]) {
+  for (const id of ["pi-notify", "pi-rsi"]) {
+    const standalone = createPlan({ mode: "release", packageName: `@oai404iao/${id}`, git: () => sha });
+    assert.deepEqual(standalone.packages, [id]);
+    assert.deepEqual(standalone.suites, ["infrastructure"]);
+  }
+  assert.equal(createPlan({ mode: "release", packageName: "", git: () => sha }).packages.length, 9);
+  for (const id of ["pi-telegram-notify", "unapproved"]) {
     assert.throws(() => createPlan({ mode: "release", packageName: `@oai404iao/${id}`, git: () => sha }), /Unapproved/);
   }
 });
