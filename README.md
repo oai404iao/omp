@@ -43,6 +43,8 @@ pi -e ./pi-extensions/pi-subagent
 中配置模型和认证；加载扩展不代表账号拥有相应端点权限。
 从 npm 安装、组合加载及验证方法见[快速开始](docs/quickstart.md)。
 
+仅从源码试用的 [pi-rsi](pi-extensions/pi-rsi/README.md) 可为最近一条指令记录本地反馈，也可通过 `/rsi tree` 选择当前会话的历史分支和回答。
+
 ## 升级前先读
 
 - 子代理使用异步多代理 v2 API，旧同步工具与配置不再适用，先读[迁移指南](pi-extensions/pi-subagent/README.md#breaking-migration)。

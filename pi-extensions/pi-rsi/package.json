@@ -1,0 +1,40 @@
+{
+  "name": "@oai404iao/pi-rsi",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local feedback on user instructions in Pi sessions.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oai404iao/omp.git",
+    "directory": "pi-extensions/pi-rsi"
+  },
+  "homepage": "https://github.com/oai404iao/omp/tree/main/pi-extensions/pi-rsi#readme",
+  "bugs": {
+    "url": "https://github.com/oai404iao/omp/issues"
+  },
+  "type": "module",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.5.2"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.2"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "pnpm run typecheck && pnpm run test"
+  },
+  "files": ["index.ts", "src/", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

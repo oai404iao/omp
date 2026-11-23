@@ -190,6 +190,7 @@ for (const name of [
   "pi-codex-minimal-tools",
   "pi-subagent",
   "pi-notify",
+  "pi-rsi",
 ]) {
   check(
     projectLicense.equals(read(`pi-extensions/${name}/LICENSE`)),

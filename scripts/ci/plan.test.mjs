@@ -33,11 +33,11 @@ function fixture() {
   return { root, git, write, commit, base: commit() };
 }
 
-test("full plan contains eight package checks, all suites, and policy in stable order", () => {
+test("full plan contains nine package checks, all suites, and policy in stable order", () => {
   const value = createPlan({ git: () => `${sha}\n` });
-  assert.equal(value.packages.length, 8);
+  assert.equal(value.packages.length, 9);
   assert.deepEqual(value.suites, ["composition", "consumers", "infrastructure"]);
-  assert.equal(tasksForPlan(value).length, 12);
+  assert.equal(tasksForPlan(value).length, 13);
   assert.equal(tasksForPlan(value)[0].id, "policy");
   assert.deepEqual(value.packages, [...value.packages].sort());
   const outputs = githubOutputs(value);
@@ -174,7 +174,7 @@ test("release plans use canonical runtime/optional closure, including activated 
   assert.deepEqual(notify.packages, ["pi-notify"]);
   assert.deepEqual(notify.suites, ["infrastructure"]);
   assert.equal(createPlan({ mode: "release", packageName: "", git: () => sha }).packages.length, 8);
-  for (const id of ["pi-telegram-notify", "unapproved"]) {
+  for (const id of ["pi-telegram-notify", "pi-rsi", "unapproved"]) {
     assert.throws(() => createPlan({ mode: "release", packageName: `@oai404iao/${id}`, git: () => sha }), /Unapproved/);
   }
 });
