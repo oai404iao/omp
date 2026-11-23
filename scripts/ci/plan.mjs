@@ -28,6 +28,7 @@ export function parseDiff(output) {
 }
 
 const allPackages = testPackages.map(entry => entry.id);
+const workspaceCatalogPath = "scripts/workspaces.mjs";
 const releasePackages = testPackages.filter(entry => entry.releaseStatus === "publishable").map(entry => entry.id);
 function plan(mode, sourceSha, packages, selectedSuites, reasons, full = false) {
   return validatePlan({ schemaVersion: 1, mode, sourceSha, packages: [...packages].sort(),
@@ -59,7 +60,7 @@ export function affectedPlan(paths, graphs, sourceSha) {
       reasons.push(`Shared Codex test change: ${path}`);
     } else if (policyOnlyPath(path)) {
       reasons.push(`Policy-only documentation: ${path}`);
-    } else if (path === "scripts/workspaces.mjs") {
+    } else if (path === workspaceCatalogPath) {
       return fullPlan("affected", sourceSha, `Full fallback: shared workspace catalog ${path}`);
     } else if (path.startsWith(".github/actions/setup-ci/")) {
       return fullPlan("affected", sourceSha, `Full fallback: shared CI toolchain ${path}`);
@@ -123,7 +124,10 @@ export function createPlan({ mode = "full", packageName, base, head = "HEAD",
       throw new GitError("Invalid base revision");
     }
     const paths = parseDiff(gitRunner(["diff", "--name-status", "-z", "--find-renames", mergeBase, sourceSha, "--"]));
-    const graphs = [mergeBase, sourceSha].map(sha => buildGraph(testPackages,
+    // A catalog change already requires full CI. Only the head manifest registrations
+    // can be checked against the new catalog; the base graph is needed only for pruning.
+    const revisions = paths.includes(workspaceCatalogPath) ? [sourceSha] : [mergeBase, sourceSha];
+    const graphs = revisions.map(sha => buildGraph(testPackages,
       entry => JSON.parse(gitRunner(["show", `${sha}:${entry.directory}/package.json`]))));
     return affectedPlan(paths, graphs, sourceSha);
   } catch (error) {
