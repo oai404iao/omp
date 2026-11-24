@@ -1,5 +1,13 @@
 # @oai404iao/pi-codex-web-search
 
+## 1.2.1
+
+### Patch Changes
+
+- c14138a: Update exact workspace dependency pins for the pending dependency releases.
+- Updated dependencies [c14138a]
+  - @oai404iao/pi-codex-tools@0.2.1
+
 ## 1.2.0
 
 ### Minor Changes

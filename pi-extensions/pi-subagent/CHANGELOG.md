@@ -1,5 +1,11 @@
 # @oai404iao/pi-subagent
 
+## 1.5.1
+
+### Patch Changes
+
+- c14138a: Update exact workspace dependency pins for the pending dependency releases.
+
 ## 1.5.0
 
 ### Minor Changes
