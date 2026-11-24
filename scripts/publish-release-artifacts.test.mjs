@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { copyReleaseScripts } from "./test-support/release-scripts.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const commit = "0123456789012345678901234567890123456789";
@@ -17,7 +18,7 @@ function candidate(name) {
     directory: name.replaceAll("/", "-"),
     tag: `${name}@1.0.0`,
     mode: "recover",
-    integrity: "sha512-fixture",
+    integrity: `sha512-${createHash("sha512").update(name).digest("base64")}`,
     sourceCommit: commit,
     distTag: "latest",
     prerelease: false,
@@ -37,9 +38,7 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
     writeFileSync(join(temporaryDirectory, "package.json"), JSON.stringify({ devDependencies: { npm: "11.19.0" } }));
     const scripts = join(temporaryDirectory, "scripts");
     mkdirSync(scripts);
-    for (const name of ["publish-release-artifacts.mjs", "release-batch.mjs", "release-dependencies.mjs", "release-utils.mjs", "initial-codex-bootstrap.mjs", "targeted-release.mjs"]) {
-      writeFileSync(join(scripts, name), readFileSync(join(root, "scripts", name)));
-    }
+    copyReleaseScripts(scripts, ["publish-release-artifacts.mjs", "initial-codex-bootstrap.mjs"]);
     writeFileSync(join(scripts, "registry-visibility-implementation.mjs"), readFileSync(join(root, "scripts/registry-visibility.mjs")));
     writeFileSync(join(scripts, "registry-visibility.mjs"), `
       import { spawnSync } from "node:child_process";
@@ -85,6 +84,8 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
       const manifest = { name: c.name, version: c.version, dependencies: options.dependencies?.[c.name] };
       if (options.privateFor === c.name) manifest.private = true;
       manifests[c.directory] = manifest;
+      mkdirSync(join(temporaryDirectory, c.directory));
+      writeFileSync(join(temporaryDirectory, c.directory, "package.json"), JSON.stringify(manifest));
       if (c.mode === "publish") {
         const stage = join(temporaryDirectory, "stage", c.directory);
         mkdirSync(join(stage, "package"), { recursive: true });
@@ -114,6 +115,7 @@ function runPublisher(candidates, wrongDistTagFor, options = {}) {
         "printf 'git %s\\n' \"$*\" >> \"$CALL_LOG\"",
         "if [ \"$1\" = \"rev-parse\" ]; then echo \"$FAKE_COMMIT\"; exit 0; fi",
         "if [ \"$1\" = \"rev-list\" ]; then exit 1; fi",
+        'if [ "$1" = "show" ]; then cat "${2#*:}"; exit $?; fi',
         "exit 0",
         "",
       ].join("\n"),
@@ -167,7 +169,8 @@ if (args[2] === "version") {
     writeFileSync(
       manifestPath,
       `${JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
+        requestedPackages: candidates.map(c => c.name).sort(),
         commit,
         registry: "https://registry.npmjs.org/",
         candidates,
@@ -180,7 +183,7 @@ if (args[2] === "version") {
       env: {
         ...environment,
         ...(options.runId === undefined ? {} : { GITHUB_RUN_ID: options.runId }),
-        RELEASE_PACKAGE: "",
+        RELEASE_PACKAGE: candidates.map(c => c.name).join(","),
         RELEASE_VERIFY_ONLY: options.verifyOnly ? "true" : "false",
         npm_config_dry_run: options.inheritedDryRun ? "true" : "false",
         PUBLISH_STDOUT: options.publishStdout ?? "",
@@ -444,6 +447,14 @@ test("verify-only recovery of an original publish manifest never uploads again",
   assert.equal(process.status, 0, process.stderr);
   assert.equal(result.ok, true);
   assert.doesNotMatch(calls, /^npm publish /m);
+});
+
+test("a stale unrelated recovery candidate blocks every upload in an explicit batch", () => {
+  const values = [{ ...candidate("@fixture/a"), mode: "publish" }, candidate("@fixture/z")];
+  const { process, result, calls } = runPublisher(values, undefined, { wrongIntegrityFor: values[1].name });
+  assert.equal(process.status, 0, process.stderr);
+  assert.equal(result.ok, false);
+  assert.doesNotMatch(calls, /^npm publish |^git tag /m);
 });
 
 test("accepted receipt survives visibility deadline with original digest and run identity", () => {

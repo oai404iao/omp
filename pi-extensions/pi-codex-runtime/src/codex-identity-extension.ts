@@ -1,4 +1,5 @@
 import { claimSessionFeature } from "./session-claims.js";
+import { getCodexBroker } from "./broker.js";
 import { installFastModeLifecycle } from "./fast-mode-state.js";
 import { readSubagentLineage, type SubagentLineage } from "./codex-session-lineage.js";
 import { installCodexTurnLifecycle } from "./codex-turn-lifecycle.js";
@@ -244,12 +245,14 @@ export function installCodexIdentityLifecycle(pi: ExtensionAPI): void {
 export function createCodexSubagentInlineExtension(
 	options: { parentSessionManager?: CodexIdentitySessionView; openAIIdentity?: boolean } = {},
 ): InlineExtension {
-	if (options.parentSessionManager && options.openAIIdentity !== false) {
-		ensureCodexSessionIdentity(options.parentSessionManager);
-	}
 	return {
 		name: "pi-codex-subagent-identity",
 		factory: (pi) => {
+			// Inline and capability factories share Fast and identity state in either load order.
+			getCodexBroker(pi);
+			if (options.parentSessionManager && options.openAIIdentity !== false) {
+				ensureCodexSessionIdentity(options.parentSessionManager);
+			}
 			installFastModeLifecycle(pi, options.parentSessionManager);
 			if (options.openAIIdentity !== false) installCodexIdentityLifecycle(pi);
 			else installCodexTurnLifecycle(pi);

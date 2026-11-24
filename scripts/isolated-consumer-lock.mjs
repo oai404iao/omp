@@ -3,13 +3,14 @@
  * Registry artifacts retain their exact URLs/hashes and peer-specific snapshots;
  * workspace dependencies are replaced with the packed artifacts, never links.
  */
-export function isolatedConsumerLock(name, included, manifests, artifacts, sourceLock) {
+export function isolatedConsumerLock(name, included, manifests, artifacts, sourceLock, registryEdges = new Set()) {
   if (String(sourceLock.lockfileVersion) !== "9.0") throw new Error("Expected a pnpm v9 lockfile");
   const packages = {};
   const snapshots = {};
   const dependencies = {};
   const importerDependencies = {};
   const overrides = {};
+  const localEdgeOverrides = {};
   const locals = new Set(included);
   const hosts = new Map();
   const root = sourceLock.importers["."];
@@ -99,8 +100,9 @@ export function isolatedConsumerLock(name, included, manifests, artifacts, sourc
     for (const field of ["dependencies", "optionalDependencies"]) {
       for (const dependency of Object.keys(manifest[field] ?? {})) {
         let ref;
-        if (manifests.has(dependency)) {
+        if (manifests.has(dependency) && !registryEdges.has(`${pkg}>${dependency}`)) {
           if (!locals.has(dependency)) throw new Error(`Missing packed workspace dependency: ${pkg} -> ${dependency}`);
+          localEdgeOverrides[`${pkg}@${manifest.version}>${dependency}`] = overrides[dependency];
           ref = localReference(dependency);
         } else {
           ref = locked(importerFor(pkg), dependency)?.version;
@@ -118,11 +120,12 @@ export function isolatedConsumerLock(name, included, manifests, artifacts, sourc
     snapshots[`${pkg}@${reference}`] = snapshot;
   }
   const manifest = { name, version: "1.0.0", private: true, type: "module", dependencies };
-  const workspace = { autoInstallPeers: false, lockfileIncludeTarballUrl: true, overrides };
+  // A global name override would rewrite the genuine registry edges of older consumers.
+  const workspace = { autoInstallPeers: false, lockfileIncludeTarballUrl: true, overrides: registryEdges.size ? localEdgeOverrides : overrides };
   const lock = {
     lockfileVersion: "9.0",
     settings: { ...sourceLock.settings, autoInstallPeers: false },
-    overrides,
+    overrides: workspace.overrides,
     importers: { ".": { dependencies: importerDependencies } },
     packages,
     snapshots,

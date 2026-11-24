@@ -1,3 +1,41 @@
+import semver from "semver";
+import { isWorkspaceRange, satisfiesWorkspaceDependency } from "./workspace-ranges.mjs";
+
+// Never override a registry dependency with a checkout outside its declared range.
+export function sourceConsumerSelection(requested, manifests, lock) {
+  const included = new Set();
+  const resolutions = [];
+  function visit(name) {
+    if (included.has(name)) return;
+    included.add(name);
+    const manifest = manifests.get(name);
+    for (const field of ["dependencies", "optionalDependencies"]) {
+      for (const [dep, spec] of Object.entries(manifest[field] ?? {})) {
+        if (!manifests.has(dep)) continue;
+        if (typeof spec !== "string" || (!isWorkspaceRange(spec) && semver.valid(spec) !== spec)) {
+          throw new Error(`Unsupported source dependency: ${name} -> ${dep}@${spec}`);
+        }
+        const version = manifests.get(dep).version;
+        if (satisfiesWorkspaceDependency(version, spec)) visit(dep);
+        else {
+          const ref = lock.importers[`pi-extensions/${name.split("/").at(-1)}`]?.[field]?.[dep];
+          if (ref?.specifier !== spec || !satisfiesWorkspaceDependency(ref.version?.split("(")[0], spec)) {
+            throw new Error(`No compatible locked registry dependency for ${name} -> ${dep}@${spec} (checkout ${version})`);
+          }
+          resolutions.push({ owner: name, dependency: dep, version: ref.version.split("(")[0], range: spec, sourceVersion: version });
+        }
+      }
+    }
+  }
+  requested.forEach(visit);
+  return { included, resolutions };
+}
+
+export function incompatibleRuntimeLines(versions) {
+  const unique = [...new Set(versions)];
+  return unique.length > 1 && (unique.some(v => semver.prerelease(v)) || new Set(unique.map(v => semver.major(v))).size !== 1);
+}
+
 // Keep the exhaustive consumer contract as the default. Smoke only reduces
 // selection: packing, isolated installation and each loader probe stay intact.
 export function codexConsumerMatrix(mode = "full") {

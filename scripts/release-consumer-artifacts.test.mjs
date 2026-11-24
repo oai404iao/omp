@@ -22,24 +22,24 @@ function fixture(t) {
   const path = join(directory, candidate.filename);
   assert.equal(spawnSync("tar", ["-czf", path, "package/"], { cwd: directory }).status, 0);
   candidate.integrity = digest(readFileSync(path));
-  const release = { schemaVersion: 1, commit, registry, requestedPackage: null, candidates: [candidate] };
+  const release = { schemaVersion: 2, commit, registry, requestedPackages: [manifest.name], candidates: [candidate] };
   const entries = [{ name: manifest.name, directory: candidate.directory, releaseStatus: "publishable" }];
   return { directory, manifest, candidate, path, release, entries };
 }
-const validation = f => ({ commit, entries: f.entries, manifestFor: () => f.manifest, env: {} });
+const validation = f => ({ commit, entries: f.entries, manifestFor: () => f.manifest, env: { RELEASE_PACKAGE: f.manifest.name } });
 
 test("validation isolates fixture environments but defaults to production SHA and selection guards", t => {
   const f = fixture(t);
   assert.doesNotThrow(() => validateManifest(f.release, validation(f)));
-  assert.throws(() => validateManifest(f.release, { ...validation(f), env: { GITHUB_SHA: "b".repeat(40) } }), /GITHUB_SHA/);
-  assert.throws(() => validateManifest(f.release, { ...validation(f), env: { RELEASE_PACKAGE: "@oai404iao/pi-notify" } }), /selection/);
-  for (const env of [{ GITHUB_SHA: "b".repeat(40), RELEASE_PACKAGE: "" },
+  assert.throws(() => validateManifest(f.release, { ...validation(f), env: { RELEASE_PACKAGE: f.manifest.name, GITHUB_SHA: "b".repeat(40) } }), /GITHUB_SHA/);
+  assert.throws(() => validateManifest(f.release, { ...validation(f), env: { RELEASE_PACKAGE: "@oai404iao/pi-notify" } }), /Unapproved release target/);
+  for (const env of [{ GITHUB_SHA: "b".repeat(40), RELEASE_PACKAGE: f.manifest.name },
     { GITHUB_SHA: commit, RELEASE_PACKAGE: "@oai404iao/pi-notify" }]) {
     const script = `import assert from "node:assert/strict";
 import { validateManifest } from ${JSON.stringify(new URL("./release-consumer-artifacts.mjs", import.meta.url).href)};
 assert.throws(() => validateManifest(${JSON.stringify(f.release)}, {
   commit: ${JSON.stringify(commit)}, entries: ${JSON.stringify(f.entries)}, manifestFor: () => (${JSON.stringify(f.manifest)})
-}), ${env.RELEASE_PACKAGE ? "/selection/" : "/GITHUB_SHA/"});`;
+}), ${env.GITHUB_SHA === commit ? "/Unapproved release target/" : "/GITHUB_SHA/"});`;
     const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
       encoding: "utf8", env: { ...process.env, ...env }, timeout: 30_000,
     });
@@ -56,9 +56,8 @@ test("canonical exact batch and targeted mode reject invalid closure, identity a
     const bad = structuredClone(f.release); mutate(bad);
     assert.throws(() => validateManifest(bad, validation(f)));
   }
-  const targeted = { ...f.release, requestedPackage: f.manifest.name };
-  assert.equal(validateManifest(targeted, { ...validation(f), requestedPackage: f.manifest.name }).length, 1);
-  assert.throws(() => validateManifest(targeted, validation(f)));
+  assert.throws(() => validateManifest({ ...f.release, requestedPackages: [] }, validation(f)));
+  assert.throws(() => validateManifest(f.release, { ...validation(f), env: {} }));
 });
 
 test("packed historical manifest, gitHead, archive checksum and symlinks are checked", t => {
@@ -99,8 +98,8 @@ test("targeted selection requires the exact transitive closure and verify-only d
   const manifests = new Map([[f.manifest.name, { ...f.manifest, dependencies: { [dependency.name]: "1.0.0" } }],
     [dependency.name, { name: dependency.name, version: "1.0.0" }]]);
   const entries = [...f.entries, { name: dependency.name, directory: dependency.directory, releaseStatus: "publishable" }];
-  const release = { ...f.release, requestedPackage: f.manifest.name, candidates: [f.candidate, dependency] };
-  const options = { commit, entries, manifestFor: e => manifests.get(e.name), requestedPackage: f.manifest.name, env: {} };
+  const release = { ...f.release, candidates: [f.candidate, dependency] };
+  const options = { commit, entries, manifestFor: e => manifests.get(e.name), historicalManifest: e => manifests.get(e.name), requestedPackage: f.manifest.name, env: {} };
   assert.deepEqual(validateManifest(release, options).map(c => c.name), [dependency.name, f.manifest.name]);
   assert.throws(() => validateManifest({ ...release, candidates: [f.candidate] }, options), /closure/);
   assert.throws(() => validateManifest({ ...release, candidates: [f.candidate, { ...dependency, mode: "recover" }] }, options), /mode/);

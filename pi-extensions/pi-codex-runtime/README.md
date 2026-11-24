@@ -231,7 +231,7 @@ ID 按精确、大小写不敏感的 `provider/model` 匹配，绝不按名称�
 
 ## 组合与故障排查
 
-- **版本冲突：** broker 要求 ABI v2 和完全相同的 runtime 包版本，即使 broker 已缓存也会检查。不兼容时明确失败，不依加载顺序选择语义。
+- **版本冲突：** broker 按 ABI 和运行时能力握手，兼容稳定版本无需精确同版；缓存命中时也会检查。不兼容时明确失败，不依加载顺序选择语义。
 - **重复加载：** 使用同步 `pi.events` 发现服务，按能力认领而非比较模块对象。兼容 core/tools/组合包可共存，分离的物理副本也能协作；不支持与不认识 broker 的旧单体混装。
 - **工具状态：** 只管理已安装能力。patch 用 `prepareLoadout.hiddenDeclarations` 隐藏所选 `edit`/`write` 的声明，不移出 active set；Pi 保留恢复/分支选择，codemode 仍可调用，插件不会重启明确禁用的工具。
 - **会话释放：** shutdown 关闭发现与资源；实际 Pi runtime 失效会解除跟踪的总线订阅。显示 sink 在请求 I/O 前捕获，观察器只属于当前响应尝试；不要复用旧会话 context。

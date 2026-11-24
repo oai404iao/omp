@@ -11,7 +11,8 @@ import {
   assertLockedPublishedArtifact,
 } from "./release-utils.mjs";
 import { registry, root } from "./workspaces.mjs";
-import { validateReleaseBatch, verifyPackedCandidate } from "./release-batch.mjs";
+import { verifyPackedCandidate } from "./release-batch.mjs";
+import { validateManifest } from "./release-consumer-artifacts.mjs";
 import { hasInitialBootstrapLatestAlias, isInitialCodexBootstrap } from "./initial-codex-bootstrap.mjs";
 import { verifyDependencySource } from "./targeted-release.mjs";
 import { waitForRegistryVisibility, RegistryVisibilityPending } from "./registry-visibility.mjs";
@@ -44,25 +45,13 @@ if (propagationInitialDelayMs > propagationMaxDelayMs) {
 }
 
 
-if (manifest.schemaVersion !== 1 || manifest.commit !== commit) {
-  throw new Error(`release artifact commit ${String(manifest.commit)} does not match checkout ${commit}`);
-}
-if (process.env.GITHUB_SHA && process.env.GITHUB_SHA !== commit) {
-  throw new Error(`checkout ${commit} does not match GITHUB_SHA ${process.env.GITHUB_SHA}`);
-}
-if (manifest.registry !== registry || !Array.isArray(manifest.candidates)) {
-  throw new Error("release artifact manifest is malformed or targets another registry");
-}
-
-const requestedPackage = process.env.RELEASE_PACKAGE || undefined;
-if ((manifest.requestedPackage ?? undefined) !== requestedPackage) {
-  throw new Error("release artifact requestedPackage does not match RELEASE_PACKAGE");
-}
-const candidates = validateReleaseBatch(manifest.candidates, undefined, undefined, requestedPackage);
+const candidates = validateManifest(manifest, { commit });
 // Validate the entire batch before the first irreversible registry write.
 for (const candidate of candidates) {
+  const tagCommit = existingTagCommit(candidate.tag);
+  if (tagCommit && tagCommit !== candidate.sourceCommit) throw new Error(`tag ${candidate.tag} points to ${tagCommit}, expected ${candidate.sourceCommit}`);
   if (candidate.mode === "publish") {
-    if (candidate.sourceCommit !== commit) throw new Error(`Publish candidate is not from this checkout: ${candidate.name}`);
+    if (lockedPublishedArtifact(candidate.name, candidate.version)) throw new Error(`Publish candidate already locked as published: ${candidate.tag}`);
     verifyPackedCandidate(candidate, resolve(manifestPath, "..", candidate.filename));
   }
   if (candidate.mode === "verify") {
@@ -108,7 +97,10 @@ function saveResult(extra = {}) {
     releases: [], unresolved: [], publishWarnings, receipts, ...extra }, null, 2)}\n`);
 }
 saveResult();
-for (const candidate of candidates) {
+// Resolve visibility of every existing artifact before any upload, including a
+// recover target unrelated to the first publish target. New uploads retain DAG order.
+const visibilityOrder = [...candidates.filter(c => c.mode !== "publish"), ...candidates.filter(c => c.mode === "publish")];
+for (const candidate of visibilityOrder) {
   try {
     const tagCommit = existingTagCommit(candidate.tag);
     if (tagCommit && tagCommit !== candidate.sourceCommit) {

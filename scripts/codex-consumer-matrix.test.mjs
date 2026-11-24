@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { codexConsumerMatrix } from "./codex-consumer-matrix.mjs";
+import { codexConsumerMatrix, incompatibleRuntimeLines, sourceConsumerSelection } from "./codex-consumer-matrix.mjs";
 
 test("default and explicit full retain the exhaustive consumer matrix", () => {
   const expected = {
@@ -58,4 +58,35 @@ test("unknown modes fail instead of silently reducing coverage", () => {
   for (const mode of ["", "FULL", "Smoke", " smoke", "smoke ", "fast", null, false]) {
     assert.throws(() => codexConsumerMatrix(mode), /Unknown OMP_CODEX_CONSUMER_MODE: .*; expected full or smoke/);
   }
+});
+
+test("direct and optional source consumers require a compatible frozen registry resolution when checkout cannot satisfy an edge", () => {
+  for (const version of ["4.0.0", "3.2.0-next.1"]) {
+    const manifests = new Map([
+      ["runtime", { version }], ["tools", { version: "0.2.3", dependencies: { runtime: "^3.1.2" } }],
+      ["bundle", { dependencies: { tools: "^0.2.2" } }], ["subagent", { optionalDependencies: { runtime: "^3.1.2" } }],
+    ]);
+    const ref = { specifier: "^3.1.2", version: "3.3.1(host@1.2.3)" };
+    const lock = { importers: { "pi-extensions/tools": { dependencies: { runtime: ref } },
+      "pi-extensions/subagent": { optionalDependencies: { runtime: ref } } } };
+    const select = (...roots) => sourceConsumerSelection(roots, manifests, lock);
+    assert.deepEqual(select("runtime").included, new Set(["runtime"]));
+    assert.deepEqual(select("tools").included, new Set(["tools"]));
+    for (const [name, owner] of [["bundle", "tools"], ["subagent", "subagent"]]) {
+      assert.deepEqual(select(name).resolutions, [{ owner, dependency: "runtime", version: "3.3.1", range: "^3.1.2", sourceVersion: version }]);
+    }
+    for (const invalid of ["link:../runtime", "file:runtime.tgz", "4.1.0"]) {
+      ref.version = invalid;
+      assert.throws(() => select("tools"), /No compatible locked registry dependency/);
+    }
+    manifests.get("runtime").version = "3.2.0";
+    assert.deepEqual(select("bundle").included, new Set(["bundle", "tools", "runtime"]));
+    assert.deepEqual(select("bundle").resolutions, []);
+    manifests.get("tools").dependencies.runtime = "*";
+    assert.throws(() => select("tools"), /Unsupported source dependency/);
+  }
+  assert.equal(incompatibleRuntimeLines(["3.1.2", "3.8.1"]), false);
+  assert.equal(incompatibleRuntimeLines(["3.1.2", "4.0.0"]), true);
+  assert.equal(incompatibleRuntimeLines(["3.2.0-alpha.1", "3.2.0-alpha.1"]), false);
+  assert.equal(incompatibleRuntimeLines(["3.2.0-alpha.1", "3.2.0"]), true);
 });

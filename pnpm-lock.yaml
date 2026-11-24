@@ -210,6 +210,9 @@ importers:
       "@changesets/cli":
         specifier: 3.0.3
         version: 3.0.3
+      "@changesets/parse":
+        specifier: 1.0.0
+        version: 1.0.0
       "@changesets/read":
         specifier: 1.0.1
         version: 1.0.1
@@ -249,6 +252,9 @@ importers:
       npm:
         specifier: 11.19.0
         version: 11.19.0
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
       tsx:
         specifier: 4.23.15
         version: 4.23.15

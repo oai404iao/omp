@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript-ast";
+import { isWorkspaceRange, satisfiesWorkspaceDependency } from "./workspace-ranges.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 export const codexSource = resolve(root, "pi-extensions");
@@ -101,9 +102,13 @@ export function checkArchitecture(directory, policy) {
       }
     }
   }
-  const workspaceTarget = (specifier) => {
+  const workspaceTarget = (specifier, importer) => {
     const name = [...manifests.keys()].find(name => specifier === name || specifier.startsWith(`${name}/`));
     if (!name) return undefined;
+    const declaration = manifests.get(importer)?.dependencies?.[name];
+    // This edge resolves to a registry artifact, not a node in the source graph.
+    // Its subpath belongs to the installed version's typecheck/installation check.
+    if (isWorkspaceRange(declaration) && !satisfiesWorkspaceDependency(manifests.get(name).version, declaration)) return undefined;
     const key = specifier === name ? "." : `.${specifier.slice(name.length)}`;
     const exports = manifests.get(name).exports ?? {};
     let path = exports[key];
@@ -126,10 +131,11 @@ export function checkArchitecture(directory, policy) {
     const limit = policy.exceptions[name]?.maxLines ?? policy.maxLines;
     if (lines > limit) warnings.push(`${name}: ${lines} lines exceeds ${limit}`);
     const dependencies = new Set();
+    const importer = ownerOf(file);
     for (const specifier of moduleReferences(text, file)) {
       const target = specifier.startsWith(".")
         ? resolve(dirname(file), specifier.replace(/\.(?:m?js|tsx?)$/, ".ts"))
-        : workspaceTarget(specifier);
+        : workspaceTarget(specifier, importer);
       if (target === undefined) continue;
       if (target === null) {
         errors.push(`${name}: workspace import is not exported: ${specifier}`);
@@ -141,13 +147,12 @@ export function checkArchitecture(directory, policy) {
         continue;
       }
       dependencies.add(target);
-      const importer = ownerOf(file);
       const imported = ownerOf(target);
       if (importer && imported && importer !== imported) {
         if (specifier.startsWith(".")) errors.push(`${name}: cross-package imports must use exports: ${specifier}`);
-        const pin = manifests.get(importer).dependencies?.[imported];
-        if (pin !== manifests.get(imported).version) {
-          errors.push(`${name}: ${imported} needs an exact runtime dependency, not an implicit workspace hoist`);
+        const declaration = manifests.get(importer).dependencies?.[imported];
+        if (!isWorkspaceRange(declaration) && declaration !== manifests.get(imported).version) {
+          errors.push(`${name}: ${imported} needs a declared runtime dependency, not an implicit workspace hoist`);
         }
       }
       const targetName = localName(target);

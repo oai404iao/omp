@@ -39,6 +39,14 @@ test("PR verification has only read permissions and no publishing environment", 
   }
 });
 
+test("dependency declaration coverage compares the PR base in the required policy job", () => {
+  const steps = workflow.jobs.policy.steps;
+  assert.equal(steps.find(step => step.uses?.startsWith("actions/checkout@")).with["fetch-depth"], 0);
+  const coverage = steps.find(step => step.run?.includes("check-dependency-changesets.mjs"));
+  assert.equal(coverage.if, "github.event_name == 'pull_request'");
+  assert.equal(coverage.env.BASE_SHA, "${{ github.event.pull_request.base.sha }}");
+});
+
 test("the required check always aggregates the planned coverage graph", () => {
   const { verify, "trusted-main-coverage": coverage } = workflow.jobs;
   assert.equal(verify.name, "Verification / Required");

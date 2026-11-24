@@ -1,9 +1,8 @@
-import { createRequire } from "node:module";
+import semver from "semver";
 import { isolatedConsumerLock } from "./isolated-consumer-lock.mjs";
+import { satisfiesWorkspaceDependency } from "./workspace-ranges.mjs";
 
-// Changesets already owns the workspace's release-time SemVer implementation.
-const require = createRequire(import.meta.url);
-const { satisfies } = createRequire(require.resolve("@changesets/cli/package.json"))("semver");
+const { satisfies } = semver;
 const locked = (importer, dependency) => importer?.dependencies?.[dependency]
   ?? importer?.optionalDependencies?.[dependency] ?? importer?.devDependencies?.[dependency];
 
@@ -12,7 +11,12 @@ export function releaseConsumerLock(name, included, manifests, artifacts, lock) 
     const manifest = manifests.get(pkg);
     const importer = lock.importers?.[`pi-extensions/${pkg.split("/").at(-1)}`];
     for (const [dependency, specifier] of Object.entries({ ...manifest.dependencies, ...manifest.optionalDependencies })) {
-      if (manifests.has(dependency)) continue;
+      if (manifests.has(dependency)) {
+        if (!satisfiesWorkspaceDependency(manifests.get(dependency).version, specifier)) {
+          throw new Error(`Cannot override ${pkg} -> ${dependency}@${specifier} with ${manifests.get(dependency).version}`);
+        }
+        continue;
+      }
       const entry = locked(importer, dependency);
       if (!entry || entry.specifier !== specifier) throw new Error(`Historical external lock prerequisite mismatch: ${pkg} -> ${dependency}`);
       if (!satisfies(entry.version.split("(")[0], specifier)) throw new Error(`Locked external version does not satisfy historical dependency: ${dependency}`);

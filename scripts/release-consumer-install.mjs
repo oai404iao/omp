@@ -26,10 +26,10 @@ export function assertContainedTree(path, consumer) {
   }
 }
 
-export function installConsumers(candidates, manifests, artifacts, sourceLock, directory, runner = run) {
+export function installConsumers(candidates, manifests, artifacts, sourceLock, directory, runner = run,
+  cases = releaseConsumerCases(candidates, manifests)) {
   const store = runner("pnpm", ["store", "path", "--silent"], root, { TMPDIR: directory }).trim();
   if (!store || !resolve(store).startsWith("/")) throw new Error("Cannot resolve pnpm artifact store");
-  const cases = releaseConsumerCases(candidates, manifests);
   for (const item of cases) {
     const cwd = join(directory, item.label);
     mkdirSync(cwd);

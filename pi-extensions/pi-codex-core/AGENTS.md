@@ -14,8 +14,8 @@ Sole Responses engine. Does not register patch, web search or image generation.
 
 ## Constraints
 
-1. Workspace imports may target runtime only, through declared exports and exact
-   dependencies. Never import legacy facades or optional capability implementations.
+1. Workspace imports may target runtime only, through declared exports and a
+   supported dependency range. Never import legacy facades or optional capability implementations.
 2. Core connects stream effects to the broker. Shared services own presentation
    hooks; do not install duplicate clear/flush handlers around the broker.
 3. Socket state stays session-owned. Reset prewarm waiters even if authentication

@@ -9,7 +9,7 @@
 
 ## 选择最小组合
 
-以下包均使用 `@oai404iao/` scope，内部依赖版本精确固定：
+以下包均使用 `@oai404iao/` scope，按各自的兼容契约独立发版：
 
 | 包 | 拥有什么 | 工作区依赖 |
 | --- | --- | --- |
@@ -37,7 +37,7 @@ Core 不注册三类工具，也不加载图像存储或搜索展示实现；保
 本项目不接管无关的同名工具，本地图片查看使用 Pi 原生 `read`。
 
 包发布 TypeScript 源码，供 Pi/TS-aware loader 使用，不承诺 plain Node 可直接导入。
-`./internal/*` 仅服务内部装配与 owner tests，不是稳定公共 API。
+`./internal/*` 不是对第三方的公共 API；已发布的 OMP 消费者使用的导出、参数和回放语义仍须在其兼容范围内保持可用。
 SDK 子会话集成直接使用 `@oai404iao/pi-codex-runtime/subagent-inline`。
 
 <a id="model-and-configuration-behavior"></a>
@@ -125,7 +125,8 @@ Standard/Lite、可选 Codex request 增强、SSE/WS/auto、Pi/native 压缩互�
 API wrapper 和模块路径可以不同；一个服务只认领一次 package ownership，合作包不会重复安装
 provider、工具、命令、renderer 或身份 hooks。
 
-握手要求 **ABI v2 和相同 runtime 包版本**。混合版本显式失败，不按加载顺序决定 catalog 语义。
+ABI v3 以协议、必需能力和兼容版本线握手，不要求两个稳定 runtime 的 patch 或 minor 相同。
+旧 ABI 的实际发布版本不会因为新包的 npm 范围而获得混装能力；迁移时需更新仍使用旧握手的入口。
 发现 channel 与 cache key 保持稳定以检测旧 ABI，而不是建立平行 broker。
 仅支持新 broker-enabled bundle 与兼容能力版本重复安装；旧单体工厂不参与握手。
 
@@ -156,7 +157,7 @@ pnpm run check:architecture
 
 完整 `pnpm run ci` 已包含这些检查。Behavioral tests 属于 runtime/core/tools 各 owner，
 根 `tests/codex/` 负责跨包集成与纯组合边界，不在 bundle 重复实现/测试行为。
-架构检查覆盖 type/re-export edges、循环、跨包导出路径、精确依赖和禁止的 optional/peer edges。
+架构检查覆盖 type/re-export edges、循环、跨包导出路径、依赖声明和禁止的 optional/peer edges。
 
 `test:codex-packages` 将六个 Codex 包及 subagent 打包，在临时 consumer 内使用自身真实 Pi SDK/loader，
 覆盖 runtime、各能力、两两/全部组合、bundle、重复和逆序加载、不同物理 runtime 副本、shutdown/reload。
@@ -191,13 +192,10 @@ Live 测试与 CI 分开，需显式授权和 `--execute provider/model`，不�
 Tools 已完成首发与独立激活，走常规受保护发布流程。
 
 这不表示当前 manifest 的所有版本都已发布，也不授权发布。
-普通批次要求完整依赖闭包和依赖优先顺序；定向发布要求精确依赖已在 npm 验证。
-消费者仍需单独受保护调度，minimal-tools 保持在依赖之后发布。
+单包和多包均须显式选择目标，按依赖顺序发布。范围内已发布的依赖只读验证，不创建其 tags 或 Releases。
 已发布 recovery 节点由 release lock 的 source/SHA-512 固定；暂时 E404 必须停止，不能重打包当新候选。
 
-Changesets 的 `changeset:sync` 递归覆盖 hard/optional workspace 消费者；
-`changeset:version` 保持 exact pins 并要求相应 consumer bump。
-不要手改生成 changeset 或跳过依赖守卫。
+Changesets 只版本化有变更的包；升级依赖而未改变消费者的兼容范围，不会给消费者生成 patch。
 初始 alpha 的有限 `latest`/`next` 同指例外不是稳定认证；trusted publisher 配置也不证明 OIDC 已成功发布。
 完整流程见[发布指南](../RELEASING.md)，证据见[初始激活](audits/codex-bootstrap-activation.md)、
 [tools 激活](audits/codex-tools-bootstrap-activation.md)和[集成审计](audits/codex-integration.md)。

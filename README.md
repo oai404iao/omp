@@ -47,8 +47,8 @@ pi -e ./pi-extensions/pi-subagent
 ## 升级前先读
 
 - 子代理使用异步多代理 v2 API，旧同步工具与配置不再适用，先读[迁移指南](pi-extensions/pi-subagent/README.md#breaking-migration)。
-- 不要把旧的单体 minimal-tools 与新的能力包混装；重复加载去重只适用于支持 broker
-  且 runtime 版本一致的组合。
+- 不要把旧单体 minimal-tools 或旧 broker 与新的能力包混装；重复加载去重只适用于
+  [broker 兼容的组合](docs/codex-packages.md#broker-and-lifecycle-contract)。
 - `pi-telegram-notify` 已退出 OMP 工作区；现有用户可[迁移到 `pi-notify`](docs/configuration.md#notification-migration)。
 - `external-thinking`、`pi-keep-defaults`、`pi-tree-continue` 和 `pi-code-mode`
   已从仓库与未来产物批次移除。移除旧安装/配置后完全重启 Pi，不能假定 `/reload`

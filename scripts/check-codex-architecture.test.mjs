@@ -87,7 +87,7 @@ test("a neutral intermediary cannot hide a forbidden capability dependency", () 
   });
 });
 
-test("workspace edges require exported paths and exact declared runtime dependencies", () => {
+test("workspace edges require exported paths and declared runtime dependencies, even when the local provider is on another line", () => {
   const core = { name: "@test/core", version: "1.0.0", exports: { ".": "./src/index.ts" } };
   const runtime = { name: "@test/runtime", version: "1.0.0", exports: { ".": "./src/index.ts" } };
   const matrix = {
@@ -100,9 +100,14 @@ test("workspace edges require exported paths and exact declared runtime dependen
     "core/src/index.ts": 'import "@test/runtime";',
     "runtime/src/index.ts": "export {};",
   };
-  withSources(files, dir => assert.match(checkArchitecture(dir, matrix).errors[0], /exact runtime dependency/));
-  core.dependencies = { "@test/runtime": "1.0.0" };
+  withSources(files, dir => assert.match(checkArchitecture(dir, matrix).errors[0], /declared runtime dependency/));
+  core.dependencies = { "@test/runtime": "^2.0.0" };
   files["core/package.json"] = JSON.stringify(core);
+  files["core/src/index.ts"] = 'import "@test/runtime/only-in-v2";';
+  withSources(files, dir => assert.deepEqual(checkArchitecture(dir, matrix).errors, []));
+  core.dependencies = { "@test/runtime": "^1.0.0" };
+  files["core/package.json"] = JSON.stringify(core);
+  files["core/src/index.ts"] = 'import "@test/runtime";';
   withSources(files, dir => assert.deepEqual(checkArchitecture(dir, matrix).errors, []));
   files["core/src/index.ts"] = 'import "@test/runtime/private";';
   withSources(files, dir => assert.match(checkArchitecture(dir, matrix).errors[0], /not exported/));

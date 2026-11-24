@@ -82,19 +82,16 @@ pnpm install --offline --prod --frozen-lockfile --trust-lockfile --ignore-script
 
 ```bash
 pnpm run changeset
-pnpm run changeset:sync
 ```
 
 仅修改仓库文档、测试或基础设施时不需要 changeset，除非同时改变了发布包。
 
-`changeset:sync` 沿 `dependencies` 和 `optionalDependencies` 递归补齐消费者版本记录；
-已有显式消费者 changeset 优先。不要手改生成的
-`.changeset/workspace-dependent-releases*.md`。预发布迭代使用不同 ID，
-保留 `.changeset/pre/` 中已消费的历史。CI 中的 `changeset:check` 检查覆盖和精确版本 pin。
+工作区的生产／可选依赖声明最低兼容版本（如 `^3.1.2`）。最低版本表示实际依赖的接口或修复，
+不是每次都追随依赖最新版。`0.x` 也遵循 npm caret 规则：`^0.2.2` 不包含 `0.3.0`。
+更改消费者自己的依赖声明需要该包的 changeset；仅升级范围内的依赖，只增加反向依赖测试范围，不增加待发布包。
+Pi 宿主 peers、开发工具版本、根锁与不可变制品证据仍独立管理。
 
-**不要手改包版本，也不要放宽工作区依赖的精确 pin。** 经授权的版本 PR 使用
-`pnpm run changeset:version`：它依次同步消费者 changeset、运行 Changesets、
-修复精确 pin、验证消费者已升级，并刷新根锁。不要直接运行裸 Changesets version。
+经授权的版本 PR 使用 `pnpm run changeset:version` 更新版本、changelog 和根锁。不要手改版本或调用裸 Changesets version。
 尚未首发的 bootstrap 包有严格受限的一次性例外，见[发布指南](RELEASING.md#npm-bootstrap-and-trusted-publishing)；
 已首发包不能借用该例外。
 

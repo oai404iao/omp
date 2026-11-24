@@ -3,22 +3,39 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { artifactWorkspaces, publishableWorkspaces, readManifest, workspaces } from "./workspaces.mjs";
+import { releaseTargets } from "./release-selection.mjs";
 import { targetedReleaseWorkspaces } from "./targeted-release.mjs";
 
 test("targeted publication passes the same selection through protected verification and publication", () => {
   const workflow = parse(readFileSync(new URL("../.github/workflows/publish.yml", import.meta.url), "utf8"));
-  assert.deepEqual(workflow.on.workflow_dispatch.inputs.package, {
-    description: "Optional exact workspace package name; blank publishes the full batch",
-    required: false,
-    default: "",
-    type: "string",
-  });
+  const input = workflow.on.workflow_dispatch.inputs.package;
+  assert.equal(input.type, "string");
+  assert.equal(input.required, true);
+  assert.equal(input.default, undefined);
   assert.equal(workflow.env.RELEASE_PACKAGE, "${{ inputs.package }}");
   assert.equal(workflow.jobs.publish.environment, "npm-publish");
   assert.equal(workflow.jobs.publish.needs, "verify");
+  const steps = workflow.jobs.publish.steps;
+  const gate = steps.findIndex(step => step.run?.includes("release-preflight.mjs"));
+  const install = steps.findIndex(step => step.run?.split("\n").includes("pnpm install --frozen-lockfile --ignore-scripts"));
+  const publish = steps.findIndex(step => step.run?.includes("publish-release-artifacts.mjs"));
+  assert.ok(gate >= 0 && gate < install && install < publish, "load locked release tooling after approval and safety gates");
   for (const job of Object.values(workflow.jobs)) {
     assert.equal(job.env?.RELEASE_PACKAGE, undefined);
     for (const step of job.steps) assert.equal(step.env?.RELEASE_PACKAGE, undefined);
+  }
+});
+
+test("release dispatch selects only explicitly named publishable targets", () => {
+  const notify = "@oai404iao/pi-notify";
+  const rsi = "@oai404iao/pi-rsi";
+  assert.deepEqual(releaseTargets(notify), [notify]);
+  assert.deepEqual(releaseTargets(`${rsi}, ${notify}`), [notify, rsi]);
+  for (const input of [undefined, "", " ", ",", `${rsi},`, `${rsi},${rsi}`, "*", `${notify},@fixture/unknown`]) {
+    assert.throws(() => releaseTargets(input));
+  }
+  for (const releaseStatus of ["bootstrap", "blocked"]) {
+    assert.throws(() => releaseTargets(rsi, [{ name: rsi, releaseStatus }]), /Unapproved/);
   }
 });
 

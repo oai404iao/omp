@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { publishableWorkspaces, root as repositoryRoot, workspaces } from "../workspaces.mjs";
-import { targetedReleaseWorkspaces } from "../targeted-release.mjs";
+import { publishableWorkspaces, root as repositoryRoot } from "../workspaces.mjs";
+import { releaseTargets } from "../release-selection.mjs";
 import { buildGraph, integrationPackages, readPackage, reverseClosure, suites,
   taskCatalog, testPackages, validateRepositoryCatalog } from "./catalog.mjs";
 
@@ -68,12 +69,12 @@ export function affectedPlan(paths, graphs, sourceSha) {
       selectedSuites.add("infrastructure");
       reasons.push(`Infrastructure change: ${path}`);
       // These scripts are also executed by the behavioral suites.
-      if (["scripts/test-codex-composition.mjs", "scripts/check-codex-architecture.mjs"].includes(path)) {
+      if (["scripts/test-codex-composition.mjs", "scripts/check-codex-architecture.mjs", "scripts/workspace-ranges.mjs"].includes(path)) {
         selectedSuites.add("composition");
       }
       if (["scripts/verify-codex-installations.mjs", "scripts/codex-consumer-matrix.mjs",
         "scripts/codex-loader-probe.mjs", "scripts/subagent-consumer-probe.mjs",
-        "scripts/isolated-consumer-lock.mjs", "scripts/pnpm-lock.mjs", "scripts/pi-version.mjs"].includes(path)) {
+        "scripts/isolated-consumer-lock.mjs", "scripts/pnpm-lock.mjs", "scripts/pi-version.mjs", "scripts/workspace-ranges.mjs"].includes(path)) {
         selectedSuites.add("consumers");
       }
     } else {
@@ -109,12 +110,17 @@ export function createPlan({ mode = "full", packageName, base, head = "HEAD",
     return fullPlan(mode, sourceSha, "Explicit full verification");
   }
   if (mode === "release") {
-    buildGraph(testPackages, entry => readPackage(entry, root));
-    const entries = packageName?.trim()
-      ? targetedReleaseWorkspaces(packageName, workspaces, entry => readPackage(entry, root)) : publishableWorkspaces;
-    const packages = entries.map(entry => testPackages.find(item => item.name === entry.name).id);
+    const manifestFor = entry => readPackage(entry, root);
+    const graph = buildGraph(testPackages, manifestFor);
+    // Ordinary plan and aggregate jobs run before any workspace dependencies are installed.
+    const { targetedSourceWorkspaces } = createRequire(import.meta.url)("../targeted-release.mjs");
+    const targets = packageName === undefined ? publishableWorkspaces.map(e => e.name) : releaseTargets(packageName);
+    const forward = targetedSourceWorkspaces(targets, testPackages, manifestFor);
+    const rootIds = testPackages.filter(entry => targets.includes(entry.name)).map(entry => entry.id);
+    const consumers = reverseClosure(rootIds, [graph]).filter(id => releasePackages.includes(id));
+    const packages = [...new Set([...forward.map(entry => entry.id), ...consumers])];
     return plan(mode, sourceSha, packages, packages.some(id => integrationPackages.has(id))
-      ? suites : ["infrastructure"], [`Release verification: ${packageName?.trim() || "all release workspaces"}`]);
+      ? suites : ["infrastructure"], [`Release verification: ${targets.join(", ")}`]);
   }
   try {
     if (!base) throw new GitError("No base revision supplied");

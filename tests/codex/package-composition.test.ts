@@ -12,7 +12,8 @@ import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal
 import web from "@oai404iao/pi-codex-web-search";
 import image from "@oai404iao/pi-codex-imagegen";
 import { getOpenAICodexLatestImagePath } from "@oai404iao/pi-codex-tools/internal/tools/image-generation/storage";
-import { CODEX_BROKER_CHANNEL, getCodexBroker } from "@oai404iao/pi-codex-runtime";
+import { CODEX_BROKER_CHANNEL, CODEX_RUNTIME_VERSION, getCodexBroker } from "@oai404iao/pi-codex-runtime";
+import { createCodexSubagentInlineExtension } from "@oai404iao/pi-codex-runtime/subagent-inline";
 import bundle from "@oai404iao/pi-codex-minimal-tools";
 import { snapshotOwnedToolProtocols } from "@oai404iao/pi-codex-runtime/internal/tool-activation";
 import {
@@ -346,35 +347,51 @@ test("broker protocol mismatch fails before any registration", () =>
 		} finally { host.dispose(); }
 	}));
 
-test("mixed runtime versions fail closed instead of making catalog ownership load-order dependent", () =>
+test("two distinct live brokers cannot both answer discovery", () =>
 	withCompositionDirectory(async directory => {
 		const host = createCompositionHost(directory);
-		host.bus.on(CODEX_BROKER_CHANNEL, request => request.accept({
-			version: 2, runtimeVersion: "0.0.0", claim() { throw new Error("must not be called"); },
-		}));
+		const broker = getCodexBroker(host.api());
+		host.bus.on(CODEX_BROKER_CHANNEL, request => request.accept({ ...broker }));
 		try {
-			assert.throws(() => image(host.api()), /requires ABI v2 and runtime/);
+			assert.throws(() => image(host.api()), /duplicate Codex capability broker/);
 			assert.equal(host.tools.size, 0);
 		} finally { host.dispose(); }
 	}));
 
-for (const override of [{ runtimeVersion: "0.0.0" }, { version: 1 }, { tools: undefined }]) {
-	test(`cached broker still validates compatibility: ${JSON.stringify(override)}`, () =>
+for (const [label, override] of Object.entries({
+	"different major": { runtimeVersion: "0.0.0" },
+	"different prerelease": { runtimeVersion: `${CODEX_RUNTIME_VERSION}-fixture.1` },
+	"old strict ABI": { version: 2 },
+	"missing tool registry": { tools: undefined },
+	"partial tool registry": { tools: { get() {}, set() {} } },
+	"invalid installed engine": { engine: {} },
+	"missing peer compatibility": { acceptsRuntime: undefined },
+	"peer refuses this runtime": { acceptsRuntime: () => false },
+	"peer cannot complete handshake": { acceptsRuntime() { throw new Error("handshake failed"); } },
+})) {
+	test(`incompatible broker (${label}) fails discovery and cached access before installation`, () =>
 		withCompositionDirectory(async directory => {
-			const host = createCompositionHost(directory);
-			const api = host.api();
-			const broker = getCodexBroker(api);
+			const owner = createCompositionHost(directory);
+			const candidate = { ...getCodexBroker(owner.api()), ...override };
 			try {
-				Object.defineProperty(api, Symbol.for("@oai404iao/pi-codex/broker/v1"), {
-					value: { ...broker, ...override }, writable: true, configurable: true,
-				});
-				assert.throws(() => image(api), /requires ABI v2 and runtime/);
-				assert.equal(host.tools.size, 0);
-				assert.equal(host.providers.size, 0);
-			} finally {
-				await host.emit("session_shutdown");
-				host.dispose();
-			}
+				for (const cached of [false, true]) {
+					const host = createCompositionHost(directory);
+					const api = host.api();
+					if (cached) Object.defineProperty(api, Symbol.for("@oai404iao/pi-codex/broker/v1"), { value: candidate });
+					else host.bus.on(CODEX_BROKER_CHANNEL, request => request.accept(candidate));
+					try {
+						assert.throws(() => image(api), /Incompatible or duplicate Codex/);
+						const parent = SessionManager.inMemory(directory);
+						const inline = createCodexSubagentInlineExtension({ parentSessionManager: parent });
+						const factory = typeof inline === "function" ? inline : inline.factory;
+						assert.throws(() => factory(api), /Incompatible or duplicate Codex/);
+						assert.equal(parent.getEntries().length, 0);
+						assert.equal(host.handlers.size, 0);
+						assert.equal(host.tools.size, 0);
+						assert.equal(host.providers.size, 0);
+					} finally { host.dispose(); }
+				}
+			} finally { owner.dispose(); }
 		}));
 }
 

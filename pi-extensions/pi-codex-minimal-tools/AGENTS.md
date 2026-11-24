@@ -37,13 +37,13 @@ sockets, restore environment/fetch/timers, and reset identity state.
 
 1. Preserve the default extension factory. Do not rebuild compatibility
    facades or duplicate owner resources.
-2. Depend on core and tools at exact versions; runtime is transitive. The
+2. Depend only on compatible core and tools; runtime is transitive. The
    broker deduplicates compatible installations. Factory order and lifecycle
    changes need composition tests.
 3. Existing configuration paths retain the `pi-codex-minimal-tools` directory name.
 4. Tarballs have an explicit file allowlist checked by root pack validation.
    Keep maintenance documents out of published artifacts.
-5. Tarball-facing edits require changesets and `pnpm run changeset:sync`.
+5. Tarball-facing edits require a changeset for this package.
    Do not alter release eligibility, locks, Pi baselines or default tool behavior
    during mechanical cleanup.
 

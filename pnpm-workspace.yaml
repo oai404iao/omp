@@ -9,8 +9,9 @@ packages:
   - pi-extensions/pi-notify
   - pi-extensions/pi-rsi
 
-# Keep exact published pins while resolving matching development packages locally.
+# Resolve matching published numeric ranges to local packages during development.
 linkWorkspacePackages: true
+preferWorkspacePackages: true
 autoInstallPeers: false
 lockfileIncludeTarballUrl: true
 
