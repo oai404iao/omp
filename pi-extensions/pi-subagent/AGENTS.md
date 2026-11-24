@@ -23,9 +23,9 @@ and publication boundaries.
 
 ## Async v2 contracts
 
-- Keep root and child definitions identical and `model-only`: the seven controls
-  are not callable through codemode or nested tool execution. Do not restore
-  retired tools, arguments or synchronous completion responses.
+- Keep root and child tool definitions identical, including the [public exposure
+  contract](README.md#seven-model-facing-tools). Do not restore retired tools,
+  arguments or synchronous completion responses.
 - Spawn and follow-up return acceptance, not completion. Follow-up carries an
   explicit task, can override the saved execution profile, and cannot target `/root`.
 - Wake only after mail is durably enqueued. Start idle `/root` via a custom

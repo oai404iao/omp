@@ -41,9 +41,8 @@ pi install /absolute/path/to/omp/pi-extensions/pi-subagent
 
 ## 完成一次委派
 
-以下 JSON 是对应模型工具的参数，不是 shell 命令，也不是可以放进 codemode 的调用。
-根代理和子代理使用相同的七个 `model-only` 工具；它们只能由模型直接调用，不能通过
-codemode 或嵌套工具执行。
+以下 JSON 是对应工具的调用参数，不是 shell 命令。根代理和子代理的工具一致；
+哪些可以在 codemode 脚本里调用，见[工具说明](#seven-model-facing-tools)。
 
 **1. 创建子代理：`spawn_agent`**
 
@@ -213,6 +212,11 @@ MCP allowlist 例外绕过上限；精确 MCP 工具名须在子代理初始化�
 全部工具使用闭合参数对象，不接受额外字段或旧别名。`message` 必须包含非空白文本，
 最长 131072 个字符，并受收件箱 UTF-8 字节容量约束。契约定义见包内
 [`src/schemas.ts`](src/schemas.ts)，共享处理器见 [`src/tools.ts`](src/tools.ts)。
+
+`list_agents`、`spawn_agent`、`send_message`、`followup_task` 和 `interrupt_agent` 为 `direct`：
+工具启用时也支持 codemode 和 Pi 的嵌套工具调用。例如，`return (await tools.list_agents({})).agents`
+返回当前页。批量派发可用 `Promise.allSettled()` 逐项检查；脚本后续失败不会撤回已接受的任务或消息。
+`wait_agent` 和 `close_agent` 保持 `model-only`，只能由模型直接调用。
 
 | 工具 | 必填参数 | 可选参数 | 返回值与语义 |
 | --- | --- | --- | --- |

@@ -77,7 +77,7 @@ owned tool 实现或 child session 权限。不透明 checkpoint 与 replay sign
   Hosted profiles 为 `model-only`，在 codemode `on` / `only` 下保留 provider 声明；显式 direct fallback 不改变 hosted exposure。
 - Exposure 随模型切换，不替换外部同名工具，也不覆盖 `autoEnable:false`。Hosted placeholder result 是错误。
 - Active `apply_patch` 保持可调用；本地图片使用原生 `read`。
-- Subagent 的七个协作工具均为 `model-only`，旧 child `report` 已由 `send_message` 取代。
+- Subagent 在根与子代理中采用相同的[协作工具暴露规则](../pi-extensions/pi-subagent/README.md#seven-model-facing-tools)。
   `wait_agent` 只报告调用者邮箱活动，不返回正文、不确认某个子代理完成。
   消息正文和完成通知通过独立上下文消息交付，ACK 以该消息的持久 transcript 收据为依据，
   不是等待工具结果或嵌套脚本摘要。
@@ -108,7 +108,7 @@ fork 不继承 parent `codemode-store` custom entries。
 
 `tools` / `excludeTools` 继续约束 registry，包括晚注册工具。
 Allowlist 给予 codemode/deferred callable access，但不强迫声明；tool search 可随后声明，
-发现结果在 child canonical branch 冷恢复后保留。Subagent 工具仍是 model-only。
+发现结果在 child canonical branch 冷恢复后保留。
 Nested traces 保留调用层级，nested usage 只从 outer result 收集一次。
 本项目不全局启用 codemode，也不向 child 自动注入 MCP。
 
