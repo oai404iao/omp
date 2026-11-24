@@ -71,7 +71,7 @@ runtime 独占规范 [config.schema.json](config.schema.json)、[models.schema.j
   "webSocketEnabled": true,
   "fastMode": false,
   "applyPatch": true,
-  "webSearch": true,
+  "webSearch": { "mode": "live" },
   "imageGeneration": true,
   "imageOutputDir": ".pi/openai-codex-images",
   "imageModel": "gpt-image-2",
@@ -89,7 +89,7 @@ runtime 独占规范 [config.schema.json](config.schema.json)、[models.schema.j
 | `webSocketEnabled` | `true` | `false` 强制 SSE 并关闭所有模型的 WebSocket 预热，不改写目录配置 |
 | `fastMode` | `false` | 新会话默认值；`/fast` 只保存当前会话选择，不写回本文件 |
 | `applyPatch` | `true` | 补丁总开关；关闭注册和补丁专用行为，不改变其他能力 |
-| `webSearch` | `true` | 同时控制 hosted/standalone 搜索的注册、执行和专用显示 |
+| `webSearch` | `{ "mode": "live" }` | Hosted 和 standalone 共用默认搜索模式，可设 `"cached"`、`"indexed"`、`"live"`。`false` 关闭两者，`true` 使用默认值 |
 | `imageGeneration` | `true` | 控制生图工具、`/image-gen`、专用显示和网络执行；不关闭图片输入或历史回放 |
 | `imageOutputDir` | `".pi/openai-codex-images"` | 输出目录；相对路径从向上找到的最近 `.git` 或 `.pi` 根目录解析，找不到则从 cwd 解析 |
 | `imageModel` | `"gpt-image-2"` | standalone 图片模型，还支持 `"gpt-image-1.5"`、`"gpt-image-1"` |
@@ -189,8 +189,8 @@ ID 按精确、大小写不敏感的 `provider/model` 匹配，绝不按名称�
 | 搜索字段 | 可选值 |
 | --- | --- |
 | `implementation` | `"hosted"` 或 `"standalone"`；hosted 只用于 Standard 且要求兼容 core |
-| `contentTypes` | 非空、去重的 `"text"`/`"image"` 数组 |
-| `mode` | `"cached"`、`"indexed"`、`"live"`，默认 live |
+| `contentTypes` | 非空、去重的 `"text"`/`"image"` 数组；hosted 仅支持文本或文本＋图片，配置为仅图片时不声明工具 |
+| `mode` | 仅 standalone 可覆盖；省略时与 hosted 一样使用全局 `webSearch.mode` |
 | `searchContextSize` | `"low"`、`"medium"`、`"high"` |
 | `maxOutputTokens` | standalone 截断预算，正整数，默认 10000；独立于调用的 `response_length` |
 | `userLocation` | `{ "type": "approximate", "country"?, "region"?, "city"?, "timezone"? }`，可选项值均为字符串 |

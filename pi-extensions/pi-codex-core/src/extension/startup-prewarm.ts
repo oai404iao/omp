@@ -11,7 +11,7 @@ import { WEBSOCKET_PREWARM_TIMEOUT_MS } from "../providers/openai-codex/constant
 import { applyConfiguredResponsesFeatureHeaders, buildWebSocketHeaders } from "../providers/openai-codex/headers.js";
 import { withResponsesLiteWebSocketMetadata } from "../providers/openai-codex/lite.js";
 import { prewarmWebSocket } from "../providers/openai-codex/prewarm.js";
-import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOptions } from "../providers/openai-codex/request-body.js";
+import { buildRequestBody, requestBodyToolOptions } from "../providers/openai-codex/request-body.js";
 import { isWebSocketUpgradeRejectedError } from "../providers/openai-codex/retry.js";
 import { resolveResponsesWebSocketUrl } from "../providers/openai-codex/urls.js";
 import { websocketHttpFallbackSessions, websocketSessionCache } from "../providers/openai-codex/websocket-session.js";
@@ -136,13 +136,10 @@ export function createStartupPrewarmLifecycle(pi: ExtensionAPI, ownsNativeTool?:
 			settings,
 			model,
 		);
-		const webSearch = settings.modelProfile.effective.tools.webSearch;
 		body = rewriteNativeOpenAiTools(body, {
 			...requestBodyToolOptions(settings),
 			ownsNativeTool,
-			webSearch: settings.webSearchEnabled && webSearch ? webSearch : false,
 		}).payload;
-		ensureWebSearchDetailsIncluded(body);
 		body = withResponsesLiteWebSocketMetadata(body, profile.responsesMode);
 		if (requestIdentity) requestIdentity = {
 			...requestIdentity, model: model.id, reasoningEffort: body.reasoning?.effort,

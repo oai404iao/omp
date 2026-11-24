@@ -6,7 +6,7 @@ import test, { afterEach, beforeEach } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
 import { mapCodexEvents } from "../src/providers/openai-codex/events.js";
 import { ProviderResponseError, WebSocketHandshakeError } from "../src/providers/openai-codex/errors.js";
-import { isRetryableWebSocketError, webSocketCompactionRetryDelayMs, webSocketRetryDelayMs } from "../src/providers/openai-codex/retry.js";
+import { isRetryableWebSocketError, webSocketCompactionRetryDelayMs } from "../src/providers/openai-codex/retry.js";
 import { closeProviderWebSocketSessions } from "../src/providers/openai-codex/websocket-session.js";
 import { resetCodexWireState } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import type { StreamEventShape } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
@@ -150,14 +150,12 @@ for (const type of ["error", "response.failed"]) {
 		});
 	}
 
-	test(`${type} delay is subject to both existing WebSocket retry bounds`, async () => {
+	test(`${type} Retry-After remains subject to WebSocket compaction retry bounds`, async () => {
 		const event = eventWithHeaders({ "retry-after-ms": 40 }, { "retry-after-ms": 0 });
 		await assert.rejects(mapCodexEvents(source([event]))[Symbol.asyncIterator]().next(), error => {
 			assert.equal(isRetryableWebSocketError(error), true);
-			for (const delay of [webSocketRetryDelayMs, webSocketCompactionRetryDelayMs]) {
-				assert.equal(delay(error, 1, { maxRetryDelayMs: 50 }), 40);
-				assert.throws(() => delay(error, 1, { maxRetryDelayMs: 20 }), /retry delay 40ms exceeds maxRetryDelayMs 20ms/);
-			}
+			assert.equal(webSocketCompactionRetryDelayMs(error, 1, { maxRetryDelayMs: 50 }), 40);
+			assert.throws(() => webSocketCompactionRetryDelayMs(error, 1, { maxRetryDelayMs: 20 }), /retry delay 40ms exceeds maxRetryDelayMs 20ms/);
 			return true;
 		});
 	});

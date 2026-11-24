@@ -32,7 +32,11 @@ for (const { cwd, label, paths, expectedTools, core } of job.probes) {
       if (!registration) continue;
       const tool = registration.definition;
       const input = name === "web_search" ? { search_query: [{ q: "fixture" }] } : { prompt: "fixture" };
-      await assert.rejects(tool.execute("missing-auth", input, undefined, undefined, ctx), /key|auth|logged|credential/i);
+      const failure = await tool.execute("missing-auth", input, undefined, undefined, ctx);
+      assert.equal(failure.isError, true);
+      assert.equal(failure.details.success, false);
+      assert.equal(failure.structuredContent, undefined);
+      assert.match(failure.content[0].text, /key|auth|logged|credential/i);
       ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: true, apiKey: "fixture-key", headers: {} });
       let calls = 0;
       globalThis.fetch = async (url, init) => {

@@ -143,6 +143,10 @@
               ],
               "additionalProperties": false,
               "required": ["implementation"],
+              "allOf": [{
+                "if": { "type": "object", "properties": { "implementation": { "const": "hosted" } } },
+                "then": { "not": { "required": ["mode"] } }
+              }],
               "properties": {
                 "implementation": {
                   "enum": ["hosted", "standalone"],
@@ -153,14 +157,14 @@
                 },
                 "contentTypes": {
                   "type": "array",
-                  "description": "Search modalities advertised or accepted by this model.",
+                  "description": "Search modalities. Hosted search supports text or text plus image; an image-only hosted profile does not expose the tool.",
                   "minItems": 1,
                   "items": {
                     "enum": ["text", "image"]
                   },
                   "uniqueItems": true
                 },
-                "mode": { "enum": ["cached", "indexed", "live"], "default": "live" },
+                "mode": { "enum": ["cached", "indexed", "live"], "description": "Standalone-only override of webSearch.mode in config.json." },
                 "searchContextSize": { "enum": ["low", "medium", "high"] },
                 "maxOutputTokens": {
                   "type": "integer", "minimum": 1, "default": 10000,

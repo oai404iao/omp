@@ -52,7 +52,7 @@ Pi 仍拥有模型选择、认证和实际 base URL；扩展不冒充 Codex CLI�
 
 | 字段 | 契约 |
 | --- | --- |
-| `mode` | `cached`、`indexed` 或 `live` |
+| `mode` | 仅 standalone 可覆盖；两种搜索共用 [`config.json` 的 `webSearch.mode`](../pi-extensions/pi-codex-runtime/README.md#configuration) 作为默认值 |
 | `searchContextSize` | 搜索上下文大小策略 |
 | `userLocation` | 用户位置策略 |
 | `filters.allowedDomains` | 允许域名过滤 |

@@ -1,5 +1,7 @@
 import { type Api, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
+import { isRetryableAssistantError } from "@earendil-works/pi-ai/compat";
 import { buildProviderErrorMessage, ProviderResponseError } from "./errors.js";
+import type { WebSocketRetryHandoff } from "./retry.js";
 
 export function createInitialAssistantMessage<TApi extends Api>(model: Model<TApi>): AssistantMessage {
 	return {
@@ -29,7 +31,7 @@ export function assertSuccessfulOutput(
 	}
 }
 
-export function createErrorMessage(message: AssistantMessage, error: unknown, aborted: boolean): AssistantMessage {
+export function createErrorMessage(message: AssistantMessage, error: unknown, aborted: boolean, webSocketRetryHandoff?: WebSocketRetryHandoff): AssistantMessage {
 	for (const block of message.content) {
 		if (typeof block === "object" && block !== null && "partialJson" in block) {
 			delete (block as { partialJson?: string }).partialJson;
@@ -37,5 +39,12 @@ export function createErrorMessage(message: AssistantMessage, error: unknown, ab
 	}
 	message.stopReason = aborted ? "aborted" : "error";
 	message.errorMessage = buildProviderErrorMessage(error);
+	if (!aborted && webSocketRetryHandoff === "transient" && !isRetryableAssistantError(message)) {
+		// Pi classifies the display string; a transient Responses code may only be present in metadata.
+		const code = error instanceof ProviderResponseError ? error.code : undefined;
+		message.errorMessage = `WebSocket error${code ? ` (${code})` : ""}: ${message.errorMessage}`;
+	} else if (!aborted && typeof webSocketRetryHandoff === "object" && isRetryableAssistantError(message)) {
+		message.errorMessage = `Quota exceeded (${webSocketRetryHandoff.quotaIndicator}): ${message.errorMessage}`;
+	}
 	return message;
 }

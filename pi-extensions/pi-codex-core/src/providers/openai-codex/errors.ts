@@ -7,6 +7,7 @@ export class ProviderResponseError extends Error {
 	errorType?: string;
 	status?: number;
 	retryAfterMs?: number;
+	retryAfterOverflow?: boolean;
 }
 
 export class ProviderProtocolError extends Error {}
@@ -41,7 +42,11 @@ export function isRetryableError(status: number, errorText: string): boolean {
 }
 
 export function isTerminalQuotaError(errorText: string): boolean {
-	return /usage_limit_reached|usage_not_included|insufficient_quota|billing_hard_limit_reached|GoUsageLimitError|FreeUsageLimitError|monthly usage limit reached|quota[_ ](?:exceeded|exhausted)|out of budget|insufficient (?:balance|credits)/i.test(errorText);
+	return terminalQuotaIndicator(errorText) !== undefined;
+}
+
+export function terminalQuotaIndicator(errorText: string): string | undefined {
+	return /usage_limit_reached|usage_not_included|insufficient_quota|billing_hard_limit_reached|GoUsageLimitError|FreeUsageLimitError|monthly usage limit reached|quota[_ ](?:exceeded|exhausted)|out of budget|insufficient (?:balance|credits)/i.exec(errorText)?.[0];
 }
 
 export function withHttpStatusPrefix(status: number, message: string): string {

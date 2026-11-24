@@ -15,7 +15,6 @@ import { registerFastMode, resolveFastModeServiceTier } from "./fast-mode.js";
 import {
 	modelCatalogDiagnostics,
 	modelsPath,
-	resolveModelProfile,
 } from "@oai404iao/pi-codex-runtime/internal/model-catalog/catalog";
 
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
@@ -24,6 +23,7 @@ import { knownEndpointModel } from "@oai404iao/pi-codex-runtime/internal/endpoin
 import { registerNativeCompaction } from "./native-compaction.js";
 
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
+import { requestBodyToolOptions } from "./providers/openai-codex/request-body.js";
 
 import { configPath, loadSettings, settingsDiagnostics } from "@oai404iao/pi-codex-runtime/internal/settings";
 
@@ -156,22 +156,10 @@ export default function codexCore(pi: ExtensionAPI): void {
 		const settings = loadSettings(ctx.cwd);
 		const model = contextModel(ctx);
 		const modelSettings = loadModelSettings(knownEndpointModel(model ?? {}, ctx.sessionManager?.getSessionId?.()), ctx.cwd, settings, ctx.sessionManager?.getSessionId?.());
-		const profile = resolveModelProfile(model, { settings });
-		if (
-			!settings.enabled
-			|| !profile?.effective.enabled
-			|| !modelSettings.providerShimActive
-		) return undefined;
-		const webSearch = profile.effective.tools.webSearch;
+		if (!modelSettings.providerShimActive) return undefined;
 		const result = rewriteNativeOpenAiTools(event.payload, {
-			removeWebSearch: modelSettings.endpointDisabledWebSearch,
-			codexRequestExtensions: modelSettings.codexRequestExtensions,
+			...requestBodyToolOptions(modelSettings),
 			ownsNativeTool,
-			imageGeneration: modelSettings.imageGenerationImplementation ?? false,
-			webSearch: modelSettings.webSearchEnabled
-				&& webSearch
-				? webSearch
-				: false,
 		});
 		return result.rewritten.length > 0 || result.removed.length > 0
 			? result.payload

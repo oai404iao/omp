@@ -92,7 +92,9 @@ owned tool 实现或 child session 权限。不透明 checkpoint 与 replay sign
 | Search | `{ output, results }` |
 | Image generation | `{ path, latestPath?, image }` |
 
-图片需显式 `image(result.image)` 转发。执行失败抛出；模型可见 content 与既有 renderer 保留。
+图片需显式 `image(result.image)` 转发。工具执行失败时，Pi 本地保留 `isError` 和工具 details
+中的内部成功状态；没有可用数据的失败不返回 `structuredContent`，codemode 会以错误正文拒绝调用。
+Responses 回放只发送模型可见 `output`，不序列化内部状态或结构化结果。
 Pi 在 `tool_result` hook 只设 `isError:true` 时仍向脚本传递 structured data。
 需要脚本拒绝/脱敏的 hook 必须替换 `content` 且不再提供 `structuredContent`，
 不能把单独改 `isError` 当作 rejection/redaction 边界。

@@ -23,6 +23,10 @@ export function sanitizeWebSearch(value: unknown, path: string, diagnostics: str
 	}
 	if (value.mode !== undefined) {
 		if (value.mode !== "cached" && value.mode !== "indexed" && value.mode !== "live") return fail("invalid webSearch mode");
+		if (value.implementation === "hosted") {
+			diagnostics.push(`${path}.tools.webSearch.mode is ignored for hosted search; use webSearch.mode in config.json.`);
+		}
+		// Preserve existing profile hashes used to verify saved compaction checkpoints.
 		result.mode = value.mode;
 	}
 	if (value.searchContextSize !== undefined) {

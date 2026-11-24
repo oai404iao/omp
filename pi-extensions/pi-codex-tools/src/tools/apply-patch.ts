@@ -17,7 +17,7 @@ export const applyPatchToolSchema = {
 	type: "object",
 	additionalProperties: false,
 	properties: {
-		input: { type: "string", description: "Raw Codex patch text. File paths may be relative or absolute. Add File content lines start with +; Update File chunks use context, +, and - lines." },
+		input: { type: "string", description: "Raw Codex patch text, from *** Begin Patch to *** End Patch. Use Add, Update, or Delete file sections. File paths can be relative or absolute. Add lines start with +; update hunks start with @@ and use space, +, or - for each line." },
 	},
 	required: ["input"],
 };
@@ -117,16 +117,11 @@ export async function executeApplyPatchTool(params: ApplyPatchInput, cwd: string
 }
 
 export function createApplyPatchToolDefinition(options: { cwd?: string; deferRendering?: boolean } = {}) {
-	const definition: Record<string, unknown> = {
+	const definition = {
 		name: "apply_patch",
 		label: "Apply Patch",
-		description: "Use apply_patch to edit files with the Codex patch format. A patch starts with *** Begin Patch, contains one or more Add, Update, or Delete file sections, and ends with *** End Patch.",
-		promptSnippet: "Apply Codex-style multi-file patches with contextual update hunks and explicit Add, Update, or Delete headers.",
-		promptGuidelines: [
-			"Use apply_patch for concise multi-file edits when a Codex-style patch is clearer than separate edit/write calls.",
-			"In apply_patch, paths may be relative to the current working directory or absolute; prefix every Add File content line with +; and use @@ class/function context plus surrounding lines when repeated code needs disambiguation.",
-			"Use *** End of File in apply_patch when a hunk must match the end of a file.",
-		],
+		description: "The `apply_patch` tool can be used to edit files. Pass the Codex patch text as the `input` argument.",
+		promptSnippet: "Edit files using the Codex patch format.",
 		parameters: applyPatchToolSchema,
 		outputSchema: applyPatchOutputSchema,
 		prepareLoadout(loadout: ToolLoadout): ToolLoadoutChanges | undefined {
@@ -142,6 +137,5 @@ export function createApplyPatchToolDefinition(options: { cwd?: string; deferRen
 			return executeApplyPatchTool(params, cwd, signal);
 		},
 	};
-	if (!options.deferRendering) Object.assign(definition, createApplyPatchRenderers());
-	return definition;
+	return { ...definition, ...(!options.deferRendering ? createApplyPatchRenderers() : {}) };
 }

@@ -153,7 +153,7 @@ export function convertResponsesMessages<TApi extends Api>(
 					break;
 				}
 			}
-			const usesContentItems = supportsToolResultImages || originalCallUsesContentItems;
+			const usesContentItems = supportsToolResultImages || (originalCallUsesContentItems && !msg.isError);
 			const output = usesContentItems
 				? [
 						...(hasText ? [{ type: "input_text" as const, text: sanitizeSurrogates(textResult) }] : []),

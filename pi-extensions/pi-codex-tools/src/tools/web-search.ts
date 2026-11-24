@@ -22,6 +22,7 @@ import {
 	type CodexRequestIdentity,
 } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { loadSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
+import { executeWithToolResult } from "./tool-result.js";
 
 interface WebSearchToolContext {
 	cwd: string;
@@ -95,6 +96,16 @@ function assertStandaloneSearchOutput(output: string, input: WebSearchInput): vo
 			`Standalone web search backend rejected ${searchOperationLabel(input)}: ${normalized}`,
 		);
 	}
+}
+
+function searchErrorMessage(message: string): string {
+	const bytes = Buffer.from(message);
+	const limit = 1024;
+	if (bytes.length <= limit) return message;
+	const suffix = "… [truncated]";
+	let end = limit - Buffer.byteLength(suffix);
+	while ((bytes[end]! & 0xc0) === 0x80) end--;
+	return bytes.toString("utf8", 0, end) + suffix;
 }
 
 function searchInputSummary(input: WebSearchInput): string {
@@ -198,7 +209,7 @@ export async function standaloneWebSearch(
 	if (!model || !ctx.modelRegistry) throw new Error("No active model is available for standalone web search.");
 	let settings = loadModelSettings({ ...model, baseUrl: undefined }, ctx.cwd);
 	if (!settings.enabled) throw new Error("pi-codex-minimal-tools is disabled.");
-	if (!loadSettings(ctx.cwd).webSearch) throw new Error("Web search is disabled by global settings.");
+	if (!settings.webSearch) throw new Error("Web search is disabled by global settings.");
 	if (settings.webSearchImplementation !== "standalone") {
 		throw new Error(`Standalone web search is not enabled for ${model.provider}/${model.id}.`);
 	}
@@ -229,6 +240,7 @@ export async function standaloneWebSearch(
 		? buildCodexExternalToolMetadataJson({ ...identity, model: model.id, ...(reasoningEffort ? { reasoningEffort } : {}) })
 		: undefined;
 	const searchProfile = settings.modelProfile?.effective.tools.webSearch || undefined;
+	const mode = searchProfile?.mode ?? settings.webSearch.mode;
 	const requestBody = JSON.stringify({
 		id: identity?.sessionId ?? piSessionId ?? `pi-search-${Date.now()}`,
 		model: model.id,
@@ -236,7 +248,7 @@ export async function standaloneWebSearch(
 		commands: input,
 		settings: {
 			allowed_callers: ["direct"],
-			external_web_access: searchProfile?.mode === "cached" ? false : searchProfile?.mode === "indexed" ? "indexed" : true,
+			external_web_access: mode === "cached" ? false : mode === "indexed" ? "indexed" : true,
 			...(searchProfile?.searchContextSize ? { search_context_size: searchProfile.searchContextSize } : {}),
 			...(searchProfile?.userLocation ? { user_location: searchProfile.userLocation } : {}),
 			...(searchProfile?.filters?.allowedDomains ? { filters: { allowed_domains: searchProfile.filters.allowedDomains } } : {}),
@@ -320,26 +332,28 @@ export function createWebSearchToolDefinition(options: {
 			_onUpdate: unknown,
 			ctx: WebSearchToolContext,
 		) {
-			const global = loadSettings(ctx.cwd);
-			if (!global.enabled || !global.webSearch) throw new Error("Web search is disabled by global settings.");
-			const settings = loadModelSettings(ctx.model ? { ...ctx.model, baseUrl: undefined } : undefined, ctx.cwd);
-			if (settings.webSearchImplementation === "standalone") {
-				const sessionId = ctx.sessionManager?.getSessionId();
-				const identity = options.getRequestIdentity?.(sessionId);
-				return standaloneWebSearch(input, ctx, signal, {
-					turnId: identity?.turnId
-						?? options.getCurrentTurnId?.(sessionId),
-					identity,
-				});
-			}
-			if (options.hasProviderRuntime?.(ctx.model) === false) {
-				throw new Error("Hosted web_search requires pi-codex-core. Use a catalog-supported standalone profile for independent execution.");
-			}
-			return {
-				isError: true,
-				content: [{ type: "text", text: "web_search is hosted-provider-first for this model profile and should be rewritten before execution." }],
-				details: { phase: "native-provider", nativeTool: "web_search" },
-			};
+			return executeWithToolResult(signal, async () => {
+				const global = loadSettings(ctx.cwd);
+				if (!global.enabled || !global.webSearch) throw new Error("Web search is disabled by global settings.");
+				const settings = loadModelSettings(ctx.model ? { ...ctx.model, baseUrl: undefined } : undefined, ctx.cwd);
+				if (settings.webSearchImplementation === "standalone") {
+					const sessionId = ctx.sessionManager?.getSessionId();
+					const identity = options.getRequestIdentity?.(sessionId);
+					return standaloneWebSearch(input, ctx, signal, {
+						turnId: identity?.turnId
+							?? options.getCurrentTurnId?.(sessionId),
+						identity,
+					});
+				}
+				if (options.hasProviderRuntime?.(ctx.model) === false) {
+					throw new Error("Hosted web_search requires pi-codex-core. Use a catalog-supported standalone profile for independent execution.");
+				}
+				return {
+					isError: true,
+					content: [{ type: "text", text: "web_search is hosted-provider-first for this model profile and should be rewritten before execution." }],
+					details: { phase: "native-provider", nativeTool: "web_search" },
+				};
+			}, searchErrorMessage);
 		},
 	};
 }

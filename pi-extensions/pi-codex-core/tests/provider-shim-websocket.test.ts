@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test, { afterEach } from "node:test";
+import test, { afterEach, type TestContext } from "node:test";
 import { createServer } from "node:http";
 import { EventEmitter, once } from "node:events";
 import type { Socket } from "node:net";
 import type { Duplex } from "node:stream";
-import { isRetryableAssistantError } from "@earendil-works/pi-ai/compat";
+import { isRetryableAssistantError, retryAssistantCall } from "@earendil-works/pi-ai/compat";
 import { WebSocketMessageTooLargeError, streamWebSocketRequest } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/websocket-events";
 import { timeoutFromOption } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/timeouts";
 import { resetCodexWireState } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
@@ -15,6 +15,7 @@ import { buildWebSocketHeaders } from "@oai404iao/pi-codex-core/internal/provide
 import { closeProviderWebSocketSessions } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/websocket-session";
 import { requestOpenAINativeCompaction } from "@oai404iao/pi-codex-core/internal/adapter/compaction/request";
 import { resolveResponsesWebSocketUrl } from "@oai404iao/pi-codex-core/internal/providers/openai-codex/urls";
+import { websocketSessionCache } from "../src/providers/openai-codex/websocket-session.js";
 import { createProviderHarness as sharedProviderHarness } from "./support/openai-codex-test-support.js";
 import { readJsonRequest, startWebSocketServer, successEvents } from "./support/websocket-test-support.js";
 const createProviderHarness = () => sharedProviderHarness().providers;
@@ -1474,6 +1475,181 @@ test("openai auto does not fall back after transient WebSocket handshake failure
 		await server.close();
 	}
 });
+
+function useRetryClock(t: TestContext) {
+	const delayMs = 120_000;
+	const piBackoffMs = 25;
+	const start = Date.parse("2026-01-01T00:00:00Z");
+	let notifyScheduled!: () => void;
+	const scheduled = new Promise<void>(resolve => { notifyScheduled = resolve; });
+	const realSetTimeout = globalThis.setTimeout;
+	const realClearTimeout = globalThis.clearTimeout;
+	t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: start });
+	const setTimeoutOnClock = globalThis.setTimeout;
+	const clearTimeoutOnClock = globalThis.clearTimeout;
+	const clockTimers = new Set<number | ReturnType<typeof setTimeout>>();
+	// A fixture peer may not answer a close frame; keep ws's 30s fallback on the same clock.
+	const timerSpy = t.mock.method(globalThis, "setTimeout", (callback: () => void, delay?: number, ...args: unknown[]) => {
+		if (delay !== delayMs && delay !== piBackoffMs && delay !== 30_000) return realSetTimeout(callback, delay, ...args);
+		const timer = setTimeoutOnClock(callback, delay, ...args);
+		clockTimers.add(timer);
+		if (delay === delayMs) notifyScheduled();
+		return timer;
+	});
+	const clearSpy = t.mock.method(globalThis, "clearTimeout", (timer?: ReturnType<typeof setTimeout>) => {
+		if (timer && clockTimers.delete(timer)) clearTimeoutOnClock(timer);
+		else realClearTimeout(timer);
+	});
+	return { delayMs, piBackoffMs, start, scheduled, restore: () => {
+		clearSpy.mock.restore();
+		timerSpy.mock.restore();
+		t.mock.timers.reset();
+	} };
+}
+
+for (const phase of ["handshake", "first error event", "started response"] as const) {
+	test(`ordinary WebSocket waits for Retry-After at ${phase} before handing retry to Pi`, { timeout: 3000 }, async t => {
+		writeSettings({ openaiTransport: "auto" });
+		const clock = useRetryClock(t);
+		const controller = new AbortController();
+		const signal = AbortSignal.any([controller.signal, t.signal]);
+		let rejectHandshake = phase === "handshake";
+		let httpRequests = 0;
+		const server = await startWebSocketServer([
+			(request) => {
+				if (rejectHandshake) {
+					rejectHandshake = false;
+					return { handshakeStatus: 429, handshakeBody: { error: { message: "slow down" } }, handshakeHeaders: { "Retry-After": "120" } };
+				}
+				if (!request || phase === "handshake") return successEvents("resp_success", "retried by Pi");
+				return phase === "first error event" ? [
+					{ type: "error", status: 524, error: { message: "slow down", headers: { "Retry-After-Ms": 120_000, "Retry-After": "1" } } },
+				] : [
+					{ type: "response.created", response: { id: "resp_started" } },
+					{ type: "response.failed", response: { error: { code: "server_is_overloaded", headers: { "retry-after": new Date(clock.start + clock.delayMs).toUTCString() } } } },
+				];
+			},
+			() => successEvents("resp_success", "retried by Pi"),
+		], (_request, response) => {
+			httpRequests++;
+			response.writeHead(400).end();
+		});
+		try {
+			const provider = createProviderHarness().openai;
+			const messages = [{ role: "user", content: "hello" }];
+			type RetryNotice = { at: number; delay: number; message: string };
+			let notifyPiRetry!: (notice: RetryNotice) => void;
+			const piRetry = new Promise<RetryNotice>(resolve => { notifyPiRetry = resolve; });
+			let attempts = 0;
+			let retriesScheduled = 0;
+			const result = retryAssistantCall(() => {
+				attempts++;
+				return runOpenAIProvider(provider, server.url, messages, {
+					maxRetries: 2, maxRetryDelayMs: 60_000, signal, env: { NO_PROXY: "*" },
+				});
+			}, { enabled: true, maxRetries: 1, baseDelayMs: clock.piBackoffMs }, signal, {
+				onRetryScheduled: (_attempt, _max, delay, message) => {
+					retriesScheduled++;
+					notifyPiRetry({ at: Date.now(), delay, message });
+				},
+			});
+			await Promise.race([clock.scheduled, result.then(() => assert.fail("finished without the explicit wait"))]);
+			assert.equal(websocketSessionCache.size, 0, "failed connection must be evicted before waiting");
+			t.mock.timers.tick(clock.delayMs - 1);
+			await new Promise(resolve => setImmediate(resolve));
+			assert.equal(retriesScheduled, 0);
+			assert.equal(attempts, 1);
+			assert.equal(server.connections, 1);
+			assert.equal(server.requests.length, phase === "handshake" ? 0 : 1);
+			assert.equal(httpRequests, 0);
+			t.mock.timers.tick(1);
+			const retry = await Promise.race([piRetry, result.then(() => assert.fail("finished before Pi retried"))]);
+			assert.equal(retry.at, clock.start + clock.delayMs);
+			assert.equal(retry.delay, clock.piBackoffMs);
+			assert.match(retry.message, phase === "started response"
+				? /WebSocket error \(server_is_overloaded\): OpenAI Responses request failed/
+				: /HTTP (429|524): .*slow down/);
+			await new Promise(resolve => setImmediate(resolve));
+			assert.equal(attempts, 1);
+			t.mock.timers.tick(clock.piBackoffMs);
+			assert.equal((await result).stopReason, "stop");
+			assert.equal(retriesScheduled, 1);
+			assert.equal(attempts, 2);
+			assert.equal(server.connections, 2);
+			assert.equal(server.requests.length, phase === "handshake" ? 1 : 2);
+			assert.equal(server.requests.at(-1)?.previous_response_id, undefined);
+			assert.equal(httpRequests, 0);
+		} finally {
+			controller.abort();
+			closeProviderWebSocketSessions();
+			clock.restore();
+			await server.close();
+		}
+	});
+}
+
+test("cancelling WebSocket Retry-After aborts the turn without Pi retry", { timeout: 3000 }, async t => {
+	writeSettings({ openaiTransport: "websocket" });
+	const clock = useRetryClock(t);
+	const controller = new AbortController();
+	const server = await startWebSocketServer([() => [
+		{ type: "error", status: 503, headers: { "Retry-After": "120" }, error: { message: "overloaded" } },
+	]]);
+	try {
+		const result = runOpenAIProvider(createProviderHarness().openai, server.url, [{ role: "user", content: "hello" }], {
+			maxRetries: 2, signal: controller.signal, env: { NO_PROXY: "*" },
+		});
+		await Promise.race([clock.scheduled, result.then(() => assert.fail("finished before the explicit wait"))]);
+		assert.equal(websocketSessionCache.size, 0);
+		t.mock.timers.tick(25);
+		controller.abort();
+		const message = await result;
+		assert.equal(message.stopReason, "aborted");
+		assert.equal(isRetryableAssistantError(message), false);
+		assert.equal(server.requests.length, 1);
+		assert.equal(server.connections, 1);
+	} finally {
+		controller.abort();
+		clock.restore();
+		await server.close();
+	}
+});
+
+const overflowError = /Retry-After value exceeds the supported range/;
+for (const [name, status, code, hint, expected] of [
+	["insufficient quota", 429, "insufficient_quota", "120", /insufficient_quota.*slow down/],
+	["subscription usage exhaustion", 429, "subscription_sharing_usage_limit_exceeded", "120", /subscription_sharing_usage_limit_exceeded.*slow down/],
+	["authentication error", 401, "authentication_error", "120", /HTTP 401: .*slow down/],
+	["unsafe seconds", 429, "rate_limit_exceeded", "1000000000000000000000000000000", overflowError],
+	["numeric exponent overflow", 429, "rate_limit_exceeded", 1e30, overflowError],
+	["decimal overflow", 429, "rate_limit_exceeded", "9".repeat(310), overflowError],
+] as const) {
+	test(`ordinary WebSocket neither waits nor resends ${name} with Retry-After`, { timeout: 3000 }, async t => {
+		writeSettings({ openaiTransport: "websocket" });
+		const clock = useRetryClock(t);
+		const controller = new AbortController();
+		const server = await startWebSocketServer([() => [
+			{ type: "error", status, error: { code, message: "slow down", headers: { "Retry-After": hint } } },
+		]]);
+		try {
+			const result = await Promise.race([
+				runOpenAIProvider(createProviderHarness().openai, server.url, [{ role: "user", content: "hello" }], {
+					maxRetries: 2, signal: controller.signal, env: { NO_PROXY: "*" },
+				}),
+				clock.scheduled.then(() => assert.fail("a permanent error must not wait")),
+			]);
+			assert.equal(result.stopReason, "error");
+			assert.match(result.errorMessage, expected);
+			assert.equal(isRetryableAssistantError(result), false);
+			assert.equal(server.requests.length, 1);
+			assert.equal(server.connections, 1);
+		} finally {
+			controller.abort();
+			clock.restore();
+			await server.close();
+		}
+	});
+}
 
 test("openai auto honors an explicit per-request SSE override", async () => {
 	writeSettings({ openaiTransport: "auto" });

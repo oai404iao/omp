@@ -4,14 +4,26 @@ import { ProviderResponseError, ProviderStreamEventCallbackError, friendlyUsageL
 import { retryAfterMsFromHeaders } from "./retry.js";
 import { type StreamEventShape } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 
-function retryAfterMsFromEventHeaders(headers: unknown): number | undefined {
+function retryAfterHeaders(headers: unknown): Record<string, string | number> | undefined {
 	if (!headers || typeof headers !== "object" || Array.isArray(headers)) return undefined;
-	return retryAfterMsFromHeaders(Object.fromEntries(
+	return Object.fromEntries(
 		Object.entries(headers)
 			.filter((entry): entry is [string, string | number | boolean] =>
 				typeof entry[1] === "string" || typeof entry[1] === "number" || typeof entry[1] === "boolean")
-			.map(([name, value]) => [name, String(value)]),
-	));
+			.map(([name, value]) => [name, typeof value === "number" ? value : String(value)]),
+	);
+}
+
+function captureRetryAfter(error: ProviderResponseError, nestedHeaders: unknown, eventHeaders: unknown): void {
+	const nested = retryAfterHeaders(nestedHeaders);
+	const outer = retryAfterHeaders(eventHeaders);
+	const explicit = retryAfterMsFromHeaders(nested, true) ?? retryAfterMsFromHeaders(outer, true);
+	if (explicit === Infinity) {
+		error.retryAfterOverflow = true;
+		error.retryAfterMs = retryAfterMsFromHeaders(nested) ?? retryAfterMsFromHeaders(outer);
+	} else {
+		error.retryAfterMs = explicit;
+	}
 }
 
 export async function* mapCodexEvents(
@@ -73,7 +85,7 @@ export async function* mapCodexEvents(
 			if (typeof (nestedError as { param?: unknown })?.param === "string") Object.assign(error, { param: (nestedError as { param: string }).param });
 			if (typeof nestedError?.type === "string") error.errorType = nestedError.type;
 			if (status !== undefined) error.status = status;
-			error.retryAfterMs = retryAfterMsFromEventHeaders(nestedError?.headers) ?? retryAfterMsFromEventHeaders(event.headers);
+			captureRetryAfter(error, nestedError?.headers, event.headers);
 			if (typeof event.sequence_number === "number") error.sequenceNumber = event.sequence_number;
 			throw error;
 		}
@@ -85,7 +97,7 @@ export async function* mapCodexEvents(
 			);
 			if (typeof responseError?.code === "string") error.code = responseError.code;
 			if (typeof (responseError as { param?: unknown })?.param === "string") Object.assign(error, { param: (responseError as { param: string }).param });
-			error.retryAfterMs = retryAfterMsFromEventHeaders(responseError?.headers) ?? retryAfterMsFromEventHeaders(event.headers);
+			captureRetryAfter(error, responseError?.headers, event.headers);
 			throw error;
 		}
 

@@ -1,5 +1,4 @@
-import { type ProviderHeaders } from "@earendil-works/pi-ai";
-import { appendAssistantMessageDiagnostic, createAssistantMessageDiagnostic, createAssistantMessageEventStream, type Api, type AssistantMessageEventStream, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { appendAssistantMessageDiagnostic, createAssistantMessageDiagnostic, createAssistantMessageEventStream, type Api, type AssistantMessageEventStream, type Context, type Model, type ProviderHeaders, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { hasCodexRequestAuth, resolveCodexRequestAccountId } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { resolveCodexRequestProfile } from "@oai404iao/pi-codex-runtime/internal/codex-request-profile";
 import { captureCodexTurnState, resolveCodexRequestIdentity } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
@@ -16,11 +15,11 @@ import { applyConfiguredResponsesFeatureHeaders, buildSSEHeaders, buildWebSocket
 import { withResponsesLiteWebSocketMetadata } from "./lite.js";
 import { assertSuccessfulOutput, createErrorMessage, createInitialAssistantMessage } from "./message.js";
 import { proxyDispatcherForUrl } from "./proxy.js";
-import { buildRequestBody, ensureWebSearchDetailsIncluded, requestBodyToolOptions, requestGrammarProperties } from "./request-body.js";
+import { buildRequestBody, requestBodyToolOptions, requestGrammarProperties } from "./request-body.js";
 import { getLatestUserText } from "./request-context.js";
 import { configurationUpdateEffort, requestThinkingLevel } from "./reasoning.js";
 import { createCodexRequestId, createPiTurnId, withSseRequestMetadata } from "./request-metadata.js";
-import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, sleep, sseMaxRetries, sseRetryDelayMs, webSocketRetryDelayMs, webSocketSseFallbackPhase, webSocketStreamMaxRetries } from "./retry.js";
+import { isProviderNonTransportError, isRetryableWebSocketError, isWebSocketConnectionLimitReachedError, sleep, sseMaxRetries, sseRetryDelayMs, waitForWebSocketRetryAfter, webSocketRetryAfterMs, webSocketRetryDelayMs, webSocketSseFallbackPhase, webSocketStreamMaxRetries, type WebSocketRetryHandoff } from "./retry.js";
 import { fetchWithResponseHeaderTimeout, parseSSE, responseHeaderTimeoutMsFromOptions } from "./sse.js";
 import { type ResponsesBody, type WebSocketRequestMetadata } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import { resolveResponsesUrl, resolveResponsesWebSocketUrl } from "./urls.js";
@@ -53,6 +52,7 @@ export function createCodexStream<TApi extends Api>(
 		const webSearchCitationSources = collectWebSearchCitationSources(model, context);
 		const historicalCitationSources = collectHistoricalCitationSources(model, context);
 		let sentBody: ResponsesBody | undefined;
+		let webSocketRetryHandoff: WebSocketRetryHandoff | undefined;
 		const requestCapabilities: EndpointCapability[] = [];
 
 		try {
@@ -99,11 +99,9 @@ export function createCodexStream<TApi extends Api>(
 				model,
 				(options as { serviceTier?: string } | undefined)?.serviceTier,
 			);
-			const webSearch = settings.modelProfile.effective.tools.webSearch;
 			body = rewriteNativeOpenAiTools(body, {
 				...requestBodyToolOptions(settings),
 				ownsNativeTool: deps.ownsNativeTool,
-				webSearch: settings.webSearchEnabled && webSearch ? webSearch : false,
 			}).payload;
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
@@ -115,7 +113,6 @@ export function createCodexStream<TApi extends Api>(
 				reasoningEffort: configurationUpdateEffort(body) ?? body.reasoning?.effort,
 			};
 			options = withRequestServiceTier(options, body.service_tier);
-			ensureWebSearchDetailsIncluded(body);
 			assertOpaqueReplayAllowed(body, settings);
 			sentBody = body;
 			const grammarToolInputProperties = requestGrammarProperties(body, context.tools, toolProtocols);
@@ -199,7 +196,6 @@ export function createCodexStream<TApi extends Api>(
 				const websocketBody = withResponsesLiteWebSocketMetadata(body, requestProfile.responsesMode);
 				let websocketStarted = false;
 				let websocketRetries = 0;
-				const maxWebSocketRetries = webSocketStreamMaxRetries(options);
 				while (true) {
 					websocketStarted = false;
 					try {
@@ -255,10 +251,12 @@ export function createCodexStream<TApi extends Api>(
 							);
 							break;
 						}
-						const retryableTransport = !aborted
-							&& (isWebSocketConnectionLimitReachedError(error) || isRetryableWebSocketError(error));
-						const retryableBeforeStart = !websocketStarted && retryableTransport;
-						if (retryableBeforeStart && websocketRetries < maxWebSocketRetries) {
+						const retryAfterMs = webSocketRetryAfterMs(error);
+						if (!aborted && retryAfterMs !== undefined) {
+							// Honor the server deadline before handing the failed attempt to Pi's retry policy.
+							webSocketRetryHandoff = await waitForWebSocketRetryAfter(error, output, retryAfterMs, options?.signal);
+						} else if (!aborted && !websocketStarted && websocketRetries < webSocketStreamMaxRetries(options)
+							&& (isWebSocketConnectionLimitReachedError(error) || isRetryableWebSocketError(error))) {
 							websocketRetries++;
 							await sleep(webSocketRetryDelayMs(error, websocketRetries, options), options?.signal);
 							continue;
@@ -389,7 +387,7 @@ export function createCodexStream<TApi extends Api>(
 			stream.push({
 				type: "error",
 				reason: (options?.signal?.aborted ? "aborted" : "error") as "aborted" | "error",
-				error: createErrorMessage(output, error, !!options?.signal?.aborted),
+				error: createErrorMessage(output, error, !!options?.signal?.aborted, webSocketRetryHandoff),
 			});
 			stream.end();
 		}

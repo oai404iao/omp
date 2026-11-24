@@ -12,18 +12,18 @@ export interface ApplyPatchOptions {
 	cwd: string;
 }
 
-export interface AppliedPatchFile {
+export type AppliedPatchFile = {
 	kind: PatchAction["kind"];
 	path: string;
 	absolutePath: string;
 	moveTo?: string;
 	absoluteMoveTo?: string;
-}
+};
 
-export interface ApplyPatchResult {
+export type ApplyPatchResult = {
 	files: AppliedPatchFile[];
 	summary: string;
-}
+};
 
 export function resolvePatchPath(pathValue: string, options: ApplyPatchOptions): string {
 	const cleaned = pathValue.trim();

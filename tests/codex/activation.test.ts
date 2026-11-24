@@ -222,7 +222,8 @@ test("apply_patch follows model profiles without changing selected edit/write to
 	assert.deepEqual(pi.activeTools, ["read", "edit", "write"]);
 }));
 
-test("before_provider_request rewrites hosted web_search from the model profile", async () => withAgentDir(async () => {
+test("before_provider_request applies the global mode to hosted web_search", async () => withAgentDir(async (agentDir) => {
+	writeConfig(agentDir, { webSearch: { mode: "cached" } });
 	const pi = fakePi();
 	codexMinimalTools(pi as any);
 	const handler = pi.handlers.before_provider_request?.[0];
@@ -236,7 +237,7 @@ test("before_provider_request rewrites hosted web_search from the model profile"
 	});
 	assert.deepEqual(rewritten.tools, [{
 		type: "web_search",
-		external_web_access: true,
+		external_web_access: false,
 		search_content_types: ["text", "image"],
 	}]);
 
@@ -247,7 +248,7 @@ test("before_provider_request rewrites hosted web_search from the model profile"
 	});
 	assert.deepEqual(rewrittenOpenAi.tools, [{
 		type: "web_search",
-		external_web_access: true,
+		external_web_access: false,
 		search_content_types: ["text", "image"],
 	}]);
 
@@ -284,7 +285,6 @@ test("additionalModelIds enables apply_patch and web_search for an exact custom 
 	assert.deepEqual(rewritten.tools, [{
 		type: "web_search",
 		external_web_access: true,
-		search_content_types: ["text"],
 	}]);
 }));
 

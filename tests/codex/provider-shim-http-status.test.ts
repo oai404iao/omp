@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
@@ -167,8 +167,9 @@ function customApplyPatchSseResponse(): Response {
 	return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
-function webSearchLifecycleSseResponse(options?: { includeDoneItem?: boolean }): Response {
+function webSearchLifecycleSseResponse(options?: { includeDoneItem?: boolean; includeResultDetails?: boolean }): Response {
 	const includeDoneItem = options?.includeDoneItem ?? true;
+	const includeResultDetails = options?.includeResultDetails ?? true;
 	const completedItem = {
 		type: "web_search_call",
 		id: "ws_123",
@@ -176,14 +177,14 @@ function webSearchLifecycleSseResponse(options?: { includeDoneItem?: boolean }):
 		action: {
 			type: "search",
 			query: "latest docs",
-			sources: [{ title: "Docs", url: "https://example.com/docs" }],
+			...(includeResultDetails ? { sources: [{ title: "Docs", url: "https://example.com/docs" }] } : {}),
 		},
-		results: [{
+		...(includeResultDetails ? { results: [{
 			type: "text_result",
 			snippet: "citeturn0search0 Latest documentation",
 			title: "Docs",
 			url: "https://example.com/docs",
-		}],
+		}] } : {}),
 	};
 	const events = [
 		{ type: "response.created", response: { id: "resp_web" } },
@@ -198,7 +199,9 @@ function webSearchLifecycleSseResponse(options?: { includeDoneItem?: boolean }):
 		...(includeDoneItem ? [{ type: "response.output_item.done", output_index: 1, item: completedItem }] : []),
 		{ type: "response.output_item.added", output_index: 2, item: { type: "message", id: "msg_123", role: "assistant", status: "in_progress", content: [] } },
 		{ type: "response.output_text.delta", output_index: 2, content_index: 0, delta: "Final answer" },
-		{ type: "response.output_item.done", output_index: 2, item: { type: "message", id: "msg_123", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Final answer", annotations: [] }] } },
+		{ type: "response.output_item.done", output_index: 2, item: { type: "message", id: "msg_123", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Final answer", annotations: includeResultDetails ? [] : [
+			{ type: "url_citation", title: "Docs", url: "https://example.com/docs", start_index: 0, end_index: 12 },
+		] }] } },
 		{
 			type: "response.completed",
 			response: {
@@ -277,22 +280,54 @@ test("upstream stream_read_error is surfaced for Pi's agent-level auto-retry reg
 	assert.equal(result.errorMessage, "Connection error: Codex error: stream_read_error");
 });
 
-test("native web_search requests include source and result payloads without dropping reasoning include", async () => {
+test("global hosted web_search mode applies to every hosted model regardless of obsolete model settings", async () => {
 	let requestBody: any;
 	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
 		requestBody = JSON.parse(String(init?.body));
 		return successSseResponse();
 	}) as typeof fetch;
 
-	const result = await runCodexProvider({
-		onPayload: async (payload: any) => ({ ...payload, tools: [{ type: "web_search" }] }),
-	});
+	for (const [mode, access] of [
+		[undefined, { external_web_access: true }],
+		["cached", { external_web_access: false }],
+		["indexed", { external_web_access: true, indexed_web_access: true }],
+		["live", { external_web_access: true }],
+	] as const) {
+		writeSettings(mode === undefined ? {} : { webSearch: { mode } });
+		writeModels({ version: 1, models: [{
+			id: "openai-codex/gpt-5.5",
+			tools: { webSearch: { implementation: "hosted", mode: "cached" } },
+		}] });
+		for (const [id, modalities] of [
+			["gpt-5.2", {}],
+			["gpt-5.5", { search_content_types: ["text", "image"] }],
+		] as const) {
+			const result = await runCodexProvider({}, { id }, [{
+				name: "web_search", description: "Search", parameters: { type: "object", properties: {} },
+			}]);
+			assert.equal(result.stopReason, "stop");
+			assert.deepEqual(requestBody.tools, [{ type: "web_search", ...access, ...modalities }]);
+		}
+	}
+});
 
-	assert.equal(result.stopReason, "stop");
-	assert.deepEqual(requestBody.tools, [{ type: "web_search" }]);
-	assert.ok(requestBody.include.includes("reasoning.encrypted_content"));
-	assert.ok(requestBody.include.includes("web_search_call.action.sources"));
-	assert.ok(requestBody.include.includes("web_search_call.results"));
+test("native web_search keeps Codex's default include and preserves explicit caller includes", async () => {
+	let requestBody: any;
+	globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+		requestBody = JSON.parse(String(init?.body));
+		return webSearchLifecycleSseResponse({ includeResultDetails: false });
+	}) as typeof fetch;
+
+	for (const extra of [[], ["web_search_call.action.sources"]]) {
+		const result = await runCodexProvider({
+			onPayload: async (payload: any) => ({ ...payload, tools: [{ type: "web_search" }], include: [...payload.include, ...extra] }),
+		});
+		assert.equal(result.stopReason, "stop");
+		assert.deepEqual(requestBody.tools, [{ type: "web_search" }]);
+		assert.deepEqual(requestBody.include, ["reasoning.encrypted_content", ...extra]);
+		assert(result.content.some((block: any) => block.type === "text" && block.text.includes("https://example.com/docs")));
+		assert(!result.content.some((block: any) => block.type === "toolCall"));
+	}
 });
 
 test("Fast mode adds service_tier while explicit request payload overrides remain authoritative", async () => {
@@ -662,13 +697,16 @@ test("Responses Lite emits the reviewed Codex namespace compatibility serializat
 	assert.equal(requestBody.input[0].tools.length, 2);
 	assert.equal(reservedNamespaces.length, 2);
 	assert.deepEqual(reservedNamespaces.map((tool: any) => tool.name), ["web", "image_gen"]);
+	const { localCompatibilitySerialization: { namespaces } } = JSON.parse(readFileSync(new URL(
+		"../../pi-extensions/pi-codex-runtime/provenance/openai-codex-a1604a8c-tool-declarations.json", import.meta.url,
+	), "utf8"));
 	assert.equal(
 		sha256(reservedNamespaces[0]),
-		"f67597d3df3f3a77cb517646508e7305804ea029c6f8b1c1c1f241f0de0b214f",
+		namespaces.web_search.canonicalJsonSha256,
 	);
 	assert.equal(
 		sha256(reservedNamespaces[1]),
-		"0f50e9ffc4b12ef5a9e24d1d3b95827e03b7534eaf101f13b8fe5246bc7c905b",
+		namespaces.image_generation.canonicalJsonSha256,
 	);
 });
 

@@ -36,9 +36,13 @@ test("image execution does not borrow an environment key after Pi auth fails", (
 test("per-model image gate blocks manual execution before auth", () => withCodexSettings({}, async cwd => {
 	let authRequested = false;
 	const tool = createImageGenerationToolDefinition({ loadSettings: () => ({ ...DEFAULT_SETTINGS }) });
-	await assert.rejects(tool.execute("disabled", { prompt: "test" }, undefined, undefined, {
+	const failure = await tool.execute("disabled", { prompt: "test" }, undefined, undefined, {
 		cwd, model: { ...model, id: "o4-mini" },
 		modelRegistry: { async getApiKeyAndHeaders() { authRequested = true; return { ok: true, apiKey: "unused" }; } },
-	}), /global setting or current model profile/);
+	});
+	assert.equal(failure.isError, true);
+	assert.equal(failure.details.success, false);
+	assert(!("structuredContent" in failure));
+	assert.match(failure.content[0]?.text ?? "", /global setting or current model profile/);
 	assert.equal(authRequested, false);
 }));

@@ -6,6 +6,7 @@ import test, { afterEach } from "node:test";
 import { standaloneWebSearch } from "@oai404iao/pi-codex-tools/internal/tools/web-search";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { beginCodexTurn, endCodexTurn } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
+import { updateConfig } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 const originalFetch = globalThis.fetch;
 const originalPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -84,6 +85,7 @@ test("standalone search snapshots turn/history before delayed auth and cancels b
 }));
 
 test("standalone web search uses the Codex alpha/search endpoint and auth", async () => withAgentDir(async () => {
+	updateConfig({ webSearch: { mode: "cached" } });
 	const turnId = "0198e2c6-7a5b-7c10-9d1e-2f3a4b5c6d7e";
 	const model = {
 		provider: "openai-codex",
@@ -147,6 +149,7 @@ test("standalone web search uses the Codex alpha/search endpoint and auth", asyn
 		domains: ["example.com"],
 	}]);
 	assert.equal(requestBody.max_output_tokens, 10_000);
+	assert.equal(requestBody.settings.external_web_access, false);
 	assert.equal((result.content[0] as any).text, "citeturn0search0 Search result");
 }));
 
@@ -183,9 +186,11 @@ test("standalone web search uses Pi's resolved endpoint and header-only auth for
 		id: "custom/search-model",
 		extends: "openai/gpt-5.6-sol",
 		responses: { endpoint: "codex" },
+		tools: { webSearch: { implementation: "standalone", mode: "indexed" } },
 	}]);
 	writeFileSync(join(agentDir, "extensions/pi-codex-minimal-tools/config.json"), JSON.stringify({
 		codexRequestExtensions: false,
+		webSearch: { mode: "cached" },
 		endpoint_config: [{ provider: "custom", baseUrl: "https://api.example/v1", webSearch: [] }],
 	}));
 	const model = {
@@ -205,6 +210,7 @@ test("standalone web search uses Pi's resolved endpoint and header-only auth for
 		assert.equal(new Headers(init?.headers).get("x-api-key"), "resolved");
 		assert.equal(new Headers(init?.headers).get("x-codex-turn-metadata"), null);
 		assert.equal(new Headers(init?.headers).get("originator"), null);
+		assert.equal(JSON.parse(String(init?.body)).settings.external_web_access, "indexed");
 		return Response.json({ output: "search result", results: [] });
 	}) as typeof fetch;
 

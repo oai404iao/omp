@@ -139,7 +139,7 @@ function rebuildCall(component: PatchCall, theme: any, expanded: boolean): Patch
 
 export function createApplyPatchRenderers() {
 	return {
-		renderCall(args: { input?: string } | undefined, theme: any, context: any) {
+		renderCall(args: unknown, theme: any, context: any) {
 			const component = getCallComponent(context.state);
 			if (context.executionStarted && !component.executionStarted) {
 				component.executionStarted = true;
@@ -148,7 +148,7 @@ export function createApplyPatchRenderers() {
 				component.request = undefined;
 				component.requestKey = undefined;
 			}
-			const input = typeof args?.input === "string" ? args.input : "";
+			const input = args && typeof args === "object" && "input" in args && typeof args.input === "string" ? args.input : "";
 			if (input && !component.executionStarted) {
 				updatePreviewRequest(component, {
 					input,

@@ -3,9 +3,11 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { CodexRequestProfileOverride } from "./codex-request-profile.js";
 import { parseEndpointConfig, type EndpointConfig } from "./endpoint-config.js";
+import type { WebSearchProfile } from "./model-catalog/types.js";
 
 export const PACKAGE_NAME = "pi-codex-minimal-tools";
 export const CONFIG_FILE_NAME = "config.json";
+export const DEFAULT_WEB_SEARCH_MODE: NonNullable<WebSearchProfile["mode"]> = "live";
 
 export interface CodexGlobalSettings {
 	codexRequestExtensions: boolean;
@@ -16,7 +18,7 @@ export interface CodexGlobalSettings {
 	webSocketEnabled: boolean;
 	fastMode: boolean;
 	applyPatch: boolean;
-	webSearch: boolean;
+	webSearch: false | { mode: NonNullable<WebSearchProfile["mode"]> };
 	imageGeneration: boolean;
 	imageOutputDir: string;
 	imageModel: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1";
@@ -44,7 +46,7 @@ export const DEFAULT_GLOBAL_SETTINGS: Readonly<CodexGlobalSettings> = {
 	webSocketEnabled: true,
 	fastMode: false,
 	applyPatch: true,
-	webSearch: true,
+	webSearch: { mode: DEFAULT_WEB_SEARCH_MODE },
 	imageGeneration: true,
 	imageOutputDir: ".pi/openai-codex-images",
 	imageModel: "gpt-image-2",
@@ -199,6 +201,7 @@ function requestProfileSetting(raw: SettingsRecord): CodexRequestProfileOverride
 
 export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 	const raw = readRawConfig();
+	const webSearchMode = asRecord(raw.webSearch)?.mode;
 	const settings: CodexMinimalToolsSettings = {
 		codexRequestExtensions: boolSetting(raw, "codexRequestExtensions"),
 		endpoint_config: parseEndpointConfig(raw.endpoint_config).entries,
@@ -211,7 +214,10 @@ export function loadSettings(_cwd?: string): CodexMinimalToolsSettings {
 		openaiWebSocketPrewarm: boolSetting(raw, "openaiWebSocketPrewarm"),
 		fastMode: boolSetting(raw, "fastMode"),
 		applyPatch: boolSetting(raw, "applyPatch"),
-		webSearch: boolSetting(raw, "webSearch"),
+		webSearch: raw.webSearch === false ? false : {
+			mode: webSearchMode === "cached" || webSearchMode === "indexed" || webSearchMode === "live"
+				? webSearchMode : DEFAULT_WEB_SEARCH_MODE,
+		},
 		compactionMode: compactionModeSetting(raw),
 		requestProfile: requestProfileSetting(raw),
 		apiKeyMode: boolSetting(raw, "apiKeyMode"),

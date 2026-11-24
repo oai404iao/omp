@@ -73,7 +73,21 @@ test("global tool gates load independently without becoming legacy profile overr
 	assert.equal(resolved.compactionMode, "responses");
 	writeConfig(agentDir, { applyPatch: "false", webSearch: null });
 	assert.equal(loadSettings().applyPatch, true);
-	assert.equal(loadSettings().webSearch, true);
+	assert.deepEqual(loadSettings().webSearch, { mode: "live" });
+}));
+
+test("global webSearch accepts a shared mode or the existing boolean switches", () => withAgentDir(agentDir => {
+	assert.deepEqual(loadSettings().webSearch, { mode: "live" });
+	for (const [webSearch, expected] of [
+		[true, { mode: "live" }],
+		[false, false],
+		[{}, { mode: "live" }],
+		[{ mode: "cached" }, { mode: "cached" }],
+		[{ mode: "indexed" }, { mode: "indexed" }],
+	] as const) {
+		writeConfig(agentDir, { webSearch });
+		assert.deepEqual(loadSettings().webSearch, expected);
+	}
 }));
 
 test("global tool gates intersect legacy settings without changing their precedence", () => withAgentDir(agentDir => {

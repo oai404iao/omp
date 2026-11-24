@@ -35,9 +35,13 @@ test("custom patch requires actual matching engine capability, not coreEnabled",
 		const args = { input: "*** Begin Patch\n*** Add File: custom.txt\n+ok\n*** End Patch\n" };
 		const broker = getCodexBroker(f.pi);
 		broker.coreEnabled = true;
-		await assert.rejects(tool.execute("id", args, undefined, undefined, ctx), /compatible Responses engine/);
+		const noEngine = await tool.execute("id", args, undefined, undefined, ctx);
+		assert.equal(noEngine.isError, true);
+		assert.match(noEngine.content[0].text, /compatible Responses engine/);
 		broker.engine = { customTools: true, hostedWebSearch: true, supports: () => false };
-		await assert.rejects(tool.execute("id", args, undefined, undefined, ctx), /compatible Responses engine/);
+		const unsupported = await tool.execute("id", args, undefined, undefined, ctx);
+		assert.equal(unsupported.isError, true);
+		assert.match(unsupported.content[0].text, /compatible Responses engine/);
 		broker.engine = { customTools: true, hostedWebSearch: true, supports: () => true };
 		const result = await tool.execute("id", args, undefined, undefined, ctx);
 		assert.equal(result.structuredContent.files[0].path, "custom.txt");
@@ -69,7 +73,9 @@ test("global web gate blocks explicit standalone and tool execution before authe
 			modelRegistry: { async getApiKeyAndHeaders() { authenticated = true; throw new Error("must not authenticate"); } },
 		};
 		await assert.rejects(standaloneWebSearch({ search_query: [{ q: "fixture" }] }, ctx), /disabled by global settings/);
-		await assert.rejects(createWebSearchToolDefinition().execute("id", {}, undefined, undefined, ctx), /disabled by global settings/);
+		const failure = await createWebSearchToolDefinition().execute("id", {}, undefined, undefined, ctx);
+		assert.equal(failure.isError, true);
+		assert.match(failure.content[0]?.text ?? "", /disabled by global settings/);
 		assert.equal(authenticated, false);
 	}));
 

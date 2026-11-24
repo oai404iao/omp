@@ -19,6 +19,9 @@ handlers at the execution revision. Local changes include virtual-state
 preflight, symlink/overwrite checks, serialized mutation, rollback, CRLF
 preservation and preview integration. Source modification notices and the
 included Apache-2.0 terms and upstream NOTICE apply to that material.
+The freeform tool description is copied from [the Codex tool declaration at
+`a1604a8c0554c09c1be45e5a121bb1889b4d9a50`](https://github.com/openai/codex/blob/a1604a8c0554c09c1be45e5a121bb1889b4d9a50/codex-rs/core/src/tools/handlers/apply_patch_spec.rs#L18-L25)
+under the same terms.
 
 Search/image clients and presentation are project implementations. Runtime owns
 the canonical namespace schemas and evidence. Image request behavior follows

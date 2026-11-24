@@ -7,7 +7,7 @@ import { PhotonImage } from "@silvia-odwyer/photon-node";
 import { beginCodexTurn, endCodexTurn, resetCodexWireState } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { loadModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { IMAGE_GENERATION_NAMESPACE } from "@oai404iao/pi-codex-runtime/internal/reserved-tools/image-generation";
-import { imageGenerationToolSchema, standaloneImageGeneration } from "@oai404iao/pi-codex-tools/internal/tools/image-generation";
+import { createImageGenerationToolDefinition, standaloneImageGeneration } from "@oai404iao/pi-codex-tools/internal/tools/image-generation";
 import { deferred, withCodexSettings } from "../../../tests/codex/support/provider-lifecycle-test-support.js";
 
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6pAAAAABJRU5ErkJggg==";
@@ -15,13 +15,16 @@ const model = { provider: "openai", api: "openai-responses", id: "gpt-5.6-sol", 
 const auth = { ok: true as const, apiKey: "fixture" };
 
 test("image schemas expose the pinned boolean background choice", () => {
-	assert.deepEqual(imageGenerationToolSchema.properties.transparent_background, {
+	const definition = createImageGenerationToolDefinition();
+	const tool = IMAGE_GENERATION_NAMESPACE.tools[0]!;
+	assert.deepEqual(definition.parameters, tool.parameters);
+	assert.equal(definition.description, tool.description);
+	const properties = definition.parameters.properties as Record<string, unknown>;
+	assert.deepEqual(properties.transparent_background, {
 		type: "boolean",
 		description: "Whether the output should have a transparent background. Defaults to false.",
 	});
-	const tool = IMAGE_GENERATION_NAMESPACE.tools[0];
 	assert.match(tool.description, /Set `transparent_background` to true/);
-	assert.deepEqual((tool.parameters as any).properties.transparent_background, imageGenerationToolSchema.properties.transparent_background);
 });
 
 for (const value of [undefined, false, true]) test(`image request background ${value} uses pinned JSON defaults`, t =>

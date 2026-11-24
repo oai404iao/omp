@@ -144,8 +144,13 @@ for (const mode of ["on", "only"] as const) {
 		}));
 }
 
-test("native codemode receives structured patch/search/image data and reads saved images with native read", () =>
-	withNativeCodemode({}, async (session, cwd) => {
+test("native codemode receives structured patch/search/image data and reads saved images with native read", () => {
+	const seen = new Map<string, { isError: boolean; success: unknown }>();
+	return withNativeCodemode({ extensions: [pi => {
+		pi.on("tool_result", event => {
+			seen.set(event.toolName, { isError: event.isError, success: (event.details as { success?: boolean } | undefined)?.success });
+		});
+	}] }, async (session, cwd) => {
 		const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR4AQEFAPr/AP8AAP8FAAH/+lyI0QAAAABJRU5ErkJggg==";
 		const originalFetch = globalThis.fetch;
 		const requests: string[] = [];
@@ -180,8 +185,48 @@ test("native codemode receives structured patch/search/image data and reads save
 			assert.equal(requests.length, 2);
 			assert.equal(session.messages.filter(message => message.role === "toolResult").length, 1);
 			assert.deepEqual(result.nestedCalls?.calls.map(call => call.name), ["apply_patch", "web_search", "image_generation", "read"]);
+			for (const name of ["apply_patch", "web_search", "image_generation"]) {
+				assert.deepEqual(seen.get(name), { isError: false, success: true });
+			}
 		} finally { globalThis.fetch = originalFetch; }
-	}));
+	});
+});
+
+test("native codemode receives actionable patch/image errors and bounded web errors", () => {
+	const failures = new Map<string, { isError: boolean; details: unknown; structuredContent: unknown }>();
+	return withNativeCodemode({ extensions: [pi => {
+		pi.on("tool_result", event => {
+			if (event.isError) failures.set(event.toolName, {
+				isError: event.isError, details: event.details, structuredContent: event.structuredContent,
+			});
+		});
+	}] }, async (session, cwd) => {
+		writeFileSync(join(cwd, "fixture.txt"), "actual\n");
+		const patch = "*** Begin Patch\n*** Update File: fixture.txt\n@@\n-absent\n+updated\n*** End Patch";
+		const originalFetch = globalThis.fetch;
+		let requests = 0;
+		globalThis.fetch = async request => {
+			assert(String(request).endsWith("/alpha/search"));
+			requests++;
+			return new Response("字".repeat(700), { status: 400 });
+		};
+		try {
+			const { text: patchError } = await runCode(session, `return await tools.apply_patch({ input: ${JSON.stringify(patch)} });`, true);
+			assert.match(patchError, /Check the current file contents and rebuild the hunk/);
+			assert.equal(readFileSync(join(cwd, "fixture.txt"), "utf8"), "actual\n");
+			const { text: imageError } = await runCode(session, `return await tools.image_generation({ prompt: "edit", num_last_images_to_include: 1 });`, true);
+			assert.match(imageError, /only 0 were available.*attach the missing images again/);
+			const { text: webError } = await runCode(session, `return await tools.web_search({ search_query: [{ q: "fixture" }] });`, true);
+			const bounded = webError.match(/HTTP 400: 字+… \[truncated\]/)?.[0];
+			assert(bounded);
+			assert(Buffer.byteLength(bounded) <= 1024);
+			assert.equal(requests, 1);
+			for (const name of ["apply_patch", "web_search", "image_generation"]) {
+				assert.deepEqual(failures.get(name), { isError: true, details: { success: false }, structuredContent: undefined });
+			}
+		} finally { globalThis.fetch = originalFetch; }
+	});
+});
 
 test("nested patch permissions and standalone backend errors remain failures, not structured successes", () =>
 	withNativeCodemode({ extensions: [pi => {

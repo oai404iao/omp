@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import test from "node:test";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import core from "@oai404iao/pi-codex-core";
 import tools from "@oai404iao/pi-codex-tools";
@@ -18,7 +18,7 @@ import { snapshotOwnedToolProtocols } from "@oai404iao/pi-codex-runtime/internal
 import {
 	compositionModel, createCompositionHost, withCompositionDirectory, writeCompositionConfig,
 } from "./support/composition-host.js";
-import { deferred } from "./support/provider-lifecycle-test-support.js";
+import { createAssistantMessage, deferred } from "./support/provider-lifecycle-test-support.js";
 
 const cases = [
 	{ name: "bundle", factories: [bundle], tools: ["apply_patch", "image_generation", "web_search"], core: true },
@@ -98,16 +98,18 @@ test("custom patch needs an engine supporting the actual model, not a core insta
 			await host.emit("session_start");
 			assert(!host.active().includes("apply_patch"));
 			const input = { input: "*** Begin Patch\n*** Add File: forbidden.txt\n+no\n*** End Patch" };
-			await assert.rejects(host.tools.get("apply_patch").execute("patch", input, undefined, undefined, host.ctx),
-				/requires pi-codex-core with a compatible Responses engine/);
+			const noEngine = await host.tools.get("apply_patch").execute("patch", input, undefined, undefined, host.ctx);
+			assert.equal(noEngine.isError, true);
+			assert.match(noEngine.content[0].text, /requires pi-codex-core with a compatible Responses engine/);
 			assert.equal(existsSync(`${directory}/forbidden.txt`), false);
 			core(host.api());
 			host.ctx.model.api = "anthropic-messages";
 			await host.emit("model_select");
 			assert(!host.active().includes("apply_patch"));
 			assert.equal(broker.engine!.supports(host.ctx.model), false);
-			await assert.rejects(host.tools.get("apply_patch").execute("patch", input, undefined, undefined, host.ctx),
-				/requires pi-codex-core with a compatible Responses engine/);
+			const incompatible = await host.tools.get("apply_patch").execute("patch", input, undefined, undefined, host.ctx);
+			assert.equal(incompatible.isError, true);
+			assert.match(incompatible.content[0].text, /requires pi-codex-core with a compatible Responses engine/);
 			host.ctx.model = compositionModel();
 			await host.emit("model_select");
 			assert(host.active().includes("apply_patch"));
@@ -124,9 +126,12 @@ test("tools-only explicitly configured function patch executes without a Respons
 			await host.emit("session_start");
 			assert(host.active().includes("apply_patch"));
 			assert.equal(host.providers.size, 0);
-			await host.tools.get("apply_patch").execute("patch", {
+			const result = await host.tools.get("apply_patch").execute("patch", {
 				input: "*** Begin Patch\n*** Add File: independent.txt\n+fixture\n*** End Patch",
 			}, undefined, undefined, host.ctx);
+			assert.equal(result.isError, false);
+			assert.equal(result.details.success, true);
+			assert.equal(result.structuredContent.files[0].path, "independent.txt");
 			assert(existsSync(`${directory}/independent.txt`));
 		} finally { await host.emit("session_shutdown"); host.dispose(); }
 	}));
@@ -147,10 +152,14 @@ test("tools-only standalone search and images execute without registering Respon
 			await host.emit("session_start");
 			const search = await host.tools.get("web_search").execute("search",
 				{ search_query: [{ q: "fixture" }] }, undefined, undefined, host.ctx);
-			assert.equal(search.isError, undefined);
+			assert.equal(search.isError, false);
+			assert.equal(search.details.success, true);
 			const generated = await host.tools.get("image_generation").execute("image",
 				{ prompt: "fixture" }, undefined, undefined, host.ctx);
 			assert(generated.structuredContent.path);
+			assert.equal(generated.isError, false);
+			assert.equal(generated.details.success, true);
+			assert.match(generated.content.find((block: { type: string }) => block.type === "text").text, /Do not repeat it as a Markdown image/);
 			assert.equal(host.providers.size, 0);
 			assert.equal(requests.length, 2);
 			assert(requests.every(url => !url.endsWith("/responses")));
@@ -190,6 +199,43 @@ test("owned patch descriptors snapshot only the registered implementation and ma
 		} finally { await host.emit("session_shutdown"); host.dispose(); }
 	}));
 
+test("Responses patch declarations and replay carry wire descriptions and result text, not Pi metadata", () =>
+	withCompositionDirectory(async directory => {
+		const host = createCompositionHost(directory);
+		const model: Model<"openai-responses"> = host.ctx.model;
+		try {
+			const api = host.api();
+			core(api); tools(api);
+			await host.emit("session_start");
+			const patch = host.tools.get("apply_patch");
+			const toolProtocols = snapshotOwnedToolProtocols(api, getCodexBroker(api), [patch]);
+			const description = "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.";
+			const inputs = ["*** Begin Patch\n*** Add File: replay.txt\n+hello\n*** End Patch", "invalid patch"];
+			const messages: Context["messages"] = [];
+			const expectedOutputs = [];
+			for (const [index, input] of inputs.entries()) {
+				const id = `call_patch_${index}`;
+				const result = await patch.execute(id, { input }, undefined, undefined, host.ctx);
+				assert.equal(result.details.success, index === 0);
+				assert.equal(result.isError, index === 1);
+				const assistant = createAssistantMessage(model);
+				assistant.stopReason = "toolUse";
+				assistant.content = [{ type: "toolCall", name: "apply_patch", id, arguments: { input } }];
+				messages.push(assistant, { ...result, role: "toolResult" as const,
+					toolCallId: id, toolName: "apply_patch", timestamp: Date.now() });
+				expectedOutputs.push({ type: "custom_tool_call_output", call_id: id, output: result.content[0].text });
+			}
+			for (const responsesMode of ["standard", "lite"] as const) {
+				const body = buildRequestBody(model, { messages, tools: [patch] },
+					resolveCodexRequestProfile({ patchTransport: "custom", responsesMode }), { toolProtocols });
+				const declarations = responsesMode === "standard" ? body.tools as any[]
+					: (body.input.find(item => (item as { type?: string }).type === "additional_tools") as any).tools[0].tools;
+				assert.equal(declarations[0].description, description);
+				assert.deepEqual(body.input.filter(item => (item as { type?: string }).type === "custom_tool_call_output"), expectedOutputs);
+			}
+		} finally { await host.emit("session_shutdown"); host.dispose(); }
+	}));
+
 test("hosted-only capabilities are inactive without core and manual invocation fails explicitly", () =>
 	withCompositionDirectory(async directory => {
 		const host = createCompositionHost(directory);
@@ -199,7 +245,9 @@ test("hosted-only capabilities are inactive without core and manual invocation f
 			await host.emit("session_start");
 			assert.equal(host.active().includes("web_search"), false);
 			assert.equal(host.active().includes("image_generation"), true); // Standalone in this profile.
-			await assert.rejects(host.tools.get("web_search").execute("w", { search_query: [{ q: "test" }] }, undefined, undefined, host.ctx), /requires pi-codex-core/);
+			const failure = await host.tools.get("web_search").execute("w", { search_query: [{ q: "test" }] }, undefined, undefined, host.ctx);
+			assert.equal(failure.isError, true);
+			assert.match(failure.content[0].text, /requires pi-codex-core/);
 			host.ctx.model = compositionModel("gpt-4.1");
 			await host.emit("model_select");
 			assert(host.active().includes("image_generation"), "standalone image generation does not require core");

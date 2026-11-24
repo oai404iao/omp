@@ -60,6 +60,16 @@ test("verified execution defaults and search policy are resolved without guessin
 	assert.equal(unknown.supportsReasoningSummary, false);
 }));
 
+test("catalog diagnoses a hosted model-level mode without disabling hosted search", () => withAgentDir(agentDir => {
+	writeModels(agentDir, { version: 1, models: [{
+		id: "openai/gpt-5.5", tools: { webSearch: { implementation: "hosted", mode: "cached" } },
+	}] });
+	const settings = loadModelSettings({ provider: "openai", id: "gpt-5.5" });
+	assert.equal(settings.webSearchImplementation, "hosted");
+	assert.deepEqual(settings.webSearch, { mode: "live" });
+	assert.ok(modelCatalogDiagnostics().some(line => line.includes("use webSearch.mode in config.json")));
+}));
+
 test("exact GPT-6.2 OpenAI profiles inherit the Astra Standard policy", () => withAgentDir(() => {
 	const modern = { provider: "openai", api: "openai-responses" };
 	const astra = loadModelSettings({ ...modern, id: "gpt-6-astra" });
@@ -384,7 +394,7 @@ test("global tool enables and legacy compatibility settings cannot reactivate di
 	writeModels(agentDir, { version: 1, models: [{ id: "openai/gpt-5.5", enabled: false }] });
 	const settings = loadModelSettings(
 		{ provider: "openai", id: "gpt-5.5", api: "openai-responses" }, undefined,
-		{ ...DEFAULT_SETTINGS, webSearchEnabled: true, applyPatch: true, webSearch: true },
+		{ ...DEFAULT_SETTINGS, webSearchEnabled: true, applyPatch: true },
 	);
 	assert.equal(settings.providerShimActive, false);
 	assert.equal(settings.applyPatchEnabled, false);
