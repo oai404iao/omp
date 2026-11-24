@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { dependentChangeset, exactPinEdits, generatedId } from "./workspace-versioning.mjs";
+import { isWorkspaceRange, satisfiesWorkspaceDependency } from "./workspace-ranges.mjs";
+import { staleWorkspaceResolutions } from "./workspace-versioning.mjs";
 import { root } from "./workspaces.mjs";
 
 const runtimeName = "@fixture/runtime";
@@ -16,100 +17,125 @@ const unrelatedName = "@fixture/unrelated";
 function fixtureManifests() {
   return new Map([
     [runtimeName, { version: "1.0.0" }],
-    [toolsName, { version: "2.0.0", dependencies: { [runtimeName]: "1.0.0" } }],
-    [bundleName, { version: "3.0.0", dependencies: { [toolsName]: "2.0.0" } }],
-    [consumerName, { version: "4.0.0", optionalDependencies: { [bundleName]: "3.0.0" } }],
+    [toolsName, { version: "2.0.0", dependencies: { [runtimeName]: "^1.0.0" } }],
+    [bundleName, { version: "3.0.0", dependencies: { [toolsName]: "^2.0.0" } }],
+    [consumerName, { version: "4.0.0", optionalDependencies: { [bundleName]: "^3.0.0" } }],
     [unrelatedName, { version: "5.0.0" }],
   ].map(([name, manifest]) => [name, { name, private: false, ...manifest }]));
 }
 
-const graph = new Map([
-  ["runtime", { version: "1.0.0" }],
-  ["web", { version: "2.0.0", dependencies: { runtime: "1.0.0" } }],
-  ["bundle", { version: "3.0.0", dependencies: { web: "2.0.0" } }],
-  ["consumer", { version: "4.0.0", optionalDependencies: { bundle: "3.0.0" } }],
-]);
-test("dependency changes recursively generate explicit consumer changesets, including optional edges", () => {
-  const source = [{ id: "source", releases: [{ name: "runtime", type: "patch" }] }];
-  const text = dependentChangeset(graph, source);
-  for (const name of ["web", "bundle", "consumer"]) assert.ok(text.includes(`"${name}": patch`));
-  assert.ok(!text.includes('"runtime": patch'));
-  assert.equal(dependentChangeset(graph, [...source, {
-    id: generatedId, releases: [{ name: "web", type: "patch" }],
-  }]), text);
-  assert.equal(dependentChangeset(graph, []), undefined);
-  assert.equal(dependentChangeset(graph, [...source, {
-    id: "explicit", releases: ["web", "bundle", "consumer"].map(name => ({ name, type: "minor" })),
-  }]), undefined);
+test("numeric caret compatibility excludes incompatible majors, 0.x minors, and implicit prereleases", () => {
+  for (const bad of ["workspace:^", "^1", "^1.0", "^v1.2.3", "~1.0.0", "*", ">=1.0.0", null]) {
+    assert.equal(isWorkspaceRange(bad), false);
+    assert.equal(satisfiesWorkspaceDependency("1.2.3", bad), false);
+  }
+  assert.equal(satisfiesWorkspaceDependency("0.2.3", "^0.2.2"), true);
+  assert.equal(satisfiesWorkspaceDependency("0.3.0", "^0.2.2"), false);
+  assert.equal(satisfiesWorkspaceDependency("4.0.0", "^3.1.2"), false);
+  assert.equal(satisfiesWorkspaceDependency("3.1.1", "^3.1.2"), false);
+  assert.equal(satisfiesWorkspaceDependency("3.1.3-next.0", "^3.1.2"), false);
+  assert.equal(satisfiesWorkspaceDependency("3.1.3-next.0", "3.1.3-next.0"), true);
 });
 
-test("pin repair preserves exact dependency and optional dependency versions without unversioned changes", () => {
-  const after = structuredClone(graph);
-  after.get("runtime").version = "1.0.1";
-  assert.throws(() => exactPinEdits(graph, after), /consumer version bump/);
-  after.get("web").version = "2.0.1";
-  after.get("web").dependencies.runtime = "^1.0.1";
-  after.get("bundle").version = "3.0.1";
-  after.get("consumer").version = "4.0.1";
-  const edited = new Map(exactPinEdits(graph, after));
-  assert.equal(edited.get("web").dependencies.runtime, "1.0.1");
-  assert.equal(edited.get("consumer").optionalDependencies.bundle, "3.0.1");
-  assert.deepEqual(exactPinEdits(graph, graph), []);
+for (const source of [runtimeName, toolsName]) {
+  test(`real Changesets bumps only ${source}, without manifest/changelog writes to consumers`, async t => {
+    const f = await versioningFixture(t, { source });
+    await f.versionWorkspace(f.cwd, { updateLock: false });
+    const after = f.workspaceManifests(f.cwd);
+    const expected = structuredClone(f.before);
+    expected.get(source).version = source === runtimeName ? "1.0.1" : "2.0.1";
+    assert.deepEqual(after, expected);
+    for (const { name, directory } of f.entries) {
+      assert.equal(readdirSync(join(f.cwd, directory)).includes("CHANGELOG.md"), name === source);
+    }
+    await f.versionWorkspace(f.cwd, { updateLock: false });
+    assert.deepEqual(f.workspaceManifests(f.cwd), after);
+  });
+}
+
+test("a provider major versions independently while consumers remain on the old compatible line", async t => {
+  const f = await versioningFixture(t);
+  const source = join(f.cwd, ".changeset/source.md");
+  const major = `---\n"${runtimeName}": major\n---\n\nBreaking fixture.\n`;
+  writeFileSync(source, major);
+  await f.versionWorkspace(f.cwd, { updateLock: false });
+  const expected = structuredClone(f.before);
+  expected.get(runtimeName).version = "2.0.0";
+  assert.deepEqual(f.workspaceManifests(f.cwd), expected);
+  await f.checkWorkspace(f.cwd);
 });
 
-for (const prerelease of [false, true]) {
-test(`real Changesets ${prerelease ? "pre/exit" : "normal"} versioning propagates dependency and transitive optional releases`, async t => {
-  const f = await versioningFixture(t, { privateRuntime: true });
-  const { cwd, before, syncDependentChangesets, versionWorkspace, workspaceManifests } = f;
+test("a frozen workspace link must revert to a locked registry archive when the provider moves out of range", () => {
+  const manifests = new Map([["core", { dependencies: { runtime: "^3.1.2" } }], ["runtime", { version: "3.1.3" }]]);
+  const entries = [...manifests.keys()].map(name => ({ name, directory: `packages/${name}` }));
+  const ref = { specifier: "^3.1.2", version: "link:../runtime" };
+  const lock = { importers: { "packages/core": { dependencies: { runtime: ref } } }, packages: {}, snapshots: {} };
+  assert.deepEqual(staleWorkspaceResolutions(lock, manifests, entries), []);
+  manifests.get("runtime").version = "4.0.0";
+  const stale = [{ directory: "packages/core", field: "dependencies", dep: "runtime" }];
+  assert.deepEqual(staleWorkspaceResolutions(lock, manifests, entries), stale);
+  ref.version = "3.1.3";
+  assert.deepEqual(staleWorkspaceResolutions(lock, manifests, entries), stale);
+  lock.packages["runtime@3.1.3"] = { resolution: { integrity: "sha512-reviewed", tarball: "file:some-path" } };
+  lock.snapshots["runtime@3.1.3"] = {};
+  assert.deepEqual(staleWorkspaceResolutions(lock, manifests, entries), stale);
+  lock.packages["runtime@3.1.3"].resolution.tarball = "https://registry.npmjs.org/runtime/-/runtime-3.1.3.tgz";
+  assert.deepEqual(staleWorkspaceResolutions(lock, manifests, entries), []);
+});
+
+test("the coordinated migration introduces only first-compatible stable floors, once", async t => {
+  const f = await versioningFixture(t);
+  const plan = {};
+  const patches = [runtimeName, toolsName, bundleName, consumerName];
+  for (const [index, consumer] of patches.entries()) {
+    if (!index) continue;
+    const dep = patches[index - 1];
+    const file = join(f.cwd, f.entries.find(e => e.name === consumer).directory, "package.json");
+    const manifest = JSON.parse(readFileSync(file, "utf8"));
+    (manifest.dependencies ?? manifest.optionalDependencies)[dep] = f.before.get(dep).version;
+    writeFileSync(file, JSON.stringify(manifest));
+    plan[consumer] = { [dep]: `^${index}.0.1` };
+  }
+  const file = join(f.cwd, ".changeset/codex-compatibility-floors.json");
+  writeFileSync(file, JSON.stringify(plan));
+  const old = f.workspaceManifests(f.cwd);
+  await assert.rejects(f.versionWorkspace(f.cwd, { updateLock: false }), /explicit patch release/);
+  assert.deepEqual(f.workspaceManifests(f.cwd), old);
+  writeFileSync(join(f.cwd, ".changeset/source.md"), `---\n${patches.map(n => `"${n}": patch`).join("\n")}\n---\n\nMigration.\n`);
+  const expected = structuredClone(old);
+  for (const [i, name] of patches.entries()) {
+    const m = expected.get(name);
+    m.version = `${i + 1}.0.1`;
+    if (i) Object.assign(m.dependencies ?? m.optionalDependencies, plan[name]);
+  }
+  await f.versionWorkspace(f.cwd, { updateLock: false });
+  assert.deepEqual(f.workspaceManifests(f.cwd), expected);
+  assert.equal(existsSync(file), false);
+  await f.checkWorkspace(f.cwd);
+});
+
+test("prerelease iterations and stable exit do not consume changes twice or bump consumers", async t => {
+  const f = await versioningFixture(t, { source: runtimeName });
   const pre = command => {
-    const result = spawnSync(join(cwd, "node_modules/.bin/changeset"), ["pre", command, ...(command === "enter" ? ["next"] : [])], { cwd, encoding: "utf8" });
+    const result = spawnSync(join(f.cwd, "node_modules/.bin/changeset"), ["pre", command, ...(command === "enter" ? ["next"] : [])], { cwd: f.cwd, encoding: "utf8" });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   };
-  if (prerelease) pre("enter");
-  await assert.rejects(syncDependentChangesets(cwd), /missing or stale/);
-  await syncDependentChangesets(cwd, true);
-  await assert.doesNotReject(syncDependentChangesets(cwd));
-  const generated = readFileSync(join(cwd, ".changeset", `${generatedId}.md`), "utf8");
-  for (const name of [toolsName, bundleName, consumerName]) assert.ok(generated.includes(`"${name}": patch`));
-  await versionWorkspace(cwd, { updateLock: false });
-  const after = workspaceManifests(cwd);
-  for (const name of [runtimeName, toolsName, bundleName, consumerName]) {
-    assert.notEqual(after.get(name).version, before.get(name).version);
-  }
-  assert.equal(after.get(consumerName).optionalDependencies[bundleName], after.get(bundleName).version);
-  assert.deepEqual(after.get(unrelatedName), before.get(unrelatedName));
-  for (const [name, manifest] of after) {
-    assert.equal(manifest.private, before.get(name).private, `${name}: versioning must preserve privacy`);
-  }
-  assert.deepEqual(exactPinEdits(after, after), []);
-  await versionWorkspace(cwd, { updateLock: false });
-  assert.deepEqual(workspaceManifests(cwd), after);
-  if (prerelease) {
-    assert.match(after.get(toolsName).version, /-next\./);
-    const historyPath = join(cwd, ".changeset/pre", `${generatedId}.md`);
-    const history = readFileSync(historyPath, "utf8");
-    writeFileSync(join(cwd, ".changeset/capability-next.md"), `---\n"${toolsName}": patch\n---\n\nNext capability fixture.\n`);
-    await versionWorkspace(cwd, { updateLock: false });
-    const next = workspaceManifests(cwd);
-    assert.equal(next.get(runtimeName).version, after.get(runtimeName).version);
-    for (const name of [toolsName, bundleName, consumerName]) {
-      assert.notEqual(next.get(name).version, after.get(name).version);
-    }
-    assert.equal(readFileSync(historyPath, "utf8"), history);
-    await versionWorkspace(cwd, { updateLock: false });
-    assert.deepEqual(workspaceManifests(cwd), next);
-    pre("exit");
-    await versionWorkspace(cwd, { updateLock: false });
-    const stable = workspaceManifests(cwd);
-    for (const manifest of stable.values()) assert.doesNotMatch(manifest.version, /-/);
-    assert.deepEqual(exactPinEdits(stable, stable), []);
+  pre("enter");
+  const expected = structuredClone(f.before);
+  for (const version of ["1.0.1-next.0", "1.0.1-next.1", "1.0.1"]) {
+    if (version.endsWith("next.1")) writeFileSync(join(f.cwd, ".changeset/another.md"), `---\n"${runtimeName}": patch\n---\n\nNext fixture.\n`);
+    if (!version.includes("next")) pre("exit");
+    await f.versionWorkspace(f.cwd, { updateLock: false });
+    expected.get(runtimeName).version = version;
+    assert.deepEqual(f.workspaceManifests(f.cwd), expected);
+    await f.versionWorkspace(f.cwd, { updateLock: false });
+    assert.deepEqual(f.workspaceManifests(f.cwd), expected);
   }
 });
-}
 
 async function versioningFixture(t, {
   status = "publishable", private: isPrivate = false, locked = {},
-  source = runtimeName, prerelease = false, existingChangelog = false, privateRuntime = false,
+  source = runtimeName, prerelease = false, existingChangelog = false,
 } = {}) {
   const scratch = join(process.env.HOME, ".local/state/agents/tmp");
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
@@ -120,15 +146,10 @@ async function versioningFixture(t, {
   mkdirSync(join(cwd, "scripts"));
   writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\nimporters: {}\n");
   writeFileSync(join(cwd, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
-  writeFileSync(join(cwd, ".changeset/config.json"), JSON.stringify({
-    changelog: "@changesets/cli/changelog", commit: false, fixed: [], linked: [],
-    access: "public", baseBranch: "main", updateInternalDependencies: "patch",
-    privatePackages: { version: true, tag: false }, ignore: [],
-  }));
+  writeFileSync(join(cwd, ".changeset/config.json"), readFileSync(join(root, ".changeset/config.json")));
   writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "fixture", private: true }));
   const before = fixtureManifests();
   before.get(toolsName).private = isPrivate;
-  before.get(runtimeName).private = privateRuntime;
   const entries = [...before.keys()].map((name, index) => ({
     name, directory: `packages/package-${index}`,
     releaseStatus: name === toolsName ? status : "publishable",
@@ -147,7 +168,7 @@ async function versioningFixture(t, {
   writeFileSync(join(cwd, ".changeset/source.md"), `---\n"${source}": patch\n---\n\nBootstrap fixture.\n`);
   if (prerelease) writeFileSync(join(cwd, ".changeset/pre.json"), JSON.stringify({ mode: "pre" }));
   symlinkSync(join(root, "node_modules"), join(cwd, "node_modules"), "dir");
-  for (const script of ["workspace-versioning.mjs", "release-dependencies.mjs", "lock-integrity.mjs", "pnpm-lock.mjs"]) {
+  for (const script of ["workspace-versioning.mjs", "workspace-ranges.mjs", "release-dependencies.mjs", "lock-integrity.mjs", "pnpm-lock.mjs"]) {
     writeFileSync(join(cwd, "scripts", script), readFileSync(join(root, "scripts", script)));
   }
   writeFileSync(join(cwd, "scripts/workspaces.mjs"), `
@@ -170,46 +191,25 @@ async function versioningFixture(t, {
   return { cwd, before, entries, changelog, lockPath, ...versioning };
 }
 
-for (const source of [runtimeName, toolsName]) {
-test(`bootstrap preservation of ${source} release keeps the initial version and bumps consumers`, async t => {
-  const f = await versioningFixture(t, { status: "bootstrap", source, existingChangelog: source === runtimeName });
+test("bootstrap preservation requires its own explicit changeset and leaves compatible consumers untouched", async t => {
+  const f = await versioningFixture(t, { status: "bootstrap", source: toolsName, existingChangelog: true });
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {
     calls.push({ url: String(url), options });
     assert.deepEqual(f.workspaceManifests(f.cwd), f.before, "registry lookup must precede version writes");
-    assert.deepEqual(f.exactPinEdits(f.before, f.before), []);
     assert.equal(readFileSync(join(f.cwd, ".changeset/source.md"), "utf8").includes("Bootstrap fixture."), true);
     return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
   });
   await f.versionWorkspace(f.cwd, { updateLock: false, preserveBootstrapVersion: toolsName });
-  const after = f.workspaceManifests(f.cwd);
+  assert.deepEqual(f.workspaceManifests(f.cwd), f.before);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "https://registry.npmjs.org/%40fixture%2Fcapability");
   assert.equal(calls[0].options.redirect, "error");
-  assert.equal(after.get(toolsName).version, f.before.get(toolsName).version);
-  assert.equal(after.get(toolsName).dependencies[runtimeName], after.get(runtimeName).version);
-  const consumers = source === runtimeName
-    ? [runtimeName, bundleName, consumerName] : [bundleName, consumerName];
-  for (const name of consumers) {
-    assert.notEqual(after.get(name).version, f.before.get(name).version, `${name}: consumers must still bump`);
-  }
-  assert.deepEqual(f.exactPinEdits(after, after), []);
-  if (source === runtimeName) assert.throws(() => f.exactPinEdits(f.before, after), /consumer version bump/,
-      "public pin repair must not acquire an unvalidated exemption");
-  assert.deepEqual(after.get(unrelatedName), f.before.get(unrelatedName));
   const changelog = readFileSync(f.changelog, "utf8");
-  assert.equal(changelog.split(`## ${after.get(toolsName).version}\n`).length, 2);
-  if (source === runtimeName) {
-    assert.ok(changelog.includes(`Existing bootstrap notes for ${toolsName}@${after.get(toolsName).version}.`));
-    assert.match(changelog, /Updated dependencies/);
-  } else {
-    assert.match(changelog, /Bootstrap fixture/);
-    assert.equal(after.get(runtimeName).version, f.before.get(runtimeName).version);
-  }
-  const bundleLog = readFileSync(join(f.cwd, f.entries.find(entry => entry.name === bundleName).directory, "CHANGELOG.md"), "utf8");
-  assert.ok(bundleLog.includes(`${toolsName}@${after.get(toolsName).version}`));
+  assert.equal(changelog.split("## 2.0.0\n").length, 2);
+  assert.match(changelog, /Bootstrap fixture/);
+  assert.match(changelog, /Existing bootstrap notes/);
 });
-}
 
 for (const failure of [
   "published", "locked", "historically-locked", "blocked", "private", "unrelated-name",
@@ -222,7 +222,7 @@ for (const failure of [
       private: failure === "private",
       locked: failure === "locked" ? { [key]: {} }
         : failure === "historically-locked" ? { [`${toolsName}@0.0.1`]: {} } : {},
-      source: failure === "unrelated-release" ? unrelatedName : runtimeName,
+      source: failure === "unrelated-release" ? runtimeName : toolsName,
       prerelease: failure === "prerelease",
     });
     if (failure === "malformed-lock") writeFileSync(f.lockPath, "{}");

@@ -8,6 +8,7 @@ export type { ToolProtocol, ToolProtocolSnapshot } from "./tool-protocol.js";
 
 export const CODEX_BROKER_CHANNEL = "@oai404iao/pi-codex:broker";
 export const CODEX_RUNTIME_VERSION: string = createRequire(import.meta.url)("../package.json").version;
+const ABI = 3;
 const CACHE = Symbol.for("@oai404iao/pi-codex/broker/v1");
 
 export interface ResponsesEngineCapability {
@@ -31,8 +32,9 @@ export interface OwnedTool {
 }
 
 export interface CodexBroker {
-	readonly version: 2;
+	readonly version: typeof ABI;
 	readonly runtimeVersion: string;
+	acceptsRuntime(version: string): boolean;
 	readonly closed: boolean;
 	readonly tools: Map<PackageToolName, InstalledTool>;
 	coreEnabled: boolean;
@@ -41,6 +43,15 @@ export interface CodexBroker {
 	claim(name: string): boolean;
 	addPresentation(name: string, presentation: ProviderPresentation): void;
 	presentation: ProviderPresentation;
+}
+
+// A prerelease can compose with itself, but does not promise compatibility with
+// another build. Stable releases opt in to a shared ABI within their major.
+function acceptsRuntime(version: string): boolean {
+	if (version === CODEX_RUNTIME_VERSION) return true;
+	const stable = /^([1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+	const major = stable.exec(CODEX_RUNTIME_VERSION)?.[1];
+	return major !== undefined && typeof version === "string" && stable.exec(version)?.[1] === major;
 }
 
 function createBroker(): CodexBroker & { close(): void } {
@@ -52,8 +63,9 @@ function createBroker(): CodexBroker & { close(): void } {
 	let closed = false;
 	const ordered = () => [...presentations].sort(([a], [b]) => a.localeCompare(b));
 	return {
-		version: 2,
+		version: ABI,
 		runtimeVersion: CODEX_RUNTIME_VERSION,
+		acceptsRuntime,
 		get closed() { return closed; },
 		coreEnabled: false,
 		tools,
@@ -98,27 +110,38 @@ function createBroker(): CodexBroker & { close(): void } {
 }
 
 function isCompatible(candidate: CodexBroker): boolean {
-	return candidate?.version === 2 && candidate.runtimeVersion === CODEX_RUNTIME_VERSION
-		&& typeof candidate.claim === "function"
-		&& typeof candidate.addPresentation === "function"
-		&& typeof candidate.tools?.get === "function"
-		&& typeof candidate.tools?.set === "function"
-		&& typeof candidate.ownedTools?.get === "function"
-		&& typeof candidate.ownedTools?.set === "function"
-		&& typeof candidate.closed === "boolean"
-		&& typeof candidate.coreEnabled === "boolean"
-		&& ["clear", "flush", "scheduleFlush", "registerRenderers", "streamEffects"].every(
-			name => typeof (candidate.presentation as unknown as Record<string, unknown>)?.[name] === "function",
-		);
+	try {
+		return candidate?.version === ABI && acceptsRuntime(candidate.runtimeVersion)
+			&& typeof candidate.acceptsRuntime === "function" && candidate.acceptsRuntime(CODEX_RUNTIME_VERSION) === true
+			&& typeof candidate.claim === "function"
+			&& typeof candidate.addPresentation === "function"
+			&& typeof candidate.tools?.get === "function"
+			&& typeof candidate.tools?.set === "function"
+			&& typeof candidate.tools?.has === "function"
+			&& typeof candidate.tools?.values === "function"
+			&& typeof candidate.ownedTools?.get === "function"
+			&& typeof candidate.ownedTools?.set === "function"
+			&& typeof candidate.ownedTools?.[Symbol.iterator] === "function"
+			&& typeof candidate.closed === "boolean"
+			&& typeof candidate.coreEnabled === "boolean"
+			&& (candidate.engine === undefined || (typeof candidate.engine?.supports === "function"
+				&& candidate.engine.customTools === true && candidate.engine.hostedWebSearch === true))
+			&& ["clear", "flush", "scheduleFlush", "registerRenderers", "streamEffects"].every(
+				name => typeof (candidate.presentation as unknown as Record<string, unknown>)?.[name] === "function",
+			);
+	} catch {
+		// Pi isolates subscriber exceptions. A broken handshake must not look like no responder.
+		return false;
+	}
 }
 
 function incompatibleBroker(): Error {
-	return new Error(`Incompatible or duplicate Codex capability broker: requires ABI v2 and runtime ${CODEX_RUNTIME_VERSION}`);
+	return new Error(`Incompatible or duplicate Codex capability broker: requires ABI v${ABI} and a runtime compatible with ${CODEX_RUNTIME_VERSION}`);
 }
 
 /**
  * Pi gives each extension a separate API/module root. Synchronous event-bus
- * discovery shares the v2 service across those roots; no module-global registry
+ * discovery shares the service across those roots; no module-global registry
  * or equality of pi.events wrapper objects is assumed. The cached property is
  * only a fast path (and supports minimal ExtensionAPI test doubles).
  */
@@ -133,7 +156,7 @@ export function getCodexBroker(pi: ExtensionAPI): CodexBroker {
 	let found: CodexBroker | undefined;
 	let incompatible = false;
 	pi.events?.emit(CODEX_BROKER_CHANNEL, {
-		version: 2,
+		version: ABI,
 		accept(candidate: CodexBroker) {
 			if (!isCompatible(candidate)) incompatible = true;
 			else if (!candidate.closed) {

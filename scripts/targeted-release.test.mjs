@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { root } from "./workspaces.mjs";
+import { copyReleaseScripts } from "./test-support/release-scripts.mjs";
 import { targetedReleaseWorkspaces } from "./targeted-release.mjs";
 import { validateReleaseBatch } from "./release-batch.mjs";
+import { resolveReleaseWorkspaces } from "./release-resolution.mjs";
 
 const names = Object.fromEntries(["target", "bundle", "runtime", "unrelated"].map(name => [name, `@fixture/${name}`]));
 const integrity = `sha512-${createHash("sha512").update("immutable dependency").digest("base64")}`;
@@ -18,10 +19,7 @@ function fixture(t, options = {}) {
   const scripts = join(directory, "scripts"), bin = join(directory, "bin");
   for (const path of [scripts, bin, join(directory, "release-locks")]) mkdirSync(path);
   writeFileSync(join(directory, "package.json"), JSON.stringify({ devDependencies: { npm: "11.19.0" } }));
-  for (const file of ["prepare-release-artifacts.mjs", "publish-release-artifacts.mjs", "release-batch.mjs",
-    "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs", "targeted-release.mjs", "initial-codex-bootstrap.mjs"]) {
-    copyFileSync(join(root, "scripts", file), join(scripts, file));
-  }
+  copyReleaseScripts(scripts, ["prepare-release-artifacts.mjs", "publish-release-artifacts.mjs", "recovery-guard.mjs", "initial-codex-bootstrap.mjs"]);
   writeFileSync(join(scripts, "registry-visibility.mjs"), `
     import { lookupPublishedVersion, lookupDistTags } from "./release-utils.mjs";
     export class RegistryVisibilityPending extends Error {}
@@ -39,7 +37,7 @@ function fixture(t, options = {}) {
   const entries = Object.entries(names).map(([short, name]) => {
     mkdirSync(join(directory, short));
     manifests[short] = { name, version: "1.0.0", private: false, files: ["index.js"] };
-    if (short === "target") manifests[short].optionalDependencies = { [names.bundle]: "1.0.0" };
+    if (short === "target") manifests[short].optionalDependencies = { [names.bundle]: options.bootstrap ? "1.0.0" : "^1.0.0" };
     if (short === "bundle") manifests[short].dependencies = { [names.runtime]: "1.0.0" };
     writeFileSync(join(directory, short, "package.json"), JSON.stringify(manifests[short]));
     writeFileSync(join(directory, short, "index.js"), "export const original = true;\n");
@@ -72,12 +70,14 @@ if (args[0] === "publish") {
 } else if (args[0] === "view" && args[2] === "version") {
   if (!registry[args[1]]) { console.error("E404"); process.exit(1); }
   console.log(JSON.stringify(registry[args[1]]));
+} else if (args[0] === "view" && args[2] === "versions") {
+  console.log(JSON.stringify(Object.entries(registry).filter(([key]) => key.startsWith(args[1]+"@")).map(([,m]) => m.version)));
 } else if (args[0] === "view" && args[2] === "dist-tags") {
   console.log(JSON.stringify({latest: args[1] === ${JSON.stringify(names.target)} ? "1.0.0" : "9.0.0"}));
 } else { console.error("Unexpected npm request"); process.exit(99); }
 `);
   chmodSync(join(bin, "npm"), 0o755);
-  if (options.bootstrap) {
+  if (options.bootstrap || options.mockPublicMain) {
     const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
     writeFileSync(join(bin, "git"), `#!/usr/bin/env node
 const cp = require("node:child_process"), fs = require("node:fs");
@@ -109,6 +109,11 @@ if (args[0] === "fetch" && args.includes("https://github.com/oai404iao/omp.git")
   }
   const source = commit();
   writeFileSync(join(directory, "runtime/index.js"), "export const changed = true;\n");
+  if (!options.bootstrap) {
+    // A newer, unpublished workspace revision now depends on a different package.
+    manifests.bundle = { ...manifests.bundle, version: "1.2.0", dependencies: { [names.unrelated]: "1.0.0" } };
+    writeFileSync(join(directory, "bundle/package.json"), JSON.stringify(manifests.bundle));
+  }
   writeFileSync(join(directory, "unrelated/index.js"), "export const unrelated = true;\n");
   if (options.changedTarget) writeFileSync(join(directory, "target/index.js"), "export const changed = true;\n");
   if (options.changedMap) {
@@ -149,18 +154,22 @@ if (args[0] === "fetch" && args.includes("https://github.com/oai404iao/omp.git")
   };
 }
 
-test("targeted publication consumes changed immutable dependency workspaces but writes/releases only target", t => {
-  const f = fixture(t);
+test("targeted publication uses the historical transitive graph instead of changed checkout contracts and releases only the target", t => {
+  const f = fixture(t, { changedMap: true });
   const prepared = f.prepare();
   assert.equal(prepared.status, 0, prepared.stderr);
   const release = f.release();
-  assert.equal(release.requestedPackage, names.target);
+  assert.deepEqual(release.requestedPackages, [names.target]);
   assert.deepEqual(release.candidates.map(c => [c.name, c.mode]), [
     [names.runtime, "verify"], [names.bundle, "verify"], [names.target, "publish"],
   ]);
   assert.equal(release.candidates[0].sourceCommit, f.source);
   assert.equal(release.candidates[0].filename, undefined);
   assert.equal(release.candidates[0].notes, undefined);
+  assert.equal(release.candidates[1].version, "1.0.0");
+  // Freeze the compatible selection before any writes, even if new versions appear.
+  f.registry[`${names.bundle}@1.1.0`] = { version: "1.1.0", gitHead: f.head, "dist.integrity": integrity };
+  f.saveRegistry();
   const published = f.publish();
   assert.equal(published.status, 0, published.stderr);
   assert.equal(f.result().ok, true);
@@ -199,7 +208,7 @@ test("targeted bootstrap packs only its target and verifies immutable published 
 
 for (const failure of ["actions", "unreviewed-source", "missing-dependency", "ordinary-target"]) {
   test(`targeted bootstrap rejects ${failure}`, t => {
-    const f = fixture(t, failure === "ordinary-target" ? {} : { bootstrap: "target" });
+    const f = fixture(t, failure === "ordinary-target" ? { mockPublicMain: true } : { bootstrap: "target" });
     if (failure === "missing-dependency") {
       delete f.registry[`${names.runtime}@1.0.0`];
       f.saveRegistry();
@@ -218,7 +227,7 @@ for (const failure of ["actions", "unreviewed-source", "missing-dependency", "or
 for (const targeted of [true, false]) {
   test(`${targeted ? "targeted" : "full-batch"} recovery retains tarball-facing drift rejection`, t => {
     const f = fixture(t, { recover: true, changedTarget: targeted });
-    const prepared = f.prepare([], targeted ? {} : { RELEASE_PACKAGE: "" });
+    const prepared = f.prepare([], targeted ? {} : { RELEASE_PACKAGE: Object.values(names).join(",") });
     assert.notEqual(prepared.status, 0);
     assert.match(prepared.stderr, /current tarball-facing files changed/);
     assert.doesNotMatch(f.calls(), /npm publish/);
@@ -226,9 +235,9 @@ for (const targeted of [true, false]) {
 }
 
 for (const failure of ["unknown", "blocked", "missing", "bad-source", "bad-integrity", "wrong-identity",
-  "historical-identity", "changed-map", "lock-mismatch", "conflicting-tag", "cli-mismatch"]) {
+  "historical-identity", "lock-mismatch", "conflicting-tag", "cli-mismatch"]) {
   test(`targeted preparation rejects ${failure}`, t => {
-    const f = fixture(t, { blocked: failure === "blocked" ? "target" : undefined, changedMap: failure === "changed-map",
+    const f = fixture(t, { blocked: failure === "blocked" ? "target" : undefined,
       historicalIdentity: failure === "historical-identity", lockMismatch: failure === "lock-mismatch" });
     const dependency = f.registry[`${names.runtime}@1.0.0`];
     if (failure === "missing") delete f.registry[`${names.runtime}@1.0.0`];
@@ -248,13 +257,13 @@ for (const failure of ["unknown", "blocked", "missing", "bad-source", "bad-integ
 
 for (const failure of ["missing-env", "other-env", "removed-selector", "extra-node", "missing-node", "dependency-publish",
   "dependency-recover", "target-verify", "registry-missing", "registry-integrity", "registry-source", "forged-source",
-  "forged-integrity", "changed-map", "conflicting-tag"]) {
+  "forged-integrity", "outside-range", "conflicting-tag"]) {
   test(`publisher rejects targeted ${failure} before registry writes`, t => {
     const f = fixture(t);
     const prepared = f.prepare();
     assert.equal(prepared.status, 0, prepared.stderr);
     const release = f.release();
-    if (failure === "removed-selector") delete release.requestedPackage;
+    if (failure === "removed-selector") delete release.requestedPackages;
     if (failure === "extra-node") release.candidates.push({ ...release.candidates[0], name: names.unrelated, directory: "unrelated" });
     if (failure === "missing-node") release.candidates.shift();
     if (failure === "dependency-publish") release.candidates[0].mode = "publish";
@@ -271,9 +280,9 @@ for (const failure of ["missing-env", "other-env", "removed-selector", "extra-no
       release.candidates[0].integrity = "sha512-invalid";
       f.registry[`${names.runtime}@1.0.0`]["dist.integrity"] = release.candidates[0].integrity;
     }
-    if (failure === "changed-map") {
-      writeFileSync(join(f.directory, "runtime/package.json"),
-        JSON.stringify({ ...f.manifests.runtime, peerDependencies: { external: "^2.0.0" } }));
+    if (failure === "outside-range") {
+      writeFileSync(join(f.directory, "target/package.json"),
+        JSON.stringify({ ...f.manifests.target, optionalDependencies: { [names.bundle]: "^2.0.0" } }));
     }
     if (failure === "conflicting-tag") f.git("tag", `${names.runtime}@1.0.0`, f.head);
     f.saveRegistry();
@@ -281,20 +290,22 @@ for (const failure of ["missing-env", "other-env", "removed-selector", "extra-no
     const published = f.publish(failure === "missing-env" ? { RELEASE_PACKAGE: "" }
       : failure === "other-env" ? { RELEASE_PACKAGE: names.bundle } : {});
     assert.notEqual(published.status, 0);
-    assert.match(published.stderr, /does not match RELEASE_PACKAGE|exactly the requested package dependency closure|Invalid release mode|identity or integrity mismatch|tag .* points to|not an ancestor|SHA-512 integrity|historical peerDependencies/);
+    assert.match(published.stderr, /exact release package|does not match RELEASE_PACKAGE|dependency closure|Invalid release mode|identity or integrity mismatch|Invalid release identity|tag .* points to|not an ancestor|does not satisfy/);
     assert.doesNotMatch(f.calls(), /npm publish/);
     assert.doesNotMatch(f.git("tag"), /@fixture\/target/);
   });
 }
 
-test("closure selection retains exact pins, eligibility, cycles and private-workspace guards", () => {
+test("source closure selection checks compatibility, eligibility, cycles and private workspaces", () => {
   const entries = ["target", "dependency"].map(name => ({ name, directory: name, releaseStatus: "publishable" }));
   const manifests = { target: { name: "target", version: "1.0.0", dependencies: { dependency: "1.0.0" } },
     dependency: { name: "dependency", version: "1.0.0" } };
   const manifestFor = entry => manifests[entry.name];
   assert.deepEqual(targetedReleaseWorkspaces("target", entries, manifestFor).map(e => e.name), ["dependency", "target"]);
   manifests.target.dependencies.dependency = "^1.0.0";
-  assert.throws(() => targetedReleaseWorkspaces("target", entries, manifestFor), /exactly pinned/);
+  assert.deepEqual(targetedReleaseWorkspaces("target", entries, manifestFor).map(e => e.name), ["dependency", "target"]);
+  manifests.target.dependencies.dependency = "^2.0.0";
+  assert.throws(() => targetedReleaseWorkspaces("target", entries, manifestFor), /does not satisfy/);
   manifests.target.dependencies.dependency = "1.0.0";
   manifests.dependency.private = true;
   assert.throws(() => targetedReleaseWorkspaces("target", entries, manifestFor), /Invalid release workspace identity/);
@@ -310,5 +321,52 @@ test("closure selection retains exact pins, eligibility, cycles and private-work
   manifests.dependency.dependencies = { target: "1.0.0" };
   assert.throws(() => targetedReleaseWorkspaces("target", entries, manifestFor), /cycle/);
   assert.throws(() => validateReleaseBatch([{ name: "target", directory: "target", version: "1.0.0", mode: "verify" }],
-    entries, manifestFor), /Invalid release mode/);
+    entries, manifestFor, ["target"]), /Invalid release mode/);
+});
+
+test("explicit roots share a single immutable resolution, accounting for historical exact pins and prerelease policy", () => {
+  const entries = Object.values(names).map(name => ({ name, directory: name.split("/")[1], releaseStatus: "publishable" }));
+  const checkout = new Map(entries.map(({ name }) => [name, { name, version: "2.0.0" }]));
+  const target = checkout.get(names.target);
+  target.dependencies = { [names.runtime]: "^1.0.0" };
+  const other = checkout.get(names.unrelated);
+  other.optionalDependencies = { [names.bundle]: "^1.0.0" };
+  const histories = { [names.runtime]: ["1.1.0", "1.2.4", "2.0.0", "1.3.0-beta.1"], [names.bundle]: ["1.4.0"] };
+  const historical = { [names.bundle]: { dependencies: { [names.runtime]: "1.1.0" } } };
+  function plan(...targets) {
+    return resolveReleaseWorkspaces(targets, "a".repeat(40), { entries, checkout: entry => checkout.get(entry.name),
+      versions: name => histories[name], lookup: (name, version) => ({ exists: histories[name].includes(version), version,
+        gitHead: "b".repeat(40), integrity }), check: ({ name, version }) => ({ name, version, ...historical[name] }) });
+  }
+  assert.equal(plan(names.target)[0].candidate.version, "1.2.4");
+  assert.deepEqual(plan(names.target, names.unrelated).map(({ entry, manifest, candidate }) => [entry.name, manifest.version, !!candidate]), [
+    [names.runtime, "1.1.0", true], [names.bundle, "1.4.0", true], [names.target, "2.0.0", false], [names.unrelated, "2.0.0", false],
+  ]);
+  target.dependencies[names.runtime] = "^1.2.0";
+  assert.throws(() => plan(names.target, names.unrelated), /No published .* satisfies/);
+  target.dependencies[names.runtime] = "^1.3.0";
+  assert.throws(() => plan(names.target), /No published .* satisfies/);
+  target.dependencies[names.runtime] = "^1.3.0-beta.1";
+  assert.equal(plan(names.target)[0].candidate.version, "1.3.0-beta.1");
+  target.dependencies[names.runtime] = "workspace:^";
+  assert.throws(() => plan(names.target), /Invalid historical workspace dependency/);
+});
+
+test("a historical transitive constraint can select an older compatible helper, but source failures never trigger fallback", () => {
+  const entries = [names.target, names.runtime, names.bundle].map(name => ({ name, directory: name, releaseStatus: "publishable" }));
+  const checkout = ({ name }) => ({ name, version: name === names.runtime ? "3.1.2" : "1.0.0",
+    ...(name === names.target ? { dependencies: { [names.bundle]: "^1.0.0", [names.runtime]: "^3.1.0" } } : {}) });
+  const calls = [];
+  const resolution = { entries, checkout, versions: () => ["1.0.0", "1.1.0"], lookup: (_name, version) => {
+    calls.push(version); return { exists: true, version, gitHead: "b".repeat(40), integrity };
+  }, check: ({ name, version }) => ({ name, version, dependencies: { [names.runtime]: version === "1.1.0" ? "^3.2.0" : "^3.1.0" } }) };
+  const solve = () => resolveReleaseWorkspaces([names.target, names.runtime], "a".repeat(40), resolution);
+  assert.equal(solve().find(({ candidate }) => candidate?.name === names.bundle).manifest.version, "1.0.0");
+  assert.deepEqual(calls, ["1.1.0", "1.0.0"]);
+  calls.length = 0;
+  resolution.check = () => { throw new Error("identity or integrity mismatch"); };
+  assert.throws(solve, /identity or integrity mismatch/);
+  assert.deepEqual(calls, ["1.1.0"]);
+  resolution.check = candidate => ({ ...candidate, optionalDependencies: { "@oai404iao/retired": "1.2.0" } });
+  assert.throws(solve, /Unknown internal release dependency/);
 });

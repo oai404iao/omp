@@ -13,7 +13,7 @@ assert.equal(JSON.parse(readFileSync(join(sdkRoot, "package.json"))).version, ve
 const sdk = await import(pathToFileURL(join(sdkRoot, "dist/index.js")));
 assert.equal(sdk.VERSION, version);
 const subagent = join(cwd, "node_modules/@oai404iao/pi-subagent");
-const require = createRequire(join(subagent, "index.ts"));
+const require = createRequire(realpathSync(join(subagent, "index.ts")));
 const runtime = "@oai404iao/pi-codex-runtime";
 if (label === "subagent-no-optional") {
   assert.equal(existsSync(join(cwd, "node_modules", runtime)), false);

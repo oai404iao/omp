@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { root } from "./workspaces.mjs";
+import { copyReleaseScripts } from "./test-support/release-scripts.mjs";
 import { verifyPackedCandidate } from "./release-batch.mjs";
 
 const manifest = { name: "@fixture/release-package", version: "1.0.0", private: false, files: ["index.js"] };
@@ -17,9 +17,7 @@ function prepareFixture(t, unexpectedFilename) {
   for (const directory of [scripts, bin, join(temporary, "release-locks"), join(temporary, "fixture")]) {
     mkdirSync(directory);
   }
-  for (const file of ["prepare-release-artifacts.mjs", "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs", "targeted-release.mjs"]) {
-    copyFileSync(join(root, "scripts", file), join(scripts, file));
-  }
+  copyReleaseScripts(scripts, ["prepare-release-artifacts.mjs", "recovery-guard.mjs"]);
   writeFileSync(join(temporary, ".gitignore"), "release-artifacts/\ncalls.log\n");
   writeFileSync(join(temporary, "package.json"), JSON.stringify({ devDependencies: { npm: "11.19.0" } }));
   writeFileSync(join(temporary, "fixture/package.json"), JSON.stringify(manifest));
@@ -62,7 +60,7 @@ printf '%s\\n' '${JSON.stringify({ name: manifest.name, version: manifest.versio
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "fixture"]);
   const child = spawnSync(process.execPath, [join(scripts, "prepare-release-artifacts.mjs")], {
     cwd: temporary, encoding: "utf8", timeout: 30000,
-    env: { ...process.env, RELEASE_PACKAGE: "", PATH: `${bin}:${process.env.PATH}`, CALL_LOG: join(temporary, "calls.log") },
+    env: { ...process.env, RELEASE_PACKAGE: manifest.name, PATH: `${bin}:${process.env.PATH}`, CALL_LOG: join(temporary, "calls.log") },
   });
   const calls = readFileSync(join(temporary, "calls.log"), "utf8").trim().split("\n");
   assert.equal(calls.length, 1);

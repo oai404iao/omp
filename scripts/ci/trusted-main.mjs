@@ -8,7 +8,7 @@ const repositoryName = "oai404iao/omp";
 const workflowPath = ".github/workflows/ci.yml";
 // Deliberately pin the reviewed full-coverage graph, not merely its job names.
 // Workflow changes must update this digest and the graph's policy tests together.
-export const coverageWorkflowSha256 = "82973ab4e5fa1f6b95c1f8dbaffedd79a678711c365918567c0e5386bc303658";
+export const coverageWorkflowSha256 = "ba0334cdfceda2da4ed07b84bee9f21662148c083377e0dfbf0d00fa94ab74ed";
 export const expectedJobNames = [
   "Verification plan", "Repository policy",
   ...workspaces.map(entry => entry.directory)

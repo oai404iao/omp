@@ -4,9 +4,12 @@ import { lstatSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { validateReleaseBatch, verifyPackedCandidate } from "./release-batch.mjs";
-import { assertLockedPublishedArtifact, currentCommit, existingTagCommit, git } from "./release-utils.mjs";
-import { verifyDependencySource } from "./targeted-release.mjs";
-import { registry, workspaces, readManifest, root } from "./workspaces.mjs";
+import { assertLockedPublishedArtifact, currentCommit } from "./release-utils.mjs";
+import { historicalManifest, verifyDependencySource } from "./targeted-release.mjs";
+import { releaseTargets } from "./release-selection.mjs";
+import { registry, workspaces, readManifest } from "./workspaces.mjs";
+
+export { historicalManifest };
 
 export const digest = bytes => `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
 export const canonicalTarball = ({ name, version }) => `${registry}${name}/-/${name.split("/").at(-1)}-${version}.tgz`;
@@ -28,30 +31,18 @@ export async function boundedFetch(url, limit, transport = globalThis.fetch) {
 }
 
 export function validateManifest(manifest, { commit = currentCommit(), entries = workspaces,
-  manifestFor = entry => readManifest(entry.directory), env = process.env, requestedPackage = env.RELEASE_PACKAGE || undefined } = {}) {
-  if (manifest.schemaVersion !== 1 || manifest.commit !== commit || manifest.registry !== registry
+  manifestFor = entry => readManifest(entry.directory), env = process.env, requestedPackage = env.RELEASE_PACKAGE,
+  historicalManifest: source = historicalManifest } = {}) {
+  const targets = releaseTargets(requestedPackage, entries);
+  if (manifest.schemaVersion !== 2 || manifest.commit !== commit || manifest.registry !== registry
     || !Array.isArray(manifest.candidates) || manifest.candidates.length === 0
-    || (manifest.requestedPackage ?? undefined) !== requestedPackage) throw new Error("Invalid release consumer manifest or selection");
+    || !isDeepStrictEqual(manifest.requestedPackages, targets)) throw new Error("Invalid release manifest or selection: does not match RELEASE_PACKAGE");
   if (env.GITHUB_SHA && env.GITHUB_SHA !== commit) throw new Error("Release checkout differs from GITHUB_SHA");
-  if (!requestedPackage && !isDeepStrictEqual(manifest.candidates.map(c => c.name).sort(),
-    entries.filter(e => e.releaseStatus === "publishable").map(e => e.name).sort())) throw new Error("Release batch must contain exactly all publishable workspaces");
-  const candidates = validateReleaseBatch(manifest.candidates, entries, manifestFor, requestedPackage);
+  const candidates = validateReleaseBatch(manifest.candidates, entries, manifestFor, targets, c => source(c, commit));
   for (const candidate of candidates) {
-    if (!/^sha512-[A-Za-z0-9+/]{86}==$/.test(candidate.integrity)) throw new Error("Invalid candidate SHA-512");
     if (candidate.mode === "publish" && candidate.sourceCommit !== commit) throw new Error("Publish candidate source differs from release commit");
   }
   return candidates;
-}
-
-export function historicalManifest(candidate) {
-  if (spawnSync("git", ["merge-base", "--is-ancestor", candidate.sourceCommit, currentCommit()], { cwd: root }).status !== 0) {
-    throw new Error(`Candidate source is not an ancestor: ${candidate.name}`);
-  }
-  const manifest = JSON.parse(git(["show", `${candidate.sourceCommit}:${candidate.directory}/package.json`]));
-  if (manifest.private || manifest.name !== candidate.name || manifest.version !== candidate.version) throw new Error("Historical candidate identity mismatch");
-  const tag = existingTagCommit(candidate.tag);
-  if (tag && tag !== candidate.sourceCommit) throw new Error("Candidate tag source mismatch");
-  return manifest;
 }
 
 export function verifyArchive(candidate, path, manifest) {

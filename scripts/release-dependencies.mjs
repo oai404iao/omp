@@ -1,4 +1,12 @@
 import { readManifest, workspaces } from "./workspaces.mjs";
+import { satisfiesWorkspaceDependency } from "./workspace-ranges.mjs";
+
+export function* workspaceDependencies(manifest, byName) {
+  for (const [name, range] of Object.entries({ ...manifest.dependencies, ...manifest.optionalDependencies })) {
+    if (byName.has(name)) yield [name, range];
+    else if (name.startsWith("@oai404iao/")) throw new Error(`Unknown internal release dependency: ${manifest.name} -> ${name}`);
+  }
+}
 
 export function assertReleaseDependencies(
   selected,
@@ -13,17 +21,18 @@ export function assertReleaseDependencies(
     if (path.includes(entry.name)) throw new Error(`Workspace dependency cycle: ${[...path, entry.name].join(" -> ")}`);
     if (checked.has(entry.name)) return;
     const manifest = manifestFor(entry);
-    for (const [name, version] of Object.entries({ ...manifest.dependencies, ...manifest.optionalDependencies })) {
+    for (const [name, version] of workspaceDependencies(manifest, byName)) {
       const dependency = byName.get(name);
-      if (!dependency) continue;
       const chain = [...path, entry.name, name].join(" -> ");
       const depManifest = manifestFor(dependency);
       if (dependency.releaseStatus === "blocked" || depManifest.private === true) {
         throw new Error(`Release blocked by unpublished workspace dependency: ${chain}`);
       }
-      if (version !== depManifest.version) throw new Error(`Workspace dependency must be exactly pinned: ${chain}`);
       if (!selectedNames.has(name)) {
         throw new Error(`Workspace dependency is outside this artifact batch: ${chain}`);
+      }
+      if (!satisfiesWorkspaceDependency(depManifest.version, version)) {
+        throw new Error(`Workspace dependency ${chain}: ${depManifest.version} does not satisfy ${version}`);
       }
       visit(dependency, [...path, entry.name]);
     }

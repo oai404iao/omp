@@ -74,14 +74,13 @@ Notification behavior and configuration are documented in each notifier's README
 ## Changesets, artifacts and authorization
 
 - Package behavior, configuration, dependency or published-documentation changes
-  need `pnpm run changeset`, then `pnpm run changeset:sync`. Repository-only
+  need a changeset for the changed package. Repository-only
   instructions, tests and infrastructure do not need a changeset unless they
   alter a published package.
-- Do not hand-edit generated `.changeset/workspace-dependent-releases*.md`,
-  loosen exact workspace dependency pins or manually bump package versions.
-  For authorized versioning, use `pnpm run changeset:version`, not bare
-  Changesets versioning; the wrapper synchronizes consumers, repairs pins and
-  refreshes the root lock.
+- Declare internal production and optional dependencies with a numeric caret
+  range anchored at the minimum supported version. Test affected consumers;
+  don't bump them merely because a compatible dependency was released.
+  Use `pnpm run changeset:version` for authorized versioning and lock refresh.
 - Read [RELEASING.md](RELEASING.md) before release work. Ordinary maintenance does
   not authorize publication, workflow dispatch, release-eligibility changes or
   replacing immutable entries in `release-locks/`.
@@ -96,5 +95,5 @@ Notification behavior and configuration are documented in each notifier's README
 - Tools' verified first publication is locked; use the guarded workflow for
   recovery and separately authorized future releases, never re-bootstrap it.
   See [activation evidence](docs/audits/codex-tools-bootstrap-activation.md).
-  Release consumers only after their exact dependencies are verified on npm.
-  Keep minimal-tools publication last; never bypass dependency guards.
+  Release only explicitly selected packages, after their selected dependency
+  artifacts have been verified. A dependency range is not artifact identity.

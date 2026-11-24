@@ -29,12 +29,11 @@
 
 ```bash
 pnpm run changeset
-pnpm run changeset:sync
 ```
 
-同步器递归覆盖 runtime／optional 工作区依赖的消费者，包括 subagent 对 Codex runtime
-的 optional 依赖。已有显式消费者 changeset 优先，不手改生成的
-`.changeset/workspace-dependent-releases*.md`。
+每个包独立记录变更。工作区生产／可选依赖使用显式数字 caret 范围；
+新增对依赖接口的要求时，更新调用方的最低版本并为调用方写 changeset。
+如果一个 runtime patch 没有改变消费者，测试它们，但只发 runtime；只改 subagent 则只发 subagent。
 
 改动合并到 `main` 并通过 CI 后，`release-pr.yml` 创建或更新版本 PR，不重复运行 `ci`。
 版本操作只能使用：
@@ -43,8 +42,12 @@ pnpm run changeset:sync
 pnpm run changeset:version
 ```
 
-该 wrapper 同步 changeset、执行 Changesets、修复精确 pin、拒绝依赖 pin 改变但消费者
-未升级的情况，并刷新根锁。不要手改包版本、放宽 pin 或直接调用裸 Changesets version。
+该 wrapper 执行 Changesets 并刷新根锁。首次迁移例外：旧 runtime 使用严格同版握手，
+因此迁移版本 PR 一次升级 6 个 Codex 包和 subagent，将消费者的下限设为第一批兼容制品，
+而不是声称旧握手也支持混装。迁移数据仅用于此次切换；已经安装的旧版本与旧锁均不被改写。
+此后不再生成反向依赖 changeset，也不追随依赖最新版本重写下限。
+例如，迁移后的 subagent 可选依赖为 `^3.1.2`。runtime `3.1.3` 不要求修改或重发 subagent。
+若 subagent 的新功能需要 runtime `3.2.0`，才在 subagent 的变更中将下限抬至 `^3.2.0`。
 测试中的临时 fixture 版本升级不授权改动真实 alpha 版本；真实升级必须进入经审阅的版本 PR。
 
 审阅版本和 changelog，批准该 PR 的 CI，再合并。使用 `GITHUB_TOKEN` 创建的 PR
@@ -69,7 +72,7 @@ Release PR 运行串行化，但阻止不了最后一次检查之后的外部 ma
 
 在获授权后，从 `main` 手动运行 `.github/workflows/publish.yml`：
 
-1. 全批发布时留空 `package`；单包发布时填[精确 scoped 包名](#targeted-package-releases)。
+1. `package` 必填：一个精确 scoped 包名，或以逗号分隔的明确目标列表。拒绝空输入；本次审批不涵盖其他包。
 2. `confirm` 输入 **`publish`**，不能使用其他值。
 3. 等待读验证 job 成功，再由维护者批准 `npm-publish` environment deployment。
 
@@ -90,11 +93,10 @@ preflight 还要求仓库为 `oai404iao/omp`、checkout 干净、HEAD 等于 `GI
 `id-token: write`、固定 **npm 11.19.0** 和 provenance，不读取 `NPM_TOKEN`，
 不运行包生命周期脚本。开发、验证和锁更新仍使用固定 **pnpm 12.4.1**；npm 只是发布客户端。
 
-制品准备与发布均采用稳定的依赖优先顺序。全批 manifest 必须包含全部工作区依赖，
-已发布依赖以 `recover` 候选进入。发布器在第一次不可逆写入前验证整批；只有前一依赖
-的精确 npm `gitHead`、SHA-512 和 dist-tag 可见后，才继续消费者。任何失败停止后续发布，
-最终对账失败则不创建新 tags。Codex 兼容消费者须等 tools 的精确依赖已验证；
-Codex 发布顺序中 minimal-tools 保持最后，之后才是受影响的 optional 消费者。
+制品准备将每条声明的范围解析到具体版本。显式目标才可以 `publish` 或 `recover`；
+其他工作区依赖即使在闭包内也只能 `verify`。发布 job 使用同一份 manifest、精确制品和安装回执，
+不重新解析范围。首次写入前验证整批，依赖优先；任一依赖身份未核实，则停止发布其消费者。
+最终对账失败不创建新 tags，成功也只为显式目标最终化。
 
 包级 Git tag 使用 Changesets 格式，例如 `@oai404iao/pi-subagent@0.3.0`。
 预发布必须使用 prerelease SemVer 和 `next` dist-tag；稳定版使用 `latest`。
@@ -103,27 +105,17 @@ Codex 发布顺序中 minimal-tools 保持最后，之后才是受影响的 opti
 <a id="targeted-package-releases"></a>
 ## 只发布一个包
 
-`publish.yml` 的可选 `package` 输入只接受一个精确 `publishable` 工作区名，
-如 `@oai404iao/pi-subagent`。留空是全批发布。制品准备和受保护发布都执行同一选择，
-不会改变包的发布资格，也不会顺便发布缺失的依赖。
-
-### 准备只包含目标升级的版本 PR
-
-1. 拆分共享 changeset，把其他包的待发记录暂缓，不要消费它们。
-2. 用 `pnpm run changeset:version` 生成目标版本和 changelog，不能手改 manifest 版本。
-3. 提交前恢复暂缓的 changeset，再运行 `pnpm run changeset:sync`。
-4. 如果尚待发布的依赖又为刚升级的目标生成消费者 changeset，保留它供后续批次使用。
-
-自动化可以继续更新暂缓的全批版本 PR，但完成定向发布前不要合并那个竞争的 PR。
+若只发布 `@oai404iao/pi-subagent`，即使版本 PR 中还有其他包，也只把这个名字填入 `package`。
+CI 的反向依赖覆盖和安装测试不会扩大 npm 发布或 GitHub Release 的写入范围。
 
 ### 依赖只能验证，不能补发
 
-目标保留现有精确工作区 pin；所有传递 runtime／optional 工作区依赖必须已经在 npm
-存在该精确版本。依赖以 `verify` 模式进入 manifest：
+对于不在目标列表中的 runtime／optional 依赖，在 npm 寻找满足真实制品声明范围的版本。
+checkout 中有更新但尚未发布的依赖，不妨碍选择符合范围的已发布版本。
+没有可验证的满足版本就停止。依赖以 `verify` 模式进入 manifest：
 
 - 核实不可变 registry identity、SHA-512、release lock、源码 ancestry 和包身份；
-- 其历史源码中的 `dependencies`、`optionalDependencies`、`peerDependencies` 和
-  `peerDependenciesMeta` 必须与当前契约相同，版本号未变但契约已改也会阻止该路径；
+- 根据该制品 `gitHead` 处的 manifest 验证 archive 的依赖、可选依赖和 peer 契约并解析闭包，而非假定 main 的 manifest 就是该版本；
 - 不发布依赖，不创建它们的 tags／GitHub Releases，也不把依赖的未发源码重新打包来替代 npm 制品；
 - 不要求当前 npm dist-tag 仍指向该历史精确依赖版本。
 
@@ -149,7 +141,7 @@ pnpm run ci:release --package @oai404iao/pi-notify
 pnpm run ci:release
 ```
 
-单包命令检查目标及其规范 runtime／optional 工作区闭包；不带参数则检查所有
+单包命令检查目标、其 runtime／optional 工作区依赖及受影响的反向消费者；不带参数则检查所有
 `publishable` 工作区。它不打包、不发布、不改版本、不绕过依赖前置条件。
 仓库 policy 和发布基础设施回归始终保留；任何 Codex／subagent 选择仍运行完整源码
 composition 和 consumer 套件。独立 Telegram 发布无需重跑无关 Codex 行为。
@@ -187,12 +179,18 @@ pnpm run release:verify-installations release-artifacts/manifest.json
 | 消费者 | 将已核实 archive 加入现有 store；投影 frozen lock、离线安装、禁用生命周期脚本；运行消费者自己的 Pi SDK loader，并禁用网络 |
 | 组合覆盖 | 每个候选闭包、组合和反向加载、runtime 公共导出；任何链接不得逃出消费者 |
 
+对于新版本，验证 job 还检查两类组合：
+
+- **新消费者 + 最低依赖**：安装内部直接依赖范围的精确下限（同批尚未发布的依赖使用同批的已验制品）。
+- **已发布消费者 + 新依赖**：从 release SHA 可达的 manifest 历史限定可能受影响的工作区，再读取其 npm `latest` 的真实契约。
+  该版本声明支持新依赖就实际安装和加载；旧精确 pin 或排除预发布的范围如实记录为不支持，不用 overrides 伪造兼容。
+
 `consumer-verification.json` 将 manifest、source commits、artifact hashes 与消费者绑定。
 结束时再检查制品字节；上传和受保护 job 都验证 receipt 与待发 tarball hash。
 注册表获取仅为只读、有界的 canonical npm artifact URL 访问，不是模型／端点测试。
 
 源码构建的 `test:codex-packages` 是额外覆盖，不能证明历史 npm payload。
-此流程不放宽 ancestry、精确 pin、不可变 lock、dist-tag／恢复规则、审批、OIDC 分离
+此流程不放宽 ancestry、已选制品的精确版本与 integrity、不可变 lock、dist-tag／恢复规则、审批、OIDC 分离
 或依赖优先串行发布要求。普通 CI 的检查范围及复用契约见
 [贡献指南](CONTRIBUTING.md#remote-ci-scope)。
 
@@ -228,7 +226,7 @@ pnpm run release:verify-installations release-artifacts/manifest.json
 ### 使用原始制品只读恢复
 
 获授权后，在同一个 `main` SHA 手动 dispatch `publish.yml`，填写原始发布运行 ID 到
-`recovery_run`，`package` 必须与原 manifest 的目标完全一致（全批则留空），仍须
+`recovery_run`，`package` 必须与原 manifest 的目标集合完全一致，仍须
 `confirm=publish` 和 `npm-publish` environment 审批。恢复运行必须与原运行的 SHA
 完全相同；main 已前进、原制品过期或不存在时此路径拒绝，不从其他 SHA／仓库补取，
 也不重新打包替代原始证据。
@@ -289,7 +287,7 @@ npm ownership、provenance、源码权利、tag 身份或仓库元数据不确�
 2. 从刚获取的公共 `main` 上可达、经审阅且干净的 commit 准备制品；该源码必须留在公共历史。
    通常先 `git fetch github main`、checkout `github/main`，完成 frozen install 和 `pnpm run ci`。
 3. 使用本地 `pnpm run release:bootstrap-artifacts`；可用 `RELEASE_PACKAGE` 指定精确 bootstrap
-   目标。定向选择要求已发布／publishable 的完整依赖闭包和精确 pin；依赖只验证，只有目标打包。
+   目标。与普通发布的历史版本选择不同，bootstrap 要求 checkout 所选依赖的精确版本已在 npm 验证；只有目标打包。
    GitHub Actions 禁止准备 bootstrap 制品，受保护 publisher 也不能发布 bootstrap 包。
 4. 维护者以交互式 2FA **只发布 manifest 指定的目标 tarball**，使用 `--access public`
    及 manifest 的 `distTag`：预发布 `next`、稳定版 `latest`。不要从源码目录发布，
@@ -314,11 +312,11 @@ npm ownership、provenance、源码权利、tag 身份或仓库元数据不确�
 `--preserve-bootstrap-version <exact-name>` 选项。它在写入前核实非 private bootstrap
 资格、immutable lock 中无该包发布历史、注册表确认从未发布，且与待发 changeset 有关；
 Changesets prerelease mode 不支持此选项。随后正常运行 Changesets，仅恢复被核实目标
-的初始版本，仍修复精确 pin 并要求其他消费者升级。
+的初始版本，并验证范围与锁文件。
 
 它不是回滚版本或跳过消费者升级的通道，任何已发布历史都会拒绝；**不得再用于 tools**。
 相关命令会联网核实前置条件，不能在普通文档或维护任务中顺手执行。
-暂缓无关 changeset 时，沿用[定向发布](#targeted-package-releases)的恢复／同步步骤。
+无关包不加入[发布目标](#targeted-package-releases)。
 
 <a id="one-time-github-preparation"></a>
 ## 一次性仓库准备参考

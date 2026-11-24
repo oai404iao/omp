@@ -139,7 +139,7 @@ profile 选择 patch 的 function/custom、搜索的 hosted/standalone、图片�
 
 ## 限制与故障排查
 
-- **只有当前组合实现支持 broker 去重。** 与兼容能力包可共存，要求 ABI v2、相同 runtime 版本；不与旧未参与 broker 的单体保证去重。
+- **只有当前组合实现支持 broker 去重。** 与兼容能力包可共存，要求兼容的 runtime broker；不与旧未参与 broker 的单体保证去重。
 - **生图仅 standalone。** 使用 Pi 所选模型的认证/端点；删除 `directImageApiFallback`，旧 hosted 图片 profile 改成 standalone。关闭生图不关闭图片输入和历史回放。
 - **原生 checkpoint 不等于文字摘要。** provider/model/API/profile 不兼容时保留并拒绝回放；恢复原设置、回到压缩前或新建会话，不要修改 session JSON。原生压缩仅使用 `compaction_trigger`，旧 `responses-compact` 配置必须迁移。
 - **本地/远程执行不是沙箱。** patch 有文件修改权限，搜索会发送有限对话尾部，图片编辑会上传参考图片；输出与会话应按敏感数据保管。abort/会话关闭不能撤销已经开始的服务端生成或文件写入。

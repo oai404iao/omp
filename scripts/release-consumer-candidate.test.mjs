@@ -19,7 +19,7 @@ test("target archive and historical registry dependency really install, load and
   const dependency = { name: dependencyName, version: "1.0.0", type: "module",
     exports: { ".": "./index.ts", "./subagent-inline": "./inline.ts" },
     peerDependencies: { "@earendil-works/pi-coding-agent": ">=1.2.0" } };
-  const target = { name: targetName, version: "1.0.0", type: "module", dependencies: { [dependencyName]: "1.0.0" },
+  const target = { name: targetName, version: "1.0.0", type: "module", dependencies: { [dependencyName]: "^1.0.0" },
     peerDependencies: dependency.peerDependencies, pi: { extensions: ["./index.ts"] } };
   const manifests = new Map([[dependencyName, dependency], [targetName, target]]);
   const entries = [dependency, target].map(manifest => ({ name: manifest.name,
@@ -62,7 +62,7 @@ export default pi => {
     prerelease: false, distTag: "latest", mode, sourceCommit, integrity: digest(readFileSync(tarball)) });
   const depCandidate = identity(dependency, "verify", historicalCommit, dependencyArchive);
   const targetCandidate = { ...identity(target, "publish", commit, targetArchive), filename: "target.tgz" };
-  const manifest = { schemaVersion: 1, commit, registry, requestedPackage: targetName, candidates: [depCandidate, targetCandidate] };
+  const manifest = { schemaVersion: 2, commit, registry, requestedPackages: [targetName], candidates: [depCandidate, targetCandidate] };
   const manifestPath = join(directory, "manifest.json"); writeFileSync(manifestPath, JSON.stringify(manifest));
   const calls = [];
   const receipt = await verifyReleaseInstallations(manifestPath, {
@@ -72,6 +72,7 @@ export default pi => {
       assert.equal(candidate.sourceCommit, candidate.name === dependencyName ? historicalCommit : commit);
       return manifests.get(candidate.name);
     },
+    compatibility: { inventory: () => [] },
     acquisition: { commit, checkPublished: (candidate, published, source) => {
       assert.equal(candidate.name, dependencyName); assert.equal(published.gitHead, historicalCommit); assert.equal(source, commit);
     }, transport: async url => {
@@ -91,7 +92,15 @@ export default pi => {
   assert.deepEqual(calls, [`${registry}${encodeURIComponent(dependencyName)}/1.0.0`, canonicalTarball(depCandidate)]);
   assert.equal(receipt.consumers.length, 3);
   assert.deepEqual(receipt.consumers.find(consumer => consumer.label === "combined").included.sort(), [dependencyName, targetName].sort());
-  assert.deepEqual(verifyConsumerReceipt(manifestPath, join(directory, "consumer-verification.json")), receipt);
+  const receiptPath = join(directory, "consumer-verification.json");
+  const verify = () => verifyConsumerReceipt(manifestPath, receiptPath, { entries, source: c => manifests.get(c.name), inventory: () => [] });
+  assert.deepEqual(verify(), receipt);
+  assert.deepEqual(receipt.compatibility.checks[0].floors, { [dependencyName]: "1.0.0" });
+  for (const mutate of [r => r.compatibility.latest.push(depCandidate), r => r.compatibility.checks.pop(),
+    r => r.compatibility.checks[0].artifacts.find(a => a.name === dependencyName).version = "1.0.1"]) {
+    const bad = structuredClone(receipt); mutate(bad); writeFileSync(receiptPath, JSON.stringify(bad));
+    assert.throws(verify);
+  }
   assert.equal(receipt.artifacts.find(artifact => artifact.name === dependencyName).integrity, digest(readFileSync(dependencyArchive)));
   assert.equal(receipt.artifacts.find(artifact => artifact.name === targetName).integrity, digest(readFileSync(targetArchive)));
 });

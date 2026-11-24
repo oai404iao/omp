@@ -21,7 +21,8 @@ Shared library, not a Pi extension. No default factory or `pi.extensions`.
 1. No dependency on core, tools, web-search, imagegen or the compatibility bundle,
    including optional/peer dependencies. No Responses SSE/WS, image storage or
    capability endpoint clients.
-2. Broker v2 requires identical runtime versions and rejects older ABI brokers.
+2. Broker compatibility is an ABI contract. Reject unsupported ABI, missing
+   capabilities and incompatible runtime lines, including cached brokers.
    Keep the discovery channel/cache key stable so incompatible copies are detected.
    Shutdown closes discovery;
    actual Pi runtime invalidation disposes tracked subscriptions on reload.

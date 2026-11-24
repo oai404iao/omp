@@ -1,0 +1,11 @@
+{
+  "@oai404iao/pi-codex-core": { "@oai404iao/pi-codex-runtime": "^3.1.2" },
+  "@oai404iao/pi-codex-tools": { "@oai404iao/pi-codex-runtime": "^3.1.2" },
+  "@oai404iao/pi-subagent": { "@oai404iao/pi-codex-runtime": "^3.1.2" },
+  "@oai404iao/pi-codex-web-search": { "@oai404iao/pi-codex-tools": "^0.2.2" },
+  "@oai404iao/pi-codex-imagegen": { "@oai404iao/pi-codex-tools": "^0.2.2" },
+  "@oai404iao/pi-codex-minimal-tools": {
+    "@oai404iao/pi-codex-core": "^3.1.2",
+    "@oai404iao/pi-codex-tools": "^0.2.2"
+  }
+}

@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
-  assertLockedPublishedArtifact,
   currentCommit,
   existingTagCommit,
   lookupPublishedVersion,
@@ -14,6 +14,8 @@ import {
 import { normalizePackagePath, tarballFacingChangedPaths } from "./recovery-guard.mjs";
 import { artifactWorkspaces, readManifest, registry, root } from "./workspaces.mjs";
 import { assertReleaseDependencies, orderReleaseWorkspaces } from "./release-dependencies.mjs";
+import { releaseTargets } from "./release-selection.mjs";
+import { resolveReleaseWorkspaces } from "./release-resolution.mjs";
 import { targetedReleaseWorkspaces, verifyDependencySource } from "./targeted-release.mjs";
 
 const outputDirectory = resolve(root, "release-artifacts");
@@ -31,11 +33,6 @@ for (let index = 0; index < arguments_.length; index += 1) {
     requestedPackage = value;
   } else throw new Error("usage: prepare-release-artifacts.mjs [--include-bootstrap] [--package <name>]");
 }
-const selectedWorkspaces = requestedPackage
-  ? targetedReleaseWorkspaces(requestedPackage, undefined, undefined, { bootstrapTarget: includeBootstrap })
-  : artifactWorkspaces(includeBootstrap);
-assertReleaseDependencies(selectedWorkspaces);
-const orderedWorkspaces = orderReleaseWorkspaces(selectedWorkspaces);
 if (includeBootstrap && process.env.GITHUB_ACTIONS === "true") {
   throw new Error("bootstrap artifacts must be prepared from a reviewed local checkout, not GitHub Actions");
 }
@@ -116,6 +113,14 @@ function assertBootstrapCommitIsPublic() {
 }
 
 assertCleanCheckout();
+const targets = includeBootstrap ? null : releaseTargets(requestedPackage);
+function bootstrapPlan() {
+  const selected = requestedPackage ? targetedReleaseWorkspaces(requestedPackage, undefined, undefined, { bootstrapTarget: true })
+    : artifactWorkspaces(true);
+  assertReleaseDependencies(selected);
+  return orderReleaseWorkspaces(selected).map(entry => ({ entry, manifest: readManifest(entry.directory) }));
+}
+const plan = includeBootstrap ? bootstrapPlan() : resolveReleaseWorkspaces(targets, commit);
 if (includeBootstrap) assertBootstrapCommitIsPublic();
 rmSync(outputDirectory, { recursive: true, force: true });
 mkdirSync(outputDirectory, { recursive: true });
@@ -123,7 +128,7 @@ mkdirSync(outputDirectory, { recursive: true });
 function currentPackedPaths(name) {
   const packed = spawnSync(
     pnpm,
-    ["--dir", orderedWorkspaces.find(entry => entry.name === name).directory, "pack", "--dry-run", "--json", "--ignore-scripts"],
+    ["--dir", plan.find(({ entry }) => entry.name === name).entry.directory, "pack", "--dry-run", "--json", "--ignore-scripts"],
     {
       cwd: root,
       encoding: "utf8",
@@ -175,47 +180,12 @@ function assertPublishedPayloadIsUnchanged(name, version, directory, sourceCommi
   }
 }
 
-function verifyPublishedSource(name, version, directory, published, tag) {
-  const sourceCommit = published.gitHead;
-  if (!/^[0-9a-f]{40,64}$/i.test(sourceCommit)) {
-    throw new Error(`${name}@${version} has invalid npm gitHead ${sourceCommit}`);
+for (const { entry: { name, directory }, manifest, candidate: dependency } of plan) {
+  if (dependency) {
+    candidates.push(dependency);
+    console.log(`✓ ${dependency.tag}: verify immutable dependency from ${dependency.sourceCommit}`);
+    continue;
   }
-  assertLockedPublishedArtifact(name, version, published);
-  if (!published.integrity?.startsWith("sha512-")) {
-    throw new Error(`${name}@${version} has no verifiable npm SHA-512 integrity`);
-  }
-
-  const ancestry = spawnSync("git", ["merge-base", "--is-ancestor", sourceCommit, commit], {
-    cwd: root,
-    encoding: "utf8",
-  });
-  if (ancestry.status !== 0) {
-    throw new Error(`${name}@${version} npm gitHead ${sourceCommit} is not an ancestor of ${commit}`);
-  }
-
-  const historicalManifest = spawnSync(
-    "git",
-    ["show", `${sourceCommit}:${directory}/package.json`],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (historicalManifest.status !== 0) {
-    throw new Error(`${name}@${version} package.json is unavailable at npm gitHead ${sourceCommit}`);
-  }
-  const historical = JSON.parse(historicalManifest.stdout);
-  if (historical.name !== name || historical.version !== version) {
-    throw new Error(
-      `${name}@${version} does not match package identity at npm gitHead ${sourceCommit}`,
-    );
-  }
-
-  const tagCommit = existingTagCommit(tag);
-  if (tagCommit && tagCommit !== sourceCommit) {
-    throw new Error(`tag ${tag} points to ${tagCommit}, but npm gitHead is ${sourceCommit}`);
-  }
-}
-
-for (const { name, directory } of orderedWorkspaces) {
-  const manifest = readManifest(directory);
   if (manifest.private === true) {
     throw new Error(`${name} is approved in workspaces.mjs but remains private in package.json`);
   }
@@ -228,7 +198,7 @@ for (const { name, directory } of orderedWorkspaces) {
   const tag = tagFor(name, manifest.version);
   const localTagCommit = existingTagCommit(tag);
 
-  if (requestedPackage && name !== requestedPackage) {
+  if (includeBootstrap && requestedPackage && name !== requestedPackage) {
     if (!published.exists) throw new Error(`Targeted release dependency must already be published: ${name}@${manifest.version}`);
     const candidate = {
       name, version: manifest.version, directory, tag, mode: "verify",
@@ -236,7 +206,10 @@ for (const { name, directory } of orderedWorkspaces) {
       distTag: manifest.version.includes("-") ? "next" : "latest",
       prerelease: manifest.version.includes("-"),
     };
-    verifyDependencySource(candidate, published, commit, manifest);
+    const historical = verifyDependencySource(candidate, published, commit);
+    for (const field of ["dependencies", "optionalDependencies", "peerDependencies", "peerDependenciesMeta"]) {
+      if (!isDeepStrictEqual(historical[field], manifest[field])) throw new Error(`${name} historical ${field} differs from bootstrap checkout`);
+    }
     candidates.push(candidate);
     console.log(`✓ ${name}@${manifest.version}: verify immutable dependency from ${published.gitHead}`);
     continue;
@@ -248,7 +221,8 @@ for (const { name, directory } of orderedWorkspaces) {
         `${name}@${manifest.version} exists on npm without gitHead; release identity is ambiguous`,
       );
     }
-    verifyPublishedSource(name, manifest.version, directory, published, tag);
+    verifyDependencySource({ name, version: manifest.version, directory, tag, sourceCommit: published.gitHead,
+      integrity: published.integrity }, published, commit);
     assertPublishedPayloadIsUnchanged(name, manifest.version, directory, published.gitHead);
     candidates.push({
       name,
@@ -331,10 +305,10 @@ if (candidates.length === 0) {
 }
 
 const releaseManifest = {
-  schemaVersion: 1,
+  schemaVersion: includeBootstrap ? 1 : 2,
   commit,
   registry,
-  requestedPackage: requestedPackage ?? null,
+  ...(includeBootstrap ? { requestedPackage: requestedPackage ?? null } : { requestedPackages: targets }),
   candidates,
 };
 writeFileSync(

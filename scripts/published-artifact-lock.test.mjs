@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { root } from "./workspaces.mjs";
+import { copyReleaseScripts } from "./test-support/release-scripts.mjs";
 import {
   assertLockedPublishedArtifact,
   lockedPublishedArtifact,
@@ -91,9 +91,7 @@ test("preparation never repacks a locked published version after an E404 lookup"
     const scripts = join(temporary, "scripts"), bin = join(temporary, "bin");
     mkdirSync(scripts); mkdirSync(bin); mkdirSync(join(temporary, "release-locks"));
     writeFileSync(join(temporary, "package.json"), JSON.stringify({ devDependencies: { npm: "11.19.0" } }));
-    for (const file of ["prepare-release-artifacts.mjs", "release-utils.mjs", "release-dependencies.mjs", "recovery-guard.mjs", "targeted-release.mjs"]) {
-      copyFileSync(join(root, "scripts", file), join(scripts, file));
-    }
+    copyReleaseScripts(scripts, ["prepare-release-artifacts.mjs", "recovery-guard.mjs"]);
     const value = publishedArtifacts.find(p => p.name === "@oai404iao/pi-codex-runtime");
     writeFileSync(join(temporary, "release-locks/npm-published-artifacts.json"), JSON.stringify({
       schemaVersion: 1, registry: "https://registry.npmjs.org/",
@@ -121,7 +119,7 @@ exit 1
 `);
     for (const file of ["git", "npm"]) chmodSync(join(bin, file), 0o755);
     const child = spawnSync(process.execPath, [join(scripts, "prepare-release-artifacts.mjs")], {
-      encoding: "utf8", env: { ...process.env, RELEASE_PACKAGE: "", PATH: `${bin}:${process.env.PATH}`, CALL_LOG: callLog },
+      encoding: "utf8", env: { ...process.env, RELEASE_PACKAGE: value.name, PATH: `${bin}:${process.env.PATH}`, CALL_LOG: callLog },
     });
     assert.notEqual(child.status, 0);
     assert.match(child.stderr, /locked as published.*registry verification is pending/i);

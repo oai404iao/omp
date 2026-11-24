@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { readPackage, testPackages } from "./catalog.mjs";
+import { resolveReleaseWorkspaces } from "../release-resolution.mjs";
 import { affectedPlan, createPlan, githubOutputs, parseDiff, parsePlanArgs,
   tasksForPlan, validatePlan } from "./plan.mjs";
 
@@ -45,6 +46,16 @@ test("full plan contains nine package checks, all suites, and policy in stable o
   assert.ok(outputs.includes(`plan=${JSON.stringify(value)}\n`));
 });
 
+test("ordinary CI can plan from a clean checkout without installing release tooling", () => {
+  const repo = fixture();
+  for (const path of ["scripts", "release-locks", "package.json"]) {
+    cpSync(new URL(`../../${path}`, import.meta.url), join(repo.root, path), { recursive: true });
+  }
+  const result = spawnSync(process.execPath, ["scripts/ci/plan.mjs", "--full"], { cwd: repo.root, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).sourceSha, repo.base);
+});
+
 test("documentation remains policy-only but unknown/shared/toolchain paths fall back full", () => {
   for (const path of ["README.md", "docs/audit.md", ".changeset/example.md"]) {
     const value = affectedPlan([path], [], sha);
@@ -71,6 +82,7 @@ test("infrastructure changes do not select package or consumer checks without a 
 });
 
 test("behavioral script dependencies select their suites and mixed changes preserve all work", () => {
+  assert.deepEqual(affectedPlan(["scripts/workspace-ranges.mjs"], [], sha).suites, ["composition", "consumers", "infrastructure"]);
   for (const path of ["scripts/test-codex-composition.mjs", "scripts/check-codex-architecture.mjs"]) {
     assert.deepEqual(affectedPlan([path], [], sha).suites, ["composition", "infrastructure"]);
   }
@@ -188,19 +200,54 @@ test("every planning mode fails before fallback if the current checkout has an u
   }
 });
 
-test("release plans use canonical runtime/optional closure and isolate standalone extensions", () => {
+test("release source plans cover dependencies and consumers of the targets, not unrelated extensions", () => {
   const value = createPlan({ mode: "release", packageName: "@oai404iao/pi-codex-tools", git: () => sha });
-  assert.deepEqual(value.packages, ["pi-codex-runtime", "pi-codex-tools"]);
+  const toolsChecks = ["pi-codex-imagegen", "pi-codex-minimal-tools", "pi-codex-runtime", "pi-codex-tools", "pi-codex-web-search"];
+  assert.deepEqual(value.packages, toolsChecks);
   assert.deepEqual(value.suites, ["composition", "consumers", "infrastructure"]);
   for (const id of ["pi-notify", "pi-rsi"]) {
     const standalone = createPlan({ mode: "release", packageName: `@oai404iao/${id}`, git: () => sha });
     assert.deepEqual(standalone.packages, [id]);
     assert.deepEqual(standalone.suites, ["infrastructure"]);
   }
-  assert.equal(createPlan({ mode: "release", packageName: "", git: () => sha }).packages.length, 9);
+  const batch = createPlan({ mode: "release", packageName: "@oai404iao/pi-notify,@oai404iao/pi-codex-tools", git: () => sha });
+  assert.deepEqual(batch.packages, [...toolsChecks, "pi-notify"]);
+  assert.deepEqual(batch.suites, ["composition", "consumers", "infrastructure"]);
+  assert.equal(createPlan({ mode: "release", git: () => sha }).packages.length, 9);
+  assert.throws(() => createPlan({ mode: "release", packageName: "", git: () => sha }), /Select at least one/);
   for (const id of ["pi-telegram-notify", "unapproved"]) {
     assert.throws(() => createPlan({ mode: "release", packageName: `@oai404iao/${id}`, git: () => sha }), /Unapproved/);
   }
+});
+
+test("source planning follows workspace names while artifacts select a supported registry major", () => {
+  const repo = fixture();
+  const provider = testPackages.find(e => e.id === "pi-codex-runtime");
+  const consumer = testPackages.find(e => e.id === "pi-subagent");
+  function write(entry, fields) {
+    repo.write(`${entry.directory}/package.json`, JSON.stringify({ ...readPackage(entry, repo.root), ...fields }));
+  }
+  write(provider, { version: "3.1.0" });
+  const publishedSha = repo.commit();
+  write(provider, { version: "4.0.0" });
+  write(consumer, { optionalDependencies: { [provider.name]: "^3.0.0" } });
+  const head = repo.commit();
+  const source = createPlan({ mode: "release", packageName: consumer.name, root: repo.root });
+  assert.equal(source.sourceSha, head);
+  assert.deepEqual(source.packages, [provider.id, consumer.id]);
+  const artifacts = resolveReleaseWorkspaces([consumer.name], head, { checkout: entry => readPackage(entry, repo.root),
+    versions: () => ["3.1.0", "4.0.0"],
+    lookup: (name, version) => {
+      assert.deepEqual([name, version], [provider.name, "3.1.0"]);
+      return { exists: true, gitHead: publishedSha, integrity: "sha512-fixture" };
+    },
+    check: candidate => JSON.parse(repo.git("show", `${candidate.sourceCommit}:${candidate.directory}/package.json`)),
+  });
+  assert.deepEqual(artifacts.map(({ manifest }) => [manifest.name, manifest.version]), [
+    [provider.name, "3.1.0"], [consumer.name, readPackage(consumer, repo.root).version],
+  ]);
+  write(provider, { dependencies: { [consumer.name]: "^1.0.0" } });
+  assert.throws(() => createPlan({ mode: "release", packageName: consumer.name, root: repo.root }), /cycle/);
 });
 
 test("CLI and plan validation reject conflicting/invalid/under-scoped input", () => {

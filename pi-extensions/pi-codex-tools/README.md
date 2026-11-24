@@ -38,7 +38,7 @@ pi -e ./pi-extensions/pi-codex-core -e ./pi-extensions/pi-codex-tools
 
 公开选择性入口用于扩展/SDK 组合；只想用 Pi 包管理器装一个能力，可用对应兼容包。选择性加载不等于依赖安装隔离：它们仍依赖统一 tools 包，但不会注册另一项能力。
 
-broker 按能力去重，兼容包、tools 与组合包可按任意顺序加载。要求 ABI v2 和完全相同的 runtime 版本；与不支持 broker 的旧单体混装不在保障范围内。`./internal/*` 仅作内部接线，不是稳定公共 API。
+broker 按能力去重，兼容包、tools 与组合包可按任意顺序加载。要求兼容的 runtime broker；与不支持 broker 的旧单体混装不在保障范围内。`./internal/*` 仅作内部接线，不是稳定公共 API。
 
 | 实现 | 是否需要 core | 额外条件 |
 | --- | --- | --- |

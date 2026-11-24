@@ -25,7 +25,7 @@ pi install /absolute/path/to/omp/pi-extensions/pi-codex-core
 
 重启 Pi 或执行 `/reload`。本地路径不会复制包，也不会替你安装工作区依赖。注册表预发行版可用 `pi install npm:@oai404iao/pi-codex-core@next`，但它与本工作树不一定相同；源码修改不会自动发布。
 
-core 只依赖共享 runtime 和传输库，不依赖 tools 或兼容外观包。兼容的重复安装通过 broker 去重；runtime 版本不一致或 ABI 不是 v2 时明确报错。不要与不支持 broker 的旧单体混装。
+core 只依赖共享 runtime 和传输库，不依赖 tools 或兼容外观包。兼容的重复安装通过 broker 去重；runtime 的 broker ABI 或能力不兼容时明确报错。不要与不支持 broker 的旧单体混装。
 
 ## 开始使用
 
@@ -189,7 +189,7 @@ GPT-6.2 的默认值和生效条件见 [runtime 内置兼容性默认值](https:
 | `endpoint policy` 尚未解析 | 首个请求前正常；列表不会为了显示而额外刷新认证 |
 | WS 不预热或使用 SSE | 检查全局 WS 开关、profile、端点白名单以及 active codemode/tool-search |
 | 切模型后不能继续 | 检查不透明 checkpoint 身份；恢复原设置、导航回压缩前或开始新会话 |
-| 同时加载包时报版本错误 | 统一 runtime 精确版本，不要与旧单体混用 |
+| 同时加载包时报版本错误 | 更新仍使用旧 broker 的入口；不要与旧单体混用 |
 
 不要把诊断成功或离线测试成功当成真实服务权限验证。Responses Lite 属于内部兼容路径，不是 OpenAI 支持的公共 API，服务端变化可能使其失效。扩展在 Pi 进程权限下运行，不提供额外沙箱。
 

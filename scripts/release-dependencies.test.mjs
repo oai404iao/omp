@@ -16,7 +16,7 @@ test("publishable bundles fail closed on direct and transitive blocked dependenc
     /bundle -> core -> runtime/);
 });
 
-test("bootstrap batches require included dependencies and exact pins", () => {
+test("bootstrap batches require included dependencies and compatible versions", () => {
   const entries = [{ name: "bundle", releaseStatus: "publishable" }, { name: "core", releaseStatus: "bootstrap" }];
   const manifests = {
     bundle: { version: "1.0.0", dependencies: { core: "1.0.0" } },
@@ -25,7 +25,9 @@ test("bootstrap batches require included dependencies and exact pins", () => {
   assert.throws(() => assertReleaseDependencies([entries[0]], entries, e => manifests[e.name]), /outside/);
   assert.doesNotThrow(() => assertReleaseDependencies(entries, entries, e => manifests[e.name]));
   manifests.bundle.dependencies.core = "^1.0.0";
-  assert.throws(() => assertReleaseDependencies(entries, entries, e => manifests[e.name]), /exactly pinned/);
+  assert.doesNotThrow(() => assertReleaseDependencies(entries, entries, e => manifests[e.name]));
+  manifests.bundle.dependencies.core = "^2.0.0";
+  assert.throws(() => assertReleaseDependencies(entries, entries, e => manifests[e.name]), /does not satisfy/);
 });
 
 test("the bundle requires core, tools, and their transitive runtime", () => {

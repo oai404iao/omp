@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { stringify } from "yaml";
 import { isolatedConsumerLock } from "./isolated-consumer-lock.mjs";
 import { preserveRegistryIntegrity } from "./lock-integrity.mjs";
+import { sourceConsumerSelection } from "./codex-consumer-matrix.mjs";
+import { readPnpmLock, writePnpmLock } from "./pnpm-lock.mjs";
+import { root } from "./workspaces.mjs";
 
 const entry = (version, name = "lib") => ({
   resolution: {
@@ -76,6 +86,55 @@ test("consumer lock rejects linked, unpinned and non-registry external artifacts
   const { source, project } = fixture();
   source.packages["host@1"].resolution.tarball = "https://unreviewed.example/host.tgz";
   assert.throws(project, /not a locked registry artifact/);
+});
+
+test("source projection keeps an older locked dependency even beside a local tarball of the same package", () => {
+  const { manifests, artifacts, source } = fixture();
+  source.importers["pi-extensions/pi-codex-core"].dependencies[runtime] = { specifier: "^0.9.0", version: "0.9.1" };
+  manifests.get(core).dependencies[runtime] = "^0.9.0";
+  source.packages[`${runtime}@0.9.1`] = entry("0.9.1", runtime);
+  source.snapshots[`${runtime}@0.9.1`] = {};
+  const { lock } = isolatedConsumerLock("fixture", [core, runtime], manifests, artifacts, source, new Set([`${core}>${runtime}`]));
+  assert.equal(lock.snapshots[`${core}@file:/fixtures/core.tgz(host@1(lib@1))`].dependencies[runtime], "0.9.1");
+  assert.deepEqual(lock.packages[`${runtime}@0.9.1`], source.packages[`${runtime}@0.9.1`]);
+  assert.equal(lock.packages[`${runtime}@file:/fixtures/runtime.tgz`].resolution.integrity, "sha512-runtime");
+  assert.equal(lock.overrides[runtime], undefined);
+});
+
+test("frozen pnpm resolves each source archive to its own compatible local or locked registry dependency", t => {
+  const cwd = mkdtempSync(join(tmpdir(), "mixed-source-install-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const source = readPnpmLock(join(root, "pnpm-lock.yaml"));
+  const pinned = source.importers["."].devDependencies.yaml.version;
+  const old = "@fixture/older", next = "@fixture/newer";
+  const newer = `${Number(pinned.split(".")[0]) + 1}.0.0`;
+  const manifests = new Map([
+    [old, { name: old, version: "1.0.0", dependencies: { yaml: `^${pinned}` } }],
+    [next, { name: next, version: "1.0.0", dependencies: { yaml: `^${newer}` } }],
+    ["yaml", { name: "yaml", version: newer }],
+  ]);
+  source.importers["pi-extensions/older"] = { dependencies: { yaml: { specifier: `^${pinned}`, version: pinned } } };
+  const artifacts = new Map();
+  mkdirSync(join(cwd, "package"));
+  for (const [name, manifest] of manifests) {
+    writeFileSync(join(cwd, "package/package.json"), JSON.stringify(manifest));
+    const path = join(cwd, `${name.split("/").at(-1)}.tgz`);
+    execFileSync("tar", ["-czf", path, "package/"], { cwd });
+    artifacts.set(name, { path, integrity: `sha512-${createHash("sha512").update(readFileSync(path)).digest("base64")}` });
+  }
+  const { included, resolutions } = sourceConsumerSelection([old, next], manifests, source);
+  const result = isolatedConsumerLock("isolated", included, manifests, artifacts, source,
+    new Set(resolutions.map(({ owner, dependency }) => `${owner}>${dependency}`)));
+  writeFileSync(join(cwd, "package.json"), JSON.stringify(result.manifest));
+  writeFileSync(join(cwd, "pnpm-workspace.yaml"), stringify(result.workspace));
+  writePnpmLock(join(cwd, "pnpm-lock.yaml"), result.lock);
+  const store = execFileSync("pnpm", ["store", "path", "--silent"], { cwd: root, encoding: "utf8" }).trim();
+  execFileSync("pnpm", ["install", "--store-dir", store, "--offline", "--prod", "--frozen-lockfile", "--trust-lockfile", "--ignore-scripts"], { cwd });
+  for (const [name, expected] of [[old, pinned], [next, newer]]) {
+    const require = createRequire(realpathSync(join(cwd, "node_modules", name, "package.json")));
+    assert.ok(realpathSync(require.resolve("yaml/package.json")).startsWith(`${cwd}/`));
+    assert.equal(require("yaml/package.json").version, expected);
+  }
 });
 
 test("consumer lock retains alias, optional and peer-context dependency edges", () => {

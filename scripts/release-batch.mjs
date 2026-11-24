@@ -1,38 +1,44 @@
 import { spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { assertReleaseDependencies, orderReleaseWorkspaces } from "./release-dependencies.mjs";
+import semver from "semver";
 import { readManifest, workspaces } from "./workspaces.mjs";
 import { sha512 } from "./release-utils.mjs";
-import { targetedReleaseWorkspaces } from "./targeted-release.mjs";
+import { historicalManifest, targetedReleaseWorkspaces } from "./targeted-release.mjs";
 
-export function validateReleaseBatch(candidates, entries = workspaces, manifestFor = e => readManifest(e.directory), requestedPackage) {
-  if (requestedPackage) {
-    const expected = targetedReleaseWorkspaces(requestedPackage, entries, manifestFor).map(entry => entry.name).sort();
-    if (!isDeepStrictEqual(candidates.map(candidate => candidate.name).sort(), expected)) {
-      throw new Error("Targeted release batch must contain exactly the requested package dependency closure");
-    }
-  }
-  const selected = candidates.map(candidate => {
+export function validateReleaseBatch(candidates, entries = workspaces, manifestFor = e => readManifest(e.directory),
+  targets, sourceManifest = historicalManifest) {
+  const byName = new Map(candidates.map(candidate => [candidate.name, candidate]));
+  if (!targets?.length || byName.size !== candidates.length) throw new Error("Missing release targets or duplicate candidate");
+  const manifests = new Map();
+  for (const candidate of candidates) {
     const entry = entries.find(entry => entry.name === candidate.name);
     if (!entry || entry.releaseStatus !== "publishable") throw new Error(`Unapproved release candidate: ${candidate.name}`);
     const manifest = manifestFor(entry);
-    if (manifest.private || manifest.name !== candidate.name || manifest.version !== candidate.version || entry.directory !== candidate.directory) {
+    const target = targets.includes(candidate.name);
+    if (manifest.private || manifest.name !== candidate.name || (target && manifest.version !== candidate.version) || entry.directory !== candidate.directory) {
       throw new Error(`Release candidate differs from checkout: ${candidate.name}`);
     }
-    const modes = requestedPackage && candidate.name !== requestedPackage ? ["verify"] : ["publish", "recover"];
+    const modes = target ? ["publish", "recover"] : ["verify"];
     if (!modes.includes(candidate.mode)) throw new Error(`Invalid release mode: ${candidate.name}`);
-    const prerelease = manifest.version.includes("-");
+    if (!candidate.version || semver.valid(candidate.version) !== candidate.version) throw new Error(`Invalid candidate version: ${candidate.name}`);
+    const prerelease = !!semver.prerelease(candidate.version);
     if (candidate.tag !== `${candidate.name}@${candidate.version}` || candidate.prerelease !== prerelease
       || candidate.distTag !== (prerelease ? "next" : "latest")
       || !/^[0-9a-f]{40,64}$/i.test(candidate.sourceCommit)
-      || !candidate.integrity?.startsWith("sha512-")) {
+      || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(candidate.integrity)) {
       throw new Error(`Invalid release identity or dist-tag: ${candidate.name}`);
     }
-    return entry;
+    const source = candidate.mode === "publish" ? manifest : sourceManifest(candidate);
+    if (candidate.mode === "recover" && !isDeepStrictEqual(source, manifest)) throw new Error(`Recovery manifest differs from checkout: ${candidate.name}`);
+    manifests.set(candidate.name, source);
+  }
+  const closure = targetedReleaseWorkspaces(targets, entries, entry => {
+    if (!manifests.has(entry.name)) throw new Error(`Missing candidate in requested package dependency closure: ${entry.name}`);
+    return manifests.get(entry.name);
   });
-  assertReleaseDependencies(selected, entries, manifestFor);
-  return orderReleaseWorkspaces(selected, manifestFor).map(entry => candidates.find(c => c.name === entry.name));
+  if (closure.length !== candidates.length) throw new Error("Release batch must contain exactly the requested package dependency closure");
+  return closure.map(entry => byName.get(entry.name));
 }
 
 export function verifyPackedCandidate(candidate, path, manifest = readManifest(candidate.directory)) {
