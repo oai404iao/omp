@@ -1,5 +1,15 @@
 # @oai404iao/pi-codex-tools
 
+## 0.2.1
+
+### Patch Changes
+
+- c14138a: Honor a retryable WebSocket error's full Retry-After before handing it to Pi to retry. Align Codex tool declarations and image guidance with Pi codemode, and report tool outcomes to Pi without changing Responses replay fields.
+  
+  Match Codex's hosted web search declaration and omit extra response includes. Set `webSearch.mode` in `config.json` to choose the shared default for hosted and standalone search (`live` when omitted). Only standalone search supports a model-level override.
+- Updated dependencies [c14138a]
+  - @oai404iao/pi-codex-runtime@3.1.1
+
 ## 0.2.0
 
 ### Minor Changes

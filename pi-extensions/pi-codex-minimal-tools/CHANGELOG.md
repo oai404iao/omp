@@ -1,5 +1,14 @@
 # @oai404iao/pi-codex-minimal-tools
 
+## 5.2.1
+
+### Patch Changes
+
+- c14138a: Update exact workspace dependency pins for the pending dependency releases.
+- Updated dependencies [c14138a]
+  - @oai404iao/pi-codex-core@3.1.1
+  - @oai404iao/pi-codex-tools@0.2.1
+
 ## 5.2.0
 
 ### Minor Changes
