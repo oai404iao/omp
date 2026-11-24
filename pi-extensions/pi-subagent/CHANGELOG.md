@@ -1,5 +1,11 @@
 # @oai404iao/pi-subagent
 
+## 1.5.3
+
+### Patch Changes
+
+- d59a380: Allow active list_agents, spawn_agent, send_message, followup_task and interrupt_agent to be called from Pi codemode and nested tools. wait_agent and close_agent remain model-only.
+
 ## 1.5.2
 
 ### Patch Changes
