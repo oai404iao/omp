@@ -1,5 +1,13 @@
 # @oai404iao/pi-subagent
 
+## 1.5.2
+
+### Patch Changes
+
+- 5ffd9c0: Allow compatible Codex packages to be updated independently. The runtime broker
+  recognizes compatible runtime copies; consumers declare numeric compatibility
+  ranges beginning with this generation instead of requiring identical package versions.
+
 ## 1.5.1
 
 ### Patch Changes

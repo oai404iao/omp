@@ -1,5 +1,16 @@
 # @oai404iao/pi-codex-minimal-tools
 
+## 5.2.2
+
+### Patch Changes
+
+- 5ffd9c0: Allow compatible Codex packages to be updated independently. The runtime broker
+  recognizes compatible runtime copies; consumers declare numeric compatibility
+  ranges beginning with this generation instead of requiring identical package versions.
+- Updated dependencies [5ffd9c0]
+  - @oai404iao/pi-codex-core@3.1.2
+  - @oai404iao/pi-codex-tools@0.2.2
+
 ## 5.2.1
 
 ### Patch Changes

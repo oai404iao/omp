@@ -1,6 +1,6 @@
 {
   "name": "@oai404iao/pi-codex-web-search",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "private": false,
   "description": "Compatibility entry for Codex web-search; implementation owned by pi-codex-tools",
   "type": "module",
@@ -44,7 +44,7 @@
     }
   },
   "dependencies": {
-    "@oai404iao/pi-codex-tools": "0.2.1"
+    "@oai404iao/pi-codex-tools": "^0.2.2"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "1.5.2",
