@@ -58,7 +58,7 @@ export function createAgentTools(
 			}, name === "wait_agent");
 		},
 	});
-	const common = { exposure: "model-only" as const, executionMode: "parallel" as const };
+	const common = { exposure: "direct" as const, executionMode: "parallel" as const };
 	return [
 		defineTool({
 			...common, ...rendering("spawn_agent"), name: "spawn_agent", label: "Spawn Agent",
@@ -84,12 +84,14 @@ export function createAgentTools(
 		}),
 		defineTool({
 			...common, ...rendering("close_agent"), name: "close_agent", label: "Close Agent",
+			exposure: "model-only",
 			description: TOOL_DESCRIPTIONS.close_agent, parameters: CloseParameters, outputSchema: CloseOutput,
 			execute: async (_id, params, _signal, _update, ctx) =>
 				result(getController().close(caller(ctx), params.target), { agentType: agentType(params.target) }),
 		}),
 		defineTool({
 			...common, ...rendering("wait_agent"), name: "wait_agent", label: "Wait Agent",
+			exposure: "model-only",
 			description: TOOL_DESCRIPTIONS.wait_agent, parameters: WaitAgentParameters, outputSchema: WaitOutput,
 			execute: async (_id, params, signal, _update, ctx) =>
 				result({ ...await getController().wait(caller(ctx), params.timeout_ms, signal, () => ctx.hasPendingMessages()) },

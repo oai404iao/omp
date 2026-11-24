@@ -9,6 +9,7 @@ import {
 	type CreateAgentSessionRuntimeFactory, type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import { MESSAGE_CUSTOM_TYPE } from "../src/store.ts";
+import { TOOL_NAMES } from "../src/schemas.ts";
 import { deferred, fixture } from "./support/fixture.ts";
 
 const call = (name: string, arguments_: ToolCall["arguments"], id: number): ToolCall[] =>
@@ -105,6 +106,27 @@ for (const lateHook of [false, true]) {
 	});
 }
 
+test("child codemode can delegate and coordinate using structured control results", async t => {
+	const f = await fixture(t, {
+		settings: { inheritExtensions: true },
+		reply: (_context, n) => n === 1 ? call("codemode", { code: `
+			const { task_name } = await tools.spawn_agent({ task_name: "helper", message: "Inspect.", fork_turns: "none" });
+			const { agents } = await tools.list_agents({ path_prefix: task_name });
+			const mail = await tools.send_message({ target: "/root", message: agents[0].agent_name });
+			const task = await tools.followup_task({ target: task_name, message: "Inspect again." });
+			const stop = await tools.interrupt_agent({ target: task_name });
+			if (!mail.accepted || !task.accepted || !stop.previous_status) throw new Error("Missing control receipt");
+		` }, n) : "done",
+	});
+	writeFileSync(join(f.agentDir, "agents", "driver.md"),
+		"---\nname: driver\ndescription: Scripted coordinator\ntools: codemode\n---\nDelegate work.\n");
+	await f.coordinator.spawn(f.caller, { task_name: "driver", agent_type: "driver", message: "Delegate.", fork_turns: "none" });
+	await f.idle();
+	const result = f.requests.flatMap(request => request.messages).find(m => m.role === "toolResult" && m.toolName === "codemode");
+	assert(result?.role === "toolResult" && !result.isError, JSON.stringify(result));
+	assert(f.coordinator.treeStore.mailbox("/root").some(m => m.from === "/root/driver" && m.text === "/root/driver/helper"));
+});
+
 for (const grantMcp of [false, true]) {
 	test(`SDK child ceilings constrain late MCP tools and cold resumes (exact grant=${grantMcp})`, async t => {
 		const snapshots: Array<{ registered: string[]; callable: string[] }> = [];
@@ -181,6 +203,9 @@ for (const grantMcp of [false, true]) {
 		await f.coordinator.followup(f.caller, "worker", "Inspect after a cold resume.");
 		await f.idle();
 		assert.equal(f.requests.length, firstRunRequests + 3);
+		for (const start of [0, firstRunRequests]) {
+			for (const name of TOOL_NAMES) assert(declared(start).includes(name), name);
+		}
 		if (grantMcp) assert(declared(firstRunRequests).includes("mcp__docs__lookup"));
 		assert(!declared(firstRunRequests).includes("mcp__late__lookup"));
 		assert.equal(snapshots.length, 2);
@@ -195,8 +220,13 @@ for (const grantMcp of [false, true]) {
 				assert.equal(snapshot.callable.includes(name), grantMcp, name);
 			}
 			assert(snapshot.callable.includes("local_deferred"));
-			assert(snapshot.registered.includes("send_message"));
-			assert(!snapshot.callable.includes("send_message"));
+			for (const name of ["list_agents", "spawn_agent", "send_message", "followup_task", "interrupt_agent"]) {
+				assert(snapshot.callable.includes(name), name);
+			}
+			for (const name of ["wait_agent", "close_agent"]) {
+				assert(snapshot.registered.includes(name), name);
+				assert(!snapshot.callable.includes(name), name);
+			}
 		}
 		const scriptResults = f.requests.flatMap(context => context.messages.filter(message =>
 			message.role === "toolResult" && message.toolName === "codemode"));
