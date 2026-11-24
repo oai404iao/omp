@@ -139,16 +139,13 @@ native-compaction checkpoints.
 
 ## Web search implementations
 
-Hosted search serializes as Responses `type:"web_search"`. The profile's
-`contentTypes` becomes `search_content_types`. The provider request includes:
-
-```json
-[
-  "reasoning.encrypted_content",
-  "web_search_call.action.sources",
-  "web_search_call.results"
-]
-```
+Hosted search uses the server-executed Responses `type:"web_search"` item, not
+a function schema. On the wire it follows the pinned Codex
+[hosted tool declaration](https://github.com/openai/codex/blob/a1604a8c0554c09c1be45e5a121bb1889b4d9a50/codex-rs/core/src/tools/hosted_spec.rs):
+text-only omits `search_content_types`, and text plus image emits `["text", "image"]`.
+The request does not opt in to extra search result fields, following the
+[Codex request builder](https://github.com/openai/codex/blob/a1604a8c0554c09c1be45e5a121bb1889b4d9a50/codex-rs/core/src/client.rs#L1333-L1336).
+Profile defaults and supported modes are in the [model configuration](../README.md).
 
 Standalone search calls `alpha/search` through the active provider. Its model
 schema mirrors Codex `SearchCommands`: search/image query, open, click, find,

@@ -4,12 +4,14 @@ import { buildSessionContext, detectSupportedImageMimeTypeFromFile, type Session
 import { saveBase64Image } from "../utils/images.js";
 import { imageGenerationOutput, imageGenerationOutputSchema } from "./image-generation/output.js";
 import type { CodexMinimalToolsSettings } from "@oai404iao/pi-codex-runtime/internal/settings";
+import { createCodexReservedNamespaceTool } from "@oai404iao/pi-codex-runtime/internal/codex-reserved-tools";
 import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import { buildCodexJsonHeaders, hasCodexRequestAuth, resolveCodexApiEndpoint, withResolvedAuthBaseUrl } from "@oai404iao/pi-codex-runtime/internal/codex-http";
 import { loadModelSettings, type ResolvedCodexModelSettings } from "@oai404iao/pi-codex-runtime/internal/model-catalog/runtime";
 import { checkEndpointResponse, rememberResolvedEndpoint, requireEndpointCapability } from "@oai404iao/pi-codex-runtime/internal/endpoint-state";
 import { currentCodexTurn, uuidV7 } from "@oai404iao/pi-codex-runtime/internal/codex-wire-identity";
 import { fetchCodexJson } from "../json-request.js";
+import { executeWithToolResult } from "./tool-result.js";
 
 export interface ImageGenerationInput {
 	prompt?: string;
@@ -17,28 +19,6 @@ export interface ImageGenerationInput {
 	num_last_images_to_include?: number | null;
 	transparent_background?: boolean;
 }
-
-export const imageGenerationToolSchema = {
-	type: "object",
-	additionalProperties: false,
-	properties: {
-		prompt: { type: "string", description: "Image generation or editing prompt." },
-		referenced_image_paths: {
-			type: ["array", "null"], maxItems: 5,
-			items: { type: "string", minLength: 1 },
-			description: "Local image paths to edit. PNG, JPEG, WebP, GIF and BMP are supported.",
-		},
-		num_last_images_to_include: {
-			type: ["integer", "null"], minimum: 1, maximum: 5,
-			description: "Use the newest conversation images when one or more targets have no local path.",
-		},
-		transparent_background: {
-			type: "boolean",
-			description: "Whether the output should have a transparent background. Defaults to false.",
-		},
-	},
-	required: ["prompt"],
-};
 
 interface ImageGenerationToolContext {
 	cwd: string;
@@ -106,7 +86,7 @@ function recentConversationImageUrls(ctx: ImageGenerationToolContext, count: num
 			}
 		}
 	}
-	if (images.length < count) throw new Error(`Requested the last ${count} conversation images, but only ${images.length} were available.`);
+	if (images.length < count) throw new Error(`Requested the last ${count} conversation images, but only ${images.length} were available. Use local paths if they cover every target, or ask the user to attach the missing images again.`);
 	return images.slice(-count).map((image_url) => ({ image_url }));
 }
 
@@ -175,7 +155,9 @@ export async function standaloneImageGeneration(
 	return {
 		content: [
 			{ type: "image", data: base64, mimeType: "image/png" },
-			{ type: "text", text: `Generated image with ${settings.imageModel}; saved to ${saved.path}${saved.latestPath ? ` (latest: ${saved.latestPath})` : ""}.` },
+			{ type: "text", text: `Generated image with ${settings.imageModel}; saved to ${saved.path}${saved.latestPath ? ` (latest: ${saved.latestPath})` : ""}.`
+				+ "\nIf you need the image at another path, copy it and keep the original unless the user asks to delete it."
+				+ "\nThe image is attached to this result. Do not repeat it as a Markdown image or link in the final response unless requested." },
 		],
 		details: {
 			saved, mode: "standalone-images-api",
@@ -190,21 +172,24 @@ export function createImageGenerationToolDefinition(options: {
 	loadSettings?: (cwd: string, model?: Model<Api>) => CodexMinimalToolsSettings | ResolvedCodexModelSettings;
 	getCurrentTurnId?: (sessionId: string | undefined) => string | undefined;
 } = {}) {
+	const { description, parameters } = createCodexReservedNamespaceTool("image_generation").tools[0]!;
 	return {
 		name: "image_generation",
 		label: "Image Generation",
-		description: "Generate or edit images using the standalone Images API selected by the current model profile. Results are saved under imageOutputDir and mirrored to latest.png.",
-		promptSnippet: "Generate or edit images with the implementation selected by the current model profile.",
-		parameters: imageGenerationToolSchema,
+		description,
+		promptSnippet: "Generate a new image from a description or edit an existing image.",
+		parameters,
 		outputSchema: imageGenerationOutputSchema,
-		async execute(toolCallId: string, params: ImageGenerationInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ImageGenerationToolContext) {
-			const cwd = ctx?.cwd ?? process.cwd();
-			const profileModel = ctx.model ? { ...ctx.model, baseUrl: "" } : undefined;
-			const settings = options.loadSettings?.(cwd, profileModel) ?? loadModelSettings(profileModel, cwd);
-			const resolved = "modelProfile" in settings ? settings as ResolvedCodexModelSettings : loadModelSettings(profileModel, cwd, settings);
-			return standaloneImageGeneration(params, { ...ctx, cwd }, resolved, signal, {
-				callId: toolCallId, turnId: options.getCurrentTurnId?.(ctx.sessionManager?.getSessionId?.()),
-			});
+		execute(toolCallId: string, params: ImageGenerationInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ImageGenerationToolContext) {
+			return executeWithToolResult(signal, async () => {
+				const cwd = ctx?.cwd ?? process.cwd();
+				const profileModel = ctx.model ? { ...ctx.model, baseUrl: "" } : undefined;
+				const settings = options.loadSettings?.(cwd, profileModel) ?? loadModelSettings(profileModel, cwd);
+				const resolved = "modelProfile" in settings ? settings as ResolvedCodexModelSettings : loadModelSettings(profileModel, cwd, settings);
+				return standaloneImageGeneration(params, { ...ctx, cwd }, resolved, signal, {
+					callId: toolCallId, turnId: options.getCurrentTurnId?.(ctx.sessionManager?.getSessionId?.()),
+				});
+			}, message => `Image generation failed: ${message}`);
 		},
 	};
 }

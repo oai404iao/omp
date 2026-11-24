@@ -235,6 +235,14 @@ test("namespaced function calls map to Pi tool names and replay their wire ident
 	assert.deepEqual(replay[1].output, [
 		{ type: "input_text", text: "search result" },
 	]);
+	const failed = convertResponsesMessages(model, { messages: [output, {
+		role: "toolResult", toolCallId: toolCall.id, toolName: toolCall.name,
+		content: [{ type: "text", text: "HTTP 503: search unavailable" }],
+		isError: true, details: { success: false }, timestamp: Date.now(),
+	}] }, new Set(["openai-codex"]));
+	assert.deepEqual(failed[1], {
+		type: "function_call_output", call_id: "call_web", output: "HTTP 503: search unavailable",
+	});
 });
 
 test("namespaced custom calls retain the functions namespace across replay", async () => {

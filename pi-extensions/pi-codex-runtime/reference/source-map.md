@@ -189,7 +189,7 @@ claim of a stable, OpenAI-supported public API.
 | `web.run` description | `codex-rs/ext/web-search/web_run_description.md`; its local description is byte-for-byte identical |
 | `web.run` parameters | `codex-rs/ext/web-search/src/schema.rs` and `codex-rs/codex-api/src/search.rs` |
 | `image_gen.imagegen` namespace/name/function construction | `codex-rs/ext/image-generation/src/lib.rs`, `codex-rs/ext/image-generation/src/tool.rs`, and `codex-rs/tools/src/responses_api.rs` |
-| `image_gen.imagegen` description | `codex-rs/ext/image-generation/imagegen_description.md`; local image inspection guidance uses Pi's native `read` tool |
+| `image_gen.imagegen` description | `codex-rs/ext/image-generation/imagegen_description.md`, with Pi `read` and codemode instructions |
 | `image_gen.imagegen` parameters | `ImagegenArgs` and the schema construction in `codex-rs/ext/image-generation/src/tool.rs` |
 | Responses Lite placement | `codex-rs/tools/src/tool_spec.rs` and `codex-rs/core/src/client.rs` |
 
@@ -199,9 +199,16 @@ upstream blob ID, SHA-256, raw source URL, and local canonical-JSON
 fingerprint. The pinned Cargo manifest and lockfile are included because the
 upstream parameter declarations are generated from Rust types.
 
-The current image description and namespace fingerprints are in
-`provenance/image-generation-native-read.json`; its original source evidence
-remains unchanged in `provenance/openai-codex-5a314017-image-generation.json`.
+The current namespaces were compared with Codex
+[`a1604a8c`](https://github.com/openai/codex/commit/a1604a8c0554c09c1be45e5a121bb1889b4d9a50).
+The standalone web schema matches the output of `commands_schema(false)`
+after upstream normalization and serialization, not the raw Schemars schema.
+The image declaration explicitly carries the count bounds from `ImagegenArgs`
+that Codex's wire serializer drops and documents the actual Pi path contract.
+Verification details and fingerprints are in
+`provenance/openai-codex-a1604a8c-tool-declarations.json`; earlier evidence in
+`provenance/openai-codex-5a314017-image-generation.json` and
+`provenance/image-generation-native-read.json` remains unchanged.
 
 ## Standalone web search
 

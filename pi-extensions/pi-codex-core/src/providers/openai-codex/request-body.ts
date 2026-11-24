@@ -7,7 +7,7 @@ import type { ToolProtocol } from "@oai404iao/pi-codex-runtime/internal/broker";
 import { convertResponsesMessages } from "@oai404iao/pi-codex-runtime/internal/providers/responses/messages";
 import { convertResponsesTools } from "@oai404iao/pi-codex-runtime/internal/providers/responses/tools";
 import { responseGrammarProperties, supportsGrammar } from "@oai404iao/pi-codex-runtime/internal/providers/responses/grammar";
-import { CODEX_TOOL_CALL_PROVIDERS, WEB_SEARCH_RESULTS_INCLUDE, WEB_SEARCH_SOURCES_INCLUDE } from "./constants.js";
+import { CODEX_TOOL_CALL_PROVIDERS } from "./constants.js";
 import { stripResponsesLiteImageDetails } from "./lite.js";
 import { clampReasoningEffort, requestEffortBaseline, supportsEffortUpdates } from "./reasoning.js";
 import { type ResponsesBody, type NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
@@ -37,18 +37,9 @@ export function requestBodyToolOptions(settings: ResolvedCodexModelSettings) {
 		codexRequestExtensions: settings.codexRequestExtensions,
 		imageGeneration: settings.imageGenerationImplementation ?? false,
 		removeWebSearch: settings.endpointDisabledWebSearch,
+		webSearch: settings.webSearchEnabled ? settings.modelProfile?.effective.tools.webSearch ?? false : false,
+		hostedWebSearchMode: settings.webSearch ? settings.webSearch.mode : undefined,
 	} as const;
-}
-
-function hasNativeWebSearchTool(body: ResponsesBody): boolean {
-	return Array.isArray(body.tools) && body.tools.some((tool) => Boolean(tool) && typeof tool === "object" && (tool as { type?: unknown }).type === "web_search");
-}
-
-export function ensureWebSearchDetailsIncluded(body: ResponsesBody): void {
-	if (!hasNativeWebSearchTool(body)) return;
-	const include = Array.isArray(body.include) ? body.include : [];
-	const missing = [WEB_SEARCH_SOURCES_INCLUDE, WEB_SEARCH_RESULTS_INCLUDE].filter((value) => !include.includes(value));
-	if (missing.length > 0) body.include = [...include, ...missing];
 }
 
 export function requestGrammarProperties(

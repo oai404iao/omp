@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/openai/codex",
+    "revision": "a1604a8c0554c09c1be45e5a121bb1889b4d9a50",
+    "commitUrl": "https://github.com/openai/codex/commit/a1604a8c0554c09c1be45e5a121bb1889b4d9a50",
+    "license": "Apache-2.0"
+  },
+  "files": {
+    "codex-rs/Cargo.lock": {
+      "gitBlobSha": "7dd36dd2021b4c086030e9eb9222be582348469a",
+      "sha256": "daf353aaa987c3318b12bfcc7a9d6090718324f4857ed1c4750882714e2d6e44"
+    },
+    "codex-rs/codex-api/src/search.rs": {
+      "gitBlobSha": "c60caac9f5102b9ded30b8e7621976f7e7dbbbd3",
+      "sha256": "393f53fbdedd7882c5416d00fdde166b06d39d5d669f06981c509d35fb79a53b"
+    },
+    "codex-rs/ext/image-generation/imagegen_description.md": {
+      "gitBlobSha": "0e793f2a8d4950929e3f6dd8f7a5c5c766cb12f1",
+      "sha256": "ee89dd3b9df94cc8b42b14e48714c68d11d4cd66113853b42ccf9cbd7858af61"
+    },
+    "codex-rs/ext/image-generation/src/tool.rs": {
+      "gitBlobSha": "f43830929745fa7c5cbda4cae360a7019c71eacb",
+      "sha256": "43def31d84370770cb3b638bd15bc159cec956610f5e16228c2c5e56fa5df2c9"
+    },
+    "codex-rs/ext/web-search/src/schema.rs": {
+      "gitBlobSha": "4754b2f60962234d5c7baeab9d55dd1f128723b5",
+      "sha256": "8247a46c0ea748885b08e79cc8c1e3ad3403cb9dcbab58a4b876938763142ecf"
+    },
+    "codex-rs/ext/web-search/src/tool.rs": {
+      "gitBlobSha": "34b00c3ed26419fa5adcf81c5b8e5802035c000a",
+      "sha256": "3ab748fd70ce9eed363b8d7aa11e62ca21a6cbc06bf27b7b4bda1ca28dc6bda1"
+    },
+    "codex-rs/ext/web-search/web_run_description.md": {
+      "gitBlobSha": "77be9a0a03e6e2e2760651e903ead2dce9996a57",
+      "sha256": "1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e"
+    },
+    "codex-rs/tools/src/json_schema.rs": {
+      "gitBlobSha": "330c5d1135cbfe9df39cee28fa252c6aa18e4b4c",
+      "sha256": "125f3b48cb0a7852050359841612024e74890f00e1a91217bcee85604a5abed3"
+    },
+    "codex-rs/tools/src/json_schema/compaction.rs": {
+      "gitBlobSha": "7a2376b609d1578fb80c0651d6095ccd83c80ab4",
+      "sha256": "8566f75c07bc61e9fd1fd6684cc8ea7d94cc4f97e282310f69dd0a1b26473ca7"
+    },
+    "codex-rs/tools/src/json_schema/traversal.rs": {
+      "gitBlobSha": "0c1b3944869f0145eb2e9c0374fba42a02b21073",
+      "sha256": "fb24d4acb9476c6cd6ed4156ca439786e0315de0eb908f44d0190662a12ab4b6"
+    },
+    "codex-rs/tools/src/json_schema/types.rs": {
+      "gitBlobSha": "f7868bff0429e080b379d819aea8f0016246b21d",
+      "sha256": "20e6c81ed17bb75110d3b8ea224b975ce8266a0d23411854ce3f5522365be1a5"
+    },
+    "codex-rs/tools/src/responses_api.rs": {
+      "gitBlobSha": "aaf67c88e87d728d2813434932dc8bcb9cfa8d38",
+      "sha256": "9a58a70c4992cedce5c2292e6e6f145b7174b2eeb730c181cb8e84ac8e44c069"
+    }
+  },
+  "localCompatibilitySerialization": {
+    "classification": "modified TypeScript compatibility serialization",
+    "canonicalization": "SHA-256 of recursively lexicographically sorted JSON object keys; arrays retain their order and no whitespace is emitted.",
+    "namespaces": {
+      "web_search": {
+        "path": "src/reserved-tools/web-search.ts",
+        "namespace": "web",
+        "function": "run",
+        "description": {
+          "relationship": "byte-for-byte",
+          "sha256": "1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e"
+        },
+        "parameters": {
+          "relationship": "matches the default upstream serialized parameters, with literature search disabled",
+          "verification": "Reconstructed the upstream commands_schema(false) path in a minimal Rust harness using the pinned SearchCommands source and schemars 0.8.22. Passed the generated schema through the upstream parse_tool_input_schema_without_compaction and serde_json 1.0.149 serializer. Deep equality matched the local parameters; the serializer omits raw generator numeric minimums and format annotations.",
+          "canonicalJsonSha256": "de3be87e7abfe9b67ba757f27804d4206b51c2a8de9e9799fa7db9ef4abe3539"
+        },
+        "canonicalJsonSha256": "f67597d3df3f3a77cb517646508e7305804ea029c6f8b1c1c1f241f0de0b214f"
+      },
+      "image_generation": {
+        "path": "src/reserved-tools/image-generation.ts",
+        "namespace": "image_gen",
+        "function": "imagegen",
+        "description": {
+          "relationship": "adapted to Pi codemode and local image inspection",
+          "sha256": "f1cad2a7ec5e82fc368ebbc7b083fae5aacca0495d34a983d18a23362b87f6fd"
+        },
+        "parameters": {
+          "relationship": "adapted to express the upstream ImagegenArgs count bounds (omitted by the upstream wire serializer), Pi path semantics and supported file formats; GIF generation is not exposed",
+          "canonicalJsonSha256": "46eed3860d99c0c9989a4014be7f40458b176c7099173fde27de6022e38bde0a"
+        },
+        "canonicalJsonSha256": "16c0552e42424a4342edf0012eb7caecd1f882ff96519a1f76db961d69bcdcae"
+      }
+    }
+  }
+}

@@ -104,7 +104,7 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
   "webSocketEnabled": true,
   "fastMode": false,
   "applyPatch": true,
-  "webSearch": true,
+  "webSearch": { "mode": "live" },
   "imageGeneration": true,
   "imageOutputDir": ".pi/openai-codex-images",
   "imageModel": "gpt-image-2",
@@ -120,7 +120,7 @@ Without `PI_CODING_AGENT_DIR`, Pi normally uses `~/.config/pi/agent` or
 | `webSocketEnabled` | Global Responses WebSocket master switch. Set `false` to force SSE and disable WebSocket prewarm for every model profile. |
 | `fastMode` | Default for new sessions; `/fast` saves a session-only selection. Subagents follow the main agent on subsequent requests. Only profiles with `fast` are affected. |
 | `applyPatch` | Global package patch switch. Set `false` to omit patch registration, execution and native-mutation declaration hiding without changing other capabilities. |
-| `webSearch` | Global search switch. Set `false` to omit hosted and standalone search without changing other capabilities. |
+| `webSearch` | Global search switch and shared default mode. See the [settings table](../README.md#configuration). |
 | `imageGeneration` | Global master switch. Set `false` to omit image tools, `/image-gen`, presentation and standalone requests without changing other model behavior. |
 | `imageOutputDir` | Generated-image output directory. Relative paths resolve from the workspace root. |
 | `imageModel` | Image model used by standalone generation and edits. |
@@ -492,20 +492,18 @@ This does not alter per-model selection or other capabilities.
 `tools.webSearch` supports two implementations:
 
 - `hosted`: rewrites the Pi placeholder to Responses
-  `{"type":"web_search"}` and preserves progress, sources, results, and
-  citation replay. Standard Responses only.
+  `{"type":"web_search"}` and preserves progress, citation replay and any
+  sources or results returned by the provider. Standard Responses only.
 - `standalone`: exposes `web.run` as a client-executed namespace tool and calls
   the provider's `alpha/search` endpoint. It supports search/image queries,
   open/click/find, PDF screenshots, finance, weather, sports, and time.
 
 Standalone search sends a bounded recent visible conversation tail ending at
 the latest user message, resolved Pi authentication, direct-caller settings,
-and a filtered active-turn metadata projection. Model profiles accept `mode`
-(`cached`, `indexed`, or default `live`), `searchContextSize`, `userLocation`,
-`filters.allowedDomains`, and `maxOutputTokens` (default 10,000). These settings
-also project onto hosted search where supported. Search rows stay compact by
-default and show deduplicated source hosts; expand the tool row to inspect the
-raw result text.
+and a filtered active-turn metadata projection. See the [model profile
+reference](../README.md) for search settings and defaults. Standalone search
+rows show deduplicated source hosts; expand the tool row to inspect the raw
+result text.
 
 ## Image Generation
 

@@ -40,9 +40,6 @@ export const WS_RESPONSES_LITE_CLIENT_METADATA_KEY = "ws_request_header_x_openai
 
 export const WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY = "x-codex-ws-stream-request-start-ms";
 
-export const WEB_SEARCH_SOURCES_INCLUDE = "web_search_call.action.sources";
-
-export const WEB_SEARCH_RESULTS_INCLUDE = "web_search_call.results";
 
 export const SESSION_WEBSOCKET_CACHE_TTL_MS = 5 * 60 * 1000;
 

@@ -137,7 +137,8 @@ output items.
 
 ## Sources and citations
 
-When requested through:
+Codex-compatible hosted requests do not add search-specific `include` entries
+automatically. If a request payload explicitly opts in through:
 
 ```json
 {

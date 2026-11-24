@@ -1,6 +1,7 @@
 import { createCodexReservedNamespaceTool } from "@oai404iao/pi-codex-runtime/internal/codex-reserved-tools";
 import type { NativeToolOwnership } from "@oai404iao/pi-codex-runtime/internal/providers/openai-codex/types";
 import type { WebSearchProfile } from "@oai404iao/pi-codex-runtime/internal/model-catalog/types";
+import { DEFAULT_WEB_SEARCH_MODE } from "@oai404iao/pi-codex-runtime/internal/settings";
 
 export interface NativeToolRewriteResult<T = unknown> {
 	payload: T;
@@ -13,7 +14,8 @@ export interface NativeToolRewriteOptions {
 	removeWebSearch?: boolean;
 	ownsNativeTool?: NativeToolOwnership;
 	imageGeneration?: false | "standalone";
-	webSearch?: boolean | Partial<WebSearchProfile>;
+	webSearch?: boolean | Partial<Omit<WebSearchProfile, "mode">>;
+	hostedWebSearchMode?: WebSearchProfile["mode"];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -51,27 +53,30 @@ export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewri
 			return [createCodexReservedNamespaceTool("image_generation")];
 		}
 		if (name === "web_search" && options.webSearch) {
-			rewritten.push(name);
-			if (typeof options.webSearch === "object" && options.webSearch.implementation === "standalone") {
+			const config = typeof options.webSearch === "object" ? options.webSearch : {};
+			if (config.implementation === "standalone") {
+				rewritten.push(name);
 				if (options.codexRequestExtensions === false) return [candidate];
 				return [createCodexReservedNamespaceTool("web_search")];
 			}
-			const contentTypes = typeof options.webSearch === "object"
-				? options.webSearch.contentTypes
-				: undefined;
-			const config = typeof options.webSearch === "object" ? options.webSearch : {};
+			const imageSearch = config.contentTypes?.includes("image");
+			if (imageSearch && !config.contentTypes?.includes("text")) {
+				// Codex hosted search has no image-only form; do not widen the requested modalities.
+				removed.push(name);
+				return [];
+			}
+			rewritten.push(name);
+			const mode = options.hostedWebSearchMode ?? DEFAULT_WEB_SEARCH_MODE;
 			return [{
 				type: "web_search",
-				external_web_access: config.mode !== "cached",
-				...(config.mode === "indexed" ? { indexed_web_access: true } : {}),
+				external_web_access: mode !== "cached",
+				...(mode === "indexed" ? { indexed_web_access: true } : {}),
 				...(config.searchContextSize ? { search_context_size: config.searchContextSize } : {}),
 				...(config.userLocation ? { user_location: config.userLocation } : {}),
 				...(config.filters ? { filters: {
 					...(config.filters.allowedDomains ? { allowed_domains: config.filters.allowedDomains } : {}),
 				} } : {}),
-				...(contentTypes && contentTypes.length > 0
-					? { search_content_types: [...contentTypes] }
-					: {}),
+				...(imageSearch ? { search_content_types: ["text", "image"] } : {}),
 			}];
 		}
 		return [candidate];

@@ -1,71 +1,50 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createCodexReservedNamespaceTool } from "@oai404iao/pi-codex-runtime/internal/codex-reserved-tools";
 import { rewriteNativeOpenAiTools } from "@oai404iao/pi-codex-core/internal/provider-native-tools";
-
-function canonicalJson(value: unknown): string {
-	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-	if (value && typeof value === "object") {
-		return `{${Object.entries(value as Record<string, unknown>)
-			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-			.join(",")}}`;
-	}
-	return JSON.stringify(value);
-}
-
-function sha256(value: unknown): string {
-	return createHash("sha256").update(canonicalJson(value)).digest("hex");
-}
-
-test("Codex reserved namespace definitions retain the reviewed Apache compatibility serialization", () => {
-	const web = createCodexReservedNamespaceTool("web_search");
-	const image = createCodexReservedNamespaceTool("image_generation");
-	const provenance = JSON.parse(readFileSync(
-		new URL("../provenance/openai-codex-eb9dceba-reserved-tools.json", import.meta.url),
-		"utf8",
-	));
-	const webProvenance = provenance.localCompatibilitySerialization.namespaces.web_search;
-	const imageProvenance = JSON.parse(readFileSync(
-		new URL("../../pi-codex-runtime/provenance/image-generation-native-read.json", import.meta.url),
-		"utf8",
-	)).localCompatibilitySerialization.namespaces.image_generation;
-	assert.equal(
-		sha256(web),
-		"f67597d3df3f3a77cb517646508e7305804ea029c6f8b1c1c1f241f0de0b214f",
-	);
-	assert.equal(
-		sha256(image),
-		"0f50e9ffc4b12ef5a9e24d1d3b95827e03b7534eaf101f13b8fe5246bc7c905b",
-	);
-	assert.equal(
-		createHash("sha256").update(web.tools[0]!.description).digest("hex"),
-		"1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e",
-	);
-	assert.equal(
-		createHash("sha256").update(image.tools[0]!.description).digest("hex"),
-		"8e9fa72172fcbbf8e4cb80a7c87d6099805e38e75df686699c232b01e2a05853",
-	);
-	assert.equal(sha256(web), webProvenance.canonicalJsonSha256);
-	assert.equal(sha256(web.tools[0]!.parameters), webProvenance.parameters.canonicalJsonSha256);
-	assert.equal(
-		createHash("sha256").update(web.tools[0]!.description).digest("hex"),
-		webProvenance.description.sha256,
-	);
-	assert.equal(sha256(image), imageProvenance.canonicalJsonSha256);
-	assert.equal(sha256(image.tools[0]!.parameters), imageProvenance.parameters.canonicalJsonSha256);
-	assert.equal(
-		createHash("sha256").update(image.tools[0]!.description).digest("hex"),
-		imageProvenance.description.sha256,
-	);
-});
 
 test("Codex reserved namespace definitions are cloned per request", () => {
 	const first = createCodexReservedNamespaceTool("web_search");
 	first.tools[0]!.description = "mutated";
 	assert.notEqual(createCodexReservedNamespaceTool("web_search").tools[0]!.description, "mutated");
+});
+
+test("hosted web_search defaults to live and serializes Codex modes and content types", () => {
+	const payload = { tools: [{ type: "function", name: "web_search", description: "Pi placeholder", parameters: {} }] };
+	const location = { type: "approximate", country: "US", timezone: "America/Los_Angeles" } as const;
+	for (const [mode, access] of [
+		[undefined, { external_web_access: true }],
+		["cached", { external_web_access: false }],
+		["indexed", { external_web_access: true, indexed_web_access: true }],
+		["live", { external_web_access: true }],
+	] as const) {
+		const { payload: text } = rewriteNativeOpenAiTools(payload, {
+			hostedWebSearchMode: mode,
+			webSearch: { implementation: "hosted", contentTypes: ["text"] },
+		});
+		assert.deepEqual(text.tools, [{ type: "web_search", ...access }]);
+		const { payload: multimodal } = rewriteNativeOpenAiTools(payload, {
+			hostedWebSearchMode: mode,
+			webSearch: { implementation: "hosted", contentTypes: ["image", "text"], searchContextSize: "low",
+				userLocation: location, filters: { allowedDomains: ["example.com"] } },
+		});
+		assert.deepEqual(multimodal.tools, [{
+			type: "web_search", ...access, search_content_types: ["text", "image"], search_context_size: "low",
+			user_location: location, filters: { allowed_domains: ["example.com"] },
+		}]);
+	}
+});
+
+test("hosted web_search does not expand an image-only profile to text or change a foreign tool", () => {
+	const payload = { tools: [{ type: "function", name: "web_search" }, { type: "function", name: "read" }] };
+	const webSearch = { implementation: "hosted", contentTypes: ["image"] } as const;
+	const options = { webSearch: { ...webSearch, contentTypes: [...webSearch.contentTypes] } };
+	const owned = rewriteNativeOpenAiTools(payload, { ...options, ownsNativeTool: () => true });
+	assert.deepEqual(owned.payload.tools, [payload.tools[1]]);
+	assert.deepEqual(owned.removed, ["web_search"]);
+	const foreign = rewriteNativeOpenAiTools(payload, { ...options, ownsNativeTool: () => false });
+	assert.deepEqual(foreign.payload, payload);
+	assert.deepEqual(foreign.removed, []);
 });
 
 test("rewriteNativeOpenAiTools rewrites image_generation only to a standalone namespace", () => {

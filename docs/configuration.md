@@ -48,7 +48,7 @@ Codex 的 `loadSettings(cwd)` 不读取项目覆盖；当前工作目录不是�
 | `enabled` | `true` | 总开关；关闭后优先于工具和模型 profile 开关 |
 | `autoEnable` | `true` | 包工具的自动启用策略，不等于注册表权限或沙箱 |
 | `applyPatch` | `true` | 补丁全局开关 |
-| `webSearch` | `true` | 搜索全局开关 |
+| [`webSearch`](../pi-extensions/pi-codex-runtime/README.md#configuration) | `{ "mode": "live" }` | 搜索全局开关及共用默认模式 |
 | `imageGeneration` | `true` | 图像生成全局开关，不影响图像输入、历史回放或其他能力 |
 | `webSocketEnabled` | `true` | `false` 强制 Responses SSE，同时关闭 WS 预热 |
 | `codexRequestExtensions` | `true` | 可选 Codex 身份、请求元数据等增强；不是 Lite/压缩总开关 |

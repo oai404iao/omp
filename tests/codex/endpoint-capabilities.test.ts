@@ -152,7 +152,9 @@ test("standalone policy follows auth-resolved URLs and wire-off omits image iden
 			const result = await execute();
 			assert(result.structuredContent.image.data);
 			writeCompositionConfig(cwd, { ...config, endpoint_config: [{ provider: "openai", baseUrl, imageGeneration: [] }] });
-			await assert.rejects(execute(), /disabled for this endpoint/);
+			const failure = await execute();
+			assert.equal(failure.isError, true);
+			assert.match(failure.content[0].text, /disabled for this endpoint/);
 			assert.equal(requests, 1);
 			await host.emit("model_select");
 			assert(!host.active().includes("image_generation"));

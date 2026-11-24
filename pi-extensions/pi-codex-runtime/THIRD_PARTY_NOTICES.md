@@ -57,12 +57,12 @@ Modified namespace-tool compatibility serialization is in
 assets. This is not a license or authorization to access
 private endpoints; the internal Responses Lite path remains unsupported upstream.
 
-The current image namespace is aligned with Apache-2.0 Codex revision
-`5a3140176e668a2f72f3c098490eb7f7052d9d85`; exact source identifiers and
-fingerprints are in `provenance/openai-codex-5a314017-image-generation.json`.
-Local inspection guidance is adapted to Pi's native `read` tool; current
-fingerprints are in `provenance/image-generation-native-read.json`.
-The older reserved-tools evidence is retained unchanged.
+Current standalone declaration evidence is recorded in
+`provenance/openai-codex-a1604a8c-tool-declarations.json` for Apache-2.0 Codex
+revision `a1604a8c0554c09c1be45e5a121bb1889b4d9a50`. The web description and
+default serialized parameters match upstream; the image description and
+parameters adapt upstream guidance and count bounds to Pi's paths, `read`,
+and codemode. Earlier reserved-tool and image evidence is retained unchanged.
 
 Current request metadata, model verbosity/reasoning defaults, search-history
 projection and bounded HTTP retry behavior are adapted from Apache-2.0 Codex
@@ -71,12 +71,6 @@ revision `5a3140176e668a2f72f3c098490eb7f7052d9d85`.
 blob IDs, SHA-256 hashes, exact model defaults and local adaptation boundaries.
 Pi retains its model descriptors and reviewed transport policy; no upstream
 model instructions, authentication claims or unavailable telemetry are copied.
-
-The web description matches its pinned Codex `web_run_description.md`; the image
-description adapts `imagegen_description.md` as noted above.
-The parameter schemas are derived compatibility
-serializations, not verbatim source copies. Exact upstream paths, hashes and
-canonical-JSON fingerprints are in the reserved-tools provenance record.
 
 See `reference/source-map.md` for the pinned evidence map and
 `reference/legacy-source-notices.md` for the historical bundle attribution.

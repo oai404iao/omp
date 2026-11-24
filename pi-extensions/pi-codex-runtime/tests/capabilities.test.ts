@@ -56,12 +56,12 @@ test("tool capabilities come from the exact model profile and input modalities",
 test("all global tool-gate combinations preserve protocol and unrelated capabilities", () => withAgentDir(() => {
 	const model = { provider: "openai", id: "gpt-5.6-sol", api: "openai-responses", input: ["text", "image"] };
 	for (const applyPatch of [false, true]) {
-		for (const webSearch of [false, true]) {
+		for (const searchEnabled of [false, true]) {
 			for (const imageGeneration of [false, true]) {
-				const base = { ...DEFAULT_SETTINGS, applyPatch, webSearch, imageGeneration };
+				const base = { ...DEFAULT_SETTINGS, applyPatch, webSearch: searchEnabled && DEFAULT_SETTINGS.webSearch, imageGeneration };
 				const capabilities = computeToolCapabilities(model, base);
 				assert.equal(capabilities.apply_patch.enabled, applyPatch);
-				assert.equal(capabilities.web_search.enabled, webSearch);
+				assert.equal(capabilities.web_search.enabled, searchEnabled);
 				assert.equal(capabilities.image_generation.enabled, imageGeneration);
 				const resolved = loadModelSettings(model, undefined, base);
 				assert.deepEqual(resolved.modelProfile?.sources, ["bundled"]);
@@ -69,7 +69,7 @@ test("all global tool-gate combinations preserve protocol and unrelated capabili
 				assert.equal(resolved.openaiTransport, "auto");
 				assert.equal(resolved.compactionMode, "responses");
 				assert.equal(resolved.applyPatchEnabled, applyPatch);
-				assert.equal(resolved.webSearchEnabled, webSearch);
+				assert.equal(resolved.webSearchEnabled, searchEnabled);
 				assert.equal(resolved.imageGeneration, imageGeneration);
 			}
 		}

@@ -82,9 +82,16 @@
       "default": true
     },
     "webSearch": {
-      "type": "boolean",
-      "description": "Global web-search master switch. false disables hosted and standalone search without changing Responses mode or other capabilities.",
-      "default": true
+      "type": ["boolean", "object"],
+      "description": "Global web-search settings. false disables both implementations; true uses the default mode.",
+      "default": { "mode": "live" },
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "description": "Shared access mode for hosted web_search and standalone web.run. A standalone model may override it.",
+          "enum": ["cached", "indexed", "live"]
+        }
+      }
     },
     "imageGeneration": {
       "type": "boolean",

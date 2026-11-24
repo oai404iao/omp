@@ -26,14 +26,11 @@ The owner packages include material from
 - Owner `reference/` documentation contains protocol analysis based on both
   revisions, indexed in `pi-codex-runtime/reference/source-map.md` and
   `pi-codex-tools/reference/apply-patch-behavior.md`.
-- Runtime's `src/codex-reserved-tools.ts` is a modified TypeScript compatibility
-  serialization of the pinned Codex `web.run` and
-  `image_gen.imagegen` namespace-tool construction. Its two descriptions
-  exactly match the upstream Markdown sources; its parameter declarations are
-  source-derived compatibility serializations of the pinned schema types and
-  generators. Immutable source/blob IDs, SHA-256 checksums, source URLs, and
-  local fingerprints are recorded in
-  `pi-extensions/pi-codex-runtime/provenance/openai-codex-eb9dceba-reserved-tools.json`.
+- Runtime adapts the Codex `web.run` and `image_gen.imagegen` namespace-tool
+  declarations. The current web declaration matches the upstream default;
+  the image declaration is adapted for Pi codemode and local references.
+  See the [runtime source notices](pi-extensions/pi-codex-runtime/THIRD_PARTY_NOTICES.md)
+  for the current and historical provenance records.
 
 OpenAI Codex is distributed under the Apache License 2.0. The verified license
 and upstream NOTICE are identical at both analyzed revisions and are
